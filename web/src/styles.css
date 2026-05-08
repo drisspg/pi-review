@@ -134,6 +134,7 @@ a { color: var(--link); text-decoration: none; }
 .comment-tools {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
   margin-bottom: 8px;
 }
 
@@ -378,6 +379,21 @@ a { color: var(--link); text-decoration: none; }
   padding: 0 8px;
   white-space: pre;
   min-height: 1.45rem;
+}
+
+.diff-row.split {
+  grid-template-columns: 48px minmax(0, 1fr) 48px minmax(0, 1fr) auto;
+}
+
+.diff-row.split .split-code {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.diff-row.split .old-code,
+.diff-row.split .new-code {
+  border-left: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  padding-left: 8px;
 }
 
 .diff-row code {
@@ -1012,25 +1028,9 @@ a { color: var(--link); text-decoration: none; }
   background: color-mix(in srgb, var(--attention) 14%, var(--panel));
 }
 
-.focus-area-inline.collapsed {
-  padding-bottom: 8px;
-}
-
-.focus-area-collapsed-summary {
-  display: block;
-  width: calc(100% - 20px);
-  margin: 0 10px;
-  padding: 6px 8px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--muted);
-  text-align: left;
-}
-
-.focus-area-collapsed-summary:hover {
-  border-color: color-mix(in srgb, var(--attention) 32%, var(--border));
-  color: var(--text);
+.focus-area-collapsed {
+  border-color: color-mix(in srgb, var(--attention) 45%, var(--border));
+  box-shadow: inset 3px 0 var(--attention);
 }
 
 .focus-area-inline .thread-head strong {
