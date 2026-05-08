@@ -166,7 +166,12 @@ test("runs a separate focus areas review and highlights referenced lines", async
 
   await page.getByRole("button", { name: "Focus scan" }).click();
 
-  await expect(page.locator(".focus-area-inline")).toContainText("tiling conventions");
+  const focusArea = page.locator(".focus-area-inline");
+  await expect(focusArea).toContainText("tiling conventions");
+  await focusArea.getByRole("button", { name: "Collapse" }).click();
+  await expect(focusArea).toHaveClass(/collapsed/);
+  await focusArea.getByRole("button", { name: "Expand" }).click();
+  await expect(focusArea).toContainText("tiling conventions");
   await expect(page.locator(".ai-review")).toContainText("1 focus area highlighted inline");
   await expect(row).toHaveClass(/focus-highlight-active/);
 });

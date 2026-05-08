@@ -912,6 +912,27 @@ a { color: var(--link); text-decoration: none; }
   background: color-mix(in srgb, var(--attention) 14%, var(--panel));
 }
 
+.focus-area-inline.collapsed {
+  padding-bottom: 8px;
+}
+
+.focus-area-collapsed-summary {
+  display: block;
+  width: calc(100% - 20px);
+  margin: 0 10px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+}
+
+.focus-area-collapsed-summary:hover {
+  border-color: color-mix(in srgb, var(--attention) 32%, var(--border));
+  color: var(--text);
+}
+
 .focus-area-inline .thread-head strong {
   color: var(--attention);
 }
