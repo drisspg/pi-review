@@ -108,12 +108,19 @@ function threadForTarget(threads: Record<string, Thread>, target: Target): Threa
 }
 
 function groupReviewComments(comments: PullReviewComment[]): PullReviewComment[][] {
+  const byId = new Map(comments.map((comment) => [comment.id, comment]));
+  const rootForComment = (comment: PullReviewComment): PullReviewComment => {
+    let root = comment;
+    while (root.in_reply_to_id != null && byId.has(root.in_reply_to_id)) root = byId.get(root.in_reply_to_id)!;
+    return root;
+  };
   const groups = new Map<string, PullReviewComment[]>();
   for (const comment of comments) {
-    const key = comment.in_reply_to_id == null ? targetKey(commentTarget(comment)) : String(comment.in_reply_to_id);
+    const root = rootForComment(comment);
+    const key = targetKey(commentTarget(root));
     groups.set(key, [...(groups.get(key) ?? []), comment]);
   }
-  return [...groups.values()];
+  return [...groups.values()].map((thread) => thread.sort((a, b) => a.id - b.id));
 }
 
 function isTargetInSelection(target: Target | null, selection: DragSelection | null): boolean {
