@@ -98,6 +98,19 @@ test("renders existing GitHub comments as markdown", async ({ page }) => {
   await expect(page.locator(".comment pre code").first()).toContainText("set_params_splitkv");
 });
 
+test("collapses and focuses existing comment threads", async ({ page }) => {
+  const thread = page.locator(".comment.github-thread").first();
+  await expect(thread.locator(".markdown").first()).toBeVisible();
+  await thread.getByLabel("Collapse thread").click();
+  await expect(thread.locator(".markdown")).toHaveCount(0);
+  await thread.getByLabel("Expand thread").click();
+  await expect(thread.locator(".markdown").first()).toBeVisible();
+  await thread.getByLabel("Focus thread").click();
+  await expect(page.getByRole("dialog")).toContainText("Conversation thread");
+  await page.getByRole("button", { name: "Close" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+});
+
 test("switches GitHub-style themes", async ({ page }) => {
   await page.getByLabel("Theme").selectOption("github-light");
   await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe("github-light");
