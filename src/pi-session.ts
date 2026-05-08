@@ -23,8 +23,12 @@ function sessionDirForPr(prKey: string): string {
   return resolve(homedir(), ".pi", "agent", "state", "pi-pr-review", "pi-sessions", safe(prKey));
 }
 
-export function registerPiSessionCwd(prKey: string, cwd: string): void {
+export async function registerPiSessionCwd(prKey: string, cwd: string): Promise<void> {
+  const existingCwd = cwdByPr.get(prKey);
   cwdByPr.set(prKey, cwd);
+  if (existingCwd != null && existingCwd !== cwd) {
+    await disposePiSession(prKey);
+  }
 }
 
 async function createSession(prKey: string): Promise<SessionRecord> {
@@ -49,6 +53,15 @@ function getSession(prKey: string): Promise<SessionRecord> {
 
 export function prewarmPiSession(prKey: string): void {
   void getSession(prKey).catch((error: unknown) => logger.error("pi", "prewarm failed", { prKey, error: error instanceof Error ? error.message : String(error) }));
+}
+
+export async function disposePiSession(prKey: string): Promise<void> {
+  const sessionPromise = sessions.get(prKey);
+  sessions.delete(prKey);
+  if (sessionPromise == null) return;
+  const session = await sessionPromise;
+  await session.abort?.();
+  session.dispose?.();
 }
 
 export async function disposePiSessions(): Promise<void> {

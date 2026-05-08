@@ -42,6 +42,8 @@ type DiffProps = {
   editingDraftId: string | null;
   setEditingDraftId: (id: string | null) => void;
   askThread: (thread: Thread) => Promise<void>;
+  sideWidth: number;
+  setSideWidth: (width: number) => void;
   dragSelection: DragSelection | null;
   beginDrag: (target: Target) => void;
   updateDrag: (target: Target) => void;
@@ -162,6 +164,7 @@ function App() {
   const [aiReview, setAiReview] = useState<AiReview>({ expanded: false, open: false, running: false, text: "" });
   const [busy, setBusy] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [sideWidth, setSideWidth] = useState(380);
   const [error, setError] = useState<string | null>(null);
 
   async function refreshHistory() { setPrs((await api<{ prs: StoredPullRequest[] }>("/api/prs")).prs); }
@@ -274,13 +277,12 @@ function App() {
   }
 
   function updateDrag(target: Target) {
-    setDragSelection((selection) => {
-      if (selection == null || selection.start.path !== target.path || selection.start.side !== target.side) return selection;
-      if (selection.current.line !== target.line) draggedRef.current = true;
-      const nextSelection = { ...selection, current: target };
-      dragSelectionRef.current = nextSelection;
-      return nextSelection;
-    });
+    const selection = dragSelectionRef.current;
+    if (selection == null || selection.start.path !== target.path || selection.start.side !== target.side) return;
+    if (selection.current.line !== target.line) draggedRef.current = true;
+    const nextSelection = { ...selection, current: target };
+    dragSelectionRef.current = nextSelection;
+    setDragSelection(nextSelection);
   }
 
   function finishDrag(target: Target) {
@@ -349,13 +351,28 @@ function App() {
 
   function submit(event: FormEvent) { event.preventDefault(); void openPr(input); }
 
-  return <main className="app-shell"><header className="toolbar"><div><strong>Pi PR Review</strong><span>{review == null ? "Paste a PR to start" : `${review.pr.key} · ${review.pr.title}`}</span></div><form className="open-form" onSubmit={submit}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="OWNER/REPO#123 or GitHub PR URL" /><button disabled={busy || input.trim().length === 0}>{busy ? "Fetching…" : "Open"}</button></form></header>{error != null && <div className="error">{error}</div>}{review == null ? <StartPage prs={prs} logs={logs} openPr={openPr} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} aiReview={aiReview} setAiReview={setAiReview} runAiReview={runAiReview} submitReview={submitReview} submitting={submitting} />}</main>;
+  return <main className="app-shell"><header className="toolbar"><div><strong>Pi PR Review</strong><span>{review == null ? "Paste a PR to start" : `${review.pr.key} · ${review.pr.title}`}</span></div><form className="open-form" onSubmit={submit}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="OWNER/REPO#123 or GitHub PR URL" /><button disabled={busy || input.trim().length === 0}>{busy ? "Fetching…" : "Open"}</button></form></header>{error != null && <div className="error">{error}</div>}{review == null ? <StartPage prs={prs} logs={logs} openPr={openPr} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} aiReview={aiReview} setAiReview={setAiReview} runAiReview={runAiReview} submitReview={submitReview} submitting={submitting} />}</main>;
 }
 
 function StartPage({ prs, logs, openPr }: { prs: StoredPullRequest[]; logs: LogEntry[]; openPr: (input: string) => Promise<void> }) { return <div className="start-grid"><section className="panel"><h1>Previous reviews</h1><p className="muted">Reopen a tracked PR or paste a new one above.</p><History prs={prs} openPr={openPr} /></section><details className="panel logs"><summary>Server log</summary><LogRows logs={logs} /></details></div>; }
 
 function ReviewPage(props: DiffProps & { aiReview: AiReview; setAiReview: (review: AiReview) => void; runAiReview: () => Promise<void>; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<void>; submitting: boolean }) {
-  return <div className="review-layout"><main className="files">{props.review.files.map((file) => <FileDiff key={file.filename} file={file} {...props} />)}</main><aside className="side"><ReviewSummary pr={props.review.pr} drafts={props.drafts} setDrafts={props.setDrafts} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} submitReview={props.submitReview} submitting={props.submitting} /><AiReviewPanel review={props.aiReview} setReview={props.setAiReview} runReview={props.runAiReview} /><ExistingComments comments={props.review.comments} /></aside></div>;
+  return <div className="review-layout" style={{ gridTemplateColumns: `minmax(0, 1fr) ${props.sideWidth}px` }}><main className="files">{props.review.files.map((file) => <FileDiff key={file.filename} file={file} {...props} />)}</main><div className="resize-handle" role="separator" aria-label="Resize side panel" onMouseDown={(event) => startResizeSidePanel(event, props.sideWidth, props.setSideWidth)} /><aside className="side"><ReviewSummary pr={props.review.pr} drafts={props.drafts} setDrafts={props.setDrafts} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} submitReview={props.submitReview} submitting={props.submitting} /><AiReviewPanel review={props.aiReview} setReview={props.setAiReview} runReview={props.runAiReview} /><ExistingComments comments={props.review.comments} /></aside></div>;
+}
+
+function startResizeSidePanel(event: React.MouseEvent, initialWidth: number, setSideWidth: (width: number) => void): void {
+  event.preventDefault();
+  const startX = event.clientX;
+  function move(moveEvent: MouseEvent) {
+    const nextWidth = Math.min(900, Math.max(300, initialWidth - (moveEvent.clientX - startX)));
+    setSideWidth(nextWidth);
+  }
+  function stop() {
+    window.removeEventListener("mousemove", move);
+    window.removeEventListener("mouseup", stop);
+  }
+  window.addEventListener("mousemove", move);
+  window.addEventListener("mouseup", stop);
 }
 
 function FileDiff({ file, review, openFiles, setOpenFiles, expandedContext, setExpandedContext, expandedNeighborRows, expandNeighbor, threads, setThreads, toggleThread, setViewed, drafts, setDrafts, editingDraftId, setEditingDraftId, askThread, dragSelection, beginDrag, updateDrag, finishDrag, handleRowClick }: DiffProps & { file: PullFile }) {

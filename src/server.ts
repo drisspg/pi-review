@@ -147,9 +147,9 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     logger.info("api", "open PR requested", { input });
     const ref = parsePullRequestRef(input);
     const data = await fetchPullRequestReviewData(ref);
-    const worktreeDir = await preparePrWorktree(ref, data.raw.base.repo.clone_url);
     const pr = await upsertPullRequest(data.pr);
-    registerPiSessionCwd(pr.key, worktreeDir);
+    const worktreeDir = await preparePrWorktree(ref, data.raw.base.repo.clone_url, data.pr.headSha);
+    await registerPiSessionCwd(pr.key, worktreeDir);
     prewarmPiSession(pr.key);
     logger.info("api", "open PR complete", { key: pr.key, filesChanged: pr.filesChanged, existingCommentCount: pr.existingCommentCount, worktreeDir });
     sendJson(res, 200, { ...data, pr, worktreeDir });
