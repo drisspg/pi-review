@@ -282,6 +282,23 @@ a { color: var(--link); text-decoration: none; }
   padding: 8px 12px;
 }
 
+.viewed-toggle {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  width: fit-content;
+  color: var(--muted);
+  font-size: 0.82rem;
+  user-select: none;
+}
+
+.viewed-toggle input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
 .link-row button {
   min-height: 28px;
   padding: 0.22rem 0.5rem;
@@ -386,7 +403,6 @@ a { color: var(--link); text-decoration: none; }
 .inline-thread > .markdown,
 .inline-thread > a,
 .inline-thread > .draft-card,
-.inline-thread > .existing-thread-comments,
 .review-thread > .range-control,
 .review-thread > .thread-messages,
 .review-thread > .composer {
@@ -397,28 +413,67 @@ a { color: var(--link); text-decoration: none; }
   margin-top: 0;
 }
 
-.existing-thread-comments {
+.github-thread {
+  background: var(--panel);
+}
+
+.github-comment-timeline {
   display: grid;
   gap: 0;
+  padding: 12px;
+}
+
+.github-comment {
+  position: relative;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 10px;
+  padding-bottom: 14px;
+}
+
+.github-comment:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 15px;
+  top: 34px;
+  bottom: 0;
+  width: 2px;
+  background: var(--border);
+}
+
+.avatar {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--panel2);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.github-comment-body {
+  min-width: 0;
   border: 1px solid var(--border);
   border-radius: 6px;
+  background: var(--panel);
   overflow: hidden;
 }
 
-.existing-thread-comment {
-  display: grid;
-  gap: 6px;
-  padding: 8px 10px;
-  border-top: 1px solid var(--border);
-}
-
-.existing-thread-comment:first-child {
-  border-top: 0;
-}
-
-.existing-thread-comment > strong {
+.github-comment-header {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel2);
   color: var(--muted);
   font-size: 0.8rem;
+}
+
+.github-comment-body .markdown {
+  padding: 10px;
 }
 
 .thread-head > div {
