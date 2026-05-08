@@ -53,6 +53,13 @@ type DiffProps = {
   handleRowClick: (target: Target, extend: boolean) => void;
 };
 
+function prUrlFromKey(key: string): string {
+  const match = key.match(/^(https?:\/\/[^/]+|[^/]+)\/([^/]+)\/([^#]+)#(\d+)$/);
+  if (match == null) return key;
+  const host = match[1].startsWith("http") ? new URL(match[1]).host : match[1];
+  return `https://${host}/${match[2]}/${match[3]}/pull/${match[4]}`;
+}
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { ...init, headers: { "content-type": "application/json", ...init?.headers } });
   const body = await response.json();
@@ -391,6 +398,19 @@ function App() {
     await loadDiagnostics();
   }
 
+  async function cleanupPr(pr: StoredPullRequest) {
+    if (!confirm(`Remove ${pr.key} from history and delete its local worktree/session cache?`)) return;
+    setError(null);
+    try {
+      await api("/api/pr/cleanup", { method: "POST", body: JSON.stringify({ input: pr.url || prUrlFromKey(pr.key) }) });
+      setPrs((current) => current.filter((item) => item.key !== pr.key));
+      if (review?.pr.key === pr.key) setReview(null);
+      await refreshLogs();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   function goHome() {
     setReview(null);
     setError(null);
@@ -400,10 +420,10 @@ function App() {
 
   function submit(event: FormEvent) { event.preventDefault(); void openPr(input); }
 
-  return <main className="app-shell"><header className="toolbar"><div><strong>Pi PR Review</strong><span>{review == null ? "Paste a PR to start" : `${review.pr.key} · ${review.pr.title}`}</span></div><div className="toolbar-actions">{review != null && <><button type="button" onClick={goHome}>Home</button><button type="button" title="Pi session settings" onClick={() => { setSettingsOpen(true); void loadDiagnostics(); }}>⚙</button><button type="button" title="Pi session diagnostics" onClick={() => void showDiagnostics()}>🐞</button><select aria-label="Theme" value={theme} onChange={(event) => setTheme(event.target.value as ThemeName)}><option value="github-dark">GitHub dark</option><option value="github-dimmed">GitHub dimmed</option><option value="github-light">GitHub light</option></select></>}<form className="open-form" onSubmit={submit}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="OWNER/REPO#123 or GitHub PR URL" /><button disabled={busy || input.trim().length === 0}>{busy ? "Fetching…" : "Open"}</button></form></div></header>{error != null && <div className="error">{error}</div>}{review == null ? <StartPage prs={prs} logs={logs} openPr={openPr} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} aiReview={aiReview} setAiReview={setAiReview} runAiReview={runAiReview} submitReview={submitReview} submitting={submitting} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} />}{diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} close={() => setDiagnostics(null)} />}{review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} close={() => setSettingsOpen(false)} />}</main>;
+  return <main className="app-shell"><header className="toolbar"><div><strong>Pi PR Review</strong><span>{review == null ? "Paste a PR to start" : `${review.pr.key} · ${review.pr.title}`}</span></div><div className="toolbar-actions">{review != null && <><button type="button" onClick={goHome}>Home</button><button type="button" title="Pi session settings" onClick={() => { setSettingsOpen(true); void loadDiagnostics(); }}>⚙</button><button type="button" title="Pi session diagnostics" onClick={() => void showDiagnostics()}>🐞</button><select aria-label="Theme" value={theme} onChange={(event) => setTheme(event.target.value as ThemeName)}><option value="github-dark">GitHub dark</option><option value="github-dimmed">GitHub dimmed</option><option value="github-light">GitHub light</option></select></>}<form className="open-form" onSubmit={submit}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="OWNER/REPO#123 or GitHub PR URL" /><button disabled={busy || input.trim().length === 0}>{busy ? "Fetching…" : "Open"}</button></form></div></header>{error != null && <div className="error">{error}</div>}{review == null ? <StartPage prs={prs} logs={logs} openPr={openPr} cleanupPr={cleanupPr} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} aiReview={aiReview} setAiReview={setAiReview} runAiReview={runAiReview} submitReview={submitReview} submitting={submitting} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} />}{diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} close={() => setDiagnostics(null)} />}{review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} close={() => setSettingsOpen(false)} />}</main>;
 }
 
-function StartPage({ prs, logs, openPr }: { prs: StoredPullRequest[]; logs: LogEntry[]; openPr: (input: string) => Promise<void> }) { return <div className="start-grid"><section className="panel"><h1>Previous reviews</h1><p className="muted">Reopen a tracked PR or paste a new one above.</p><History prs={prs} openPr={openPr} /></section><details className="panel logs"><summary>Server log</summary><LogRows logs={logs} /></details></div>; }
+function StartPage({ prs, logs, openPr, cleanupPr }: { prs: StoredPullRequest[]; logs: LogEntry[]; openPr: (input: string) => Promise<void>; cleanupPr: (pr: StoredPullRequest) => Promise<void> }) { return <div className="start-grid"><section className="panel"><h1>Previous reviews</h1><p className="muted">Reopen a tracked PR or paste a new one above.</p><History prs={prs} openPr={openPr} cleanupPr={cleanupPr} /></section><details className="panel logs"><summary>Server log</summary><LogRows logs={logs} /></details></div>; }
 
 function ReviewPage(props: DiffProps & { aiReview: AiReview; setAiReview: (review: AiReview) => void; runAiReview: () => Promise<void>; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<void>; submitting: boolean; refreshGithubActivity: () => Promise<void>; refreshingActivity: boolean }) {
   return <div className="review-layout" style={{ gridTemplateColumns: `minmax(0, 1fr) 12px ${props.sideWidth}px` }}><main className="files">{props.review.files.map((file) => <FileDiff key={file.filename} file={file} {...props} />)}</main><div className="resize-handle" role="separator" aria-label="Resize side panel" onMouseDown={(event) => startResizeSidePanel(event, props.sideWidth, props.setSideWidth)} /><aside className="side"><ReviewSummary pr={props.review.pr} drafts={props.drafts} setDrafts={props.setDrafts} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} submitReview={props.submitReview} submitting={props.submitting} refreshGithubActivity={props.refreshGithubActivity} refreshingActivity={props.refreshingActivity} /><AiReviewPanel review={props.aiReview} setReview={props.setAiReview} runReview={props.runAiReview} /><ExistingComments comments={props.review.comments} issueComments={props.review.issueComments} /></aside></div>;
@@ -571,7 +591,7 @@ function PiSettingsModal({ prKey, diagnostics, setDiagnostics, close }: { prKey:
   }
   return <div className="review-modal" role="dialog" aria-modal="true"><div className="review-modal-card"><div className="thread-head"><h2>Pi settings</h2><button onClick={close}>Close</button></div><label>Model<select value={selected} onChange={(event) => setSelected(event.target.value)}><option value="">Select model…</option>{models.map((model) => <option key={`${model.provider}/${model.id}`} value={`${model.provider}/${model.id}`}>{model.provider}/{model.id}{model.name != null ? ` · ${model.name}` : ""}</option>)}</select></label><label>Thinking<select value={thinkingLevel} onChange={(event) => setThinkingLevel(event.target.value)}><option value="">Keep current</option>{["off", "minimal", "low", "medium", "high", "xhigh"].map((level) => <option key={level} value={level}>{level}</option>)}</select></label><button onClick={() => void apply()} disabled={selected.length === 0}>Apply to this PR session</button><DiagnosticsView diagnostics={diagnostics} /></div></div>;
 }
-function History({ prs, openPr }: { prs: StoredPullRequest[]; openPr: (input: string) => Promise<void> }) { return <div className="history">{prs.length === 0 ? <p className="muted">No previous PRs.</p> : prs.map((pr) => <button key={pr.key} onClick={() => void openPr(pr.url)}><strong>{pr.title}</strong><span>{pr.key} · {pr.filesChanged ?? "—"} files · {pr.existingCommentCount ?? "—"} comments</span></button>)}</div>; }
+function History({ prs, openPr, cleanupPr }: { prs: StoredPullRequest[]; openPr: (input: string) => Promise<void>; cleanupPr: (pr: StoredPullRequest) => Promise<void> }) { return <div className="history">{prs.length === 0 ? <p className="muted">No previous PRs.</p> : prs.map((pr) => <div className="history-row" key={pr.key}><button onClick={() => void openPr(pr.url)}><strong>{pr.title}</strong><span>{pr.key} · {pr.filesChanged ?? "—"} files · {pr.existingCommentCount ?? "—"} comments</span></button><button className="trash-button" title="Remove saved PR and cleanup worktree" onClick={() => void cleanupPr(pr)}>🗑</button></div>)}</div>; }
 function LogRows({ logs }: { logs: LogEntry[] }) { return <>{logs.map((log) => <div className={`log ${log.level}`} key={log.id}><span>{new Date(log.timestamp).toLocaleTimeString()} {log.scope}</span><p>{log.message}</p>{log.data !== undefined && <code>{JSON.stringify(log.data)}</code>}</div>)}</>; }
 
 createRoot(document.getElementById("root")!).render(<App />);

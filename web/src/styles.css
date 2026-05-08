@@ -536,11 +536,29 @@ a { color: var(--link); text-decoration: none; }
   gap: 8px;
 }
 
+.history-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: stretch;
+}
+
 .history button {
   display: grid;
   gap: 5px;
   text-align: left;
   padding: 10px;
+}
+
+.history .trash-button {
+  place-content: center;
+  min-width: 42px;
+  color: var(--danger-text);
+}
+
+.history .trash-button:hover {
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 .history span { color: var(--muted); font-size: 0.84rem; }

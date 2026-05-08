@@ -15,6 +15,19 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator(".review-layout")).toBeVisible({ timeout: 60_000 });
 });
 
+test("removes a previous PR from local history", async ({ page }) => {
+  page.on("dialog", (dialog) => dialog.accept());
+  await page.route("**/api/pr/cleanup", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true }) });
+  });
+
+  await page.getByRole("button", { name: "Home" }).click();
+  const firstRow = page.locator(".history-row").first();
+  const key = await firstRow.locator("span").textContent();
+  await firstRow.getByTitle("Remove saved PR and cleanup worktree").click();
+  if (key != null) await expect(page.locator(".history-row", { hasText: key.split(" · ")[0] })).toHaveCount(0);
+});
+
 test("opens a PR and renders GitHub-style file diffs", async ({ page }) => {
   await expect(page.getByText("fix address access for varlen attn split kv").first()).toBeVisible();
   await expect(page.locator(".file")).toHaveCount(2);

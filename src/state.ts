@@ -42,3 +42,10 @@ export async function setFileViewed(review: FileReviewState): Promise<FileReview
   await writeState(state);
   return review;
 }
+
+export async function removePullRequest(prKey: string): Promise<void> {
+  const state = await readState();
+  state.prs = state.prs.filter((pr) => pr.key !== prKey);
+  state.fileReviews = state.fileReviews.filter((review) => review.prKey !== prKey);
+  await writeState(state);
+}

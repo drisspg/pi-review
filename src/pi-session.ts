@@ -107,6 +107,9 @@ export async function setPiModel(prKey: string, provider: string, modelId: strin
 export async function disposePiSession(prKey: string): Promise<void> {
   const sessionPromise = sessions.get(prKey);
   sessions.delete(prKey);
+  cwdByPr.delete(prKey);
+  lastPromptByPr.delete(prKey);
+  promptQueueByPr.delete(prKey);
   if (sessionPromise == null) return;
   const session = await sessionPromise;
   await session.abort?.();

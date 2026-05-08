@@ -4,10 +4,10 @@ import { extname, join, normalize, resolve } from "node:path";
 
 import { fetchFileText, fetchPullRequestReviewData, submitPullRequestReview } from "./github.js";
 import { logger } from "./logger.js";
-import { askPi, disposePiSessions, piDiagnostics, prewarmPiSession, registerPiSessionCwd, setPiModel } from "./pi-session.js";
+import { askPi, disposePiSession, disposePiSessions, piDiagnostics, prewarmPiSession, registerPiSessionCwd, setPiModel } from "./pi-session.js";
 import { parsePullRequestRef } from "./pr.js";
-import { listRecentPullRequests, setFileViewed, upsertPullRequest } from "./state.js";
-import { preparePrWorktree } from "./worktrees.js";
+import { listRecentPullRequests, removePullRequest, setFileViewed, upsertPullRequest } from "./state.js";
+import { cleanupPrWorktree, preparePrWorktree } from "./worktrees.js";
 
 const DEFAULT_PORT = 43133;
 const WEB_ROOT = resolve(process.cwd(), "dist-web");
@@ -82,6 +82,10 @@ function refFromBody(body: unknown) {
   return parsePullRequestRef(payload.prUrl);
 }
 
+function prKeyForRef(ref: ReturnType<typeof parsePullRequestRef>): string {
+  return `${ref.host}/${ref.owner}/${ref.repo}#${ref.number}`;
+}
+
 async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (req.method === "OPTIONS") {
     sendJson(res, 204, null);
@@ -109,6 +113,19 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const input = inputFromBody(await readBody(req));
     logger.info("api", "parse PR input", { input });
     sendJson(res, 200, { ref: parsePullRequestRef(input) });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/pr/cleanup") {
+    const input = inputFromBody(await readBody(req));
+    logger.info("api", "cleanup PR requested", { input });
+    const ref = parsePullRequestRef(input);
+    const prKey = prKeyForRef(ref);
+    await disposePiSession(prKey);
+    const worktreeDir = await cleanupPrWorktree(ref);
+    await removePullRequest(prKey);
+    logger.info("api", "cleanup PR complete", { prKey, worktreeDir });
+    sendJson(res, 200, { ok: true, prKey, worktreeDir });
     return;
   }
 

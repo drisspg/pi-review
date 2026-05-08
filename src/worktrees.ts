@@ -32,9 +32,13 @@ export function worktreeDirForRef(ref: PullRequestRef): string {
   return resolve(STATE_ROOT, "worktrees", safe(ref.host), safe(ref.owner), safe(ref.repo), `pr-${ref.number}`);
 }
 
+export function repoDirForRef(ref: PullRequestRef): string {
+  return resolve(STATE_ROOT, "repos", safe(ref.host), safe(ref.owner), safe(ref.repo));
+}
+
 export async function preparePrWorktree(ref: PullRequestRef, cloneUrl: string, headSha: string): Promise<string> {
   const startedAt = performance.now();
-  const repoDir = resolve(STATE_ROOT, "repos", safe(ref.host), safe(ref.owner), safe(ref.repo));
+  const repoDir = repoDirForRef(ref);
   const worktreeDir = worktreeDirForRef(ref);
   const remoteRef = `refs/pi-pr-review/pr-${ref.number}`;
   logger.info("worktree", "prepare start", { repoDir, worktreeDir });
@@ -49,5 +53,17 @@ export async function preparePrWorktree(ref: PullRequestRef, cloneUrl: string, h
   await git(["fetch", "--force", "origin", `pull/${ref.number}/head:${remoteRef}`], repoDir);
   await git(["worktree", "add", "--detach", "--force", worktreeDir, headSha], repoDir);
   logger.info("worktree", "prepare complete", { worktreeDir, ms: Math.round(performance.now() - startedAt) });
+  return worktreeDir;
+}
+
+export async function cleanupPrWorktree(ref: PullRequestRef): Promise<string> {
+  const repoDir = repoDirForRef(ref);
+  const worktreeDir = worktreeDirForRef(ref);
+  if (existsSync(resolve(repoDir, ".git"))) {
+    await gitAllowFailure(["worktree", "remove", "--force", worktreeDir], repoDir);
+    await gitAllowFailure(["worktree", "prune"], repoDir);
+  }
+  await rm(worktreeDir, { recursive: true, force: true });
+  logger.info("worktree", "cleanup complete", { worktreeDir });
   return worktreeDir;
 }
