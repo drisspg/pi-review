@@ -4,9 +4,10 @@ import { extname, join, normalize, resolve } from "node:path";
 
 import { fetchFileText, fetchPullRequestReviewData, submitPullRequestReview } from "./github.js";
 import { logger } from "./logger.js";
-import { askPi } from "./pi-session.js";
+import { askPi, disposePiSessions, prewarmPiSession, registerPiSessionCwd } from "./pi-session.js";
 import { parsePullRequestRef } from "./pr.js";
 import { listRecentPullRequests, setFileViewed, upsertPullRequest } from "./state.js";
+import { preparePrWorktree } from "./worktrees.js";
 
 const DEFAULT_PORT = 43133;
 const WEB_ROOT = resolve(process.cwd(), "dist-web");
@@ -146,9 +147,12 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     logger.info("api", "open PR requested", { input });
     const ref = parsePullRequestRef(input);
     const data = await fetchPullRequestReviewData(ref);
+    const worktreeDir = await preparePrWorktree(ref, data.raw.base.repo.clone_url);
     const pr = await upsertPullRequest(data.pr);
-    logger.info("api", "open PR complete", { key: pr.key, filesChanged: pr.filesChanged, existingCommentCount: pr.existingCommentCount });
-    sendJson(res, 200, { ...data, pr });
+    registerPiSessionCwd(pr.key, worktreeDir);
+    prewarmPiSession(pr.key);
+    logger.info("api", "open PR complete", { key: pr.key, filesChanged: pr.filesChanged, existingCommentCount: pr.existingCommentCount, worktreeDir });
+    sendJson(res, 200, { ...data, pr, worktreeDir });
     return;
   }
 
@@ -174,6 +178,21 @@ const server = createServer((req, res) => {
     sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
   });
 });
+
+let shuttingDown = false;
+
+async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info("server", "shutdown", { signal });
+  server.closeAllConnections();
+  await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+  await disposePiSessions();
+  process.exit(0);
+}
+
+process.once("SIGINT", () => void shutdown("SIGINT"));
+process.once("SIGTERM", () => void shutdown("SIGTERM"));
 
 const port = Number.parseInt(process.env.PI_PR_REVIEW_PORT ?? "", 10) || DEFAULT_PORT;
 server.listen(port, "127.0.0.1", () => {

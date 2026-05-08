@@ -1,0 +1,88 @@
+import { expect, test } from "@playwright/test";
+
+const prUrl = process.env.PI_REVIEW_TEST_PR ?? "https://github.com/Dao-AILab/flash-attention/pull/2542";
+
+test.beforeEach(async ({ page }) => {
+  await page.goto("/");
+  await page.getByPlaceholder("OWNER/REPO#123 or GitHub PR URL").fill(prUrl);
+  await page.getByRole("button", { name: "Open" }).click();
+  await expect(page.locator(".review-layout")).toBeVisible({ timeout: 60_000 });
+});
+
+test("opens a PR and renders GitHub-style file diffs", async ({ page }) => {
+  await expect(page.getByText("fix address access for varlen attn split kv").first()).toBeVisible();
+  await expect(page.locator(".file")).toHaveCount(2);
+  await expect(page.locator(".diff-row.added").first()).toBeVisible();
+});
+
+test("expands neighboring context lines", async ({ page }) => {
+  const firstFile = page.locator(".file").first();
+  const before = await firstFile.locator(".diff-row").count();
+  await firstFile.getByRole("button", { name: "Expand above" }).first().click();
+  await expect.poll(() => firstFile.locator(".diff-row").count()).toBeGreaterThan(before);
+});
+
+test("creates, edits, and removes draft comments", async ({ page }) => {
+  await page.locator(".file").first().locator(".diff-row.added").first().click();
+  await page.locator(".inline-thread textarea").first().fill("first draft");
+  await page.getByRole("button", { name: "Add draft comment" }).first().click();
+
+  await expect(page.locator(".inline-thread.draft").first()).toContainText("first draft");
+  await page.getByTitle("Edit draft").first().click();
+  await page.locator(".draft-card textarea").first().fill("edited draft");
+  await expect(page.locator(".inline-thread.draft").first()).toContainText("edited draft");
+
+  await page.locator(".inline-thread.draft").first().getByRole("button", { name: "Remove" }).click();
+  await expect(page.locator(".inline-thread.draft")).toHaveCount(0);
+});
+
+test("clears empty line threads when clicking elsewhere", async ({ page }) => {
+  await page.locator(".file").first().locator(".diff-row.added").first().click();
+  await expect(page.locator(".inline-thread")).toHaveCount(1);
+
+  await page.locator(".side").click();
+  await expect(page.locator(".inline-thread")).toHaveCount(0);
+});
+
+test("supports multiline draft ranges", async ({ page }) => {
+  await page.locator(".file").first().locator(".diff-row.added").first().click();
+  const rangeEnd = page.locator(".range-control input").first();
+  await rangeEnd.fill("1279");
+  await page.locator(".inline-thread textarea").first().fill("range draft");
+  await page.getByRole("button", { name: "Add draft comment" }).first().click();
+
+  await expect(page.locator(".inline-thread.draft").first()).toContainText("1276-1279");
+  await expect(page.getByRole("button", { name: "Submit review (1)" })).toBeEnabled();
+});
+
+test("renders inline Ask Pi responses as markdown", async ({ page }) => {
+  await page.route("**/api/ask", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ answer: "**Finding:** check `batch_offset`.\n\n```cpp\nreturn batch_offset;\n```" }),
+    });
+  });
+
+  await page.locator(".file").first().locator(".diff-row.added").first().click();
+  await page.locator(".inline-thread textarea").first().fill("review this line");
+  await page.getByRole("button", { name: "Ask Pi" }).first().click();
+
+  const thread = page.locator(".thread-messages").first();
+  await expect(thread).toContainText("Finding:");
+  await expect(thread.locator("pre code")).toContainText("return batch_offset;");
+});
+
+test("runs the right-sidebar Pi review panel with markdown output", async ({ page }) => {
+  await page.route("**/api/ask", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ answer: "- **Correctness:** inspect `cu_seqlens_q`." }),
+    });
+  });
+
+  await page.getByRole("button", { name: "Run review" }).click();
+
+  const panel = page.locator(".ai-review");
+  await expect(panel).toContainText("Correctness:");
+  await expect(panel.getByRole("button", { name: "Run again" })).toBeEnabled();
+});

@@ -70,7 +70,7 @@ export async function fetchPullRequestReviewData(ref: PullRequestRef): Promise<P
       updatedAt: new Date().toISOString(),
     };
   });
-  return { pr, files, comments, fileReviews };
+  return { pr, raw: rawPr, files, comments, fileReviews };
 }
 
 export function fingerprintPullFile(file: PullFile): string {

@@ -223,6 +223,7 @@ a { color: #79c0ff; text-decoration: none; }
 
 .diff-row:not(.hunk):not(.meta) { cursor: pointer; }
 .diff-row:hover, .diff-row.selected { background: rgba(177, 186, 196, 0.09); }
+.diff-row.range-selecting { background: rgba(47, 129, 247, 0.24); }
 .num { color: #6e7681; text-align: right; user-select: none; }
 .added { background: var(--add); }
 .removed { background: var(--del); }
@@ -366,6 +367,20 @@ a { color: #79c0ff; text-decoration: none; }
   background: rgba(13, 17, 23, 0.86);
 }
 
+.range-control {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  width: fit-content;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.range-control input {
+  width: 86px;
+  padding: 0.25rem 0.4rem;
+}
+
 .thread-head, .actions {
   display: flex;
   justify-content: space-between;
@@ -430,6 +445,40 @@ a { color: #79c0ff; text-decoration: none; }
 }
 
 .history span { color: var(--muted); font-size: 0.84rem; }
+.ai-review .markdown {
+  max-height: 360px;
+  overflow: auto;
+}
+
+.review-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: rgba(1, 4, 9, 0.72);
+}
+
+.review-modal-card {
+  width: min(1100px, 96vw);
+  max-height: 90vh;
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 16px;
+  box-shadow: 0 20px 80px rgba(0, 0, 0, 0.4);
+}
+
+.review-modal-body {
+  overflow: auto;
+  max-height: calc(90vh - 90px);
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
 .logs { max-height: 320px; overflow: auto; }
 .logs summary { cursor: pointer; color: var(--muted); }
 .log { border-top: 1px solid var(--border); padding: 8px 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.74rem; }

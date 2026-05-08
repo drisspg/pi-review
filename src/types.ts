@@ -73,6 +73,7 @@ export type FileReviewState = {
 
 export type PullRequestReviewData = {
   pr: StoredPullRequest;
+  raw: PullRequest;
   files: PullFile[];
   comments: PullReviewComment[];
   fileReviews: FileReviewState[];

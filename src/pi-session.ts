@@ -1,20 +1,40 @@
 import { createAgentSession, SessionManager } from "@earendil-works/pi-coding-agent";
+import { mkdir } from "node:fs/promises";
+import { homedir } from "node:os";
+import { resolve } from "node:path";
 
 import { logger } from "./logger.js";
 
 type SessionRecord = {
+  abort?: () => Promise<void>;
+  dispose?: () => void;
   prompt: (text: string) => Promise<void>;
   subscribe: (listener: (event: unknown) => void) => () => void;
 };
 
 const sessions = new Map<string, Promise<SessionRecord>>();
+const cwdByPr = new Map<string, string>();
+
+function safe(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "unknown";
+}
+
+function sessionDirForPr(prKey: string): string {
+  return resolve(homedir(), ".pi", "agent", "state", "pi-pr-review", "pi-sessions", safe(prKey));
+}
+
+export function registerPiSessionCwd(prKey: string, cwd: string): void {
+  cwdByPr.set(prKey, cwd);
+}
 
 async function createSession(prKey: string): Promise<SessionRecord> {
-  logger.info("pi", "create session", { prKey, cwd: process.cwd() });
+  const cwd = cwdByPr.get(prKey) ?? process.cwd();
+  const sessionDir = sessionDirForPr(prKey);
+  await mkdir(sessionDir, { recursive: true });
+  logger.info("pi", "create session", { prKey, cwd, sessionDir });
   const { session } = await createAgentSession({
-    cwd: process.cwd(),
-    noTools: "all",
-    sessionManager: SessionManager.create(process.cwd()),
+    cwd,
+    sessionManager: SessionManager.continueRecent(cwd, sessionDir),
   });
   return session as SessionRecord;
 }
@@ -25,6 +45,24 @@ function getSession(prKey: string): Promise<SessionRecord> {
   const created = createSession(prKey);
   sessions.set(prKey, created);
   return created;
+}
+
+export function prewarmPiSession(prKey: string): void {
+  void getSession(prKey).catch((error: unknown) => logger.error("pi", "prewarm failed", { prKey, error: error instanceof Error ? error.message : String(error) }));
+}
+
+export async function disposePiSessions(): Promise<void> {
+  const settled = await Promise.allSettled([...sessions.values()]);
+  sessions.clear();
+  for (const result of settled) {
+    if (result.status !== "fulfilled") continue;
+    try {
+      await result.value.abort?.();
+      result.value.dispose?.();
+    } catch (error) {
+      logger.debug("pi", "dispose ignored failure", { error: error instanceof Error ? error.message : String(error) });
+    }
+  }
 }
 
 function textDeltaFromEvent(event: unknown): string {
