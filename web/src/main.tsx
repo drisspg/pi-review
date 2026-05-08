@@ -550,11 +550,19 @@ function avatarLabel(login: string): string {
 }
 
 function ExistingReviewThread({ comments }: { comments: PullReviewComment[] }) {
-  return <div className="inline-thread existing github-thread"><div className="thread-head"><div><strong>GitHub thread</strong><span>{targetLabel(commentTarget(comments[0]))}</span></div><a href={comments[0].html_url} target="_blank" rel="noreferrer">Open</a></div><ReviewCommentTimeline comments={comments} /></div>;
+  return <GitHubThreadCard className="inline-thread existing" title="GitHub thread" subtitle={`${targetLabel(commentTarget(comments[0]))} · ${comments.length} comments`} href={comments[0].html_url} comments={comments} />;
 }
 
 function ReviewCommentTimeline({ comments }: { comments: Array<PullReviewComment | PullIssueComment> }) {
   return <div className="github-comment-timeline">{comments.map((comment) => { const login = comment.user?.login ?? "github"; return <div className="github-comment" key={comment.id}><div className="avatar" aria-hidden="true">{avatarLabel(login)}</div><div className="github-comment-body"><div className="github-comment-header"><strong>@{login}</strong></div><MarkdownText text={comment.body} /></div></div>; })}</div>;
+}
+
+function GitHubThreadCard({ className = "comment", title, subtitle, href, comments, reply }: { className?: string; title: string; subtitle: string; href: string; comments: Array<PullReviewComment | PullIssueComment>; reply?: React.ReactNode }) {
+  const [minimized, setMinimized] = useState(false);
+  const [maximized, setMaximized] = useState(false);
+  const body = <><ReviewCommentTimeline comments={comments} />{reply}</>;
+  const card = <div className={`${className} github-thread ${minimized ? "minimized" : ""}`}><div className="thread-head"><div><strong>{title}</strong><span>{subtitle}</span></div><div className="actions"><button onClick={() => setMinimized(!minimized)}>{minimized ? "Expand" : "Minimize"}</button><button onClick={() => setMaximized(true)}>Maximize</button><a href={href} target="_blank" rel="noreferrer">Open</a></div></div>{!minimized && body}</div>;
+  return <>{card}{maximized && <div className="review-modal" role="dialog" aria-modal="true"><div className="review-modal-card github-thread-modal"><div className="thread-head"><div><h2>{title}</h2><span>{subtitle}</span></div><div className="actions"><a href={href} target="_blank" rel="noreferrer">Open GitHub</a><button onClick={() => setMaximized(false)}>Close</button></div></div><div className="review-modal-body">{body}</div></div></div>}</>;
 }
 
 function ThreadBox({ thread, setThread, closeThread, addDraft, askThread }: { thread: Thread; setThread: (thread: Thread) => void; closeThread: () => void; addDraft: () => void; askThread: (thread: Thread) => Promise<void> }) {
@@ -600,7 +608,7 @@ function ThreadReplyBox({ prUrl, kind, commentId, refreshGithubActivity }: { prU
   return <div className="thread-reply"><textarea value={body} onChange={(event) => setBody(event.target.value)} placeholder="Reply…" /><button onClick={() => void submitReply()} disabled={submitting || body.trim().length === 0}>{submitting ? "Replying…" : "Reply"}</button></div>;
 }
 
-function ExistingComments({ prUrl, comments, issueComments, refreshGithubActivity }: { prUrl: string; comments: PullReviewComment[]; issueComments: PullIssueComment[]; refreshGithubActivity: () => Promise<void> }) { const reviewThreads = groupReviewComments(comments); return <section className="panel"><h2>Existing comments</h2>{comments.length + issueComments.length === 0 ? <p className="muted">No existing comments.</p> : <>{issueComments.length > 0 && <div className="comment github-thread"><a href={issueComments[0].html_url} target="_blank" rel="noreferrer"><span>Conversation thread · {issueComments.length}</span></a><ReviewCommentTimeline comments={issueComments} /><ThreadReplyBox prUrl={prUrl} kind="issue" refreshGithubActivity={refreshGithubActivity} /></div>}{reviewThreads.map((thread) => <div className="comment github-thread" key={thread.map((comment) => comment.id).join(":")}><a href={thread[0].html_url} target="_blank" rel="noreferrer"><span>{targetLabel(commentTarget(thread[0]))} · {thread.length}</span></a><ReviewCommentTimeline comments={thread} /><ThreadReplyBox prUrl={prUrl} kind="review" commentId={thread[0].id} refreshGithubActivity={refreshGithubActivity} /></div>)}</>}</section>; }
+function ExistingComments({ prUrl, comments, issueComments, refreshGithubActivity }: { prUrl: string; comments: PullReviewComment[]; issueComments: PullIssueComment[]; refreshGithubActivity: () => Promise<void> }) { const reviewThreads = groupReviewComments(comments); return <section className="panel"><h2>Existing comments</h2>{comments.length + issueComments.length === 0 ? <p className="muted">No existing comments.</p> : <>{issueComments.length > 0 && <GitHubThreadCard title="Conversation thread" subtitle={`${issueComments.length} comments`} href={issueComments[0].html_url} comments={issueComments} reply={<ThreadReplyBox prUrl={prUrl} kind="issue" refreshGithubActivity={refreshGithubActivity} />} />}{reviewThreads.map((thread) => <GitHubThreadCard key={thread.map((comment) => comment.id).join(":")} title="Review thread" subtitle={`${targetLabel(commentTarget(thread[0]))} · ${thread.length} comments`} href={thread[0].html_url} comments={thread} reply={<ThreadReplyBox prUrl={prUrl} kind="review" commentId={thread[0].id} refreshGithubActivity={refreshGithubActivity} />} />)}</>}</section>; }
 
 function diagnosticsText(value: unknown): string {
   if (value == null) return "—";

@@ -415,6 +415,25 @@ a { color: var(--link); text-decoration: none; }
 
 .github-thread {
   background: var(--panel);
+  overflow: hidden;
+}
+
+.github-thread.minimized .thread-head {
+  border-bottom: 0;
+}
+
+.github-thread .thread-head h2 {
+  margin: 0;
+}
+
+.github-thread .thread-head .actions a,
+.github-thread .thread-head .actions button {
+  min-height: 28px;
+  padding: 0.22rem 0.5rem;
+}
+
+.github-thread-modal .review-modal-body {
+  padding-top: 0;
 }
 
 .github-comment-timeline {
