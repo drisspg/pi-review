@@ -68,6 +68,7 @@ function toStoredPullRequest(ref: PullRequestRef, pr: PullRequest, files: PullFi
     existingCommentCount: comments.length + issueComments.length,
     lastOpenedAt: new Date().toISOString(),
     lastReviewedHeadSha: null,
+    lastReviewEvent: null,
   };
 }
 
