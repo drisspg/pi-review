@@ -881,7 +881,8 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .history span { color: var(--muted); font-size: 0.84rem; }
-.ai-review .markdown {
+.ai-review .markdown,
+.focus-review .markdown {
   max-height: 360px;
   overflow: auto;
 }

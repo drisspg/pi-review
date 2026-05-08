@@ -106,6 +106,13 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     return;
   }
 
+  if (req.method === "POST" && url.pathname === "/api/pi/focus-review") {
+    const payload = recordFromBody(await readBody(req));
+    if (typeof payload.prKey !== "string" || typeof payload.prompt !== "string") throw new Error("Expected prKey and prompt");
+    sendJson(res, 200, { answer: await askPi(payload.prKey, payload.prompt, "focus-review") });
+    return;
+  }
+
   if (req.method === "POST" && url.pathname === "/api/pi/diagnostics") {
     const payload = recordFromBody(await readBody(req));
     if (typeof payload.prKey !== "string") throw new Error("Expected prKey");

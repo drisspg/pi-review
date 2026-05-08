@@ -150,6 +150,22 @@ test("renders inline Ask Pi responses as markdown", async ({ page }) => {
   await expect(thread.locator("pre code")).toContainText("return batch_offset;");
 });
 
+test("runs a separate focus areas review", async ({ page }) => {
+  await page.route("**/api/pi/focus-review", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ answer: "## Focus areas\n- `hopper/mainloop.py`: check whether this matches local tiling conventions." }),
+    });
+  });
+
+  await page.getByRole("button", { name: "Find focus areas" }).click();
+
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("Focus areas");
+  await expect(dialog).toContainText("tiling conventions");
+  await expect(dialog.getByRole("button", { name: "Run again" })).toBeEnabled();
+});
+
 test("runs the right-sidebar Pi review panel and continues the chat with Enter", async ({ page }) => {
   await page.route("**/api/ask", async (route) => {
     const body = route.request().postDataJSON() as { prompt?: string };
