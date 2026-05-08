@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import { logger } from "./logger.js";
 import { prKey } from "./pr.js";
 import { listFileReviews } from "./state.js";
-import type { PullFile, PullIssueComment, PullRequest, PullRequestRef, PullRequestReviewData, PullReviewComment, StoredPullRequest } from "./types.js";
+import type { PullFile, PullIssueComment, PullRequest, PullRequestRef, PullRequestReviewData, PullRequestReviewDecision, PullReviewComment, StoredPullRequest } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -30,6 +30,19 @@ function apiBase(ref: PullRequestRef): string {
 }
 
 type ReviewThreadGraphql = { repository?: { pullRequest?: { reviewThreads?: { nodes?: Array<{ id: string; isResolved: boolean; comments?: { nodes?: Array<{ databaseId: number | null }> } }> } } } };
+type ReviewDecisionGraphql = { repository?: { pullRequest?: { reviewDecision?: PullRequestReviewDecision } } };
+
+async function fetchReviewDecision(ref: PullRequestRef): Promise<PullRequestReviewDecision> {
+  if (ref.host !== "github.com") return null;
+  const query = `query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { reviewDecision } } }`;
+  try {
+    const { stdout } = await execFileAsync("gh", ["api", "graphql", "-f", `query=${query}`, "-F", `owner=${ref.owner}`, "-F", `repo=${ref.repo}`, "-F", `number=${ref.number}`], { maxBuffer: 50 * 1024 * 1024 });
+    return (JSON.parse(stdout) as ReviewDecisionGraphql).repository?.pullRequest?.reviewDecision ?? null;
+  } catch (error) {
+    logger.warn("github", "fetch review decision failed", { ref, error: error instanceof Error ? error.message : String(error) });
+    return null;
+  }
+}
 
 async function fetchReviewThreadStates(ref: PullRequestRef): Promise<Map<number, { thread_id: string; thread_resolved: boolean }>> {
   if (ref.host !== "github.com") return new Map();
@@ -54,7 +67,7 @@ async function fetchReviewThreadStates(ref: PullRequestRef): Promise<Map<number,
   return states;
 }
 
-function toStoredPullRequest(ref: PullRequestRef, pr: PullRequest, files: PullFile[], comments: PullReviewComment[], issueComments: PullIssueComment[]): StoredPullRequest {
+function toStoredPullRequest(ref: PullRequestRef, pr: PullRequest, files: PullFile[], comments: PullReviewComment[], issueComments: PullIssueComment[], reviewDecision: PullRequestReviewDecision): StoredPullRequest {
   return {
     key: prKey(ref),
     ref,
@@ -69,6 +82,7 @@ function toStoredPullRequest(ref: PullRequestRef, pr: PullRequest, files: PullFi
     lastOpenedAt: new Date().toISOString(),
     lastReviewedHeadSha: null,
     lastReviewEvent: null,
+    reviewDecision,
   };
 }
 
@@ -78,15 +92,16 @@ function fileFingerprint(file: PullFile): string {
 
 export async function fetchPullRequestReviewData(ref: PullRequestRef): Promise<PullRequestReviewData> {
   logger.info("github", "fetch PR review data", { ref });
-  const [rawPr, files, rawComments, issueComments, threadStates] = await Promise.all([
+  const [rawPr, files, rawComments, issueComments, threadStates, reviewDecision] = await Promise.all([
     ghApi<PullRequest>(apiBase(ref)),
     ghApi<PullFile[]>(`${apiBase(ref)}/files`),
     ghApi<PullReviewComment[]>(`${apiBase(ref)}/comments`),
     ghApi<PullIssueComment[]>(`/repos/${ref.owner}/${ref.repo}/issues/${ref.number}/comments`),
     fetchReviewThreadStates(ref),
+    fetchReviewDecision(ref),
   ]);
   const comments = rawComments.map((comment) => ({ ...comment, ...threadStates.get(comment.id) }));
-  const pr = toStoredPullRequest(ref, rawPr, files, comments, issueComments);
+  const pr = toStoredPullRequest(ref, rawPr, files, comments, issueComments, reviewDecision);
   logger.info("github", "fetched PR review data", { key: pr.key, title: pr.title, files: files.length, reviewComments: comments.length, issueComments: issueComments.length });
   const storedFileReviews = await listFileReviews(pr.key);
   const fileReviews = files.map((file) => {

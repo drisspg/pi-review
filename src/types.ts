@@ -25,6 +25,8 @@ export type PullRequest = {
   head: { ref: string; sha: string; repo: GitHubRepo | null };
 };
 
+export type PullRequestReviewDecision = "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
+
 export type PullFile = {
   filename: string;
   previous_filename?: string;
@@ -73,6 +75,7 @@ export type StoredPullRequest = {
   lastOpenedAt: string;
   lastReviewedHeadSha: string | null;
   lastReviewEvent: "COMMENT" | "APPROVE" | "REQUEST_CHANGES" | null;
+  reviewDecision: PullRequestReviewDecision;
 };
 
 export type FileReviewState = {

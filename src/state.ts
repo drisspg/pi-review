@@ -27,7 +27,7 @@ export async function listRecentPullRequests(): Promise<StoredPullRequest[]> {
 export async function upsertPullRequest(pr: StoredPullRequest): Promise<StoredPullRequest> {
   const state = await readState();
   const previous = state.prs.find((stored) => stored.key === pr.key);
-  state.prs = [{ ...pr, lastReviewedHeadSha: previous?.lastReviewedHeadSha ?? pr.lastReviewedHeadSha, lastReviewEvent: previous?.lastReviewEvent ?? pr.lastReviewEvent }, ...state.prs.filter((stored) => stored.key !== pr.key)];
+  state.prs = [{ ...pr, lastReviewedHeadSha: previous?.lastReviewedHeadSha ?? pr.lastReviewedHeadSha, lastReviewEvent: previous?.lastReviewEvent ?? pr.lastReviewEvent, reviewDecision: pr.reviewDecision ?? previous?.reviewDecision ?? null }, ...state.prs.filter((stored) => stored.key !== pr.key)];
   await writeState(state);
   return state.prs[0];
 }
