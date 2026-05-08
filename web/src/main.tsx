@@ -1,6 +1,7 @@
 import React, { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { api } from "./api";
+import { Button } from "./components/Button";
 import { CodeText, MarkdownText } from "./components/Markdown";
 import { ModalShell } from "./components/Modal";
 import { ExistingComments, ExistingReviewThread } from "./components/Threads";
@@ -56,7 +57,7 @@ function App() {
   const [drafts, setDrafts] = useState<DraftComment[]>([]);
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [aiReview, setAiReview] = useState<AiReview>({ expanded: false, open: false, running: false, text: "" });
+  const [aiReview, setAiReview] = useState<AiReview>({ expanded: false, open: false, running: false, text: "", messages: [] });
   const [busy, setBusy] = useState(false);
   const [refreshingActivity, setRefreshingActivity] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -125,7 +126,7 @@ function App() {
       setDrafts([]);
       setExpandedNeighborRows({});
       setEditingDraftId(null);
-      setAiReview({ expanded: false, open: false, running: false, text: "" });
+      setAiReview({ expanded: false, open: false, running: false, text: "", messages: [] });
       await Promise.all([refreshHistory(), refreshLogs()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -259,14 +260,30 @@ function App() {
 
   async function runAiReview() {
     if (review == null || aiReview.running) return;
-    setAiReview({ ...aiReview, open: true, running: true });
+    setAiReview((current) => ({ ...current, open: true, expanded: true, running: true }));
     const diffSummary = review.files.map((file) => `## ${file.filename}\n${file.patch ?? "Patch unavailable"}`).join("\n\n");
     const prompt = `Run a concise code review for ${review.pr.key}. Focus on correctness, edge cases, tests, and concrete actionable findings. Avoid generic praise. Return markdown with bullets and file/line references where possible.\n\n${diffSummary}`;
     try {
       const { answer } = await api<{ answer: string }>("/api/ask", { method: "POST", body: JSON.stringify({ prKey: review.pr.key, prompt }) });
-      setAiReview((current) => ({ ...current, open: true, running: false, text: answer }));
+      setAiReview((current) => ({ ...current, open: true, expanded: true, running: false, text: answer, messages: [...current.messages, { role: "pi", text: answer }] }));
     } catch (err) {
-      setAiReview((current) => ({ ...current, open: true, running: false, text: `AI review failed: ${err instanceof Error ? err.message : String(err)}` }));
+      const text = `AI review failed: ${err instanceof Error ? err.message : String(err)}`;
+      setAiReview((current) => ({ ...current, open: true, expanded: true, running: false, text, messages: [...current.messages, { role: "pi", text }] }));
+    }
+  }
+
+  async function sendAiReviewMessage(message: string) {
+    if (review == null || aiReview.running || message.trim().length === 0) return;
+    const question = message.trim();
+    setAiReview((current) => ({ ...current, open: true, expanded: true, running: true, messages: [...current.messages, { role: "user", text: question }] }));
+    try {
+      const previous = aiReview.messages.map((entry) => `${entry.role === "user" ? "User" : "Pi"}: ${entry.text}`).join("\n\n");
+      const prompt = `Continue discussing PR ${review.pr.key}. Answer the user's latest question using the checked-out PR worktree. Be concise and cite files/lines when useful.\n\nPrevious dialogue:\n${previous || "(none)"}\n\nUser: ${question}`;
+      const { answer } = await api<{ answer: string }>("/api/ask", { method: "POST", body: JSON.stringify({ prKey: review.pr.key, prompt }) });
+      setAiReview((current) => ({ ...current, open: true, expanded: true, running: false, text: answer, messages: [...current.messages, { role: "pi", text: answer }] }));
+    } catch (err) {
+      const text = `Ask Pi failed: ${err instanceof Error ? err.message : String(err)}`;
+      setAiReview((current) => ({ ...current, open: true, expanded: true, running: false, text, messages: [...current.messages, { role: "pi", text }] }));
     }
   }
 
@@ -303,13 +320,13 @@ function App() {
 
   function submit(event: FormEvent) { event.preventDefault(); void openPr(input); }
 
-  return <main className="app-shell"><header className="toolbar"><div><strong>Pi PR Review</strong><span>{review == null ? "Paste a PR to start" : `${review.pr.key} · ${review.pr.title}`}</span></div><div className="toolbar-actions">{review != null && <><button type="button" onClick={goHome}>Home</button><button type="button" title="Pi session settings" onClick={() => { setSettingsOpen(true); void loadDiagnostics(); }}>⚙</button><button type="button" title="Pi session diagnostics" onClick={() => void showDiagnostics()}>🐞</button><select aria-label="Theme" value={theme} onChange={(event) => setTheme(event.target.value as ThemeName)}><option value="github-dark">GitHub dark</option><option value="github-dimmed">GitHub dimmed</option><option value="github-light">GitHub light</option></select></>}<form className="open-form" onSubmit={submit}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="OWNER/REPO#123 or GitHub PR URL" /><button disabled={busy || input.trim().length === 0}>{busy ? "Fetching…" : "Open"}</button></form></div></header>{error != null && <div className="error">{error}</div>}{review == null ? <StartPage prs={prs} logs={logs} openPr={openPr} cleanupPr={cleanupPr} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} collapseAllComments={() => setCommentCollapseSignal((signal) => signal + 1)} aiReview={aiReview} setAiReview={setAiReview} runAiReview={runAiReview} submitReview={submitReview} submitting={submitting} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} />}{diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} close={() => setDiagnostics(null)} />}{review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} close={() => setSettingsOpen(false)} />}</main>;
+  return <main className="app-shell"><header className="toolbar"><div><strong>Pi PR Review</strong><span>{review == null ? "Paste a PR to start" : `${review.pr.key} · ${review.pr.title}`}</span></div><div className="toolbar-actions">{review != null && <><button type="button" onClick={goHome}>Home</button><button type="button" title="Pi session settings" onClick={() => { setSettingsOpen(true); void loadDiagnostics(); }}>⚙</button><button type="button" title="Pi session diagnostics" onClick={() => void showDiagnostics()}>🐞</button><select aria-label="Theme" value={theme} onChange={(event) => setTheme(event.target.value as ThemeName)}><option value="github-dark">GitHub dark</option><option value="github-dimmed">GitHub dimmed</option><option value="github-light">GitHub light</option></select></>}<form className="open-form" onSubmit={submit}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="OWNER/REPO#123 or GitHub PR URL" /><button disabled={busy || input.trim().length === 0}>{busy ? "Fetching…" : "Open"}</button></form></div></header>{error != null && <div className="error">{error}</div>}{review == null ? <StartPage prs={prs} logs={logs} openPr={openPr} cleanupPr={cleanupPr} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} collapseAllComments={() => setCommentCollapseSignal((signal) => signal + 1)} aiReview={aiReview} setAiReview={setAiReview} runAiReview={runAiReview} sendAiReviewMessage={sendAiReviewMessage} submitReview={submitReview} submitting={submitting} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} />}{diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} close={() => setDiagnostics(null)} />}{review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} close={() => setSettingsOpen(false)} />}</main>;
 }
 
 function StartPage({ prs, logs, openPr, cleanupPr }: { prs: StoredPullRequest[]; logs: LogEntry[]; openPr: (input: string) => Promise<void>; cleanupPr: (pr: StoredPullRequest) => Promise<void> }) { return <div className="start-grid"><section className="panel"><h1>Previous reviews</h1><p className="muted">Reopen a tracked PR or paste a new one above.</p><History prs={prs} openPr={openPr} cleanupPr={cleanupPr} /></section><details className="panel logs"><summary>Server log</summary><LogRows logs={logs} /></details></div>; }
 
-function ReviewPage(props: DiffProps & { aiReview: AiReview; setAiReview: (review: AiReview) => void; runAiReview: () => Promise<void>; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<void>; submitting: boolean; refreshingActivity: boolean }) {
-  return <div className="review-layout" style={{ gridTemplateColumns: `minmax(0, 1fr) 12px ${props.sideWidth}px` }}><main className="files"><div className="comment-tools"><button className="small-muted-button" onClick={props.collapseAllComments}>Collapse all comments</button></div>{props.review.files.map((file) => <FileDiff key={file.filename} file={file} {...props} />)}</main><div className="resize-handle" role="separator" aria-label="Resize side panel" onMouseDown={(event) => startResizeSidePanel(event, props.sideWidth, props.setSideWidth)} /><aside className="side"><ReviewSummary pr={props.review.pr} drafts={props.drafts} setDrafts={props.setDrafts} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} submitReview={props.submitReview} submitting={props.submitting} refreshGithubActivity={props.refreshGithubActivity} refreshingActivity={props.refreshingActivity} /><AiReviewPanel review={props.aiReview} setReview={props.setAiReview} runReview={props.runAiReview} /><ExistingComments prUrl={props.review.pr.url} comments={props.review.comments} issueComments={props.review.issueComments} refreshGithubActivity={props.refreshGithubActivity} collapseSignal={props.commentCollapseSignal} collapseAllComments={props.collapseAllComments} /></aside></div>;
+function ReviewPage(props: DiffProps & { aiReview: AiReview; setAiReview: (review: AiReview) => void; runAiReview: () => Promise<void>; sendAiReviewMessage: (message: string) => Promise<void>; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<void>; submitting: boolean; refreshingActivity: boolean }) {
+  return <div className="review-layout" style={{ gridTemplateColumns: `minmax(0, 1fr) 12px ${props.sideWidth}px` }}><main className="files"><div className="comment-tools"><button className="small-muted-button" onClick={props.collapseAllComments}>Collapse all comments</button></div>{props.review.files.map((file) => <FileDiff key={file.filename} file={file} {...props} />)}</main><div className="resize-handle" role="separator" aria-label="Resize side panel" onMouseDown={(event) => startResizeSidePanel(event, props.sideWidth, props.setSideWidth)} /><aside className="side"><ReviewSummary pr={props.review.pr} drafts={props.drafts} setDrafts={props.setDrafts} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} submitReview={props.submitReview} submitting={props.submitting} refreshGithubActivity={props.refreshGithubActivity} refreshingActivity={props.refreshingActivity} /><AiReviewPanel review={props.aiReview} setReview={props.setAiReview} runReview={props.runAiReview} sendMessage={props.sendAiReviewMessage} /><ExistingComments prUrl={props.review.pr.url} comments={props.review.comments} issueComments={props.review.issueComments} refreshGithubActivity={props.refreshGithubActivity} collapseSignal={props.commentCollapseSignal} collapseAllComments={props.collapseAllComments} /></aside></div>;
 }
 
 function startResizeSidePanel(event: React.MouseEvent, initialWidth: number, setSideWidth: (width: number) => void): void {
@@ -401,17 +418,27 @@ function ReviewSummary({ pr, drafts, setDrafts, editingDraftId, setEditingDraftI
   return <section className="panel"><h2>{pr.title}</h2><div className="meta"><span>{pr.key}</span><span>{pr.state}</span><span>{pr.filesChanged} files</span><span>{pr.existingCommentCount} comments</span><span>head {shortSha(pr.headSha)}</span></div><div className="link-row"><a href={pr.url} target="_blank" rel="noreferrer">Open GitHub</a><button onClick={() => void refreshGithubActivity()} disabled={refreshingActivity}>{refreshingActivity ? "Fetching…" : "Fetch GitHub activity"}</button></div><h2>Draft review</h2><select value={event} onChange={(change) => setEvent(change.target.value as typeof event)}><option value="COMMENT">Comment</option><option value="APPROVE">Approve</option><option value="REQUEST_CHANGES">Request changes</option></select><textarea value={body} onChange={(change) => setBody(change.target.value)} placeholder="Overall review body" />{drafts.length === 0 ? <p className="muted">No draft comments yet.</p> : drafts.map((draft) => <DraftView key={draft.id} draft={draft} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} />)}<button disabled={submitting || (body.trim().length === 0 && drafts.length === 0)} onClick={() => void submitReview(event, body)}>{submitting ? "Submitting…" : `Submit review (${drafts.length})`}</button></section>;
 }
 
-function AiReviewPanel({ review, setReview, runReview }: { review: AiReview; setReview: (review: AiReview) => void; runReview: () => Promise<void> }) {
-  const body = review.text.length > 0 ? <MarkdownText text={review.text} /> : <p className="muted">Run the PR review skill-style prompt and show the result here.</p>;
+function AiReviewPanel({ review, setReview, runReview, sendMessage }: { review: AiReview; setReview: (review: AiReview) => void; runReview: () => Promise<void>; sendMessage: (message: string) => Promise<void> }) {
+  const [draft, setDraft] = useState("");
+  const hasMessages = review.messages.length > 0 || review.text.length > 0;
+  const messages = review.messages.length > 0 ? review.messages : review.text.length > 0 ? [{ role: "pi" as const, text: review.text }] : [];
+  const body = messages.length > 0 ? <div className="ai-chat-messages">{messages.map((message, index) => <div className={`ai-chat-message ${message.role}`} key={index}><div className="message-role">{message.role === "user" ? "You" : "Pi"}</div><MarkdownText text={message.text} /></div>)}</div> : <p className="muted">Run review or ask Pi about this PR.</p>;
+  function submitChat() {
+    if (draft.trim().length === 0 || review.running) return;
+    const message = draft;
+    setDraft("");
+    void sendMessage(message);
+  }
+  const composer = <div className="ai-chat-composer"><textarea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submitChat(); } }} placeholder="Ask Pi about this PR…" /><Button variant="muted" onClick={submitChat} disabled={review.running || draft.trim().length === 0}>{review.running ? "Sending…" : "Send"}</Button></div>;
   return <>
     <section className="panel ai-review">
-      <div className="thread-head"><h2>Pi review</h2><div className="actions"><button onClick={() => setReview({ ...review, expanded: true, open: true })} disabled={review.text.length === 0 && !review.open}>Expand</button><button onClick={() => setReview({ ...review, open: !review.open })}>{review.open ? "Hide" : "Show"}</button></div></div>
-      <button onClick={() => void runReview()} disabled={review.running}>{review.running ? "Reviewing…" : review.text.length > 0 ? "Run again" : "Run review"}</button>
-      {review.open && body}
+      <div className="thread-head"><h2>Pi review</h2><div className="actions"><Button variant="muted" onClick={() => setReview({ ...review, expanded: true, open: true })} disabled={!hasMessages && !review.open}>Focus</Button><Button variant="muted" onClick={() => setReview({ ...review, open: !review.open })}>{review.open ? "Collapse" : "Show"}</Button></div></div>
+      <Button onClick={() => void runReview()} disabled={review.running}>{review.running ? "Reviewing…" : hasMessages ? "Run again" : "Run review"}</Button>
+      {review.open && <>{body}{composer}</>}
     </section>
     <ModalShell open={review.expanded} onOpenChange={(open) => setReview({ ...review, expanded: open })} label="Pi review">
-      <div className="thread-head"><h2>Pi review</h2><div className="actions"><button onClick={() => void runReview()} disabled={review.running}>{review.running ? "Reviewing…" : "Run again"}</button><button onClick={() => setReview({ ...review, expanded: false })}>Close</button></div></div>
-      <div className="review-modal-body">{body}</div>
+      <div className="thread-head"><h2>Pi review</h2><div className="actions"><Button variant="muted" onClick={() => void runReview()} disabled={review.running}>{review.running ? "Reviewing…" : hasMessages ? "Run again" : "Run review"}</Button><Button variant="muted" onClick={() => setReview({ ...review, expanded: false })}>Close</Button></div></div>
+      <div className="review-modal-body ai-review-dialogue">{body}{composer}</div>
     </ModalShell>
   </>;
 }

@@ -150,17 +150,21 @@ test("renders inline Ask Pi responses as markdown", async ({ page }) => {
   await expect(thread.locator("pre code")).toContainText("return batch_offset;");
 });
 
-test("runs the right-sidebar Pi review panel with markdown output", async ({ page }) => {
+test("runs the right-sidebar Pi review panel and continues the chat with Enter", async ({ page }) => {
   await page.route("**/api/ask", async (route) => {
+    const body = route.request().postDataJSON() as { prompt?: string };
     await route.fulfill({
       contentType: "application/json",
-      body: JSON.stringify({ answer: "- **Correctness:** inspect `cu_seqlens_q`." }),
+      body: JSON.stringify({ answer: body.prompt?.includes("latest question") ? "Follow-up answer about `cu_seqlens_q`." : "- **Correctness:** inspect `cu_seqlens_q`." }),
     });
   });
 
   await page.getByRole("button", { name: "Run review" }).click();
 
-  const panel = page.locator(".ai-review");
-  await expect(panel).toContainText("Correctness:");
-  await expect(panel.getByRole("button", { name: "Run again" })).toBeEnabled();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("Correctness:");
+  await expect(dialog.getByRole("button", { name: "Run again" })).toBeEnabled();
+  await dialog.getByPlaceholder("Ask Pi about this PR…").fill("what should I test?");
+  await dialog.getByPlaceholder("Ask Pi about this PR…").press("Enter");
+  await expect(dialog).toContainText("Follow-up answer");
 });

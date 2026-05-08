@@ -620,6 +620,24 @@ a { color: var(--link); text-decoration: none; }
   background: var(--border);
 }
 
+.github-comment.commenter-blue { --commenter: #58a6ff; }
+.github-comment.commenter-purple { --commenter: #bc8cff; }
+.github-comment.commenter-green { --commenter: #56d364; }
+.github-comment.commenter-orange { --commenter: #f2cc60; }
+.github-comment.commenter-pink { --commenter: #ff7bba; }
+.github-comment.commenter-teal { --commenter: #39c5cf; }
+
+.github-comment::after {
+  content: "";
+  position: absolute;
+  left: 31px;
+  top: 6px;
+  bottom: 14px;
+  width: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--commenter) 42%, transparent);
+}
+
 .avatar {
   position: relative;
   z-index: 1;
@@ -627,26 +645,26 @@ a { color: var(--link); text-decoration: none; }
   place-items: center;
   width: 32px;
   height: 32px;
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in srgb, var(--commenter) 45%, var(--border));
   border-radius: 50%;
-  background: var(--panel2);
-  color: var(--muted);
+  background: color-mix(in srgb, var(--commenter) 14%, var(--panel2));
+  color: color-mix(in srgb, var(--commenter) 65%, var(--text));
   font-size: 0.78rem;
   font-weight: 700;
 }
 
 .github-comment-body {
   min-width: 0;
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in srgb, var(--commenter) 18%, var(--border));
   border-radius: 6px;
-  background: var(--panel);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--commenter) 5%, var(--panel)) 0, var(--panel) 120px);
   overflow: hidden;
 }
 
 .github-comment-header {
   padding: 7px 10px;
-  border-bottom: 1px solid var(--border);
-  background: var(--panel2);
+  border-bottom: 1px solid color-mix(in srgb, var(--commenter) 16%, var(--border));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--commenter) 8%, var(--panel2)) 0, var(--panel2) 160px);
   color: var(--muted);
   font-size: 0.8rem;
 }
@@ -866,6 +884,44 @@ a { color: var(--link); text-decoration: none; }
 .ai-review .markdown {
   max-height: 360px;
   overflow: auto;
+}
+
+.ai-chat-messages {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.ai-chat-message {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.ai-chat-message.user {
+  background: color-mix(in srgb, var(--accent) 7%, var(--panel));
+}
+
+.ai-chat-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+  margin-top: 10px;
+}
+
+.ai-chat-composer textarea {
+  min-height: 44px;
+  resize: vertical;
+}
+
+.ai-review-dialogue {
+  display: grid;
+  gap: 10px;
 }
 
 .review-modal {

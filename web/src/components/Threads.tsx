@@ -9,6 +9,14 @@ import { commentTarget, groupReviewComments, targetLabel } from "../lib/comments
 import type { PullIssueComment, PullReviewComment } from "../types";
 import { MarkdownText } from "./Markdown";
 
+const commenterPalette = ["blue", "purple", "green", "orange", "pink", "teal"] as const;
+
+function commenterTone(login: string): string {
+  let hash = 0;
+  for (const char of login) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return commenterPalette[hash % commenterPalette.length];
+}
+
 function avatarLabel(login: string): string {
   return login.slice(0, 1).toUpperCase();
 }
@@ -28,7 +36,7 @@ export function ExistingReviewThread({ comments, prUrl, refreshGithubActivity, c
 }
 
 function ReviewCommentTimeline({ comments }: { comments: Array<PullReviewComment | PullIssueComment> }) {
-  return <div className="github-comment-timeline">{comments.map((comment) => { const login = comment.user?.login ?? "github"; return <div className="github-comment" key={comment.id}><div className="avatar" aria-hidden="true">{avatarLabel(login)}</div><div className="github-comment-body"><div className="github-comment-header"><strong>@{login}</strong></div><MarkdownText text={comment.body} /></div></div>; })}</div>;
+  return <div className="github-comment-timeline">{comments.map((comment) => { const login = comment.user?.login ?? "github"; return <div className={`github-comment commenter-${commenterTone(login)}`} key={comment.id}><div className="avatar" aria-hidden="true">{avatarLabel(login)}</div><div className="github-comment-body"><div className="github-comment-header"><strong>@{login}</strong></div><MarkdownText text={comment.body} /></div></div>; })}</div>;
 }
 
 function GitHubThreadCard({ className = "comment", title, subtitle, status, href, comments, reply, collapseSignal = 0 }: { className?: string; title: string; subtitle: string; status?: string | null; href: string; comments: Array<PullReviewComment | PullIssueComment>; reply?: React.ReactNode; collapseSignal?: number }) {
