@@ -87,22 +87,34 @@ export async function fetchFileText(ref: PullRequestRef, path: string, sha: stri
   return stdout.replace(/\r\n/g, "\n");
 }
 
-export async function submitPullRequestReview(ref: PullRequestRef, payload: unknown): Promise<unknown> {
+async function ghApiPost(ref: PullRequestRef, path: string, payload: unknown, scope: string): Promise<unknown> {
   const dir = await mkdtemp(join(tmpdir(), "pi-review-"));
-  const inputPath = join(dir, "review.json");
+  const inputPath = join(dir, "payload.json");
   await writeFile(inputPath, JSON.stringify(payload), "utf8");
   const startedAt = performance.now();
-  logger.info("github", "submit review start", { ref });
+  logger.info("github", `${scope} start`, { ref });
   try {
-    const { stdout, stderr } = await execFileAsync("gh", ["api", apiBase(ref) + "/reviews", "--method", "POST", "--input", inputPath], { maxBuffer: 50 * 1024 * 1024 });
-    logger.info("github", "submit review complete", { ref, ms: Math.round(performance.now() - startedAt), bytes: stdout.length, stderr: stderr.trim() || undefined });
+    const { stdout, stderr } = await execFileAsync("gh", ["api", path, "--method", "POST", "--input", inputPath], { maxBuffer: 50 * 1024 * 1024 });
+    logger.info("github", `${scope} complete`, { ref, ms: Math.round(performance.now() - startedAt), bytes: stdout.length, stderr: stderr.trim() || undefined });
     return JSON.parse(stdout) as unknown;
   } catch (error) {
-    logger.error("github", "submit review failed", { ref, error: error instanceof Error ? error.message : String(error) });
+    logger.error("github", `${scope} failed`, { ref, error: error instanceof Error ? error.message : String(error) });
     throw error;
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+}
+
+export async function submitPullRequestReview(ref: PullRequestRef, payload: unknown): Promise<unknown> {
+  return ghApiPost(ref, apiBase(ref) + "/reviews", payload, "submit review");
+}
+
+export async function replyToReviewComment(ref: PullRequestRef, commentId: number, body: string): Promise<unknown> {
+  return ghApiPost(ref, `${apiBase(ref)}/comments/${commentId}/replies`, { body }, "reply review comment");
+}
+
+export async function addIssueComment(ref: PullRequestRef, body: string): Promise<unknown> {
+  return ghApiPost(ref, `/repos/${ref.owner}/${ref.repo}/issues/${ref.number}/comments`, { body }, "add issue comment");
 }
 
 export async function fetchPullRequestSummary(ref: PullRequestRef): Promise<StoredPullRequest> {

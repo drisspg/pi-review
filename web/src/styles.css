@@ -476,6 +476,24 @@ a { color: var(--link); text-decoration: none; }
   padding: 10px;
 }
 
+.thread-reply {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+  padding: 0 12px 12px 54px;
+}
+
+.thread-reply textarea {
+  min-height: 38px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.thread-reply button {
+  min-height: 38px;
+}
+
 .thread-head > div {
   display: grid;
   gap: 2px;
