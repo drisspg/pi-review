@@ -4,7 +4,7 @@ import { extname, join, normalize, resolve } from "node:path";
 
 import { fetchFileText, fetchPullRequestReviewData, submitPullRequestReview } from "./github.js";
 import { logger } from "./logger.js";
-import { askPi, disposePiSessions, prewarmPiSession, registerPiSessionCwd } from "./pi-session.js";
+import { askPi, disposePiSessions, piDiagnostics, prewarmPiSession, registerPiSessionCwd, setPiModel } from "./pi-session.js";
 import { parsePullRequestRef } from "./pr.js";
 import { listRecentPullRequests, setFileViewed, upsertPullRequest } from "./state.js";
 import { preparePrWorktree } from "./worktrees.js";
@@ -131,6 +131,20 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const payload = recordFromBody(await readBody(req));
     if (typeof payload.prKey !== "string" || typeof payload.prompt !== "string") throw new Error("Expected prKey and prompt");
     sendJson(res, 200, { answer: await askPi(payload.prKey, payload.prompt) });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/pi/diagnostics") {
+    const payload = recordFromBody(await readBody(req));
+    if (typeof payload.prKey !== "string") throw new Error("Expected prKey");
+    sendJson(res, 200, { diagnostics: await piDiagnostics(payload.prKey) });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/pi/model") {
+    const payload = recordFromBody(await readBody(req));
+    if (typeof payload.prKey !== "string" || typeof payload.provider !== "string" || typeof payload.modelId !== "string") throw new Error("Expected prKey, provider, and modelId");
+    sendJson(res, 200, { diagnostics: await setPiModel(payload.prKey, payload.provider, payload.modelId, typeof payload.thinkingLevel === "string" ? payload.thinkingLevel : undefined) });
     return;
   }
 

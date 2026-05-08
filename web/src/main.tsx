@@ -14,6 +14,7 @@ import "./styles.css";
 type StoredPullRequest = { key: string; url: string; title: string; state: string; author: string | null; baseSha: string; headSha: string; filesChanged: number | null; existingCommentCount: number | null; lastOpenedAt: string };
 type PullFile = { filename: string; previous_filename?: string; status: string; additions: number; deletions: number; changes: number; patch?: string };
 type PullReviewComment = { id: number; path: string; line?: number | null; start_line?: number | null; original_line?: number | null; side?: "RIGHT" | "LEFT" | null; original_side?: "RIGHT" | "LEFT" | null; body: string; html_url: string; user?: { login?: string } | null; updated_at?: string };
+type PullIssueComment = { id: number; body: string; html_url: string; user?: { login?: string } | null; updated_at?: string };
 type FileReviewState = { prKey: string; path: string; fingerprint: string; viewed: boolean; updatedAt: string };
 type LogEntry = { id: number; level: "debug" | "info" | "warn" | "error"; scope: string; message: string; data?: unknown; timestamp: string };
 type DiffRow = { kind: string; oldLine: number | null; newLine: number | null; text: string; hunk: string };
@@ -23,7 +24,7 @@ type Thread = { key: string; target: Target; collapsed: boolean; draft: string; 
 type DraftComment = { id: string; path: string; line: number | null; startLine?: number | null; side: "RIGHT" | "LEFT"; body: string };
 type DragSelection = { start: Target; current: Target; dragging: boolean };
 type AiReview = { expanded: boolean; open: boolean; running: boolean; text: string };
-type OpenResponse = { pr: StoredPullRequest; files: PullFile[]; comments: PullReviewComment[]; fileReviews: FileReviewState[] };
+type OpenResponse = { pr: StoredPullRequest; files: PullFile[]; comments: PullReviewComment[]; issueComments: PullIssueComment[]; fileReviews: FileReviewState[] };
 
 type DiffProps = {
   review: OpenResponse;
@@ -166,6 +167,8 @@ function App() {
   const [submitting, setSubmitting] = useState(false);
   const [sideWidth, setSideWidth] = useState(380);
   const [error, setError] = useState<string | null>(null);
+  const [diagnostics, setDiagnostics] = useState<Record<string, unknown> | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   async function refreshHistory() { setPrs((await api<{ prs: StoredPullRequest[] }>("/api/prs")).prs); }
   async function refreshLogs() { setLogs((await api<{ logs: LogEntry[] }>("/api/logs")).logs.slice(-40).reverse()); }
@@ -349,15 +352,33 @@ function App() {
     }
   }
 
+  async function loadDiagnostics() {
+    if (review == null) return null;
+    const data = await api<{ diagnostics: Record<string, unknown> }>("/api/pi/diagnostics", { method: "POST", body: JSON.stringify({ prKey: review.pr.key }) });
+    setDiagnostics(data.diagnostics);
+    return data.diagnostics;
+  }
+
+  async function showDiagnostics() {
+    await loadDiagnostics();
+  }
+
+  function goHome() {
+    setReview(null);
+    setError(null);
+    setDiagnostics(null);
+    void refreshHistory();
+  }
+
   function submit(event: FormEvent) { event.preventDefault(); void openPr(input); }
 
-  return <main className="app-shell"><header className="toolbar"><div><strong>Pi PR Review</strong><span>{review == null ? "Paste a PR to start" : `${review.pr.key} · ${review.pr.title}`}</span></div><form className="open-form" onSubmit={submit}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="OWNER/REPO#123 or GitHub PR URL" /><button disabled={busy || input.trim().length === 0}>{busy ? "Fetching…" : "Open"}</button></form></header>{error != null && <div className="error">{error}</div>}{review == null ? <StartPage prs={prs} logs={logs} openPr={openPr} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} aiReview={aiReview} setAiReview={setAiReview} runAiReview={runAiReview} submitReview={submitReview} submitting={submitting} />}</main>;
+  return <main className="app-shell"><header className="toolbar"><div><strong>Pi PR Review</strong><span>{review == null ? "Paste a PR to start" : `${review.pr.key} · ${review.pr.title}`}</span></div><div className="toolbar-actions">{review != null && <><button type="button" onClick={goHome}>Home</button><button type="button" title="Pi session settings" onClick={() => { setSettingsOpen(true); void loadDiagnostics(); }}>⚙</button><button type="button" title="Pi session diagnostics" onClick={() => void showDiagnostics()}>🐞</button></>}<form className="open-form" onSubmit={submit}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="OWNER/REPO#123 or GitHub PR URL" /><button disabled={busy || input.trim().length === 0}>{busy ? "Fetching…" : "Open"}</button></form></div></header>{error != null && <div className="error">{error}</div>}{review == null ? <StartPage prs={prs} logs={logs} openPr={openPr} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} aiReview={aiReview} setAiReview={setAiReview} runAiReview={runAiReview} submitReview={submitReview} submitting={submitting} />}{diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} close={() => setDiagnostics(null)} />}{review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} close={() => setSettingsOpen(false)} />}</main>;
 }
 
 function StartPage({ prs, logs, openPr }: { prs: StoredPullRequest[]; logs: LogEntry[]; openPr: (input: string) => Promise<void> }) { return <div className="start-grid"><section className="panel"><h1>Previous reviews</h1><p className="muted">Reopen a tracked PR or paste a new one above.</p><History prs={prs} openPr={openPr} /></section><details className="panel logs"><summary>Server log</summary><LogRows logs={logs} /></details></div>; }
 
 function ReviewPage(props: DiffProps & { aiReview: AiReview; setAiReview: (review: AiReview) => void; runAiReview: () => Promise<void>; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<void>; submitting: boolean }) {
-  return <div className="review-layout" style={{ gridTemplateColumns: `minmax(0, 1fr) ${props.sideWidth}px` }}><main className="files">{props.review.files.map((file) => <FileDiff key={file.filename} file={file} {...props} />)}</main><div className="resize-handle" role="separator" aria-label="Resize side panel" onMouseDown={(event) => startResizeSidePanel(event, props.sideWidth, props.setSideWidth)} /><aside className="side"><ReviewSummary pr={props.review.pr} drafts={props.drafts} setDrafts={props.setDrafts} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} submitReview={props.submitReview} submitting={props.submitting} /><AiReviewPanel review={props.aiReview} setReview={props.setAiReview} runReview={props.runAiReview} /><ExistingComments comments={props.review.comments} /></aside></div>;
+  return <div className="review-layout" style={{ gridTemplateColumns: `minmax(0, 1fr) 12px ${props.sideWidth}px` }}><main className="files">{props.review.files.map((file) => <FileDiff key={file.filename} file={file} {...props} />)}</main><div className="resize-handle" role="separator" aria-label="Resize side panel" onMouseDown={(event) => startResizeSidePanel(event, props.sideWidth, props.setSideWidth)} /><aside className="side"><ReviewSummary pr={props.review.pr} drafts={props.drafts} setDrafts={props.setDrafts} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} submitReview={props.submitReview} submitting={props.submitting} /><AiReviewPanel review={props.aiReview} setReview={props.setAiReview} runReview={props.runAiReview} /><ExistingComments comments={props.review.comments} issueComments={props.review.issueComments} /></aside></div>;
 }
 
 function startResizeSidePanel(event: React.MouseEvent, initialWidth: number, setSideWidth: (width: number) => void): void {
@@ -485,7 +506,24 @@ function AiReviewPanel({ review, setReview, runReview }: { review: AiReview; set
   return <><section className="panel ai-review"><div className="thread-head"><h2>Pi review</h2><div className="actions"><button onClick={() => setReview({ ...review, expanded: true, open: true })} disabled={review.text.length === 0 && !review.open}>Expand</button><button onClick={() => setReview({ ...review, open: !review.open })}>{review.open ? "Hide" : "Show"}</button></div></div><button onClick={() => void runReview()} disabled={review.running}>{review.running ? "Reviewing…" : review.text.length > 0 ? "Run again" : "Run review"}</button>{review.open && body}</section>{review.expanded && <div className="review-modal" role="dialog" aria-modal="true"><div className="review-modal-card"><div className="thread-head"><h2>Pi review</h2><div className="actions"><button onClick={() => void runReview()} disabled={review.running}>{review.running ? "Reviewing…" : "Run again"}</button><button onClick={() => setReview({ ...review, expanded: false })}>Close</button></div></div><div className="review-modal-body">{body}</div></div></div>}</>;
 }
 
-function ExistingComments({ comments }: { comments: PullReviewComment[] }) { return <section className="panel"><h2>Existing comments</h2>{comments.length === 0 ? <p className="muted">No existing comments.</p> : comments.map((comment) => <a className="comment" key={comment.id} href={comment.html_url} target="_blank" rel="noreferrer"><span>{comment.path}:{comment.line ?? comment.original_line ?? "?"}</span><strong>@{comment.user?.login ?? "github"}</strong><p>{comment.body}</p></a>)}</section>; }
+function ExistingComments({ comments, issueComments }: { comments: PullReviewComment[]; issueComments: PullIssueComment[] }) { return <section className="panel"><h2>Existing comments</h2>{comments.length + issueComments.length === 0 ? <p className="muted">No existing comments.</p> : <>{issueComments.map((comment) => <a className="comment" key={`issue-${comment.id}`} href={comment.html_url} target="_blank" rel="noreferrer"><span>Conversation</span><strong>@{comment.user?.login ?? "github"}</strong><p>{comment.body}</p></a>)}{comments.map((comment) => <a className="comment" key={comment.id} href={comment.html_url} target="_blank" rel="noreferrer"><span>{comment.path}:{comment.line ?? comment.original_line ?? "?"}</span><strong>@{comment.user?.login ?? "github"}</strong><p>{comment.body}</p></a>)}</>}</section>; }
+
+function DiagnosticsModal({ diagnostics, close }: { diagnostics: Record<string, unknown>; close: () => void }) { return <div className="review-modal" role="dialog" aria-modal="true"><div className="review-modal-card"><div className="thread-head"><h2>Pi diagnostics</h2><button onClick={close}>Close</button></div><pre className="diagnostics-json">{JSON.stringify(diagnostics, null, 2)}</pre></div></div>; }
+
+function PiSettingsModal({ prKey, diagnostics, setDiagnostics, close }: { prKey: string; diagnostics: Record<string, unknown> | null; setDiagnostics: (diagnostics: Record<string, unknown>) => void; close: () => void }) {
+  const models = Array.isArray(diagnostics?.availableModels) ? diagnostics.availableModels as Array<{ provider?: string; id?: string; name?: string }> : [];
+  const currentModel = typeof diagnostics?.model === "string" ? diagnostics.model : "";
+  const [selected, setSelected] = useState(currentModel.includes("/") ? currentModel : "");
+  const [thinkingLevel, setThinkingLevel] = useState(typeof diagnostics?.thinkingLevel === "string" ? diagnostics.thinkingLevel : "");
+  async function apply() {
+    const [provider, ...rest] = selected.split("/");
+    const modelId = rest.join("/");
+    if (provider.length === 0 || modelId.length === 0) return;
+    const data = await api<{ diagnostics: Record<string, unknown> }>("/api/pi/model", { method: "POST", body: JSON.stringify({ prKey, provider, modelId, thinkingLevel }) });
+    setDiagnostics(data.diagnostics);
+  }
+  return <div className="review-modal" role="dialog" aria-modal="true"><div className="review-modal-card"><div className="thread-head"><h2>Pi settings</h2><button onClick={close}>Close</button></div><label>Model<select value={selected} onChange={(event) => setSelected(event.target.value)}><option value="">Select model…</option>{models.map((model) => <option key={`${model.provider}/${model.id}`} value={`${model.provider}/${model.id}`}>{model.provider}/{model.id}{model.name != null ? ` · ${model.name}` : ""}</option>)}</select></label><label>Thinking<select value={thinkingLevel} onChange={(event) => setThinkingLevel(event.target.value)}><option value="">Keep current</option>{["off", "minimal", "low", "medium", "high", "xhigh"].map((level) => <option key={level} value={level}>{level}</option>)}</select></label><button onClick={() => void apply()} disabled={selected.length === 0}>Apply to this PR session</button><pre className="diagnostics-json">{JSON.stringify(diagnostics, null, 2)}</pre></div></div>;
+}
 function History({ prs, openPr }: { prs: StoredPullRequest[]; openPr: (input: string) => Promise<void> }) { return <div className="history">{prs.length === 0 ? <p className="muted">No previous PRs.</p> : prs.map((pr) => <button key={pr.key} onClick={() => void openPr(pr.url)}><strong>{pr.title}</strong><span>{pr.key} · {pr.filesChanged ?? "—"} files · {pr.existingCommentCount ?? "—"} comments</span></button>)}</div>; }
 function LogRows({ logs }: { logs: LogEntry[] }) { return <>{logs.map((log) => <div className={`log ${log.level}`} key={log.id}><span>{new Date(log.timestamp).toLocaleTimeString()} {log.scope}</span><p>{log.message}</p>{log.data !== undefined && <code>{JSON.stringify(log.data)}</code>}</div>)}</>; }
 

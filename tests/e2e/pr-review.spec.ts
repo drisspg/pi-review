@@ -1,6 +1,12 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 const prUrl = process.env.PI_REVIEW_TEST_PR ?? "https://github.com/Dao-AILab/flash-attention/pull/2542";
+
+async function openFirstFile(page: Page) {
+  const firstFile = page.locator(".file").first();
+  if (await firstFile.locator(".diff-row").count() === 0) await firstFile.getByRole("button", { name: /Expand/ }).click();
+  await expect(firstFile.locator(".diff-row").first()).toBeVisible();
+}
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
@@ -12,10 +18,12 @@ test.beforeEach(async ({ page }) => {
 test("opens a PR and renders GitHub-style file diffs", async ({ page }) => {
   await expect(page.getByText("fix address access for varlen attn split kv").first()).toBeVisible();
   await expect(page.locator(".file")).toHaveCount(2);
+  await openFirstFile(page);
   await expect(page.locator(".diff-row.added").first()).toBeVisible();
 });
 
 test("expands neighboring context lines", async ({ page }) => {
+  await openFirstFile(page);
   const firstFile = page.locator(".file").first();
   const before = await firstFile.locator(".diff-row").count();
   await firstFile.getByRole("button", { name: "Expand above" }).first().click();
@@ -23,6 +31,7 @@ test("expands neighboring context lines", async ({ page }) => {
 });
 
 test("creates, edits, and removes draft comments", async ({ page }) => {
+  await openFirstFile(page);
   await page.locator(".file").first().locator(".diff-row.added").first().click();
   await page.locator(".inline-thread textarea").first().fill("first draft");
   await page.getByRole("button", { name: "Add draft comment" }).first().click();
@@ -37,6 +46,7 @@ test("creates, edits, and removes draft comments", async ({ page }) => {
 });
 
 test("clears empty line threads when clicking elsewhere", async ({ page }) => {
+  await openFirstFile(page);
   await page.locator(".file").first().locator(".diff-row.added").first().click();
   await expect(page.locator(".inline-thread")).toHaveCount(1);
 
@@ -45,6 +55,7 @@ test("clears empty line threads when clicking elsewhere", async ({ page }) => {
 });
 
 test("supports multiline draft ranges", async ({ page }) => {
+  await openFirstFile(page);
   await page.locator(".file").first().locator(".diff-row.added").first().click();
   const rangeEnd = page.locator(".range-control input").first();
   await rangeEnd.fill("1279");
@@ -63,6 +74,7 @@ test("renders inline Ask Pi responses as markdown", async ({ page }) => {
     });
   });
 
+  await openFirstFile(page);
   await page.locator(".file").first().locator(".diff-row.added").first().click();
   await page.locator(".inline-thread textarea").first().fill("review this line");
   await page.getByRole("button", { name: "Ask Pi" }).first().click();

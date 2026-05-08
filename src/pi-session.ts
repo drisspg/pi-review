@@ -8,12 +8,25 @@ import { logger } from "./logger.js";
 type SessionRecord = {
   abort?: () => Promise<void>;
   dispose?: () => void;
-  prompt: (text: string) => Promise<void>;
+  getActiveToolNames?: () => string[];
+  getAllTools?: () => Array<{ name?: string; description?: string; source?: unknown }>;
+  getAvailableThinkingLevels?: () => string[];
+  isStreaming?: boolean;
+  model?: { id?: string; name?: string; provider?: string };
+  modelRegistry?: { find?: (provider: string, modelId: string) => unknown; getAvailable?: () => Array<{ id?: string; name?: string; provider?: string }> };
+  prompt: (text: string, options?: { streamingBehavior?: "steer" | "followUp" }) => Promise<void>;
+  sessionFile?: string;
+  sessionId?: string;
+  sessionName?: string;
+  setModel?: (model: unknown) => Promise<void>;
+  setThinkingLevel?: (level: string) => void;
   subscribe: (listener: (event: unknown) => void) => () => void;
+  thinkingLevel?: string;
 };
 
 const sessions = new Map<string, Promise<SessionRecord>>();
 const cwdByPr = new Map<string, string>();
+const lastPromptByPr = new Map<string, { chars: number; preview: string; startedAt: string }>();
 
 function safe(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "unknown";
@@ -55,6 +68,40 @@ export function prewarmPiSession(prKey: string): void {
   void getSession(prKey).catch((error: unknown) => logger.error("pi", "prewarm failed", { prKey, error: error instanceof Error ? error.message : String(error) }));
 }
 
+function modelLabel(model: SessionRecord["model"]): string | null {
+  if (model == null) return null;
+  return model.id ?? ([model.provider, model.name].filter(Boolean).join("/") || null);
+}
+
+export async function piDiagnostics(prKey: string): Promise<Record<string, unknown>> {
+  const session = await getSession(prKey);
+  return {
+    prKey,
+    cwd: cwdByPr.get(prKey) ?? process.cwd(),
+    sessionDir: sessionDirForPr(prKey),
+    sessionFile: session.sessionFile ?? null,
+    sessionId: session.sessionId ?? null,
+    sessionName: session.sessionName ?? null,
+    model: modelLabel(session.model),
+    thinkingLevel: session.thinkingLevel ?? null,
+    availableModels: session.modelRegistry?.getAvailable?.().map((model) => ({ provider: model.provider, id: model.id, name: model.name })) ?? [],
+    availableThinkingLevels: session.getAvailableThinkingLevels?.() ?? [],
+    activeTools: session.getActiveToolNames?.() ?? [],
+    tools: session.getAllTools?.().map((tool) => ({ name: tool.name, source: tool.source })).filter((tool) => tool.name != null) ?? [],
+    lastPrompt: lastPromptByPr.get(prKey) ?? null,
+  };
+}
+
+export async function setPiModel(prKey: string, provider: string, modelId: string, thinkingLevel?: string): Promise<Record<string, unknown>> {
+  const session = await getSession(prKey);
+  const model = session.modelRegistry?.find?.(provider, modelId);
+  if (model == null) throw new Error(`Unknown model ${provider}/${modelId}`);
+  if (session.setModel == null) throw new Error("Pi session does not expose model switching");
+  await session.setModel(model);
+  if (thinkingLevel != null && thinkingLevel.length > 0) session.setThinkingLevel?.(thinkingLevel);
+  return piDiagnostics(prKey);
+}
+
 export async function disposePiSession(prKey: string): Promise<void> {
   const sessionPromise = sessions.get(prKey);
   sessions.delete(prKey);
@@ -92,9 +139,10 @@ export async function askPi(prKey: string, prompt: string): Promise<string> {
   const unsubscribe = session.subscribe((event) => {
     answer += textDeltaFromEvent(event);
   });
+  lastPromptByPr.set(prKey, { chars: prompt.length, preview: prompt.slice(0, 1600), startedAt: new Date().toISOString() });
   logger.info("pi", "prompt start", { prKey, chars: prompt.length });
   try {
-    await session.prompt(prompt);
+    await session.prompt(prompt, session.isStreaming ? { streamingBehavior: "followUp" } : undefined);
     logger.info("pi", "prompt complete", { prKey, ms: Math.round(performance.now() - startedAt), answerChars: answer.length });
     return answer.trim() || "Pi completed without streamed text.";
   } finally {

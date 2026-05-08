@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import { logger } from "./logger.js";
 import { prKey } from "./pr.js";
 import { listFileReviews } from "./state.js";
-import type { PullFile, PullRequest, PullRequestRef, PullRequestReviewData, PullReviewComment, StoredPullRequest } from "./types.js";
+import type { PullFile, PullIssueComment, PullRequest, PullRequestRef, PullRequestReviewData, PullReviewComment, StoredPullRequest } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -29,7 +29,7 @@ function apiBase(ref: PullRequestRef): string {
   return `/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}`;
 }
 
-function toStoredPullRequest(ref: PullRequestRef, pr: PullRequest, files: PullFile[], comments: PullReviewComment[]): StoredPullRequest {
+function toStoredPullRequest(ref: PullRequestRef, pr: PullRequest, files: PullFile[], comments: PullReviewComment[], issueComments: PullIssueComment[]): StoredPullRequest {
   return {
     key: prKey(ref),
     ref,
@@ -40,7 +40,7 @@ function toStoredPullRequest(ref: PullRequestRef, pr: PullRequest, files: PullFi
     baseSha: pr.base.sha,
     headSha: pr.head.sha,
     filesChanged: files.length,
-    existingCommentCount: comments.length,
+    existingCommentCount: comments.length + issueComments.length,
     lastOpenedAt: new Date().toISOString(),
     lastReviewedHeadSha: null,
   };
@@ -52,13 +52,14 @@ function fileFingerprint(file: PullFile): string {
 
 export async function fetchPullRequestReviewData(ref: PullRequestRef): Promise<PullRequestReviewData> {
   logger.info("github", "fetch PR review data", { ref });
-  const [rawPr, files, comments] = await Promise.all([
+  const [rawPr, files, comments, issueComments] = await Promise.all([
     ghApi<PullRequest>(apiBase(ref)),
     ghApi<PullFile[]>(`${apiBase(ref)}/files`),
     ghApi<PullReviewComment[]>(`${apiBase(ref)}/comments`),
+    ghApi<PullIssueComment[]>(`/repos/${ref.owner}/${ref.repo}/issues/${ref.number}/comments`),
   ]);
-  const pr = toStoredPullRequest(ref, rawPr, files, comments);
-  logger.info("github", "fetched PR review data", { key: pr.key, title: pr.title, files: files.length, comments: comments.length });
+  const pr = toStoredPullRequest(ref, rawPr, files, comments, issueComments);
+  logger.info("github", "fetched PR review data", { key: pr.key, title: pr.title, files: files.length, reviewComments: comments.length, issueComments: issueComments.length });
   const storedFileReviews = await listFileReviews(pr.key);
   const fileReviews = files.map((file) => {
     const fingerprint = fileFingerprint(file);
@@ -70,7 +71,7 @@ export async function fetchPullRequestReviewData(ref: PullRequestRef): Promise<P
       updatedAt: new Date().toISOString(),
     };
   });
-  return { pr, raw: rawPr, files, comments, fileReviews };
+  return { pr, raw: rawPr, files, comments, issueComments, fileReviews };
 }
 
 export function fingerprintPullFile(file: PullFile): string {
