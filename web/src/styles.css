@@ -209,13 +209,22 @@ a { color: #79c0ff; text-decoration: none; }
   font-size: 0.82rem;
 }
 
-.file-actions {
+.file-actions,
+.link-row {
   display: flex;
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.file-actions {
   border-top: 1px solid var(--border);
   padding: 8px 12px;
+}
+
+.link-row button {
+  min-height: 28px;
+  padding: 0.22rem 0.5rem;
 }
 
 .ok { color: var(--ok); }
@@ -509,13 +518,106 @@ a { color: #79c0ff; text-decoration: none; }
   padding-top: 12px;
 }
 
-.diagnostics-json {
+.diagnostics-view {
+  display: grid;
+  gap: 14px;
   overflow: auto;
   max-height: calc(90vh - 90px);
+}
+
+.diagnostics-view section,
+.diagnostics-view details {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--panel2);
+}
+
+.diagnostics-view h3 {
+  margin: 0 0 8px;
+}
+
+.diagnostics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.diagnostics-grid > div {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--panel2);
+}
+
+.diagnostics-grid span,
+.diagnostics-view dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.diagnostics-view dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 12px;
+  margin: 0;
+}
+
+.diagnostics-view dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.chip-list {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: var(--panel);
+  font-size: 12px;
+}
+
+.model-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.model-list code,
+.prompt-preview,
+.diagnostics-json {
+  overflow: auto;
   margin: 0;
   white-space: pre-wrap;
   font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  background: #090c10;
 }
+
+.prompt-preview {
+  max-height: 220px;
+}
+
+.diagnostics-json {
+  max-height: 420px;
+}
+
+@media (max-width: 760px) {
+  .diagnostics-grid { grid-template-columns: 1fr 1fr; }
+}
+
 
 .logs { max-height: 320px; overflow: auto; }
 .logs summary { cursor: pointer; color: var(--muted); }

@@ -112,6 +112,17 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     return;
   }
 
+  if (req.method === "POST" && url.pathname === "/api/pr/activity") {
+    const input = inputFromBody(await readBody(req));
+    logger.info("api", "refresh PR activity requested", { input });
+    const ref = parsePullRequestRef(input);
+    const data = await fetchPullRequestReviewData(ref);
+    const pr = await upsertPullRequest(data.pr);
+    logger.info("api", "refresh PR activity complete", { key: pr.key, existingCommentCount: pr.existingCommentCount });
+    sendJson(res, 200, { ...data, pr });
+    return;
+  }
+
   if (req.method === "POST" && url.pathname === "/api/file/viewed") {
     const payload = viewedPayloadFromBody(await readBody(req));
     logger.info("api", "set file viewed", payload);
