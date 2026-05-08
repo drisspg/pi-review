@@ -110,7 +110,32 @@ a { color: var(--link); text-decoration: none; }
   align-content: start;
 }
 
-.toolbar, .panel, .file {
+.toolbar, .panel, .comment-tools {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.section-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+
+.section-head h2 {
+  margin: 0;
+}
+
+.small-muted-button {
+  min-height: 28px;
+  padding: 0.22rem 0.5rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  background: transparent;
+}
+
+.file {
   border: 1px solid var(--border);
   background: var(--panel);
   border-radius: 8px;
@@ -424,6 +449,29 @@ a { color: var(--link); text-decoration: none; }
   border-bottom: 0;
 }
 
+.inline-thread.existing.github-thread.minimized {
+  margin-top: 2px;
+  margin-bottom: 2px;
+  border-color: color-mix(in srgb, var(--border) 72%, transparent);
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
+}
+
+.inline-thread.existing.github-thread.minimized .thread-head {
+  min-height: 28px;
+  padding: 2px 8px;
+  background: transparent;
+}
+
+.inline-thread.existing.github-thread.minimized .thread-title {
+  gap: 6px;
+}
+
+.inline-thread.existing.github-thread.minimized .thread-title strong,
+.inline-thread.existing.github-thread.minimized .thread-title span {
+  font-size: 0.78rem;
+}
+
+.github-thread.minimized .ui-button-icon,
 .github-thread.minimized .icon-button,
 .github-thread.minimized .action-menu summary {
   width: 24px;
@@ -474,18 +522,40 @@ a { color: var(--link); text-decoration: none; }
   padding: 0.22rem 0.5rem;
 }
 
+.ui-button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+}
+
+.ui-button-muted {
+  color: var(--muted);
+  background: transparent;
+}
+
+.ui-button-icon,
 .icon-button {
   display: inline-grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
-  min-height: 30px;
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
   padding: 0;
   color: var(--muted);
   background: transparent;
   border-color: transparent;
 }
 
+.subtle-icon-button {
+  opacity: 0.7;
+}
+
+.inline-thread.existing.github-thread.minimized .subtle-icon-button {
+  display: none;
+}
+
+.ui-button-icon:hover,
 .icon-button:hover,
 .action-menu summary:hover {
   color: var(--text);
