@@ -328,16 +328,16 @@ function App() {
 
   async function runFocusReview() {
     if (review == null || focusReview.running) return;
-    setFocusReview((current) => ({ ...current, open: true, expanded: true, running: true }));
+    setFocusReview((current) => ({ ...current, open: true, running: true }));
     const diffSummary = review.files.map((file) => `## ${file.filename}\nStatus: ${file.status}, +${file.additions}/-${file.deletions}\n${file.patch ?? "Patch unavailable"}`).join("\n\n");
     const prompt = `You are a second, independent PR-review pass for ${review.pr.key}. Look specifically for areas worth deeper human review, not a normal exhaustive review. Prioritize:\n- code that feels inconsistent with nearby codebase patterns or API conventions\n- surprising behavior, hidden assumptions, edge cases, or subtle tradeoffs\n- tests, migrations, performance, concurrency, or compatibility risks that deserve investigation\n- places where the implementation may be valid but reviewers should explicitly decide if the tradeoff is acceptable\n\nReturn markdown with a short "Focus areas" list. Start each item with a clickable-style location in this exact format: \`path:startLine-endLine — short title\` or \`path:line — short title\`. Then include why it is weird or worth investigation and a concrete reviewer question. Avoid generic praise and avoid blocking language unless there is strong evidence.\n\nPR title: ${review.pr.title}\n\n${diffSummary}`;
     try {
       const { answer } = await api<{ answer: string }>("/api/pi/focus-review", { method: "POST", body: JSON.stringify({ prKey: review.pr.key, prompt }) });
-      setFocusReview((current) => ({ ...current, open: true, expanded: true, running: false, text: answer }));
+      setFocusReview((current) => ({ ...current, open: true, running: false, text: answer }));
       setActiveFocusAreaId(parseFocusAreas(answer)[0]?.id ?? null);
     } catch (err) {
       const text = `Focus review failed: ${err instanceof Error ? err.message : String(err)}`;
-      setFocusReview((current) => ({ ...current, open: true, expanded: true, running: false, text }));
+      setFocusReview((current) => ({ ...current, open: true, running: false, text }));
     }
   }
 
@@ -503,11 +503,11 @@ function FocusReviewPanel({ review, setReview, runReview, focusAreas, activeFocu
   return <>
     <section className="panel focus-review">
       <div className="thread-head"><h2>Focus areas</h2><div className="actions"><Button variant="muted" onClick={() => setReview({ ...review, expanded: true, open: true })} disabled={review.text.length === 0 && !review.open}>Focus</Button><Button variant="muted" onClick={() => setReview({ ...review, open: !review.open })}>{review.open ? "Collapse" : "Show"}</Button></div></div>
-      <Button onClick={() => void runReview()} disabled={review.running}>{review.running ? "Scanning…" : review.text.length > 0 ? "Run again" : "Find focus areas"}</Button>
+      <Button className="focus-review-run" variant="muted" onClick={() => void runReview()} disabled={review.running}>{review.running ? "Running…" : review.text.length > 0 ? "Run async again" : "Run async"}</Button>
       {review.open && body}
     </section>
     <ModalShell open={review.expanded} onOpenChange={(open) => setReview({ ...review, expanded: open })} label="Focus areas">
-      <div className="thread-head"><h2>Focus areas</h2><div className="actions"><Button variant="muted" onClick={() => void runReview()} disabled={review.running}>{review.running ? "Scanning…" : review.text.length > 0 ? "Run again" : "Find focus areas"}</Button><Button variant="muted" onClick={() => setReview({ ...review, expanded: false })}>Close</Button></div></div>
+      <div className="thread-head"><h2>Focus areas</h2><div className="actions"><Button variant="muted" onClick={() => void runReview()} disabled={review.running}>{review.running ? "Running…" : "Run async again"}</Button><Button variant="muted" onClick={() => setReview({ ...review, expanded: false })}>Close</Button></div></div>
       <div className="review-modal-body focus-review-body">{body}{focusAreas.length > 0 && <Button variant="muted" onClick={() => setActiveFocusAreaId(null)}>Clear file highlight</Button>}</div>
     </ModalShell>
   </>;

@@ -164,12 +164,11 @@ test("runs a separate focus areas review and highlights referenced lines", async
     });
   });
 
-  await page.getByRole("button", { name: "Find focus areas" }).click();
+  await page.getByRole("button", { name: "Run async" }).click();
 
-  const dialog = page.getByRole("dialog");
-  await expect(dialog).toContainText("Focus areas");
-  await expect(dialog).toContainText("tiling conventions");
-  await expect(dialog.getByRole("button", { name: "Run again" })).toBeEnabled();
+  const panel = page.locator(".focus-review");
+  await expect(panel).toContainText("tiling conventions");
+  await expect(panel.getByRole("button", { name: "Run async again" })).toBeEnabled();
   await expect(row).toHaveClass(/focus-highlight-active/);
 });
 

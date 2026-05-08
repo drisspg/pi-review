@@ -889,6 +889,13 @@ a { color: var(--link); text-decoration: none; }
   overflow: auto;
 }
 
+.focus-review-run {
+  width: fit-content;
+  min-height: 28px;
+  padding: 4px 8px;
+  font-size: 0.78rem;
+}
+
 .focus-area-list {
   display: grid;
   gap: 8px;
