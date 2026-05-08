@@ -47,6 +47,8 @@ export type PullReviewComment = {
   html_url: string;
   user?: GitHubUser;
   updated_at?: string;
+  thread_id?: string;
+  thread_resolved?: boolean;
 };
 
 export type PullIssueComment = {

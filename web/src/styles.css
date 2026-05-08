@@ -419,7 +419,16 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .github-thread.minimized .thread-head {
+  min-height: 32px;
+  padding-block: 3px;
   border-bottom: 0;
+}
+
+.github-thread.minimized .icon-button,
+.github-thread.minimized .action-menu summary {
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
 }
 
 .github-thread .thread-head h2 {
@@ -439,6 +448,24 @@ a { color: var(--link); text-decoration: none; }
   align-items: baseline;
   flex-wrap: wrap;
   min-width: 0;
+}
+
+.thread-status {
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.thread-status.resolved {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 45%, var(--border));
+}
+
+.thread-status.unresolved {
+  color: var(--muted);
 }
 
 .github-thread .thread-head .actions a,
