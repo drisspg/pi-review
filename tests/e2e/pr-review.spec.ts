@@ -80,6 +80,11 @@ test("dragging diff rows opens a multiline thread", async ({ page }) => {
   await expect(page.locator(".inline-thread.review-thread").first()).toContainText("1276-1279");
 });
 
+test("switches GitHub-style themes", async ({ page }) => {
+  await page.getByLabel("Theme").selectOption("github-light");
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe("github-light");
+});
+
 test("shows readable Pi diagnostics", async ({ page }) => {
   await page.route("**/api/pi/diagnostics", async (route) => {
     await route.fulfill({

@@ -8,10 +8,70 @@
   --text: #c9d1d9;
   --accent: #2f81f7;
   --danger: #f85149;
+  --danger-text: #ffd1d1;
   --ok: #3fb950;
+  --link: #79c0ff;
   --add: rgba(46, 160, 67, 0.18);
   --del: rgba(248, 81, 73, 0.16);
+  --code-bg: #090c10;
+  --syntax-keyword: #ff7b72;
+  --syntax-title: #d2a8ff;
+  --syntax-string: #a5d6ff;
+  --syntax-number: #79c0ff;
+  --syntax-comment: #8b949e;
+  --syntax-variable: #ffa657;
+  --syntax-meta: #7ee787;
   font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+:root[data-theme="github-light"] {
+  color-scheme: light;
+  --bg: #ffffff;
+  --panel: #ffffff;
+  --panel2: #f6f8fa;
+  --border: #d0d7de;
+  --muted: #57606a;
+  --text: #24292f;
+  --accent: #0969da;
+  --danger: #cf222e;
+  --danger-text: #82071e;
+  --ok: #1a7f37;
+  --link: #0969da;
+  --add: #dafbe1;
+  --del: #ffebe9;
+  --code-bg: #f6f8fa;
+  --syntax-keyword: #cf222e;
+  --syntax-title: #8250df;
+  --syntax-string: #0a3069;
+  --syntax-number: #0550ae;
+  --syntax-comment: #6e7781;
+  --syntax-variable: #953800;
+  --syntax-meta: #116329;
+}
+
+:root[data-theme="github-dimmed"] {
+  color-scheme: dark;
+  --bg: #22272e;
+  --panel: #2d333b;
+  --panel2: #22272e;
+  --border: #444c56;
+  --muted: #adbac7;
+  --text: #cdd9e5;
+  --accent: #539bf5;
+  --danger: #f47067;
+  --danger-text: #ffd8d3;
+  --ok: #57ab5a;
+  --link: #539bf5;
+  --add: rgba(70, 149, 74, 0.22);
+  --del: rgba(229, 83, 75, 0.2);
+  --code-bg: #1c2128;
+  --syntax-keyword: #f47067;
+  --syntax-title: #dcbdfb;
+  --syntax-string: #96d0ff;
+  --syntax-number: #6cb6ff;
+  --syntax-comment: #768390;
+  --syntax-variable: #f69d50;
+  --syntax-meta: #8ddb8c;
 }
 
 * { box-sizing: border-box; }
@@ -40,7 +100,7 @@ button {
 
 button:hover { border-color: var(--muted); }
 button:disabled { cursor: not-allowed; opacity: 0.55; }
-a { color: #79c0ff; text-decoration: none; }
+a { color: var(--link); text-decoration: none; }
 
 .app-shell {
   min-height: 100vh;
@@ -76,7 +136,7 @@ a { color: #79c0ff; text-decoration: none; }
 
 .toolbar-actions {
   display: grid;
-  grid-template-columns: auto auto auto minmax(0, 1fr);
+  grid-template-columns: auto auto auto auto minmax(0, 1fr);
   gap: 8px;
   align-items: center;
 }
@@ -102,7 +162,7 @@ a { color: #79c0ff; text-decoration: none; }
 
 .error {
   border: 1px solid var(--danger);
-  color: #ffd1d1;
+  color: var(--danger-text);
   background: rgba(248, 81, 73, 0.1);
   border-radius: 8px;
   padding: 10px;
@@ -251,14 +311,14 @@ a { color: #79c0ff; text-decoration: none; }
   overflow: visible;
 }
 
-.hljs-keyword, .hljs-built_in, .hljs-type { color: #ff7b72; }
-.hljs-title, .hljs-title.function_, .hljs-name { color: #d2a8ff; }
-.hljs-string, .hljs-attr { color: #a5d6ff; }
-.hljs-number, .hljs-literal { color: #79c0ff; }
-.hljs-comment { color: #8b949e; font-style: italic; }
-.hljs-variable, .hljs-params { color: #ffa657; }
-.hljs-meta, .hljs-preprocessor { color: #7ee787; }
-.hljs-operator, .hljs-punctuation { color: #c9d1d9; }
+.hljs-keyword, .hljs-built_in, .hljs-type { color: var(--syntax-keyword); }
+.hljs-title, .hljs-title.function_, .hljs-name { color: var(--syntax-title); }
+.hljs-string, .hljs-attr { color: var(--syntax-string); }
+.hljs-number, .hljs-literal { color: var(--syntax-number); }
+.hljs-comment { color: var(--syntax-comment); font-style: italic; }
+.hljs-variable, .hljs-params { color: var(--syntax-variable); }
+.hljs-meta, .hljs-preprocessor { color: var(--syntax-meta); }
+.hljs-operator, .hljs-punctuation { color: var(--text); }
 
 .diff-row:not(.hunk):not(.meta) { cursor: pointer; }
 .diff-row:hover, .diff-row.selected { background: rgba(177, 186, 196, 0.09); }
@@ -603,7 +663,7 @@ a { color: #79c0ff; text-decoration: none; }
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 8px;
-  background: #090c10;
+  background: var(--code-bg);
 }
 
 .prompt-preview {
@@ -628,7 +688,7 @@ a { color: #79c0ff; text-decoration: none; }
 .log.warn { color: #ffe2a8; }
 
 @media (max-width: 1100px) {
-  .toolbar-actions { grid-template-columns: auto auto auto minmax(0, 1fr); }
+  .toolbar-actions { grid-template-columns: auto auto auto auto minmax(0, 1fr); }
   .review-layout, .start-grid { grid-template-columns: 1fr !important; }
   .resize-handle { display: none; }
   .side { position: static; max-height: none; }
