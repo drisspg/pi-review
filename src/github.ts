@@ -29,15 +29,15 @@ function apiBase(ref: PullRequestRef): string {
   return `/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}`;
 }
 
-type ReviewThreadGraphql = { repository?: { pullRequest?: { reviewThreads?: { nodes?: Array<{ id: string; isResolved: boolean; comments?: { nodes?: Array<{ databaseId: number | null }> } }> } } } };
-type ReviewDecisionGraphql = { repository?: { pullRequest?: { reviewDecision?: PullRequestReviewDecision } } };
+type ReviewThreadGraphql = { data?: { repository?: { pullRequest?: { reviewThreads?: { nodes?: Array<{ id: string; isResolved: boolean; comments?: { nodes?: Array<{ databaseId: number | null }> } }> } } } } };
+type ReviewDecisionGraphql = { data?: { repository?: { pullRequest?: { reviewDecision?: PullRequestReviewDecision } } } };
 
 async function fetchReviewDecision(ref: PullRequestRef): Promise<PullRequestReviewDecision> {
   if (ref.host !== "github.com") return null;
   const query = `query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { reviewDecision } } }`;
   try {
     const { stdout } = await execFileAsync("gh", ["api", "graphql", "-f", `query=${query}`, "-F", `owner=${ref.owner}`, "-F", `repo=${ref.repo}`, "-F", `number=${ref.number}`], { maxBuffer: 50 * 1024 * 1024 });
-    return (JSON.parse(stdout) as ReviewDecisionGraphql).repository?.pullRequest?.reviewDecision ?? null;
+    return (JSON.parse(stdout) as ReviewDecisionGraphql).data?.repository?.pullRequest?.reviewDecision ?? null;
   } catch (error) {
     logger.warn("github", "fetch review decision failed", { ref, error: error instanceof Error ? error.message : String(error) });
     return null;
@@ -58,12 +58,12 @@ async function fetchReviewThreadStates(ref: PullRequestRef): Promise<Map<number,
   }
   const data = JSON.parse(stdout) as ReviewThreadGraphql;
   const states = new Map<number, { thread_id: string; thread_resolved: boolean }>();
-  for (const thread of data.repository?.pullRequest?.reviewThreads?.nodes ?? []) {
+  for (const thread of data.data?.repository?.pullRequest?.reviewThreads?.nodes ?? []) {
     for (const comment of thread.comments?.nodes ?? []) {
       if (comment.databaseId != null) states.set(comment.databaseId, { thread_id: thread.id, thread_resolved: thread.isResolved });
     }
   }
-  logger.info("github", "fetch review thread states complete", { ref, ms: Math.round(performance.now() - startedAt), threads: data.repository?.pullRequest?.reviewThreads?.nodes?.length ?? 0, comments: states.size });
+  logger.info("github", "fetch review thread states complete", { ref, ms: Math.round(performance.now() - startedAt), threads: data.data?.repository?.pullRequest?.reviewThreads?.nodes?.length ?? 0, comments: states.size });
   return states;
 }
 

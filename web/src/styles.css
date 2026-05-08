@@ -18,7 +18,7 @@
   --syntax-title: #d2a8ff;
   --syntax-string: #a5d6ff;
   --syntax-number: #79c0ff;
-  --syntax-comment: #8b949e;
+  --syntax-comment: #8fb6c9;
   --syntax-variable: #ffa657;
   --syntax-meta: #7ee787;
   font-family: ui-sans-serif, system-ui, sans-serif;
@@ -44,7 +44,7 @@
   --syntax-title: #8250df;
   --syntax-string: #0a3069;
   --syntax-number: #0550ae;
-  --syntax-comment: #6e7781;
+  --syntax-comment: #687888;
   --syntax-variable: #953800;
   --syntax-meta: #116329;
 }
@@ -69,7 +69,7 @@
   --syntax-title: #dcbdfb;
   --syntax-string: #96d0ff;
   --syntax-number: #6cb6ff;
-  --syntax-comment: #768390;
+  --syntax-comment: #9db6c9;
   --syntax-variable: #f69d50;
   --syntax-meta: #8ddb8c;
 }
@@ -167,6 +167,7 @@ a { color: var(--link); text-decoration: none; }
 
 .toolbar-actions {
   display: flex;
+  flex-flow: row nowrap;
   gap: 6px;
   align-items: center;
   justify-content: flex-end;
@@ -174,19 +175,22 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .toolbar-actions > button,
-.toolbar-actions > select {
+.toolbar-actions > select,
+.toolbar-actions > .open-form {
+  width: auto;
   flex: 0 0 auto;
 }
 
 .open-form {
-  display: grid;
-  grid-template-columns: minmax(260px, 430px) auto;
+  display: flex;
+  flex-flow: row nowrap;
   min-width: 0;
   gap: 6px;
 }
 
 .open-form input {
-  min-width: 0;
+  width: min(32vw, 430px);
+  min-width: 220px;
   padding: 0.52rem 0.6rem;
 }
 
@@ -1199,7 +1203,7 @@ a { color: var(--link); text-decoration: none; }
 
 @media (max-width: 760px) {
   .app-shell { padding: 8px; }
-  .open-form { grid-template-columns: minmax(180px, 1fr) auto; }
+  .open-form input { width: min(52vw, 430px); min-width: 180px; }
   .diff-row { grid-template-columns: 42px 42px minmax(0, 1fr) auto; }
   .inline-thread { margin-left: 8px; }
   .inline-thread.collapsed { width: calc(100% - 16px); }
