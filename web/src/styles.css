@@ -386,6 +386,7 @@ a { color: var(--link); text-decoration: none; }
 .inline-thread > .markdown,
 .inline-thread > a,
 .inline-thread > .draft-card,
+.inline-thread > .existing-thread-comments,
 .review-thread > .range-control,
 .review-thread > .thread-messages,
 .review-thread > .composer {
@@ -394,6 +395,30 @@ a { color: var(--link); text-decoration: none; }
 
 .inline-thread > a {
   margin-top: 0;
+}
+
+.existing-thread-comments {
+  display: grid;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.existing-thread-comment {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+}
+
+.existing-thread-comment:first-child {
+  border-top: 0;
+}
+
+.existing-thread-comment > strong {
+  color: var(--muted);
+  font-size: 0.8rem;
 }
 
 .thread-head > div {

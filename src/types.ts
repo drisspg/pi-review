@@ -42,6 +42,7 @@ export type PullReviewComment = {
   original_line?: number | null;
   side?: "RIGHT" | "LEFT" | null;
   original_side?: "RIGHT" | "LEFT" | null;
+  in_reply_to_id?: number | null;
   body: string;
   html_url: string;
   user?: GitHubUser;
