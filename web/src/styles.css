@@ -896,6 +896,26 @@ a { color: var(--link); text-decoration: none; }
   font-size: 0.78rem;
 }
 
+.focus-review-note {
+  margin: 8px 0 0;
+  color: var(--attention);
+  font-size: 0.82rem;
+}
+
+.focus-area-inline {
+  border-color: color-mix(in srgb, var(--attention) 45%, var(--border));
+  background: color-mix(in srgb, var(--attention) 8%, var(--panel));
+  box-shadow: inset 3px 0 var(--attention);
+}
+
+.focus-area-inline.active {
+  background: color-mix(in srgb, var(--attention) 14%, var(--panel));
+}
+
+.focus-area-inline .thread-head strong {
+  color: var(--attention);
+}
+
 .focus-area-list {
   display: grid;
   gap: 8px;
