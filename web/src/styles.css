@@ -10,6 +10,11 @@
   --danger: #f85149;
   --danger-text: #ffd1d1;
   --ok: #3fb950;
+  --success: #3fb950;
+  --attention: #d29922;
+  --thread-accent: #a371f7;
+  --thread-bg: rgba(163, 113, 247, 0.12);
+  --thread-bg-strong: rgba(163, 113, 247, 0.18);
   --link: #79c0ff;
   --add: rgba(46, 160, 67, 0.18);
   --del: rgba(248, 81, 73, 0.16);
@@ -36,6 +41,11 @@
   --danger: #cf222e;
   --danger-text: #82071e;
   --ok: #1a7f37;
+  --success: #1a7f37;
+  --attention: #9a6700;
+  --thread-accent: #8250df;
+  --thread-bg: rgba(130, 80, 223, 0.09);
+  --thread-bg-strong: rgba(130, 80, 223, 0.14);
   --link: #0969da;
   --add: #dafbe1;
   --del: #ffebe9;
@@ -61,6 +71,11 @@
   --danger: #f47067;
   --danger-text: #ffd8d3;
   --ok: #57ab5a;
+  --success: #57ab5a;
+  --attention: #c69026;
+  --thread-accent: #986ee2;
+  --thread-bg: rgba(152, 110, 226, 0.13);
+  --thread-bg-strong: rgba(152, 110, 226, 0.2);
   --link: #539bf5;
   --add: rgba(70, 149, 74, 0.22);
   --del: rgba(229, 83, 75, 0.2);
@@ -417,6 +432,12 @@ a { color: var(--link); text-decoration: none; }
   background: var(--panel);
 }
 
+.inline-thread.existing.github-thread {
+  border-color: color-mix(in srgb, var(--thread-accent) 38%, var(--border));
+  background: linear-gradient(90deg, var(--thread-bg-strong) 0, var(--panel) 180px);
+  box-shadow: inset 3px 0 var(--thread-accent);
+}
+
 .inline-thread.collapsed {
   display: block;
   width: calc(100% - 128px);
@@ -442,6 +463,15 @@ a { color: var(--link); text-decoration: none; }
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--panel2);
+}
+
+.inline-thread.existing.github-thread > .thread-head {
+  border-bottom-color: color-mix(in srgb, var(--thread-accent) 28%, var(--border));
+  background: linear-gradient(90deg, var(--thread-bg-strong) 0, var(--panel2) 190px);
+}
+
+.inline-thread.existing.github-thread .thread-title strong {
+  color: color-mix(in srgb, var(--thread-accent) 58%, var(--text));
 }
 
 .inline-thread > .markdown,
@@ -471,8 +501,8 @@ a { color: var(--link); text-decoration: none; }
 .inline-thread.existing.github-thread.minimized {
   margin-top: 2px;
   margin-bottom: 2px;
-  border-color: color-mix(in srgb, var(--border) 72%, transparent);
-  background: color-mix(in srgb, var(--panel) 72%, transparent);
+  border-color: color-mix(in srgb, var(--thread-accent) 28%, var(--border));
+  background: color-mix(in srgb, var(--thread-accent) 8%, var(--panel));
 }
 
 .inline-thread.existing.github-thread.minimized .thread-head {
@@ -870,6 +900,40 @@ a { color: var(--link); text-decoration: none; }
 .panel select {
   width: 100%;
   padding: 0.4rem 0.5rem;
+}
+
+.review-event,
+.review-submit {
+  font-weight: 650;
+}
+
+.review-event.comment,
+.review-submit.comment {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--muted) 10%, var(--panel2));
+  color: var(--muted);
+}
+
+.review-event.approve,
+.review-submit.approve {
+  border-color: color-mix(in srgb, var(--success) 55%, var(--border));
+  background: color-mix(in srgb, var(--success) 16%, var(--panel2));
+  color: var(--success);
+}
+
+.review-event.request-changes,
+.review-submit.request-changes {
+  border-color: color-mix(in srgb, var(--danger) 58%, var(--border));
+  background: color-mix(in srgb, var(--danger) 16%, var(--panel2));
+  color: var(--danger-text);
+}
+
+.review-submit.approve:hover {
+  border-color: var(--success);
+}
+
+.review-submit.request-changes:hover {
+  border-color: var(--danger);
 }
 
 .comment {
