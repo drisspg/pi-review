@@ -1,0 +1,322 @@
+import React, { FormEvent, useEffect, useMemo, useState } from "react";
+import { createRoot } from "react-dom/client";
+import hljs from "highlight.js/lib/core";
+import bash from "highlight.js/lib/languages/bash";
+import cpp from "highlight.js/lib/languages/cpp";
+import javascript from "highlight.js/lib/languages/javascript";
+import json from "highlight.js/lib/languages/json";
+import python from "highlight.js/lib/languages/python";
+import typescript from "highlight.js/lib/languages/typescript";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import "./styles.css";
+
+type StoredPullRequest = { key: string; url: string; title: string; state: string; author: string | null; baseSha: string; headSha: string; filesChanged: number | null; existingCommentCount: number | null; lastOpenedAt: string };
+type PullFile = { filename: string; previous_filename?: string; status: string; additions: number; deletions: number; changes: number; patch?: string };
+type PullReviewComment = { id: number; path: string; line?: number | null; original_line?: number | null; side?: "RIGHT" | "LEFT" | null; original_side?: "RIGHT" | "LEFT" | null; body: string; html_url: string; user?: { login?: string } | null; updated_at?: string };
+type FileReviewState = { prKey: string; path: string; fingerprint: string; viewed: boolean; updatedAt: string };
+type LogEntry = { id: number; level: "debug" | "info" | "warn" | "error"; scope: string; message: string; data?: unknown; timestamp: string };
+type DiffRow = { kind: string; oldLine: number | null; newLine: number | null; text: string; hunk: string };
+type Target = { path: string; line: number | null; side: "RIGHT" | "LEFT"; hunk: string };
+type ThreadMessage = { role: "user" | "pi"; text: string };
+type Thread = { key: string; target: Target; collapsed: boolean; draft: string; asking?: boolean; messages: ThreadMessage[] };
+type DraftComment = { id: string; path: string; line: number | null; side: "RIGHT" | "LEFT"; body: string };
+type OpenResponse = { pr: StoredPullRequest; files: PullFile[]; comments: PullReviewComment[]; fileReviews: FileReviewState[] };
+
+type DiffProps = {
+  review: OpenResponse;
+  openFiles: Record<string, boolean>;
+  setOpenFiles: (open: Record<string, boolean>) => void;
+  expandedContext: Record<string, boolean>;
+  setExpandedContext: (expanded: Record<string, boolean>) => void;
+  expandedNeighborRows: Record<string, DiffRow[]>;
+  expandNeighbor: (file: PullFile, key: string, startLine: number, endLine: number) => Promise<void>;
+  threads: Record<string, Thread>;
+  setThreads: (threads: Record<string, Thread> | ((threads: Record<string, Thread>) => Record<string, Thread>)) => void;
+  toggleThread: (target: Target) => void;
+  setViewed: (file: PullFile, viewed: boolean) => Promise<void>;
+  drafts: DraftComment[];
+  setDrafts: (drafts: DraftComment[]) => void;
+  editingDraftId: string | null;
+  setEditingDraftId: (id: string | null) => void;
+  askThread: (thread: Thread) => Promise<void>;
+};
+
+async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(path, { ...init, headers: { "content-type": "application/json", ...init?.headers } });
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
+  return body as T;
+}
+
+function parsePatchRows(patch: string | undefined): DiffRow[] {
+  if (patch == null) return [];
+  const rows: DiffRow[] = [];
+  let oldLine = 0;
+  let newLine = 0;
+  let currentHunk = "";
+  for (const line of patch.split("\n")) {
+    const hunk = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if (hunk != null) {
+      oldLine = Number.parseInt(hunk[1], 10);
+      newLine = Number.parseInt(hunk[2], 10);
+      currentHunk = line;
+      rows.push({ kind: "hunk", oldLine: null, newLine: null, text: line, hunk: currentHunk });
+    } else if (line.startsWith("+")) {
+      rows.push({ kind: "added", oldLine: null, newLine, text: line, hunk: currentHunk });
+      newLine += 1;
+    } else if (line.startsWith("-")) {
+      rows.push({ kind: "removed", oldLine, newLine: null, text: line, hunk: currentHunk });
+      oldLine += 1;
+    } else if (line.startsWith(" ")) {
+      rows.push({ kind: "context", oldLine, newLine, text: line, hunk: currentHunk });
+      oldLine += 1;
+      newLine += 1;
+    } else {
+      rows.push({ kind: "meta", oldLine: null, newLine: null, text: line, hunk: currentHunk });
+    }
+  }
+  return rows;
+}
+
+function targetKey(target: Target): string { return `${target.path}:${target.side}:${target.line ?? "file"}`; }
+function commentTarget(comment: PullReviewComment): Target { return { path: comment.path, line: comment.line ?? comment.original_line ?? null, side: comment.side ?? comment.original_side ?? "RIGHT", hunk: "" }; }
+hljs.registerLanguage("bash", bash);
+hljs.registerLanguage("cpp", cpp);
+hljs.registerLanguage("javascript", javascript);
+hljs.registerLanguage("json", json);
+hljs.registerLanguage("python", python);
+hljs.registerLanguage("typescript", typescript);
+
+function shortSha(sha: string): string { return sha.slice(0, 12); }
+function newId(): string { return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`; }
+
+function languageForPath(path: string | null | undefined): string {
+  if (path == null) return "";
+  if (/\.(cc|cpp|cu|cuh|c|h|hpp)$/.test(path)) return "cpp";
+  if (/\.tsx?$/.test(path)) return "typescript";
+  if (/\.jsx?$/.test(path)) return "javascript";
+  if (/\.py$/.test(path)) return "python";
+  if (/\.json$/.test(path)) return "json";
+  if (/\.(sh|bash|zsh)$/.test(path)) return "bash";
+  return "";
+}
+
+function highlightedHtml(code: string, language: string): string {
+  if (language.length > 0 && hljs.getLanguage(language) != null) return hljs.highlight(code, { language }).value;
+  return hljs.highlightAuto(code).value;
+}
+
+function CodeText({ code, language }: { code: string; language: string }) {
+  return <code dangerouslySetInnerHTML={{ __html: highlightedHtml(code, language) }} />;
+}
+
+function App() {
+  const [input, setInput] = useState("");
+  const [prs, setPrs] = useState<StoredPullRequest[]>([]);
+  const [review, setReview] = useState<OpenResponse | null>(null);
+  const [openFiles, setOpenFiles] = useState<Record<string, boolean>>({});
+  const [expandedContext, setExpandedContext] = useState<Record<string, boolean>>({});
+  const [expandedNeighborRows, setExpandedNeighborRows] = useState<Record<string, DiffRow[]>>({});
+  const [threads, setThreads] = useState<Record<string, Thread>>({});
+  const [drafts, setDrafts] = useState<DraftComment[]>([]);
+  const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function refreshHistory() { setPrs((await api<{ prs: StoredPullRequest[] }>("/api/prs")).prs); }
+  async function refreshLogs() { setLogs((await api<{ logs: LogEntry[] }>("/api/logs")).logs.slice(-40).reverse()); }
+
+  useEffect(() => { refreshHistory().catch((err: unknown) => setError(err instanceof Error ? err.message : String(err))); refreshLogs().catch(() => undefined); }, []);
+
+  async function openPr(nextInput: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await api<OpenResponse>("/api/pr/open", { method: "POST", body: JSON.stringify({ input: nextInput }) });
+      setReview(data);
+      setInput(data.pr.url);
+      setOpenFiles(Object.fromEntries(data.files.map((file) => [file.filename, !data.fileReviews.find((state) => state.path === file.filename)?.viewed])));
+      setThreads({});
+      setDrafts([]);
+      setExpandedNeighborRows({});
+      setEditingDraftId(null);
+      await Promise.all([refreshHistory(), refreshLogs()]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function setViewed(file: PullFile, viewed: boolean) {
+    if (review == null) return;
+    const fileReview = review.fileReviews.find((state) => state.path === file.filename);
+    if (fileReview == null) return;
+    await api("/api/file/viewed", { method: "POST", body: JSON.stringify({ ...fileReview, viewed }) });
+    setReview({ ...review, fileReviews: review.fileReviews.map((state) => state.path === file.filename ? { ...state, viewed } : state) });
+    setOpenFiles({ ...openFiles, [file.filename]: !viewed });
+  }
+
+  function toggleThread(target: Target) {
+    const key = targetKey(target);
+    const existing = threads[key];
+    setThreads({ ...threads, [key]: existing == null ? { key, target, collapsed: false, draft: "", messages: [] } : { ...existing, collapsed: !existing.collapsed } });
+  }
+
+  async function askThread(thread: Thread) {
+    if (review == null || thread.draft.trim().length === 0) return;
+    const question = thread.draft.trim();
+    setThreads((current) => ({ ...current, [thread.key]: { ...thread, asking: true, draft: "", messages: [...thread.messages, { role: "user", text: question }] } }));
+    try {
+      const prompt = `Review PR ${review.pr.key}. File: ${thread.target.path}. Line: ${thread.target.line ?? "file"}. Side: ${thread.target.side}. Hunk: ${thread.target.hunk}\n\nQuestion: ${question}`;
+      const { answer } = await api<{ answer: string }>("/api/ask", { method: "POST", body: JSON.stringify({ prKey: review.pr.key, prompt }) });
+      setThreads((current) => ({ ...current, [thread.key]: { ...current[thread.key], asking: false, messages: [...(current[thread.key]?.messages ?? []), { role: "pi", text: answer }] } }));
+      await refreshLogs();
+    } catch (err) {
+      setThreads((current) => ({ ...current, [thread.key]: { ...current[thread.key], asking: false, messages: [...(current[thread.key]?.messages ?? []), { role: "pi", text: `Ask Pi failed: ${err instanceof Error ? err.message : String(err)}` }] } }));
+    }
+  }
+
+  async function submitReview(event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) {
+    if (review == null || submitting) return;
+    setSubmitting(true);
+    try {
+      await api("/api/review/submit", { method: "POST", body: JSON.stringify({ prUrl: review.pr.url, event, body, comments: drafts.filter((draft) => draft.line != null).map(({ path, line, side, body }) => ({ path, line, side, body })) }) });
+      setDrafts([]);
+      await openPr(review.pr.url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function expandNeighbor(file: PullFile, key: string, startLine: number, endLine: number) {
+    if (review == null) return;
+    const { text } = await api<{ text: string }>("/api/file/text", { method: "POST", body: JSON.stringify({ prUrl: review.pr.url, path: file.filename, sha: review.pr.headSha }) });
+    setExpandedNeighborRows((current) => ({ ...current, [key]: contextRowsFromText(text, startLine, endLine) }));
+  }
+
+  function submit(event: FormEvent) { event.preventDefault(); void openPr(input); }
+
+  return <main className="app-shell"><header className="toolbar"><div><strong>Pi PR Review</strong><span>{review == null ? "Paste a PR to start" : `${review.pr.key} · ${review.pr.title}`}</span></div><form className="open-form" onSubmit={submit}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="OWNER/REPO#123 or GitHub PR URL" /><button disabled={busy || input.trim().length === 0}>{busy ? "Fetching…" : "Open"}</button></form></header>{error != null && <div className="error">{error}</div>}{review == null ? <StartPage prs={prs} logs={logs} openPr={openPr} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} submitReview={submitReview} submitting={submitting} />}</main>;
+}
+
+function StartPage({ prs, logs, openPr }: { prs: StoredPullRequest[]; logs: LogEntry[]; openPr: (input: string) => Promise<void> }) { return <div className="start-grid"><section className="panel"><h1>Previous reviews</h1><p className="muted">Reopen a tracked PR or paste a new one above.</p><History prs={prs} openPr={openPr} /></section><details className="panel logs"><summary>Server log</summary><LogRows logs={logs} /></details></div>; }
+
+function ReviewPage(props: DiffProps & { submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<void>; submitting: boolean }) {
+  return <div className="review-layout"><main className="files">{props.review.files.map((file) => <FileDiff key={file.filename} file={file} {...props} />)}</main><aside className="side"><ReviewSummary pr={props.review.pr} drafts={props.drafts} setDrafts={props.setDrafts} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} submitReview={props.submitReview} submitting={props.submitting} /><ExistingComments comments={props.review.comments} /></aside></div>;
+}
+
+function FileDiff({ file, review, openFiles, setOpenFiles, expandedContext, setExpandedContext, expandedNeighborRows, expandNeighbor, threads, setThreads, toggleThread, setViewed, drafts, setDrafts, editingDraftId, setEditingDraftId, askThread }: DiffProps & { file: PullFile }) {
+  const rows = useMemo(() => parsePatchRows(file.patch), [file.patch]);
+  const fileReview = review.fileReviews.find((state) => state.path === file.filename);
+  const open = openFiles[file.filename] ?? true;
+  return <section className="file"><button className="file-summary" onClick={() => setOpenFiles({ ...openFiles, [file.filename]: !open })}><div><strong>{file.filename}</strong><span>{file.status} · +{file.additions} / -{file.deletions}</span></div><span>{open ? "Collapse" : "Expand"}</span></button>{open && <><div className="file-actions"><button onClick={() => void setViewed(file, !(fileReview?.viewed ?? false))}>{fileReview?.viewed ? "Mark unviewed" : "Mark viewed"}</button>{fileReview?.viewed && <span className="ok">Viewed. It will start collapsed until this patch changes.</span>}</div><div className="patch">{rows.length === 0 ? <DiffRowView row={{ kind: "meta", oldLine: null, newLine: null, text: "Patch unavailable. Click to attach a file-level note.", hunk: "" }} target={{ path: file.filename, line: null, side: "RIGHT", hunk: "" }} threads={threads} setThreads={setThreads} toggleThread={toggleThread} comments={review.comments} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} /> : <FoldedRows file={file} rows={rows} comments={review.comments} threads={threads} setThreads={setThreads} toggleThread={toggleThread} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} />}</div></>}</section>;
+}
+
+function hunkNewStart(row: DiffRow): number | null {
+  const match = row.text.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+  return match == null ? null : Number.parseInt(match[1], 10);
+}
+
+function contextRowsFromText(fileText: string | undefined, startLine: number, endLine: number): DiffRow[] {
+  if (fileText == null || endLine < startLine) return [];
+  const lines = fileText.split("\n");
+  const rows: DiffRow[] = [];
+  for (let line = Math.max(1, startLine); line <= Math.min(endLine, lines.length); line += 1) {
+    rows.push({ kind: "context expanded-context", oldLine: line, newLine: line, text: ` ${lines[line - 1] ?? ""}`, hunk: "" });
+  }
+  return rows;
+}
+
+function lastNewLine(rows: DiffRow[]): number | null {
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    if (rows[index].newLine != null) return rows[index].newLine;
+  }
+  return null;
+}
+
+function FoldedRows({ file, rows, comments, threads, setThreads, toggleThread, expandedNeighborRows, expandNeighbor, drafts, setDrafts, editingDraftId, setEditingDraftId, askThread }: { file: PullFile; rows: DiffRow[]; comments: PullReviewComment[]; threads: Record<string, Thread>; setThreads: DiffProps["setThreads"]; toggleThread: (target: Target) => void; expandedContext: Record<string, boolean>; setExpandedContext: (expanded: Record<string, boolean>) => void; expandedNeighborRows: Record<string, DiffRow[]>; expandNeighbor: (file: PullFile, key: string, startLine: number, endLine: number) => Promise<void>; drafts: DraftComment[]; setDrafts: (drafts: DraftComment[]) => void; editingDraftId: string | null; setEditingDraftId: (id: string | null) => void; askThread: (thread: Thread) => Promise<void> }) {
+  const rendered: React.ReactNode[] = [];
+  for (let index = 0; index < rows.length; index += 1) {
+    if (rows[index].kind !== "hunk") {
+      rendered.push(<ConnectedRow key={`${file.filename}:${index}`} file={file} row={rows[index]} comments={comments} threads={threads} setThreads={setThreads} toggleThread={toggleThread} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} />);
+      continue;
+    }
+
+    const nextHunkOffset = rows.slice(index + 1).findIndex((row) => row.kind === "hunk");
+    const blockEnd = nextHunkOffset === -1 ? rows.length : index + 1 + nextHunkOffset;
+    const block = rows.slice(index, blockEnd);
+    const start = hunkNewStart(rows[index]);
+    const lastLine = lastNewLine(block);
+
+    if (start != null) {
+      const aboveKey = `${file.filename}:${index}:above`;
+      rendered.push(<button className="fold neighbor" key={`${aboveKey}:button`} onClick={() => void expandNeighbor(file, aboveKey, Math.max(1, start - (expandedNeighborRows[aboveKey]?.length ?? 0) - 10), start - 1)}>Expand above</button>);
+      (expandedNeighborRows[aboveKey] ?? []).forEach((row, offset) => rendered.push(<ConnectedRow key={`${aboveKey}:${offset}`} file={file} row={row} comments={comments} threads={threads} setThreads={setThreads} toggleThread={toggleThread} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} />));
+    }
+
+    block.forEach((row, offset) => rendered.push(<ConnectedRow key={`${file.filename}:${index + offset}`} file={file} row={row} comments={comments} threads={threads} setThreads={setThreads} toggleThread={toggleThread} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} />));
+
+    if (lastLine != null) {
+      const belowKey = `${file.filename}:${index}:below`;
+      (expandedNeighborRows[belowKey] ?? []).forEach((row, offset) => rendered.push(<ConnectedRow key={`${belowKey}:${offset}`} file={file} row={row} comments={comments} threads={threads} setThreads={setThreads} toggleThread={toggleThread} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} />));
+      rendered.push(<button className="fold neighbor" key={`${belowKey}:button`} onClick={() => void expandNeighbor(file, belowKey, lastLine + 1, lastLine + (expandedNeighborRows[belowKey]?.length ?? 0) + 10)}>Expand below</button>);
+    }
+    index = blockEnd - 1;
+  }
+  return <>{rendered}</>;
+}
+
+function ConnectedRow({ file, row, comments, threads, setThreads, toggleThread, drafts, setDrafts, editingDraftId, setEditingDraftId, askThread }: { file: PullFile; row: DiffRow; comments: PullReviewComment[]; threads: Record<string, Thread>; setThreads: DiffProps["setThreads"]; toggleThread: (target: Target) => void; drafts: DraftComment[]; setDrafts: (drafts: DraftComment[]) => void; editingDraftId: string | null; setEditingDraftId: (id: string | null) => void; askThread: (thread: Thread) => Promise<void> }) {
+  const line = row.newLine ?? row.oldLine;
+  const target = line == null || row.kind === "hunk" || row.kind === "meta" ? null : { path: file.filename, line, side: row.newLine != null ? "RIGHT" as const : "LEFT" as const, hunk: row.hunk };
+  return <DiffRowView row={row} target={target} threads={threads} setThreads={setThreads} toggleThread={toggleThread} comments={comments} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} />;
+}
+
+function updateDraft(drafts: DraftComment[], setDrafts: (drafts: DraftComment[]) => void, id: string, body: string): void {
+  setDrafts(drafts.map((draft) => draft.id === id ? { ...draft, body } : draft));
+}
+
+function DraftView({ draft, drafts, setDrafts, editingDraftId, setEditingDraftId }: { draft: DraftComment; drafts: DraftComment[]; setDrafts: (drafts: DraftComment[]) => void; editingDraftId: string | null; setEditingDraftId: (id: string | null) => void }) {
+  const editing = editingDraftId === draft.id;
+  return <div className="comment draft-card"><div className="thread-head"><span>{draft.path}:{draft.line ?? "file"}</span><div className="actions"><button title="Edit draft" onClick={() => setEditingDraftId(editing ? null : draft.id)}>✎</button><button onClick={() => setDrafts(drafts.filter((item) => item.id !== draft.id))}>Remove</button></div></div>{editing ? <textarea value={draft.body} onChange={(event) => updateDraft(drafts, setDrafts, draft.id, event.target.value)} /> : <p>{draft.body}</p>}</div>;
+}
+
+function DiffRowView({ row, target, threads, setThreads, toggleThread, comments, drafts, setDrafts, editingDraftId, setEditingDraftId, askThread }: { row: DiffRow; target: Target | null; threads: Record<string, Thread>; setThreads: DiffProps["setThreads"]; toggleThread: (target: Target) => void; comments: PullReviewComment[]; drafts: DraftComment[]; setDrafts: (drafts: DraftComment[]) => void; editingDraftId: string | null; setEditingDraftId: (id: string | null) => void; askThread: (thread: Thread) => Promise<void> }) {
+  const thread = target == null ? null : threads[targetKey(target)];
+  const inlineComments = target == null ? [] : comments.filter((comment) => comment.path === target.path && targetKey(commentTarget(comment)) === targetKey(target));
+  const inlineDrafts = target == null ? [] : drafts.filter((draft) => targetKey({ ...draft, hunk: "" }) === targetKey(target));
+  return <><div className={`diff-row ${row.kind} ${thread != null && !thread.collapsed ? "selected" : ""}`} onClick={() => target != null && toggleThread(target)}><span className="num">{row.oldLine ?? ""}</span><span className="num">{row.newLine ?? ""}</span><CodeText code={row.text} language={languageForPath(target?.path)} />{(thread != null || inlineComments.length + inlineDrafts.length > 0) && <span className="pill">{(thread == null ? 0 : 1) + inlineComments.length + inlineDrafts.length}</span>}</div>{inlineComments.map((comment) => <div className="inline-thread existing" key={comment.id}><strong>@{comment.user?.login ?? "github"}</strong><p>{comment.body}</p><a href={comment.html_url} target="_blank" rel="noreferrer">Open comment</a></div>)}{inlineDrafts.map((draft) => <div className="inline-thread draft" key={draft.id}><DraftView draft={draft} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} /></div>)}{thread != null && <ThreadBox thread={thread} setThread={(next) => setThreads((current) => ({ ...current, [next.key]: next }))} addDraft={() => { if (thread.draft.trim().length > 0) setDrafts([...drafts, { id: newId(), path: thread.target.path, line: thread.target.line, side: thread.target.side, body: thread.draft.trim() }]); setThreads((current) => ({ ...current, [thread.key]: { ...thread, draft: "", collapsed: true } })); }} askThread={askThread} />}</>;
+}
+
+function ThreadBox({ thread, setThread, addDraft, askThread }: { thread: Thread; setThread: (thread: Thread) => void; addDraft: () => void; askThread: (thread: Thread) => Promise<void> }) {
+  if (thread.collapsed) return <button className="inline-thread collapsed" onClick={() => setThread({ ...thread, collapsed: false })}>▶ Thread on line {thread.target.line}</button>;
+  return <div className="inline-thread review-thread"><div className="thread-head"><div><strong>Line thread</strong><span>{thread.target.path}:{thread.target.line ?? "file"}</span></div><button onClick={() => setThread({ ...thread, collapsed: true })}>Collapse</button></div>{thread.messages.length > 0 && <div className="thread-messages">{thread.messages.map((message, index) => <div className={`thread-note ${message.role}`} key={index}><div className="message-role">{message.role === "user" ? "You" : "Pi"}</div><MarkdownText text={message.text} /></div>)}</div>}<div className="composer"><textarea value={thread.draft} onChange={(event) => setThread({ ...thread, draft: event.target.value })} placeholder="Write a draft comment or ask Pi about this line" /><div className="actions"><button onClick={addDraft} disabled={thread.draft.trim().length === 0}>Add draft comment</button><button onClick={() => void askThread(thread)} disabled={thread.asking || thread.draft.trim().length === 0}>{thread.asking ? "Asking…" : "Ask Pi"}</button></div></div></div>;
+}
+
+function MarkdownText({ text }: { text: string }) {
+  return <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ code: MarkdownCode }}>{text}</ReactMarkdown></div>;
+}
+
+function MarkdownCode({ className, children }: { className?: string; children?: React.ReactNode }) {
+  const code = String(children ?? "").replace(/\n$/, "");
+  const language = className?.match(/language-(\w+)/)?.[1] ?? "";
+  return <code dangerouslySetInnerHTML={{ __html: highlightedHtml(code, language) }} />;
+}
+
+function ReviewSummary({ pr, drafts, setDrafts, editingDraftId, setEditingDraftId, submitReview, submitting }: { pr: StoredPullRequest; drafts: DraftComment[]; setDrafts: (drafts: DraftComment[]) => void; editingDraftId: string | null; setEditingDraftId: (id: string | null) => void; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<void>; submitting: boolean }) {
+  const [event, setEvent] = useState<"COMMENT" | "APPROVE" | "REQUEST_CHANGES">("COMMENT");
+  const [body, setBody] = useState("");
+  return <section className="panel"><h2>{pr.title}</h2><div className="meta"><span>{pr.key}</span><span>{pr.state}</span><span>{pr.filesChanged} files</span><span>{pr.existingCommentCount} comments</span><span>head {shortSha(pr.headSha)}</span></div><a href={pr.url} target="_blank" rel="noreferrer">Open GitHub</a><h2>Draft review</h2><select value={event} onChange={(change) => setEvent(change.target.value as typeof event)}><option value="COMMENT">Comment</option><option value="APPROVE">Approve</option><option value="REQUEST_CHANGES">Request changes</option></select><textarea value={body} onChange={(change) => setBody(change.target.value)} placeholder="Overall review body" />{drafts.length === 0 ? <p className="muted">No draft comments yet.</p> : drafts.map((draft) => <DraftView key={draft.id} draft={draft} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} />)}<button disabled={submitting || (body.trim().length === 0 && drafts.length === 0)} onClick={() => void submitReview(event, body)}>{submitting ? "Submitting…" : `Submit review (${drafts.length})`}</button></section>;
+}
+
+function ExistingComments({ comments }: { comments: PullReviewComment[] }) { return <section className="panel"><h2>Existing comments</h2>{comments.length === 0 ? <p className="muted">No existing comments.</p> : comments.map((comment) => <a className="comment" key={comment.id} href={comment.html_url} target="_blank" rel="noreferrer"><span>{comment.path}:{comment.line ?? comment.original_line ?? "?"}</span><strong>@{comment.user?.login ?? "github"}</strong><p>{comment.body}</p></a>)}</section>; }
+function History({ prs, openPr }: { prs: StoredPullRequest[]; openPr: (input: string) => Promise<void> }) { return <div className="history">{prs.length === 0 ? <p className="muted">No previous PRs.</p> : prs.map((pr) => <button key={pr.key} onClick={() => void openPr(pr.url)}><strong>{pr.title}</strong><span>{pr.key} · {pr.filesChanged ?? "—"} files · {pr.existingCommentCount ?? "—"} comments</span></button>)}</div>; }
+function LogRows({ logs }: { logs: LogEntry[] }) { return <>{logs.map((log) => <div className={`log ${log.level}`} key={log.id}><span>{new Date(log.timestamp).toLocaleTimeString()} {log.scope}</span><p>{log.message}</p>{log.data !== undefined && <code>{JSON.stringify(log.data)}</code>}</div>)}</>; }
+
+createRoot(document.getElementById("root")!).render(<App />);
