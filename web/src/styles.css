@@ -338,23 +338,28 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .inline-thread {
-  margin: 0.45rem 8px 0.7rem 112px;
-  padding: 0.7rem;
+  margin: 0.45rem 16px 0.7rem 112px;
   border: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
-  border-radius: 8px;
-  background: rgba(47, 129, 247, 0.08);
+  border-radius: 6px;
+  background: var(--panel);
   display: grid;
-  gap: 8px;
+  gap: 0;
   white-space: normal;
   font-family: ui-sans-serif, system-ui, sans-serif;
+  box-shadow: 0 1px 0 rgba(27, 31, 36, 0.04);
 }
 
-.inline-thread.existing { border-left-color: #d29922; background: rgba(210, 153, 34, 0.1); }
-.inline-thread.draft { border-left-color: var(--ok); background: rgba(46, 160, 67, 0.1); }
+.inline-thread.existing,
+.inline-thread.draft,
+.review-thread {
+  border-left: 0;
+  background: var(--panel);
+}
+
 .inline-thread.collapsed {
   display: block;
-  width: calc(100% - 120px);
+  width: calc(100% - 128px);
+  padding: 0.55rem 0.7rem;
   text-align: left;
   color: var(--muted);
 }
@@ -368,8 +373,27 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .review-thread {
-  gap: 10px;
-  background: rgba(13, 17, 23, 0.72);
+  gap: 0;
+}
+
+.inline-thread > strong,
+.thread-head {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel2);
+}
+
+.inline-thread > .markdown,
+.inline-thread > a,
+.inline-thread > .draft-card,
+.review-thread > .range-control,
+.review-thread > .thread-messages,
+.review-thread > .composer {
+  margin: 10px 12px;
+}
+
+.inline-thread > a {
+  margin-top: 0;
 }
 
 .thread-head > div {
@@ -389,22 +413,22 @@ a { color: var(--link); text-decoration: none; }
   display: grid;
   gap: 0;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 6px;
   overflow: hidden;
 }
 
 .thread-note {
   display: grid;
-  grid-template-columns: 72px minmax(0, 1fr);
+  grid-template-columns: 64px minmax(0, 1fr);
   gap: 10px;
-  padding: 10px 12px;
-  background: rgba(22, 27, 34, 0.7);
+  padding: 8px 10px;
+  background: var(--panel);
   border-top: 1px solid var(--border);
 }
 
 .thread-note:first-child { border-top: 0; }
-.thread-note.user { background: rgba(47, 129, 247, 0.08); }
-.thread-note.pi { background: rgba(22, 27, 34, 0.82); }
+.thread-note.user { background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
+.thread-note.pi { background: var(--panel); }
 
 .message-role {
   color: var(--muted);
