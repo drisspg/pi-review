@@ -11,6 +11,7 @@ export type Thread = { key: string; target: Target; collapsed: boolean; draft: s
 export type DraftComment = { id: string; path: string; line: number | null; startLine?: number | null; side: "RIGHT" | "LEFT"; body: string };
 export type DragSelection = { start: Target; current: Target; dragging: boolean };
 export type AiReviewMessage = { role: "user" | "pi"; text: string };
+export type FocusArea = { id: string; path: string; startLine: number; endLine: number; title: string; body: string };
 export type FocusReview = { expanded: boolean; open: boolean; running: boolean; text: string };
 export type AiReview = { expanded: boolean; open: boolean; running: boolean; text: string; messages: AiReviewMessage[] };
 export type ThemeName = "github-dark" | "github-light" | "github-dimmed";

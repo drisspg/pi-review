@@ -365,6 +365,8 @@ a { color: var(--link); text-decoration: none; }
 .diff-row:not(.hunk):not(.meta) { cursor: pointer; }
 .diff-row:hover, .diff-row.selected { background: rgba(177, 186, 196, 0.09); }
 .diff-row.range-selecting { background: rgba(47, 129, 247, 0.24); }
+.diff-row.focus-highlight { background: color-mix(in srgb, var(--attention) 18%, transparent); box-shadow: inset 3px 0 color-mix(in srgb, var(--attention) 70%, transparent); }
+.diff-row.focus-highlight-active { background: color-mix(in srgb, var(--attention) 32%, transparent); box-shadow: inset 4px 0 var(--attention); }
 .num { color: #6e7681; text-align: right; user-select: none; }
 .added { background: var(--add); }
 .removed { background: var(--del); }
@@ -885,6 +887,35 @@ a { color: var(--link); text-decoration: none; }
 .focus-review .markdown {
   max-height: 360px;
   overflow: auto;
+}
+
+.focus-area-list {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.focus-area-card {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--attention) 28%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--attention) 7%, var(--panel));
+  color: var(--text);
+  text-align: left;
+}
+
+.focus-area-card:hover,
+.focus-area-card.active {
+  border-color: var(--attention);
+  background: color-mix(in srgb, var(--attention) 16%, var(--panel));
+}
+
+.focus-area-card span {
+  color: var(--muted);
+  font-size: 0.82rem;
 }
 
 .ai-chat-messages {

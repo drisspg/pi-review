@@ -150,11 +150,17 @@ test("renders inline Ask Pi responses as markdown", async ({ page }) => {
   await expect(thread.locator("pre code")).toContainText("return batch_offset;");
 });
 
-test("runs a separate focus areas review", async ({ page }) => {
+test("runs a separate focus areas review and highlights referenced lines", async ({ page }) => {
+  await openFirstFile(page);
+  const row = page.locator(".file").first().locator(".diff-row.added").first();
+  const path = await row.getAttribute("data-path");
+  const line = await row.getAttribute("data-line");
+  if (path == null || line == null) throw new Error("Missing diff row target");
+
   await page.route("**/api/pi/focus-review", async (route) => {
     await route.fulfill({
       contentType: "application/json",
-      body: JSON.stringify({ answer: "## Focus areas\n- `hopper/mainloop.py`: check whether this matches local tiling conventions." }),
+      body: JSON.stringify({ answer: `## Focus areas\n- \`${path}:${line}-${Number.parseInt(line, 10) + 1} — convention mismatch\`: check whether this matches local tiling conventions.` }),
     });
   });
 
@@ -164,6 +170,7 @@ test("runs a separate focus areas review", async ({ page }) => {
   await expect(dialog).toContainText("Focus areas");
   await expect(dialog).toContainText("tiling conventions");
   await expect(dialog.getByRole("button", { name: "Run again" })).toBeEnabled();
+  await expect(row).toHaveClass(/focus-highlight-active/);
 });
 
 test("runs the right-sidebar Pi review panel and continues the chat with Enter", async ({ page }) => {

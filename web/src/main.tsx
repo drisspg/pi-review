@@ -9,7 +9,7 @@ import { commentTarget, draftMatchesTarget, groupReviewComments, targetKey, targ
 import { contextRowsFromText, hunkNewStart, isTargetInSelection, lastNewLine, parsePatchRows, targetFromPoint, targetFromRow } from "./lib/diff";
 import { languageForPath } from "./lib/highlight";
 import { newId, prUrlFromKey, shortSha } from "./lib/pr";
-import type { AiReview, DiffRow, DraftComment, DragSelection, FileReviewState, FocusReview, LogEntry, OpenResponse, PullFile, PullIssueComment, PullReviewComment, StoredPullRequest, Target, ThemeName, Thread } from "./types";
+import type { AiReview, DiffRow, DraftComment, DragSelection, FileReviewState, FocusArea, FocusReview, LogEntry, OpenResponse, PullFile, PullIssueComment, PullReviewComment, StoredPullRequest, Target, ThemeName, Thread } from "./types";
 import "./styles.css";
 
 type DiffProps = {
@@ -41,6 +41,38 @@ type DiffProps = {
   collapseAllComments: () => void;
 };
 
+function parseFocusAreas(text: string): FocusArea[] {
+  const location = /(?:^|[`\s(*-])([\w./@+-][\w./@+ -]*?\.[\w+-]+):(\d+)(?:-(\d+))?(?:\s*[—-]\s*([^\n]+))?/gm;
+  const areas: FocusArea[] = [];
+  for (const match of text.matchAll(location)) {
+    const path = match[1].trim();
+    const startLine = Number.parseInt(match[2], 10);
+    const endLine = Number.parseInt(match[3] ?? match[2], 10);
+    if (!Number.isFinite(startLine) || !Number.isFinite(endLine)) continue;
+    areas.push({ id: `${path}:${startLine}-${endLine}:${areas.length}`, path, startLine: Math.min(startLine, endLine), endLine: Math.max(startLine, endLine), title: (match[4] ?? "Focus area").replace(/[`*_]+$/g, "").trim(), body: nearbyMarkdown(text, match.index ?? 0) });
+  }
+  return areas;
+}
+
+function nearbyMarkdown(text: string, index: number): string {
+  const nextItem = text.slice(index + 1).search(/\n\s*(?:[-*]|\d+\.)\s+[`\w./@+-][^\n]*:\d+/);
+  const end = nextItem === -1 ? text.length : index + 1 + nextItem;
+  return text.slice(index, end).trim();
+}
+
+function highlightFocusAreas(areas: FocusArea[], activeId: string | null): void {
+  document.querySelectorAll(".diff-row.focus-highlight, .diff-row.focus-highlight-active").forEach((row) => row.classList.remove("focus-highlight", "focus-highlight-active"));
+  for (const area of areas) {
+    document.querySelectorAll<HTMLElement>(".diff-row[data-path][data-line]").forEach((row) => {
+      const line = Number.parseInt(row.dataset.line ?? "", 10);
+      if (row.dataset.path !== area.path || !Number.isFinite(line) || line < area.startLine || line > area.endLine) return;
+      row.classList.add("focus-highlight");
+      if (area.id === activeId) row.classList.add("focus-highlight-active");
+    });
+  }
+  if (activeId != null) document.querySelector(".diff-row.focus-highlight-active")?.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
 function App() {
   const [input, setInput] = useState("");
   const [prs, setPrs] = useState<StoredPullRequest[]>([]);
@@ -59,6 +91,7 @@ function App() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [aiReview, setAiReview] = useState<AiReview>({ expanded: false, open: false, running: false, text: "", messages: [] });
   const [focusReview, setFocusReview] = useState<FocusReview>({ expanded: false, open: false, running: false, text: "" });
+  const [activeFocusAreaId, setActiveFocusAreaId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [refreshingActivity, setRefreshingActivity] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -78,6 +111,9 @@ function App() {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("pi-review-theme", theme);
   }, [theme]);
+
+  const focusAreas = useMemo(() => parseFocusAreas(focusReview.text), [focusReview.text]);
+  useEffect(() => highlightFocusAreas(focusAreas, activeFocusAreaId), [focusAreas, activeFocusAreaId, openFiles, expandedNeighborRows]);
 
   useEffect(() => {
     function beginWindowDrag(event: MouseEvent) {
@@ -129,6 +165,7 @@ function App() {
       setEditingDraftId(null);
       setAiReview({ expanded: false, open: false, running: false, text: "", messages: [] });
       setFocusReview({ expanded: false, open: false, running: false, text: "" });
+      setActiveFocusAreaId(null);
       await Promise.all([refreshHistory(), refreshLogs()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -293,10 +330,11 @@ function App() {
     if (review == null || focusReview.running) return;
     setFocusReview((current) => ({ ...current, open: true, expanded: true, running: true }));
     const diffSummary = review.files.map((file) => `## ${file.filename}\nStatus: ${file.status}, +${file.additions}/-${file.deletions}\n${file.patch ?? "Patch unavailable"}`).join("\n\n");
-    const prompt = `You are a second, independent PR-review pass for ${review.pr.key}. Look specifically for areas worth deeper human review, not a normal exhaustive review. Prioritize:\n- code that feels inconsistent with nearby codebase patterns or API conventions\n- surprising behavior, hidden assumptions, edge cases, or subtle tradeoffs\n- tests, migrations, performance, concurrency, or compatibility risks that deserve investigation\n- places where the implementation may be valid but reviewers should explicitly decide if the tradeoff is acceptable\n\nReturn markdown with a short "Focus areas" list. For each item include: file/line if possible, why it is weird or worth investigation, and a concrete reviewer question. Avoid generic praise and avoid blocking language unless there is strong evidence.\n\nPR title: ${review.pr.title}\n\n${diffSummary}`;
+    const prompt = `You are a second, independent PR-review pass for ${review.pr.key}. Look specifically for areas worth deeper human review, not a normal exhaustive review. Prioritize:\n- code that feels inconsistent with nearby codebase patterns or API conventions\n- surprising behavior, hidden assumptions, edge cases, or subtle tradeoffs\n- tests, migrations, performance, concurrency, or compatibility risks that deserve investigation\n- places where the implementation may be valid but reviewers should explicitly decide if the tradeoff is acceptable\n\nReturn markdown with a short "Focus areas" list. Start each item with a clickable-style location in this exact format: \`path:startLine-endLine — short title\` or \`path:line — short title\`. Then include why it is weird or worth investigation and a concrete reviewer question. Avoid generic praise and avoid blocking language unless there is strong evidence.\n\nPR title: ${review.pr.title}\n\n${diffSummary}`;
     try {
       const { answer } = await api<{ answer: string }>("/api/pi/focus-review", { method: "POST", body: JSON.stringify({ prKey: review.pr.key, prompt }) });
       setFocusReview((current) => ({ ...current, open: true, expanded: true, running: false, text: answer }));
+      setActiveFocusAreaId(parseFocusAreas(answer)[0]?.id ?? null);
     } catch (err) {
       const text = `Focus review failed: ${err instanceof Error ? err.message : String(err)}`;
       setFocusReview((current) => ({ ...current, open: true, expanded: true, running: false, text }));
@@ -336,13 +374,13 @@ function App() {
 
   function submit(event: FormEvent) { event.preventDefault(); void openPr(input); }
 
-  return <main className="app-shell"><header className="toolbar"><div><strong>Pi PR Review</strong><span>{review == null ? "Paste a PR to start" : `${review.pr.key} · ${review.pr.title}`}</span></div><div className="toolbar-actions">{review != null && <><button type="button" onClick={goHome}>Home</button><button type="button" title="Pi session settings" onClick={() => { setSettingsOpen(true); void loadDiagnostics(); }}>⚙</button><button type="button" title="Pi session diagnostics" onClick={() => void showDiagnostics()}>🐞</button><select aria-label="Theme" value={theme} onChange={(event) => setTheme(event.target.value as ThemeName)}><option value="github-dark">GitHub dark</option><option value="github-dimmed">GitHub dimmed</option><option value="github-light">GitHub light</option></select></>}<form className="open-form" onSubmit={submit}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="OWNER/REPO#123 or GitHub PR URL" /><button disabled={busy || input.trim().length === 0}>{busy ? "Fetching…" : "Open"}</button></form></div></header>{error != null && <div className="error">{error}</div>}{review == null ? <StartPage prs={prs} logs={logs} openPr={openPr} cleanupPr={cleanupPr} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} collapseAllComments={() => setCommentCollapseSignal((signal) => signal + 1)} aiReview={aiReview} setAiReview={setAiReview} runAiReview={runAiReview} sendAiReviewMessage={sendAiReviewMessage} focusReview={focusReview} setFocusReview={setFocusReview} runFocusReview={runFocusReview} submitReview={submitReview} submitting={submitting} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} />}{diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} close={() => setDiagnostics(null)} />}{review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} close={() => setSettingsOpen(false)} />}</main>;
+  return <main className="app-shell"><header className="toolbar"><div><strong>Pi PR Review</strong><span>{review == null ? "Paste a PR to start" : `${review.pr.key} · ${review.pr.title}`}</span></div><div className="toolbar-actions">{review != null && <><button type="button" onClick={goHome}>Home</button><button type="button" title="Pi session settings" onClick={() => { setSettingsOpen(true); void loadDiagnostics(); }}>⚙</button><button type="button" title="Pi session diagnostics" onClick={() => void showDiagnostics()}>🐞</button><select aria-label="Theme" value={theme} onChange={(event) => setTheme(event.target.value as ThemeName)}><option value="github-dark">GitHub dark</option><option value="github-dimmed">GitHub dimmed</option><option value="github-light">GitHub light</option></select></>}<form className="open-form" onSubmit={submit}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="OWNER/REPO#123 or GitHub PR URL" /><button disabled={busy || input.trim().length === 0}>{busy ? "Fetching…" : "Open"}</button></form></div></header>{error != null && <div className="error">{error}</div>}{review == null ? <StartPage prs={prs} logs={logs} openPr={openPr} cleanupPr={cleanupPr} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} collapseAllComments={() => setCommentCollapseSignal((signal) => signal + 1)} aiReview={aiReview} setAiReview={setAiReview} runAiReview={runAiReview} sendAiReviewMessage={sendAiReviewMessage} focusReview={focusReview} setFocusReview={setFocusReview} runFocusReview={runFocusReview} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} submitReview={submitReview} submitting={submitting} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} />}{diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} close={() => setDiagnostics(null)} />}{review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} close={() => setSettingsOpen(false)} />}</main>;
 }
 
 function StartPage({ prs, logs, openPr, cleanupPr }: { prs: StoredPullRequest[]; logs: LogEntry[]; openPr: (input: string) => Promise<void>; cleanupPr: (pr: StoredPullRequest) => Promise<void> }) { return <div className="start-grid"><section className="panel"><h1>Previous reviews</h1><p className="muted">Reopen a tracked PR or paste a new one above.</p><History prs={prs} openPr={openPr} cleanupPr={cleanupPr} /></section><details className="panel logs"><summary>Server log</summary><LogRows logs={logs} /></details></div>; }
 
-function ReviewPage(props: DiffProps & { aiReview: AiReview; setAiReview: (review: AiReview) => void; runAiReview: () => Promise<void>; sendAiReviewMessage: (message: string) => Promise<void>; focusReview: FocusReview; setFocusReview: (review: FocusReview) => void; runFocusReview: () => Promise<void>; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<void>; submitting: boolean; refreshingActivity: boolean }) {
-  return <div className="review-layout" style={{ gridTemplateColumns: `minmax(0, 1fr) 12px ${props.sideWidth}px` }}><main className="files"><div className="comment-tools"><button className="small-muted-button" onClick={props.collapseAllComments}>Collapse all comments</button></div>{props.review.files.map((file) => <FileDiff key={file.filename} file={file} {...props} />)}</main><div className="resize-handle" role="separator" aria-label="Resize side panel" onMouseDown={(event) => startResizeSidePanel(event, props.sideWidth, props.setSideWidth)} /><aside className="side"><ReviewSummary pr={props.review.pr} drafts={props.drafts} setDrafts={props.setDrafts} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} submitReview={props.submitReview} submitting={props.submitting} refreshGithubActivity={props.refreshGithubActivity} refreshingActivity={props.refreshingActivity} /><AiReviewPanel review={props.aiReview} setReview={props.setAiReview} runReview={props.runAiReview} sendMessage={props.sendAiReviewMessage} /><FocusReviewPanel review={props.focusReview} setReview={props.setFocusReview} runReview={props.runFocusReview} /><ExistingComments prUrl={props.review.pr.url} comments={props.review.comments} issueComments={props.review.issueComments} refreshGithubActivity={props.refreshGithubActivity} collapseSignal={props.commentCollapseSignal} collapseAllComments={props.collapseAllComments} /></aside></div>;
+function ReviewPage(props: DiffProps & { aiReview: AiReview; setAiReview: (review: AiReview) => void; runAiReview: () => Promise<void>; sendAiReviewMessage: (message: string) => Promise<void>; focusReview: FocusReview; setFocusReview: (review: FocusReview) => void; runFocusReview: () => Promise<void>; focusAreas: FocusArea[]; activeFocusAreaId: string | null; setActiveFocusAreaId: (id: string | null) => void; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<void>; submitting: boolean; refreshingActivity: boolean }) {
+  return <div className="review-layout" style={{ gridTemplateColumns: `minmax(0, 1fr) 12px ${props.sideWidth}px` }}><main className="files"><div className="comment-tools"><button className="small-muted-button" onClick={props.collapseAllComments}>Collapse all comments</button></div>{props.review.files.map((file) => <FileDiff key={file.filename} file={file} {...props} />)}</main><div className="resize-handle" role="separator" aria-label="Resize side panel" onMouseDown={(event) => startResizeSidePanel(event, props.sideWidth, props.setSideWidth)} /><aside className="side"><ReviewSummary pr={props.review.pr} drafts={props.drafts} setDrafts={props.setDrafts} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} submitReview={props.submitReview} submitting={props.submitting} refreshGithubActivity={props.refreshGithubActivity} refreshingActivity={props.refreshingActivity} /><AiReviewPanel review={props.aiReview} setReview={props.setAiReview} runReview={props.runAiReview} sendMessage={props.sendAiReviewMessage} /><FocusReviewPanel review={props.focusReview} setReview={props.setFocusReview} runReview={props.runFocusReview} focusAreas={props.focusAreas} activeFocusAreaId={props.activeFocusAreaId} setActiveFocusAreaId={props.setActiveFocusAreaId} openFocusArea={(area) => { props.setOpenFiles({ ...props.openFiles, [area.path]: true }); props.setActiveFocusAreaId(area.id); }} /><ExistingComments prUrl={props.review.pr.url} comments={props.review.comments} issueComments={props.review.issueComments} refreshGithubActivity={props.refreshGithubActivity} collapseSignal={props.commentCollapseSignal} collapseAllComments={props.collapseAllComments} /></aside></div>;
 }
 
 function startResizeSidePanel(event: React.MouseEvent, initialWidth: number, setSideWidth: (width: number) => void): void {
@@ -459,8 +497,9 @@ function AiReviewPanel({ review, setReview, runReview, sendMessage }: { review: 
   </>;
 }
 
-function FocusReviewPanel({ review, setReview, runReview }: { review: FocusReview; setReview: (review: FocusReview) => void; runReview: () => Promise<void> }) {
-  const body = review.text.length > 0 ? <MarkdownText text={review.text} /> : <p className="muted">Run an independent Pi session to find weird areas, codebase mismatches, and tradeoffs reviewers should investigate.</p>;
+function FocusReviewPanel({ review, setReview, runReview, focusAreas, activeFocusAreaId, setActiveFocusAreaId, openFocusArea }: { review: FocusReview; setReview: (review: FocusReview) => void; runReview: () => Promise<void>; focusAreas: FocusArea[]; activeFocusAreaId: string | null; setActiveFocusAreaId: (id: string | null) => void; openFocusArea: (area: FocusArea) => void }) {
+  const areaList = focusAreas.length > 0 ? <div className="focus-area-list">{focusAreas.map((area) => <button className={`focus-area-card${area.id === activeFocusAreaId ? " active" : ""}`} key={area.id} onClick={() => openFocusArea(area)}><strong>{area.path}:{area.startLine === area.endLine ? area.startLine : `${area.startLine}-${area.endLine}`}</strong><span>{area.title}</span></button>)}</div> : null;
+  const body = review.text.length > 0 ? <>{areaList}<MarkdownText text={review.text} /></> : <p className="muted">Run an independent Pi session to find weird areas, codebase mismatches, and tradeoffs reviewers should investigate.</p>;
   return <>
     <section className="panel focus-review">
       <div className="thread-head"><h2>Focus areas</h2><div className="actions"><Button variant="muted" onClick={() => setReview({ ...review, expanded: true, open: true })} disabled={review.text.length === 0 && !review.open}>Focus</Button><Button variant="muted" onClick={() => setReview({ ...review, open: !review.open })}>{review.open ? "Collapse" : "Show"}</Button></div></div>
@@ -469,7 +508,7 @@ function FocusReviewPanel({ review, setReview, runReview }: { review: FocusRevie
     </section>
     <ModalShell open={review.expanded} onOpenChange={(open) => setReview({ ...review, expanded: open })} label="Focus areas">
       <div className="thread-head"><h2>Focus areas</h2><div className="actions"><Button variant="muted" onClick={() => void runReview()} disabled={review.running}>{review.running ? "Scanning…" : review.text.length > 0 ? "Run again" : "Find focus areas"}</Button><Button variant="muted" onClick={() => setReview({ ...review, expanded: false })}>Close</Button></div></div>
-      <div className="review-modal-body focus-review-body">{body}</div>
+      <div className="review-modal-body focus-review-body">{body}{focusAreas.length > 0 && <Button variant="muted" onClick={() => setActiveFocusAreaId(null)}>Clear file highlight</Button>}</div>
     </ModalShell>
   </>;
 }
