@@ -143,7 +143,7 @@ a { color: var(--link); text-decoration: none; }
 
 .toolbar {
   display: grid;
-  grid-template-columns: minmax(280px, 1fr) minmax(360px, 640px);
+  grid-template-columns: minmax(220px, 1fr) minmax(360px, 760px);
   gap: 12px;
   align-items: center;
   padding: 10px 12px;
@@ -160,15 +160,18 @@ a { color: var(--link); text-decoration: none; }
 .toolbar span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .toolbar-actions {
-  display: grid;
-  grid-template-columns: auto auto auto auto minmax(0, 1fr);
+  display: flex;
   gap: 8px;
   align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
 }
 
 .open-form {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  flex: 1 1 360px;
+  min-width: 0;
   gap: 8px;
 }
 
@@ -835,6 +838,21 @@ a { color: var(--link); text-decoration: none; }
   padding: 0.12rem 0.45rem;
 }
 
+.meta .review-status.success {
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+  color: var(--success);
+}
+
+.meta .review-status.pending {
+  border-color: color-mix(in srgb, var(--attention) 45%, var(--border));
+  color: var(--attention);
+}
+
+.meta .review-status.danger {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  color: var(--danger-text);
+}
+
 .panel select {
   width: 100%;
   padding: 0.4rem 0.5rem;
@@ -900,6 +918,10 @@ a { color: var(--link); text-decoration: none; }
   margin: 8px 0 0;
   color: var(--attention);
   font-size: 0.82rem;
+}
+
+.focus-review-note.clean {
+  color: var(--success);
 }
 
 .focus-area-inline {
@@ -1157,7 +1179,8 @@ a { color: var(--link); text-decoration: none; }
 .log.warn { color: #ffe2a8; }
 
 @media (max-width: 1100px) {
-  .toolbar-actions { grid-template-columns: auto auto auto auto minmax(0, 1fr); }
+  .toolbar { grid-template-columns: 1fr; }
+  .toolbar-actions { flex-wrap: wrap; justify-content: flex-start; }
   .review-layout, .start-grid { grid-template-columns: 1fr !important; }
   .resize-handle { display: none; }
   .side { position: static; max-height: none; }
@@ -1165,7 +1188,7 @@ a { color: var(--link); text-decoration: none; }
 
 @media (max-width: 760px) {
   .app-shell { padding: 8px; }
-  .toolbar, .open-form { grid-template-columns: 1fr; }
+  .open-form { grid-template-columns: 1fr; flex-basis: 100%; }
   .diff-row { grid-template-columns: 42px 42px minmax(0, 1fr) auto; }
   .inline-thread { margin-left: 8px; }
   .inline-thread.collapsed { width: calc(100% - 16px); }

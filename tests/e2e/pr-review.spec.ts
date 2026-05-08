@@ -130,6 +130,7 @@ test("shows readable Pi diagnostics", async ({ page }) => {
   await expect(dialog.locator("strong", { hasText: "anthropic/claude" })).toBeVisible();
   await expect(dialog.locator("dd", { hasText: "/tmp/pr" })).toBeVisible();
   await expect(dialog.locator(".prompt-preview", { hasText: "Review this PR" })).toBeVisible();
+  await expect(dialog).toContainText("Pi runs");
 });
 
 test("renders inline Ask Pi responses as markdown", async ({ page }) => {
@@ -174,6 +175,17 @@ test("runs a separate focus areas review and highlights referenced lines", async
   await expect(focusArea).toContainText("tiling conventions");
   await expect(page.locator(".ai-review")).toContainText("1 focus area highlighted inline");
   await expect(row).toHaveClass(/focus-highlight-active/);
+});
+
+test("shows a clean focus scan status when there are no focus areas", async ({ page }) => {
+  await page.route("**/api/pi/focus-review", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ answer: "No focus areas found. All good." }) });
+  });
+
+  await page.getByRole("button", { name: "Focus scan" }).click();
+
+  await expect(page.locator(".ai-review")).toContainText("Focus scan clean");
+  await expect(page.locator(".focus-area-inline")).toHaveCount(0);
 });
 
 test("runs the right-sidebar Pi review panel and continues the chat with Enter", async ({ page }) => {

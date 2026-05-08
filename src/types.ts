@@ -72,6 +72,7 @@ export type StoredPullRequest = {
   existingCommentCount: number | null;
   lastOpenedAt: string;
   lastReviewedHeadSha: string | null;
+  lastReviewEvent: "COMMENT" | "APPROVE" | "REQUEST_CHANGES" | null;
 };
 
 export type FileReviewState = {

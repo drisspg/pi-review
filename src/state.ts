@@ -27,9 +27,18 @@ export async function listRecentPullRequests(): Promise<StoredPullRequest[]> {
 export async function upsertPullRequest(pr: StoredPullRequest): Promise<StoredPullRequest> {
   const state = await readState();
   const previous = state.prs.find((stored) => stored.key === pr.key);
-  state.prs = [{ ...pr, lastReviewedHeadSha: previous?.lastReviewedHeadSha ?? pr.lastReviewedHeadSha }, ...state.prs.filter((stored) => stored.key !== pr.key)];
+  state.prs = [{ ...pr, lastReviewedHeadSha: previous?.lastReviewedHeadSha ?? pr.lastReviewedHeadSha, lastReviewEvent: previous?.lastReviewEvent ?? pr.lastReviewEvent }, ...state.prs.filter((stored) => stored.key !== pr.key)];
   await writeState(state);
   return state.prs[0];
+}
+
+export async function markPullRequestReviewed(prKey: string, headSha: string, event: StoredPullRequest["lastReviewEvent"]): Promise<StoredPullRequest | null> {
+  const state = await readState();
+  const index = state.prs.findIndex((pr) => pr.key === prKey);
+  if (index === -1) return null;
+  state.prs[index] = { ...state.prs[index], lastReviewedHeadSha: headSha, lastReviewEvent: event };
+  await writeState(state);
+  return state.prs[index];
 }
 
 export async function listFileReviews(prKey: string): Promise<FileReviewState[]> {

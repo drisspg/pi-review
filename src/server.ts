@@ -7,7 +7,7 @@ import { inputFromBody, prKeyForRef, readBody, recordFromBody, refFromBody, send
 import { logger } from "./logger.js";
 import { askPi, disposePiSession, disposePiSessions, piDiagnostics, prewarmPiSession, registerPiSessionCwd, setPiModel } from "./pi-session.js";
 import { parsePullRequestRef } from "./pr.js";
-import { listRecentPullRequests, removePullRequest, setFileViewed, upsertPullRequest } from "./state.js";
+import { listRecentPullRequests, markPullRequestReviewed, removePullRequest, setFileViewed, upsertPullRequest } from "./state.js";
 import { cleanupPrWorktree, preparePrWorktree } from "./worktrees.js";
 
 const DEFAULT_PORT = 43133;
@@ -130,8 +130,11 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (req.method === "POST" && url.pathname === "/api/review/submit") {
     const payload = recordFromBody(await readBody(req));
     const ref = refFromBody(payload);
+    if (payload.event !== "COMMENT" && payload.event !== "APPROVE" && payload.event !== "REQUEST_CHANGES") throw new Error("Expected review event");
     logger.info("api", "submit review requested", { ref, comments: Array.isArray(payload.comments) ? payload.comments.length : 0, event: payload.event });
-    sendJson(res, 200, { result: await submitPullRequestReview(ref, { event: payload.event, body: payload.body, comments: payload.comments }) });
+    const result = await submitPullRequestReview(ref, { event: payload.event, body: payload.body, comments: payload.comments });
+    const reviewedPr = await markPullRequestReviewed(prKeyForRef(ref), typeof payload.headSha === "string" ? payload.headSha : "", payload.event);
+    sendJson(res, 200, { result, pr: reviewedPr });
     return;
   }
 
