@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { extname, join, normalize, resolve } from "node:path";
 
 import { addIssueComment, fetchFileText, fetchPullRequestReviewData, replyToReviewComment, submitPullRequestReview } from "./github.js";
+import { inputFromBody, prKeyForRef, readBody, recordFromBody, refFromBody, sendJson, viewedPayloadFromBody } from "./http.js";
 import { logger } from "./logger.js";
 import { askPi, disposePiSession, disposePiSessions, piDiagnostics, prewarmPiSession, registerPiSessionCwd, setPiModel } from "./pi-session.js";
 import { parsePullRequestRef } from "./pr.js";
@@ -19,18 +20,6 @@ const contentTypes: Record<string, string> = {
   ".svg": "image/svg+xml",
 };
 
-type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
-
-function sendJson(res: ServerResponse, status: number, body: JsonValue): void {
-  res.writeHead(status, {
-    "content-type": "application/json; charset=utf-8",
-    "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
-    "access-control-allow-headers": "content-type",
-  });
-  res.end(JSON.stringify(body));
-}
-
 async function sendStatic(res: ServerResponse, pathname: string): Promise<void> {
   const candidate = normalize(pathname).replace(/^([/\\])+/, "");
   const filePath = resolve(join(WEB_ROOT, candidate.length > 0 ? candidate : "index.html"));
@@ -39,51 +28,6 @@ async function sendStatic(res: ServerResponse, pathname: string): Promise<void> 
   const data = await readFile(finalPath);
   res.writeHead(200, { "content-type": contentTypes[extname(finalPath)] ?? "application/octet-stream" });
   res.end(data);
-}
-
-function readBody(req: IncomingMessage): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    let body = "";
-    req.setEncoding("utf8");
-    req.on("data", (chunk) => {
-      body += chunk;
-    });
-    req.on("end", () => {
-      resolve(body.length > 0 ? JSON.parse(body) : {});
-    });
-    req.on("error", reject);
-  });
-}
-
-function inputFromBody(body: unknown): string {
-  if (typeof body !== "object" || body == null || !("input" in body) || typeof body.input !== "string") {
-    throw new Error("Expected JSON body with an input string");
-  }
-  return body.input;
-}
-
-function viewedPayloadFromBody(body: unknown) {
-  if (typeof body !== "object" || body == null) throw new Error("Expected JSON body");
-  const payload = body as Record<string, unknown>;
-  if (typeof payload.prKey !== "string" || typeof payload.path !== "string" || typeof payload.fingerprint !== "string" || typeof payload.viewed !== "boolean") {
-    throw new Error("Expected prKey, path, fingerprint, and viewed fields");
-  }
-  return payload as { prKey: string; path: string; fingerprint: string; viewed: boolean };
-}
-
-function recordFromBody(body: unknown): Record<string, unknown> {
-  if (typeof body !== "object" || body == null) throw new Error("Expected JSON body");
-  return body as Record<string, unknown>;
-}
-
-function refFromBody(body: unknown) {
-  const payload = recordFromBody(body);
-  if (typeof payload.prUrl !== "string") throw new Error("Expected prUrl");
-  return parsePullRequestRef(payload.prUrl);
-}
-
-function prKeyForRef(ref: ReturnType<typeof parsePullRequestRef>): string {
-  return `${ref.host}/${ref.owner}/${ref.repo}#${ref.number}`;
 }
 
 async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {

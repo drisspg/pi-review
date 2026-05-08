@@ -1,0 +1,15 @@
+export type StoredPullRequest = { key: string; url: string; title: string; state: string; author: string | null; baseSha: string; headSha: string; filesChanged: number | null; existingCommentCount: number | null; lastOpenedAt: string };
+export type PullFile = { filename: string; previous_filename?: string; status: string; additions: number; deletions: number; changes: number; patch?: string };
+export type PullReviewComment = { id: number; path: string; line?: number | null; start_line?: number | null; original_line?: number | null; side?: "RIGHT" | "LEFT" | null; original_side?: "RIGHT" | "LEFT" | null; in_reply_to_id?: number | null; body: string; html_url: string; user?: { login?: string } | null; updated_at?: string };
+export type PullIssueComment = { id: number; body: string; html_url: string; user?: { login?: string } | null; updated_at?: string };
+export type FileReviewState = { prKey: string; path: string; fingerprint: string; viewed: boolean; updatedAt: string };
+export type LogEntry = { id: number; level: "debug" | "info" | "warn" | "error"; scope: string; message: string; data?: unknown; timestamp: string };
+export type DiffRow = { kind: string; oldLine: number | null; newLine: number | null; text: string; hunk: string };
+export type Target = { path: string; line: number | null; startLine?: number | null; side: "RIGHT" | "LEFT"; hunk: string };
+export type ThreadMessage = { role: "user" | "pi"; text: string };
+export type Thread = { key: string; target: Target; collapsed: boolean; draft: string; asking?: boolean; messages: ThreadMessage[] };
+export type DraftComment = { id: string; path: string; line: number | null; startLine?: number | null; side: "RIGHT" | "LEFT"; body: string };
+export type DragSelection = { start: Target; current: Target; dragging: boolean };
+export type AiReview = { expanded: boolean; open: boolean; running: boolean; text: string };
+export type ThemeName = "github-dark" | "github-light" | "github-dimmed";
+export type OpenResponse = { pr: StoredPullRequest; files: PullFile[]; comments: PullReviewComment[]; issueComments: PullIssueComment[]; fileReviews: FileReviewState[] };

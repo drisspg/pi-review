@@ -1,32 +1,14 @@
 import React, { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { ChevronDownIcon, ChevronRightIcon, KebabHorizontalIcon, LinkExternalIcon, ScreenFullIcon } from "@primer/octicons-react";
-import hljs from "highlight.js/lib/core";
-import bash from "highlight.js/lib/languages/bash";
-import cpp from "highlight.js/lib/languages/cpp";
-import javascript from "highlight.js/lib/languages/javascript";
-import json from "highlight.js/lib/languages/json";
-import python from "highlight.js/lib/languages/python";
-import typescript from "highlight.js/lib/languages/typescript";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { api } from "./api";
+import { CodeText, MarkdownText } from "./components/Markdown";
+import { ExistingComments, ExistingReviewThread } from "./components/Threads";
+import { commentTarget, draftMatchesTarget, groupReviewComments, targetKey, targetLabel, threadForTarget } from "./lib/comments";
+import { contextRowsFromText, hunkNewStart, isTargetInSelection, lastNewLine, parsePatchRows, targetFromPoint, targetFromRow } from "./lib/diff";
+import { languageForPath } from "./lib/highlight";
+import { newId, prUrlFromKey, shortSha } from "./lib/pr";
+import type { AiReview, DiffRow, DraftComment, DragSelection, FileReviewState, LogEntry, OpenResponse, PullFile, PullIssueComment, PullReviewComment, StoredPullRequest, Target, ThemeName, Thread } from "./types";
 import "./styles.css";
-
-type StoredPullRequest = { key: string; url: string; title: string; state: string; author: string | null; baseSha: string; headSha: string; filesChanged: number | null; existingCommentCount: number | null; lastOpenedAt: string };
-type PullFile = { filename: string; previous_filename?: string; status: string; additions: number; deletions: number; changes: number; patch?: string };
-type PullReviewComment = { id: number; path: string; line?: number | null; start_line?: number | null; original_line?: number | null; side?: "RIGHT" | "LEFT" | null; original_side?: "RIGHT" | "LEFT" | null; in_reply_to_id?: number | null; body: string; html_url: string; user?: { login?: string } | null; updated_at?: string };
-type PullIssueComment = { id: number; body: string; html_url: string; user?: { login?: string } | null; updated_at?: string };
-type FileReviewState = { prKey: string; path: string; fingerprint: string; viewed: boolean; updatedAt: string };
-type LogEntry = { id: number; level: "debug" | "info" | "warn" | "error"; scope: string; message: string; data?: unknown; timestamp: string };
-type DiffRow = { kind: string; oldLine: number | null; newLine: number | null; text: string; hunk: string };
-type Target = { path: string; line: number | null; startLine?: number | null; side: "RIGHT" | "LEFT"; hunk: string };
-type ThreadMessage = { role: "user" | "pi"; text: string };
-type Thread = { key: string; target: Target; collapsed: boolean; draft: string; asking?: boolean; messages: ThreadMessage[] };
-type DraftComment = { id: string; path: string; line: number | null; startLine?: number | null; side: "RIGHT" | "LEFT"; body: string };
-type DragSelection = { start: Target; current: Target; dragging: boolean };
-type AiReview = { expanded: boolean; open: boolean; running: boolean; text: string };
-type ThemeName = "github-dark" | "github-light" | "github-dimmed";
-type OpenResponse = { pr: StoredPullRequest; files: PullFile[]; comments: PullReviewComment[]; issueComments: PullIssueComment[]; fileReviews: FileReviewState[] };
 
 type DiffProps = {
   review: OpenResponse;
@@ -53,127 +35,6 @@ type DiffProps = {
   finishDrag: (target: Target) => void;
   handleRowClick: (target: Target, extend: boolean) => void;
 };
-
-function prUrlFromKey(key: string): string {
-  const match = key.match(/^(https?:\/\/[^/]+|[^/]+)\/([^/]+)\/([^#]+)#(\d+)$/);
-  if (match == null) return key;
-  const host = match[1].startsWith("http") ? new URL(match[1]).host : match[1];
-  return `https://${host}/${match[2]}/${match[3]}/pull/${match[4]}`;
-}
-
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, { ...init, headers: { "content-type": "application/json", ...init?.headers } });
-  const body = await response.json();
-  if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
-  return body as T;
-}
-
-function parsePatchRows(patch: string | undefined): DiffRow[] {
-  if (patch == null) return [];
-  const rows: DiffRow[] = [];
-  let oldLine = 0;
-  let newLine = 0;
-  let currentHunk = "";
-  for (const line of patch.split("\n")) {
-    const hunk = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-    if (hunk != null) {
-      oldLine = Number.parseInt(hunk[1], 10);
-      newLine = Number.parseInt(hunk[2], 10);
-      currentHunk = line;
-      rows.push({ kind: "hunk", oldLine: null, newLine: null, text: line, hunk: currentHunk });
-    } else if (line.startsWith("+")) {
-      rows.push({ kind: "added", oldLine: null, newLine, text: line, hunk: currentHunk });
-      newLine += 1;
-    } else if (line.startsWith("-")) {
-      rows.push({ kind: "removed", oldLine, newLine: null, text: line, hunk: currentHunk });
-      oldLine += 1;
-    } else if (line.startsWith(" ")) {
-      rows.push({ kind: "context", oldLine, newLine, text: line, hunk: currentHunk });
-      oldLine += 1;
-      newLine += 1;
-    } else {
-      rows.push({ kind: "meta", oldLine: null, newLine: null, text: line, hunk: currentHunk });
-    }
-  }
-  return rows;
-}
-
-function targetKey(target: Target): string { return `${target.path}:${target.side}:${target.startLine ?? target.line ?? "file"}:${target.line ?? "file"}`; }
-function commentTarget(comment: PullReviewComment): Target { return { path: comment.path, startLine: comment.start_line ?? comment.line ?? comment.original_line ?? null, line: comment.line ?? comment.original_line ?? null, side: comment.side ?? comment.original_side ?? "RIGHT", hunk: "" }; }
-function draftMatchesTarget(draft: DraftComment, target: Target): boolean {
-  return draft.path === target.path && draft.side === target.side && draft.line === target.line;
-}
-
-function threadForTarget(threads: Record<string, Thread>, target: Target): Thread | null {
-  return threads[targetKey(target)] ?? Object.values(threads).find((thread) => thread.target.path === target.path && thread.target.side === target.side && thread.target.line === target.line) ?? null;
-}
-
-function groupReviewComments(comments: PullReviewComment[]): PullReviewComment[][] {
-  const byId = new Map(comments.map((comment) => [comment.id, comment]));
-  const rootForComment = (comment: PullReviewComment): PullReviewComment => {
-    let root = comment;
-    while (root.in_reply_to_id != null && byId.has(root.in_reply_to_id)) root = byId.get(root.in_reply_to_id)!;
-    return root;
-  };
-  const groups = new Map<string, PullReviewComment[]>();
-  for (const comment of comments) {
-    const root = rootForComment(comment);
-    const key = targetKey(commentTarget(root));
-    groups.set(key, [...(groups.get(key) ?? []), comment]);
-  }
-  return [...groups.values()].map((thread) => thread.sort((a, b) => a.id - b.id));
-}
-
-function isTargetInSelection(target: Target | null, selection: DragSelection | null): boolean {
-  if (target == null || selection == null || target.line == null || selection.start.line == null || selection.current.line == null) return false;
-  if (target.path !== selection.start.path || target.side !== selection.start.side) return false;
-  const start = Math.min(selection.start.line, selection.current.line);
-  const end = Math.max(selection.start.line, selection.current.line);
-  return target.line >= start && target.line <= end;
-}
-
-function targetFromRow(row: HTMLElement | null): Target | null {
-  if (row == null) return null;
-  const line = Number.parseInt(row.dataset.line ?? "", 10);
-  const path = row.dataset.path;
-  const side = row.dataset.side;
-  if (path == null || !Number.isInteger(line) || (side !== "RIGHT" && side !== "LEFT")) return null;
-  return { path, line, side, hunk: row.dataset.hunk ?? "" };
-}
-
-function targetFromPoint(clientX: number, clientY: number): Target | null {
-  return targetFromRow(document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>(".diff-row[data-path]") ?? null);
-}
-hljs.registerLanguage("bash", bash);
-hljs.registerLanguage("cpp", cpp);
-hljs.registerLanguage("javascript", javascript);
-hljs.registerLanguage("json", json);
-hljs.registerLanguage("python", python);
-hljs.registerLanguage("typescript", typescript);
-
-function shortSha(sha: string): string { return sha.slice(0, 12); }
-function targetLabel(target: Pick<Target, "path" | "line" | "startLine">): string { return `${target.path}:${target.line == null ? "file" : target.startLine != null && target.startLine !== target.line ? `${target.startLine}-${target.line}` : target.line}`; }
-function newId(): string { return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`; }
-
-function languageForPath(path: string | null | undefined): string {
-  if (path == null) return "";
-  if (/\.(cc|cpp|cu|cuh|c|h|hpp)$/.test(path)) return "cpp";
-  if (/\.tsx?$/.test(path)) return "typescript";
-  if (/\.jsx?$/.test(path)) return "javascript";
-  if (/\.py$/.test(path)) return "python";
-  if (/\.json$/.test(path)) return "json";
-  if (/\.(sh|bash|zsh)$/.test(path)) return "bash";
-  return "";
-}
-
-function highlightedHtml(code: string, language: string): string {
-  if (language.length > 0 && hljs.getLanguage(language) != null) return hljs.highlight(code, { language }).value;
-  return hljs.highlightAuto(code).value;
-}
-
-function CodeText({ code, language }: { code: string; language: string }) {
-  return <code dangerouslySetInnerHTML={{ __html: highlightedHtml(code, language) }} />;
-}
 
 function App() {
   const [input, setInput] = useState("");
@@ -546,42 +407,9 @@ function DiffRowView({ row, target, threads, setThreads, toggleThread, comments,
   return <><div className={`diff-row ${row.kind} ${thread != null && !thread.collapsed ? "selected" : ""} ${selecting ? "range-selecting" : ""}`} data-path={target?.path} data-line={target?.line ?? undefined} data-side={target?.side} data-hunk={target?.hunk} onMouseDown={(event) => { if (target != null && event.button === 0) { event.preventDefault(); beginDrag(target); } }} onMouseEnter={() => { if (target != null && dragSelectionRef.current != null) updateDrag(target); }} onMouseUp={() => { if (target != null) finishDrag(target); }} onClick={(event) => { if (target != null) handleRowClick(target, event.shiftKey); }}><span className="num">{row.oldLine ?? ""}</span><span className="num">{row.newLine ?? ""}</span><CodeText code={row.text} language={languageForPath(target?.path)} />{(thread != null || inlineCommentThreads.length + inlineDrafts.length > 0) && <span className="pill">{(thread == null ? 0 : 1) + inlineCommentThreads.length + inlineDrafts.length}</span>}</div>{inlineCommentThreads.map((commentThread) => <ExistingReviewThread key={commentThread.map((comment) => comment.id).join(":")} comments={commentThread} />)}{inlineDrafts.map((draft) => <div className="inline-thread draft" key={draft.id}><DraftView draft={draft} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} /></div>)}{thread != null && <ThreadBox thread={thread} setThread={(next) => setThreads((current) => ({ ...current, [next.key]: next }))} closeThread={() => setThreads((current) => { const next = { ...current }; delete next[thread.key]; return next; })} addDraft={() => { if (thread.draft.trim().length > 0) setDrafts([...drafts, { id: newId(), path: thread.target.path, line: thread.target.line, startLine: thread.target.startLine, side: thread.target.side, body: thread.draft.trim() }]); setThreads((current) => { const next = { ...current }; if (thread.messages.length === 0) delete next[thread.key]; else next[thread.key] = { ...thread, draft: "", collapsed: true }; return next; }); }} askThread={askThread} />}</>;
 }
 
-function avatarLabel(login: string): string {
-  return login.slice(0, 1).toUpperCase();
-}
-
-function commentCountLabel(count: number): string {
-  return `${count} ${count === 1 ? "comment" : "comments"}`;
-}
-
-function ExistingReviewThread({ comments }: { comments: PullReviewComment[] }) {
-  return <GitHubThreadCard className="inline-thread existing" title="GitHub thread" subtitle={`${targetLabel(commentTarget(comments[0]))} · ${commentCountLabel(comments.length)}`} href={comments[0].html_url} comments={comments} />;
-}
-
-function ReviewCommentTimeline({ comments }: { comments: Array<PullReviewComment | PullIssueComment> }) {
-  return <div className="github-comment-timeline">{comments.map((comment) => { const login = comment.user?.login ?? "github"; return <div className="github-comment" key={comment.id}><div className="avatar" aria-hidden="true">{avatarLabel(login)}</div><div className="github-comment-body"><div className="github-comment-header"><strong>@{login}</strong></div><MarkdownText text={comment.body} /></div></div>; })}</div>;
-}
-
-function GitHubThreadCard({ className = "comment", title, subtitle, href, comments, reply }: { className?: string; title: string; subtitle: string; href: string; comments: Array<PullReviewComment | PullIssueComment>; reply?: React.ReactNode }) {
-  const [collapsed, setCollapsed] = useState(false);
-  const [focused, setFocused] = useState(false);
-  const body = <><ReviewCommentTimeline comments={comments} />{reply}</>;
-  return <><div className={`${className} github-thread ${collapsed ? "minimized" : ""}`}><div className="thread-head"><div className="thread-title"><button className="icon-button" aria-label={collapsed ? "Expand thread" : "Collapse thread"} onClick={() => setCollapsed(!collapsed)}>{collapsed ? <ChevronRightIcon size={16} /> : <ChevronDownIcon size={16} />}</button><div><strong>{title}</strong><span>{subtitle}</span></div></div><div className="actions"><button className="icon-button" aria-label="Focus thread" onClick={() => setFocused(true)}><ScreenFullIcon size={16} /></button><details className="action-menu"><summary aria-label="Thread actions"><KebabHorizontalIcon size={16} /></summary><div className="action-menu-popover"><a href={href} target="_blank" rel="noreferrer"><LinkExternalIcon size={16} />Open on GitHub</a><button onClick={() => setFocused(true)}><ScreenFullIcon size={16} />Focus thread</button></div></details></div></div>{!collapsed && body}</div>{focused && <div className="review-modal" role="dialog" aria-modal="true" aria-label={title}><div className="review-modal-card github-thread-modal"><div className="thread-head"><div><h2>{title}</h2><span>{subtitle}</span></div><div className="actions"><a href={href} target="_blank" rel="noreferrer"><LinkExternalIcon size={16} /> Open on GitHub</a><button onClick={() => setFocused(false)}>Close</button></div></div><div className="review-modal-body github-thread-dialog-body">{body}</div></div></div>}</>;
-}
-
 function ThreadBox({ thread, setThread, closeThread, addDraft, askThread }: { thread: Thread; setThread: (thread: Thread) => void; closeThread: () => void; addDraft: () => void; askThread: (thread: Thread) => Promise<void> }) {
   if (thread.collapsed) return <button className="inline-thread collapsed" onClick={() => setThread({ ...thread, collapsed: false })}>▶ Thread on {thread.target.line == null ? "file" : targetLabel(thread.target)}</button>;
   return <div className="inline-thread review-thread"><div className="thread-head"><div><strong>Line thread</strong><span>{targetLabel(thread.target)}</span></div><div className="actions">{(thread.draft.trim().length > 0 || thread.messages.length > 0) && <button onClick={() => setThread({ ...thread, collapsed: true })}>Collapse</button>}<button onClick={closeThread}>Close</button></div></div>{thread.target.line != null && <label className="range-control">Range end <input type="number" value={thread.target.line} min={thread.target.startLine ?? thread.target.line} onChange={(event) => setThread({ ...thread, target: { ...thread.target, startLine: thread.target.startLine ?? thread.target.line, line: Number.parseInt(event.target.value, 10) || thread.target.line } })} /></label>}{thread.messages.length > 0 && <div className="thread-messages">{thread.messages.map((message, index) => <div className={`thread-note ${message.role}`} key={index}><div className="message-role">{message.role === "user" ? "You" : "Pi"}</div><MarkdownText text={message.text} /></div>)}</div>}<div className="composer"><textarea value={thread.draft} onChange={(event) => setThread({ ...thread, draft: event.target.value })} placeholder="Write a draft comment or ask Pi about this line" /><div className="actions"><button onClick={addDraft} disabled={thread.draft.trim().length === 0}>Add draft comment</button><button onClick={() => void askThread(thread)} disabled={thread.asking || thread.draft.trim().length === 0}>{thread.asking ? "Asking…" : "Ask Pi"}</button></div></div></div>;
-}
-
-function MarkdownText({ text }: { text: string }) {
-  return <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ code: MarkdownCode }}>{text}</ReactMarkdown></div>;
-}
-
-function MarkdownCode({ className, children }: { className?: string; children?: React.ReactNode }) {
-  const code = String(children ?? "").replace(/\n$/, "");
-  const language = className?.match(/language-(\w+)/)?.[1] ?? "";
-  return <code dangerouslySetInnerHTML={{ __html: highlightedHtml(code, language) }} />;
 }
 
 function ReviewSummary({ pr, drafts, setDrafts, editingDraftId, setEditingDraftId, submitReview, submitting, refreshGithubActivity, refreshingActivity }: { pr: StoredPullRequest; drafts: DraftComment[]; setDrafts: (drafts: DraftComment[]) => void; editingDraftId: string | null; setEditingDraftId: (id: string | null) => void; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<void>; submitting: boolean; refreshGithubActivity: () => Promise<void>; refreshingActivity: boolean }) {
@@ -594,25 +422,6 @@ function AiReviewPanel({ review, setReview, runReview }: { review: AiReview; set
   const body = review.text.length > 0 ? <MarkdownText text={review.text} /> : <p className="muted">Run the PR review skill-style prompt and show the result here.</p>;
   return <><section className="panel ai-review"><div className="thread-head"><h2>Pi review</h2><div className="actions"><button onClick={() => setReview({ ...review, expanded: true, open: true })} disabled={review.text.length === 0 && !review.open}>Expand</button><button onClick={() => setReview({ ...review, open: !review.open })}>{review.open ? "Hide" : "Show"}</button></div></div><button onClick={() => void runReview()} disabled={review.running}>{review.running ? "Reviewing…" : review.text.length > 0 ? "Run again" : "Run review"}</button>{review.open && body}</section>{review.expanded && <div className="review-modal" role="dialog" aria-modal="true"><div className="review-modal-card"><div className="thread-head"><h2>Pi review</h2><div className="actions"><button onClick={() => void runReview()} disabled={review.running}>{review.running ? "Reviewing…" : "Run again"}</button><button onClick={() => setReview({ ...review, expanded: false })}>Close</button></div></div><div className="review-modal-body">{body}</div></div></div>}</>;
 }
-
-function ThreadReplyBox({ prUrl, kind, commentId, refreshGithubActivity }: { prUrl: string; kind: "issue" | "review"; commentId?: number; refreshGithubActivity: () => Promise<void> }) {
-  const [body, setBody] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  async function submitReply() {
-    if (body.trim().length === 0 || submitting) return;
-    setSubmitting(true);
-    try {
-      await api("/api/comment/reply", { method: "POST", body: JSON.stringify({ prUrl, kind, commentId, body }) });
-      setBody("");
-      await refreshGithubActivity();
-    } finally {
-      setSubmitting(false);
-    }
-  }
-  return <div className="thread-reply"><textarea value={body} onChange={(event) => setBody(event.target.value)} placeholder="Reply…" /><button onClick={() => void submitReply()} disabled={submitting || body.trim().length === 0}>{submitting ? "Replying…" : "Reply"}</button></div>;
-}
-
-function ExistingComments({ prUrl, comments, issueComments, refreshGithubActivity }: { prUrl: string; comments: PullReviewComment[]; issueComments: PullIssueComment[]; refreshGithubActivity: () => Promise<void> }) { const reviewThreads = groupReviewComments(comments); return <section className="panel"><h2>Existing comments</h2>{comments.length + issueComments.length === 0 ? <p className="muted">No existing comments.</p> : <>{issueComments.length > 0 && <GitHubThreadCard title="Conversation thread" subtitle={commentCountLabel(issueComments.length)} href={issueComments[0].html_url} comments={issueComments} reply={<ThreadReplyBox prUrl={prUrl} kind="issue" refreshGithubActivity={refreshGithubActivity} />} />}{reviewThreads.map((thread) => <GitHubThreadCard key={thread.map((comment) => comment.id).join(":")} title="Review thread" subtitle={`${targetLabel(commentTarget(thread[0]))} · ${commentCountLabel(thread.length)}`} href={thread[0].html_url} comments={thread} reply={<ThreadReplyBox prUrl={prUrl} kind="review" commentId={thread[0].id} refreshGithubActivity={refreshGithubActivity} />} />)}</>}</section>; }
 
 function diagnosticsText(value: unknown): string {
   if (value == null) return "—";
