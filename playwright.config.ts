@@ -1,6 +1,6 @@
 import { defineConfig } from "@playwright/test";
 
-const port = Number.parseInt(process.env.PI_PR_REVIEW_PORT ?? "43133", 10);
+const port = Number.parseInt(process.env.PI_REVIEW_TEST_PORT ?? process.env.PI_PR_REVIEW_PORT ?? "43134", 10);
 
 export default defineConfig({
   testDir: "tests/e2e",
@@ -15,7 +15,7 @@ export default defineConfig({
   webServer: {
     command: `PI_PR_REVIEW_PORT=${port} npm start`,
     url: `http://127.0.0.1:${port}/api/health`,
-    reuseExistingServer: true,
+    reuseExistingServer: false,
     timeout: 30_000,
   },
 });

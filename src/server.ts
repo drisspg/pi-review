@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, normalize, resolve } from "node:path";
@@ -12,6 +13,29 @@ import { cleanupPrWorktree, preparePrWorktree } from "./worktrees.js";
 
 const DEFAULT_PORT = 43133;
 const WEB_ROOT = resolve(process.cwd(), "dist-web");
+
+type FocusReviewJob = {
+  id: string;
+  prKey: string;
+  status: "running" | "complete" | "failed";
+  answer?: string;
+  error?: string;
+  startedAt: string;
+  finishedAt?: string;
+};
+
+const focusReviewJobs = new Map<string, FocusReviewJob>();
+
+function startFocusReviewJob(prKey: string, prompt: string): FocusReviewJob {
+  const job: FocusReviewJob = { id: randomUUID(), prKey, status: "running", startedAt: new Date().toISOString() };
+  focusReviewJobs.set(job.id, job);
+  void askPi(prKey, prompt, "focus-review").then((answer) => {
+    focusReviewJobs.set(job.id, { ...job, status: "complete", answer, finishedAt: new Date().toISOString() });
+  }).catch((error: unknown) => {
+    focusReviewJobs.set(job.id, { ...job, status: "failed", error: error instanceof Error ? error.message : String(error), finishedAt: new Date().toISOString() });
+  });
+  return job;
+}
 
 const contentTypes: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
@@ -106,10 +130,21 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     return;
   }
 
+  if (req.method === "POST" && url.pathname === "/api/pi/focus-review/status") {
+    const payload = recordFromBody(await readBody(req));
+    if (typeof payload.jobId !== "string") throw new Error("Expected jobId");
+    const job = focusReviewJobs.get(payload.jobId);
+    if (job == null) throw new Error(`Unknown focus review job ${payload.jobId}`);
+    sendJson(res, 200, { job });
+    return;
+  }
+
   if (req.method === "POST" && url.pathname === "/api/pi/focus-review") {
     const payload = recordFromBody(await readBody(req));
     if (typeof payload.prKey !== "string" || typeof payload.prompt !== "string") throw new Error("Expected prKey and prompt");
-    sendJson(res, 200, { answer: await askPi(payload.prKey, payload.prompt, "focus-review") });
+    const job = startFocusReviewJob(payload.prKey, payload.prompt);
+    logger.info("api", "focus review job started", { prKey: payload.prKey, jobId: job.id });
+    sendJson(res, 202, { job });
     return;
   }
 

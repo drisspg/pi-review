@@ -70,6 +70,10 @@ function nearbyMarkdown(text: string, index: number): string {
   return text.slice(index, end).trim();
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
+}
+
 function highlightFocusAreas(areas: FocusArea[], activeId: string | null): void {
   document.querySelectorAll(".diff-row.focus-highlight, .diff-row.focus-highlight-active").forEach((row) => row.classList.remove("focus-highlight", "focus-highlight-active"));
   for (const area of areas) {
@@ -346,9 +350,18 @@ function App() {
     const diffSummary = review.files.map((file) => `## ${file.filename}\nStatus: ${file.status}, +${file.additions}/-${file.deletions}\n${file.patch ?? "Patch unavailable"}`).join("\n\n");
     const prompt = `You are a second, independent PR-review pass for ${review.pr.key}. Look specifically for areas worth deeper human review, not a normal exhaustive review. Prioritize:\n- code that feels inconsistent with nearby codebase patterns or API conventions\n- surprising behavior, hidden assumptions, edge cases, or subtle tradeoffs\n- tests, migrations, performance, concurrency, or compatibility risks that deserve investigation\n- places where the implementation may be valid but reviewers should explicitly decide if the tradeoff is acceptable\n\nReturn markdown with a short "Focus areas" list. Start each item with a clickable-style location in this exact format: \`path:startLine-endLine — short title\` or \`path:line — short title\`. Then include why it is weird or worth investigation and a concrete reviewer question. Avoid generic praise and avoid blocking language unless there is strong evidence.\n\nPR title: ${review.pr.title}\n\n${diffSummary}`;
     try {
-      const { answer } = await api<{ answer: string }>("/api/pi/focus-review", { method: "POST", body: JSON.stringify({ prKey: review.pr.key, prompt }) });
-      setFocusReview((current) => ({ ...current, open: true, running: false, text: answer }));
-      setActiveFocusAreaId(parseFocusAreas(answer)[0]?.id ?? null);
+      const { job } = await api<{ job: { id: string } }>("/api/pi/focus-review", { method: "POST", body: JSON.stringify({ prKey: review.pr.key, prompt }) });
+      for (;;) {
+        await sleep(800);
+        const { job: status } = await api<{ job: { status: "running" | "complete" | "failed"; answer?: string; error?: string } }>("/api/pi/focus-review/status", { method: "POST", body: JSON.stringify({ jobId: job.id }) });
+        if (status.status === "running") continue;
+        if (status.status === "failed") throw new Error(status.error ?? "Focus review failed");
+        if (status.status !== "complete") throw new Error("Focus review returned an unknown job status");
+        const answer = status.answer ?? "Focus scan completed without output.";
+        setFocusReview((current) => ({ ...current, open: true, running: false, text: answer }));
+        setActiveFocusAreaId(parseFocusAreas(answer)[0]?.id ?? null);
+        break;
+      }
     } catch (err) {
       const text = `Focus review failed: ${err instanceof Error ? err.message : String(err)}`;
       setFocusReview((current) => ({ ...current, open: true, running: false, text }));

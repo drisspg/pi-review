@@ -158,11 +158,11 @@ test("runs a separate focus areas review and highlights referenced lines", async
   const line = await row.getAttribute("data-line");
   if (path == null || line == null) throw new Error("Missing diff row target");
 
-  await page.route("**/api/pi/focus-review", async (route) => {
-    await route.fulfill({
-      contentType: "application/json",
-      body: JSON.stringify({ answer: `## Focus areas\n- \`${path}:${line}-${Number.parseInt(line, 10) + 1} — convention mismatch\`: check whether this matches local tiling conventions.` }),
-    });
+  await page.route(/\/api\/pi\/focus-review\/status$/, async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { status: "complete", answer: `## Focus areas\n- \`${path}:${line}-${Number.parseInt(line, 10) + 1} — convention mismatch\`: check whether this matches local tiling conventions.` } }) });
+  });
+  await page.route(/\/api\/pi\/focus-review$/, async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { id: "focus-job" } }) });
   });
 
   await page.getByRole("button", { name: "Focus scan" }).click();
@@ -178,8 +178,11 @@ test("runs a separate focus areas review and highlights referenced lines", async
 });
 
 test("shows a clean focus scan status when there are no focus areas", async ({ page }) => {
-  await page.route("**/api/pi/focus-review", async (route) => {
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ answer: "No focus areas found. All good." }) });
+  await page.route(/\/api\/pi\/focus-review\/status$/, async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { status: "complete", answer: "No focus areas found. All good." } }) });
+  });
+  await page.route(/\/api\/pi\/focus-review$/, async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { id: "clean-focus-job" } }) });
   });
 
   await page.getByRole("button", { name: "Focus scan" }).click();
