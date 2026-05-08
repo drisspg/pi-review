@@ -110,7 +110,13 @@ a { color: var(--link); text-decoration: none; }
   align-content: start;
 }
 
-.toolbar, .panel, .comment-tools {
+.toolbar, .panel, .file {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 8px;
+}
+
+.comment-tools {
   display: flex;
   justify-content: flex-end;
   margin-bottom: 8px;
@@ -133,12 +139,6 @@ a { color: var(--link); text-decoration: none; }
   color: var(--muted);
   font-size: 0.82rem;
   background: transparent;
-}
-
-.file {
-  border: 1px solid var(--border);
-  background: var(--panel);
-  border-radius: 8px;
 }
 
 .toolbar {
@@ -471,9 +471,7 @@ a { color: var(--link); text-decoration: none; }
   font-size: 0.78rem;
 }
 
-.github-thread.minimized .ui-button-icon,
-.github-thread.minimized .icon-button,
-.github-thread.minimized .action-menu summary {
+.github-thread.minimized .ui-button-icon {
   width: 24px;
   height: 24px;
   min-height: 24px;
@@ -534,8 +532,7 @@ a { color: var(--link); text-decoration: none; }
   background: transparent;
 }
 
-.ui-button-icon,
-.icon-button {
+.ui-button-icon {
   display: inline-grid;
   place-items: center;
   width: 28px;
@@ -555,39 +552,14 @@ a { color: var(--link); text-decoration: none; }
   display: none;
 }
 
-.ui-button-icon:hover,
-.icon-button:hover,
-.action-menu summary:hover {
+.ui-button-icon:hover {
   color: var(--text);
   background: var(--panel);
   border-color: var(--border);
 }
 
-.action-menu {
-  position: relative;
-}
-
-.action-menu summary {
-  display: inline-grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  color: var(--muted);
-  list-style: none;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.action-menu summary::-webkit-details-marker {
-  display: none;
-}
-
 .action-menu-popover {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 20;
+  z-index: 60;
   display: grid;
   min-width: 180px;
   padding: 4px;
@@ -900,13 +872,15 @@ a { color: var(--link); text-decoration: none; }
   position: fixed;
   inset: 0;
   z-index: 50;
-  display: grid;
-  place-items: center;
-  padding: 28px;
   background: rgba(1, 4, 9, 0.72);
 }
 
 .review-modal-card {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 51;
   width: min(1100px, 96vw);
   max-height: 90vh;
   display: grid;
@@ -916,6 +890,18 @@ a { color: var(--link); text-decoration: none; }
   background: var(--panel);
   padding: 16px;
   box-shadow: 0 20px 80px rgba(0, 0, 0, 0.4);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .review-modal-body {

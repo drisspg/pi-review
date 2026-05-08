@@ -2,6 +2,7 @@ import React, { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { api } from "./api";
 import { CodeText, MarkdownText } from "./components/Markdown";
+import { ModalShell } from "./components/Modal";
 import { ExistingComments, ExistingReviewThread } from "./components/Threads";
 import { commentTarget, draftMatchesTarget, groupReviewComments, targetKey, targetLabel, threadForTarget } from "./lib/comments";
 import { contextRowsFromText, hunkNewStart, isTargetInSelection, lastNewLine, parsePatchRows, targetFromPoint, targetFromRow } from "./lib/diff";
@@ -402,7 +403,17 @@ function ReviewSummary({ pr, drafts, setDrafts, editingDraftId, setEditingDraftI
 
 function AiReviewPanel({ review, setReview, runReview }: { review: AiReview; setReview: (review: AiReview) => void; runReview: () => Promise<void> }) {
   const body = review.text.length > 0 ? <MarkdownText text={review.text} /> : <p className="muted">Run the PR review skill-style prompt and show the result here.</p>;
-  return <><section className="panel ai-review"><div className="thread-head"><h2>Pi review</h2><div className="actions"><button onClick={() => setReview({ ...review, expanded: true, open: true })} disabled={review.text.length === 0 && !review.open}>Expand</button><button onClick={() => setReview({ ...review, open: !review.open })}>{review.open ? "Hide" : "Show"}</button></div></div><button onClick={() => void runReview()} disabled={review.running}>{review.running ? "Reviewing…" : review.text.length > 0 ? "Run again" : "Run review"}</button>{review.open && body}</section>{review.expanded && <div className="review-modal" role="dialog" aria-modal="true"><div className="review-modal-card"><div className="thread-head"><h2>Pi review</h2><div className="actions"><button onClick={() => void runReview()} disabled={review.running}>{review.running ? "Reviewing…" : "Run again"}</button><button onClick={() => setReview({ ...review, expanded: false })}>Close</button></div></div><div className="review-modal-body">{body}</div></div></div>}</>;
+  return <>
+    <section className="panel ai-review">
+      <div className="thread-head"><h2>Pi review</h2><div className="actions"><button onClick={() => setReview({ ...review, expanded: true, open: true })} disabled={review.text.length === 0 && !review.open}>Expand</button><button onClick={() => setReview({ ...review, open: !review.open })}>{review.open ? "Hide" : "Show"}</button></div></div>
+      <button onClick={() => void runReview()} disabled={review.running}>{review.running ? "Reviewing…" : review.text.length > 0 ? "Run again" : "Run review"}</button>
+      {review.open && body}
+    </section>
+    <ModalShell open={review.expanded} onOpenChange={(open) => setReview({ ...review, expanded: open })} label="Pi review">
+      <div className="thread-head"><h2>Pi review</h2><div className="actions"><button onClick={() => void runReview()} disabled={review.running}>{review.running ? "Reviewing…" : "Run again"}</button><button onClick={() => setReview({ ...review, expanded: false })}>Close</button></div></div>
+      <div className="review-modal-body">{body}</div>
+    </ModalShell>
+  </>;
 }
 
 function diagnosticsText(value: unknown): string {
@@ -424,7 +435,12 @@ function DiagnosticsView({ diagnostics }: { diagnostics: Record<string, unknown>
   return <div className="diagnostics-view"><div className="diagnostics-grid"><div><span>Model</span><strong>{diagnosticsText(diagnostics.model)}</strong></div><div><span>Thinking</span><strong>{diagnosticsText(diagnostics.thinkingLevel)}</strong></div><div><span>Active tools</span><strong>{activeTools.length}</strong></div><div><span>Available models</span><strong>{models.length}</strong></div></div><section><h3>Session</h3><dl><dt>PR key</dt><dd>{diagnosticsText(diagnostics.prKey)}</dd><dt>CWD</dt><dd>{diagnosticsText(diagnostics.cwd)}</dd><dt>Session file</dt><dd>{diagnosticsText(diagnostics.sessionFile)}</dd><dt>Session ID</dt><dd>{diagnosticsText(diagnostics.sessionId)}</dd></dl></section><section><h3>Last prompt</h3>{lastPrompt == null ? <p className="muted">No prompt sent yet.</p> : <><p className="muted">{lastPrompt.chars ?? 0} chars · {lastPrompt.startedAt ?? "unknown time"}</p><pre className="prompt-preview">{lastPrompt.preview}</pre></>}</section><details open><summary>Active tools ({activeTools.length})</summary><div className="chip-list">{activeTools.map((tool, index) => <span className="chip" key={index}>{diagnosticsText(tool)}</span>)}</div></details><details><summary>Available models ({models.length})</summary><div className="model-list">{models.map((model, index) => <code key={index}>{diagnosticsText(model)}</code>)}</div></details><details><summary>All tool definitions ({tools.length})</summary><div className="model-list">{tools.map((tool, index) => <code key={index}>{diagnosticsText(tool)}</code>)}</div></details><details><summary>Raw diagnostics</summary><pre className="diagnostics-json">{JSON.stringify(diagnostics, null, 2)}</pre></details></div>;
 }
 
-function DiagnosticsModal({ diagnostics, close }: { diagnostics: Record<string, unknown>; close: () => void }) { return <div className="review-modal" role="dialog" aria-modal="true"><div className="review-modal-card"><div className="thread-head"><h2>Pi diagnostics</h2><button onClick={close}>Close</button></div><DiagnosticsView diagnostics={diagnostics} /></div></div>; }
+function DiagnosticsModal({ diagnostics, close }: { diagnostics: Record<string, unknown>; close: () => void }) {
+  return <ModalShell open onOpenChange={(open) => { if (!open) close(); }} label="Pi diagnostics">
+    <div className="thread-head"><h2>Pi diagnostics</h2><button onClick={close}>Close</button></div>
+    <DiagnosticsView diagnostics={diagnostics} />
+  </ModalShell>;
+}
 
 function PiSettingsModal({ prKey, diagnostics, setDiagnostics, close }: { prKey: string; diagnostics: Record<string, unknown> | null; setDiagnostics: (diagnostics: Record<string, unknown>) => void; close: () => void }) {
   const models = Array.isArray(diagnostics?.availableModels) ? diagnostics.availableModels as Array<{ provider?: string; id?: string; name?: string }> : [];
@@ -438,7 +454,13 @@ function PiSettingsModal({ prKey, diagnostics, setDiagnostics, close }: { prKey:
     const data = await api<{ diagnostics: Record<string, unknown> }>("/api/pi/model", { method: "POST", body: JSON.stringify({ prKey, provider, modelId, thinkingLevel }) });
     setDiagnostics(data.diagnostics);
   }
-  return <div className="review-modal" role="dialog" aria-modal="true"><div className="review-modal-card"><div className="thread-head"><h2>Pi settings</h2><button onClick={close}>Close</button></div><label>Model<select value={selected} onChange={(event) => setSelected(event.target.value)}><option value="">Select model…</option>{models.map((model) => <option key={`${model.provider}/${model.id}`} value={`${model.provider}/${model.id}`}>{model.provider}/{model.id}{model.name != null ? ` · ${model.name}` : ""}</option>)}</select></label><label>Thinking<select value={thinkingLevel} onChange={(event) => setThinkingLevel(event.target.value)}><option value="">Keep current</option>{["off", "minimal", "low", "medium", "high", "xhigh"].map((level) => <option key={level} value={level}>{level}</option>)}</select></label><button onClick={() => void apply()} disabled={selected.length === 0}>Apply to this PR session</button><DiagnosticsView diagnostics={diagnostics} /></div></div>;
+  return <ModalShell open onOpenChange={(open) => { if (!open) close(); }} label="Pi settings">
+    <div className="thread-head"><h2>Pi settings</h2><button onClick={close}>Close</button></div>
+    <label>Model<select value={selected} onChange={(event) => setSelected(event.target.value)}><option value="">Select model…</option>{models.map((model) => <option key={`${model.provider}/${model.id}`} value={`${model.provider}/${model.id}`}>{model.provider}/{model.id}{model.name != null ? ` · ${model.name}` : ""}</option>)}</select></label>
+    <label>Thinking<select value={thinkingLevel} onChange={(event) => setThinkingLevel(event.target.value)}><option value="">Keep current</option>{["off", "minimal", "low", "medium", "high", "xhigh"].map((level) => <option key={level} value={level}>{level}</option>)}</select></label>
+    <button onClick={() => void apply()} disabled={selected.length === 0}>Apply to this PR session</button>
+    <DiagnosticsView diagnostics={diagnostics} />
+  </ModalShell>;
 }
 function History({ prs, openPr, cleanupPr }: { prs: StoredPullRequest[]; openPr: (input: string) => Promise<void>; cleanupPr: (pr: StoredPullRequest) => Promise<void> }) { return <div className="history">{prs.length === 0 ? <p className="muted">No previous PRs.</p> : prs.map((pr) => <div className="history-row" key={pr.key}><button onClick={() => void openPr(pr.url)}><strong>{pr.title}</strong><span>{pr.key} · {pr.filesChanged ?? "—"} files · {pr.existingCommentCount ?? "—"} comments</span></button><button className="trash-button" title="Remove saved PR and cleanup worktree" onClick={() => void cleanupPr(pr)}>🗑</button></div>)}</div>; }
 function LogRows({ logs }: { logs: LogEntry[] }) { return <>{logs.map((log) => <div className={`log ${log.level}`} key={log.id}><span>{new Date(log.timestamp).toLocaleTimeString()} {log.scope}</span><p>{log.message}</p>{log.data !== undefined && <code>{JSON.stringify(log.data)}</code>}</div>)}</>; }

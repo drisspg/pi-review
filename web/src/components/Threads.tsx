@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { ChevronDownIcon, ChevronRightIcon, KebabHorizontalIcon, LinkExternalIcon, ScreenFullIcon } from "@primer/octicons-react";
 
 import { api } from "../api";
+import { ActionMenu, ActionMenuItem } from "./ActionMenu";
 import { Button } from "./Button";
+import { ModalShell } from "./Modal";
 import { commentTarget, groupReviewComments, targetLabel } from "../lib/comments";
 import type { PullIssueComment, PullReviewComment } from "../types";
 import { MarkdownText } from "./Markdown";
@@ -36,7 +38,36 @@ function GitHubThreadCard({ className = "comment", title, subtitle, status, href
     if (collapseSignal > 0) setCollapsed(true);
   }, [collapseSignal]);
   const body = <><ReviewCommentTimeline comments={comments} />{reply}</>;
-  return <><div className={`${className} github-thread ${collapsed ? "minimized" : ""}`}><div className="thread-head"><div className="thread-title"><Button variant="icon" aria-label={collapsed ? "Expand thread" : "Collapse thread"} onClick={() => setCollapsed(!collapsed)}>{collapsed ? <ChevronRightIcon size={16} /> : <ChevronDownIcon size={16} />}</Button><div><strong>{title}</strong><span>{subtitle}</span>{status != null && <span className={`thread-status ${status.toLowerCase()}`}>{status}</span>}</div></div><div className="actions"><Button variant="icon" className="subtle-icon-button" aria-label="Focus thread" onClick={() => setFocused(true)}><ScreenFullIcon size={16} /></Button><details className="action-menu"><summary aria-label="Thread actions"><KebabHorizontalIcon size={16} /></summary><div className="action-menu-popover"><a href={href} target="_blank" rel="noreferrer"><LinkExternalIcon size={16} />Open on GitHub</a><button onClick={() => setFocused(true)}><ScreenFullIcon size={16} />Focus thread</button></div></details></div></div>{!collapsed && body}</div>{focused && <div className="review-modal" role="dialog" aria-modal="true" aria-label={title}><div className="review-modal-card github-thread-modal"><div className="thread-head"><div><h2>{title}</h2><span>{subtitle}</span>{status != null && <span className={`thread-status ${status.toLowerCase()}`}>{status}</span>}</div><div className="actions"><a href={href} target="_blank" rel="noreferrer"><LinkExternalIcon size={16} /> Open on GitHub</a><Button variant="muted" onClick={() => setFocused(false)}>Close</Button></div></div><div className="review-modal-body github-thread-dialog-body">{body}</div></div></div>}</>;
+  return <>
+    <div className={`${className} github-thread ${collapsed ? "minimized" : ""}`}>
+      <div className="thread-head">
+        <div className="thread-title">
+          <Button variant="icon" aria-label={collapsed ? "Expand thread" : "Collapse thread"} onClick={() => setCollapsed(!collapsed)}>{collapsed ? <ChevronRightIcon size={16} /> : <ChevronDownIcon size={16} />}</Button>
+          <div><strong>{title}</strong><span>{subtitle}</span>{status != null && <span className={`thread-status ${status.toLowerCase()}`}>{status}</span>}</div>
+        </div>
+        <div className="actions">
+          <Button variant="icon" className="subtle-icon-button" aria-label="Focus thread" onClick={() => setFocused(true)}><ScreenFullIcon size={16} /></Button>
+          <ActionMenu trigger={<Button variant="icon" aria-label="Thread actions"><KebabHorizontalIcon size={16} /></Button>}>
+            <ActionMenuItem asChild>
+              <a href={href} target="_blank" rel="noreferrer"><LinkExternalIcon size={16} />Open on GitHub</a>
+            </ActionMenuItem>
+            <ActionMenuItem onSelect={() => setFocused(true)}><ScreenFullIcon size={16} />Focus thread</ActionMenuItem>
+          </ActionMenu>
+        </div>
+      </div>
+      {!collapsed && body}
+    </div>
+    <ModalShell open={focused} onOpenChange={setFocused} label={title} className="github-thread-modal">
+      <div className="thread-head">
+        <div><h2>{title}</h2><span>{subtitle}</span>{status != null && <span className={`thread-status ${status.toLowerCase()}`}>{status}</span>}</div>
+        <div className="actions">
+          <a href={href} target="_blank" rel="noreferrer"><LinkExternalIcon size={16} /> Open on GitHub</a>
+          <Button variant="muted" onClick={() => setFocused(false)}>Close</Button>
+        </div>
+      </div>
+      <div className="review-modal-body github-thread-dialog-body">{body}</div>
+    </ModalShell>
+  </>;
 }
 
 function ThreadReplyBox({ prUrl, kind, commentId, refreshGithubActivity }: { prUrl: string; kind: "issue" | "review"; commentId?: number; refreshGithubActivity: () => Promise<void> }) {
