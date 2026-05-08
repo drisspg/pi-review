@@ -27,6 +27,7 @@ type SessionRecord = {
 const sessions = new Map<string, Promise<SessionRecord>>();
 const cwdByPr = new Map<string, string>();
 const lastPromptByPr = new Map<string, { chars: number; preview: string; startedAt: string }>();
+const promptQueueByPr = new Map<string, Promise<void>>();
 
 function safe(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "unknown";
@@ -70,6 +71,7 @@ export function prewarmPiSession(prKey: string): void {
 
 function modelLabel(model: SessionRecord["model"]): string | null {
   if (model == null) return null;
+  if (model.provider != null && model.id != null) return `${model.provider}/${model.id}`;
   return model.id ?? ([model.provider, model.name].filter(Boolean).join("/") || null);
 }
 
@@ -132,7 +134,7 @@ function textDeltaFromEvent(event: unknown): string {
   return update.assistantMessageEvent.delta ?? update.assistantMessageEvent.text ?? "";
 }
 
-export async function askPi(prKey: string, prompt: string): Promise<string> {
+async function runPiPrompt(prKey: string, prompt: string): Promise<string> {
   const startedAt = performance.now();
   const session = await getSession(prKey);
   let answer = "";
@@ -142,10 +144,26 @@ export async function askPi(prKey: string, prompt: string): Promise<string> {
   lastPromptByPr.set(prKey, { chars: prompt.length, preview: prompt.slice(0, 1600), startedAt: new Date().toISOString() });
   logger.info("pi", "prompt start", { prKey, chars: prompt.length });
   try {
-    await session.prompt(prompt, session.isStreaming ? { streamingBehavior: "followUp" } : undefined);
+    await session.prompt(prompt);
     logger.info("pi", "prompt complete", { prKey, ms: Math.round(performance.now() - startedAt), answerChars: answer.length });
     return answer.trim() || "Pi completed without streamed text.";
   } finally {
     unsubscribe();
+  }
+}
+
+export async function askPi(prKey: string, prompt: string): Promise<string> {
+  const previous = promptQueueByPr.get(prKey) ?? Promise.resolve();
+  let releaseQueue: () => void = () => undefined;
+  const queued = previous.catch(() => undefined).then(() => new Promise<void>((resolveQueue) => {
+    releaseQueue = resolveQueue;
+  }));
+  promptQueueByPr.set(prKey, queued);
+  await previous.catch(() => undefined);
+  try {
+    return await runPiPrompt(prKey, prompt);
+  } finally {
+    releaseQueue();
+    if (promptQueueByPr.get(prKey) === queued) promptQueueByPr.delete(prKey);
   }
 }

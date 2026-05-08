@@ -66,6 +66,36 @@ test("supports multiline draft ranges", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Submit review (1)" })).toBeEnabled();
 });
 
+test("dragging diff rows opens a multiline thread", async ({ page }) => {
+  await openFirstFile(page);
+  const rows = page.locator(".file").first().locator(".diff-row.added");
+  const start = await rows.nth(0).boundingBox();
+  const end = await rows.nth(3).boundingBox();
+  if (start == null || end == null) throw new Error("Missing drag row boxes");
+  await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(end.x + end.width / 2, end.y + end.height / 2, { steps: 8 });
+  await page.mouse.up();
+
+  await expect(page.locator(".inline-thread.review-thread").first()).toContainText("1276-1279");
+});
+
+test("shows readable Pi diagnostics", async ({ page }) => {
+  await page.route("**/api/pi/diagnostics", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ diagnostics: { prKey: "github.com/o/r#1", cwd: "/tmp/pr", sessionFile: "/tmp/session.jsonl", sessionId: "abc", model: "anthropic/claude", thinkingLevel: "medium", activeTools: ["read", "bash"], availableModels: [{ provider: "anthropic", id: "claude" }], tools: [{ name: "read" }], lastPrompt: { chars: 42, startedAt: "now", preview: "Review this PR" } } }),
+    });
+  });
+
+  await page.getByTitle("Pi session diagnostics").click();
+  await expect(page.getByRole("heading", { name: "Pi diagnostics" })).toBeVisible();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.locator("strong", { hasText: "anthropic/claude" })).toBeVisible();
+  await expect(dialog.locator("dd", { hasText: "/tmp/pr" })).toBeVisible();
+  await expect(dialog.locator(".prompt-preview", { hasText: "Review this PR" })).toBeVisible();
+});
+
 test("renders inline Ask Pi responses as markdown", async ({ page }) => {
   await page.route("**/api/ask", async (route) => {
     await route.fulfill({

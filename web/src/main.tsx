@@ -95,6 +95,10 @@ function draftMatchesTarget(draft: DraftComment, target: Target): boolean {
   return draft.path === target.path && draft.side === target.side && draft.line === target.line;
 }
 
+function threadForTarget(threads: Record<string, Thread>, target: Target): Thread | null {
+  return threads[targetKey(target)] ?? Object.values(threads).find((thread) => thread.target.path === target.path && thread.target.side === target.side && thread.target.line === target.line) ?? null;
+}
+
 function isTargetInSelection(target: Target | null, selection: DragSelection | null): boolean {
   if (target == null || selection == null || target.line == null || selection.start.line == null || selection.current.line == null) return false;
   if (target.path !== selection.start.path || target.side !== selection.start.side) return false;
@@ -490,7 +494,7 @@ function DraftView({ draft, drafts, setDrafts, editingDraftId, setEditingDraftId
 }
 
 function DiffRowView({ row, target, threads, setThreads, toggleThread, comments, drafts, setDrafts, editingDraftId, setEditingDraftId, askThread, dragSelection, beginDrag, updateDrag, finishDrag, handleRowClick }: { row: DiffRow; target: Target | null; threads: Record<string, Thread>; setThreads: DiffProps["setThreads"]; toggleThread: (target: Target, extend?: boolean) => void; comments: PullReviewComment[]; drafts: DraftComment[]; setDrafts: (drafts: DraftComment[]) => void; editingDraftId: string | null; setEditingDraftId: (id: string | null) => void; askThread: (thread: Thread) => Promise<void>; dragSelection: DragSelection | null; beginDrag: (target: Target) => void; updateDrag: (target: Target) => void; finishDrag: (target: Target) => void; handleRowClick: (target: Target, extend: boolean) => void }) {
-  const thread = target == null ? null : threads[targetKey(target)];
+  const thread = target == null ? null : threadForTarget(threads, target);
   const inlineComments = target == null ? [] : comments.filter((comment) => comment.path === target.path && targetKey(commentTarget(comment)) === targetKey(target));
   const inlineDrafts = target == null ? [] : drafts.filter((draft) => draftMatchesTarget(draft, target));
   const selecting = isTargetInSelection(target, dragSelection);
