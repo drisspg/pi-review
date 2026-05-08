@@ -80,6 +80,11 @@ test("dragging diff rows opens a multiline thread", async ({ page }) => {
   await expect(page.locator(".inline-thread.review-thread").first()).toContainText("1276-1279");
 });
 
+test("renders existing GitHub comments as markdown", async ({ page }) => {
+  await expect(page.locator(".comment .markdown").first()).toContainText("Before #2448");
+  await expect(page.locator(".comment pre code").first()).toContainText("set_params_splitkv");
+});
+
 test("switches GitHub-style themes", async ({ page }) => {
   await page.getByLabel("Theme").selectOption("github-light");
   await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe("github-light");

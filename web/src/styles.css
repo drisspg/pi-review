@@ -429,9 +429,9 @@ a { color: var(--link); text-decoration: none; }
 .markdown li + li { margin-top: 0.2rem; }
 .markdown code {
   padding: 0.08rem 0.25rem;
-  border: 1px solid rgba(48, 54, 61, 0.75);
+  border: 1px solid var(--border);
   border-radius: 4px;
-  background: rgba(13, 17, 23, 0.9);
+  background: var(--code-bg);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.88em;
 }
@@ -458,12 +458,12 @@ a { color: var(--link); text-decoration: none; }
   display: grid;
   gap: 8px;
   padding-top: 8px;
-  border-top: 1px solid rgba(48, 54, 61, 0.75);
+  border-top: 1px solid var(--border);
 }
 
 .composer textarea {
   min-height: 92px;
-  background: rgba(13, 17, 23, 0.86);
+  background: var(--panel2);
 }
 
 .range-control {
@@ -496,7 +496,7 @@ a { color: var(--link); text-decoration: none; }
   border-bottom: 1px solid var(--border);
   border-radius: 0;
   background: var(--panel2);
-  color: #79c0ff;
+  color: var(--link);
   padding: 0.35rem;
   text-align: center;
   font-size: 0.8rem;
@@ -528,7 +528,7 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .comment span, .comment strong { font-size: 0.8rem; color: var(--muted); }
-.comment p { margin: 0; color: var(--text); font-size: 0.9rem; }
+.comment .markdown { font-size: 0.9rem; }
 .comment button { justify-self: start; }
 
 .history {
