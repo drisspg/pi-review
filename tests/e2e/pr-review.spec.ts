@@ -170,9 +170,13 @@ test("runs a separate focus areas review and highlights referenced lines", async
   const focusArea = page.locator(".focus-area-inline");
   await expect(focusArea).toContainText("tiling conventions");
   await focusArea.getByRole("button", { name: "Collapse" }).click();
-  await expect(focusArea).toHaveClass(/collapsed/);
-  await focusArea.getByRole("button", { name: "Expand" }).click();
+  await expect(page.locator(".focus-area-collapsed")).toBeVisible();
+  await page.locator(".focus-area-collapsed").click();
   await expect(focusArea).toContainText("tiling conventions");
+  await focusArea.getByPlaceholder("Ask Pi or write a draft comment about this focus area").fill("please check this tradeoff");
+  await focusArea.getByRole("button", { name: "Add draft comment" }).click();
+  await expect(page.locator(".inline-thread.draft")).toContainText("please check this tradeoff");
+  await expect(page.getByRole("button", { name: "Submit review (1)" })).toBeEnabled();
   await expect(page.locator(".ai-review")).toContainText("1 focus area highlighted inline");
   await expect(row).toHaveClass(/focus-highlight-active/);
 });
@@ -192,11 +196,17 @@ test("shows a clean focus scan status when there are no focus areas", async ({ p
 });
 
 test("runs the right-sidebar Pi review panel and continues the chat with Enter", async ({ page }) => {
+  await page.route(/\/api\/pi\/review\/status$/, async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { status: "complete", answer: "- **Correctness:** inspect `cu_seqlens_q`." } }) });
+  });
+  await page.route(/\/api\/pi\/review$/, async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { id: "review-job" } }) });
+  });
   await page.route("**/api/ask", async (route) => {
     const body = route.request().postDataJSON() as { prompt?: string };
     await route.fulfill({
       contentType: "application/json",
-      body: JSON.stringify({ answer: body.prompt?.includes("latest question") ? "Follow-up answer about `cu_seqlens_q`." : "- **Correctness:** inspect `cu_seqlens_q`." }),
+      body: JSON.stringify({ answer: body.prompt?.includes("latest question") ? "Follow-up answer about `cu_seqlens_q`." : "Unexpected ask response" }),
     });
   });
 

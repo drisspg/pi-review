@@ -14,7 +14,7 @@ import { cleanupPrWorktree, preparePrWorktree } from "./worktrees.js";
 const DEFAULT_PORT = 43133;
 const WEB_ROOT = resolve(process.cwd(), "dist-web");
 
-type FocusReviewJob = {
+type PiReviewJob = {
   id: string;
   prKey: string;
   status: "running" | "complete" | "failed";
@@ -24,15 +24,15 @@ type FocusReviewJob = {
   finishedAt?: string;
 };
 
-const focusReviewJobs = new Map<string, FocusReviewJob>();
+const piReviewJobs = new Map<string, PiReviewJob>();
 
-function startFocusReviewJob(prKey: string, prompt: string): FocusReviewJob {
-  const job: FocusReviewJob = { id: randomUUID(), prKey, status: "running", startedAt: new Date().toISOString() };
-  focusReviewJobs.set(job.id, job);
-  void askPi(prKey, prompt, "focus-review").then((answer) => {
-    focusReviewJobs.set(job.id, { ...job, status: "complete", answer, finishedAt: new Date().toISOString() });
+function startPiReviewJob(prKey: string, prompt: string, sessionKind?: string): PiReviewJob {
+  const job: PiReviewJob = { id: randomUUID(), prKey, status: "running", startedAt: new Date().toISOString() };
+  piReviewJobs.set(job.id, job);
+  void askPi(prKey, prompt, sessionKind).then((answer) => {
+    piReviewJobs.set(job.id, { ...job, status: "complete", answer, finishedAt: new Date().toISOString() });
   }).catch((error: unknown) => {
-    focusReviewJobs.set(job.id, { ...job, status: "failed", error: error instanceof Error ? error.message : String(error), finishedAt: new Date().toISOString() });
+    piReviewJobs.set(job.id, { ...job, status: "failed", error: error instanceof Error ? error.message : String(error), finishedAt: new Date().toISOString() });
   });
   return job;
 }
@@ -130,19 +130,28 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     return;
   }
 
-  if (req.method === "POST" && url.pathname === "/api/pi/focus-review/status") {
+  if (req.method === "POST" && (url.pathname === "/api/pi/review/status" || url.pathname === "/api/pi/focus-review/status")) {
     const payload = recordFromBody(await readBody(req));
     if (typeof payload.jobId !== "string") throw new Error("Expected jobId");
-    const job = focusReviewJobs.get(payload.jobId);
-    if (job == null) throw new Error(`Unknown focus review job ${payload.jobId}`);
+    const job = piReviewJobs.get(payload.jobId);
+    if (job == null) throw new Error(`Unknown review job ${payload.jobId}`);
     sendJson(res, 200, { job });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/pi/review") {
+    const payload = recordFromBody(await readBody(req));
+    if (typeof payload.prKey !== "string" || typeof payload.prompt !== "string") throw new Error("Expected prKey and prompt");
+    const job = startPiReviewJob(payload.prKey, payload.prompt, "main-review");
+    logger.info("api", "main review job started", { prKey: payload.prKey, jobId: job.id });
+    sendJson(res, 202, { job });
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/api/pi/focus-review") {
     const payload = recordFromBody(await readBody(req));
     if (typeof payload.prKey !== "string" || typeof payload.prompt !== "string") throw new Error("Expected prKey and prompt");
-    const job = startFocusReviewJob(payload.prKey, payload.prompt);
+    const job = startPiReviewJob(payload.prKey, payload.prompt, "focus-review");
     logger.info("api", "focus review job started", { prKey: payload.prKey, jobId: job.id });
     sendJson(res, 202, { job });
     return;

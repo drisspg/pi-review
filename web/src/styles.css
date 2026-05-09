@@ -448,6 +448,12 @@ a { color: var(--link); text-decoration: none; }
   background: var(--panel);
 }
 
+.inline-thread.draft {
+  border-color: color-mix(in srgb, var(--attention) 42%, var(--border));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--attention) 10%, var(--panel)) 0, var(--panel) 180px);
+  box-shadow: inset 3px 0 var(--attention);
+}
+
 .inline-thread.existing.github-thread {
   border-color: color-mix(in srgb, var(--thread-accent) 38%, var(--border));
   background: linear-gradient(90deg, var(--thread-bg-strong) 0, var(--panel) 180px);
@@ -958,6 +964,80 @@ a { color: var(--link); text-decoration: none; }
   border-top: 1px solid var(--border);
   padding: 9px 0;
   color: var(--text);
+}
+
+.pending-draft {
+  border-top: 0;
+  border-radius: 8px;
+  padding: 0;
+  overflow: hidden;
+  animation: pending-draft-enter 140ms ease-out;
+  transition: opacity 160ms ease, transform 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.pending-draft.editing {
+  border-color: color-mix(in srgb, var(--accent) 46%, var(--attention));
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+}
+
+.pending-draft.removing {
+  opacity: 0;
+  transform: translateX(12px) scale(0.985);
+}
+
+.pending-draft .thread-head {
+  border-bottom-color: color-mix(in srgb, var(--attention) 30%, var(--border));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--attention) 12%, var(--panel2)) 0, var(--panel2) 160px);
+}
+
+.pending-draft .thread-head strong {
+  color: var(--attention);
+  font-size: 0.82rem;
+}
+
+.pending-draft p {
+  margin: 10px 12px 12px;
+}
+
+.pending-draft textarea {
+  margin: 10px 12px 12px;
+  width: calc(100% - 24px);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.draft-icon-button {
+  transition: transform 120ms ease, border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.draft-icon-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.edit-draft-button {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  color: color-mix(in srgb, var(--accent) 62%, var(--text));
+}
+
+.edit-draft-button:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel2));
+}
+
+.remove-draft-button {
+  border-color: color-mix(in srgb, var(--danger) 30%, var(--border));
+  color: var(--danger-text);
+}
+
+.remove-draft-button:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, var(--panel2));
+  color: var(--danger-text);
+}
+
+@keyframes pending-draft-enter {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .comment span, .comment strong { font-size: 0.8rem; color: var(--muted); }
