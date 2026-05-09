@@ -553,7 +553,7 @@ function ReviewPage(props: DiffProps & { aiReview: AiReview; setAiReview: (revie
       </nav>
       <div className="side-tab-panels">
         {sideTab === "review" && <ReviewSummary pr={props.review.pr} drafts={props.drafts} setDrafts={props.setDrafts} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} submitReview={props.submitReview} submitting={props.submitting} />}
-        {sideTab === "pi" && <AiReviewPanel prUrl={props.review.pr.url} review={props.aiReview} setReview={props.setAiReview} runReview={props.runAiReview} sendMessage={props.sendAiReviewMessage} focusReview={props.focusReview} runFocusReview={props.runFocusReview} focusAreas={props.focusAreas} setActiveFocusAreaId={props.setActiveFocusAreaId} collapsedFocusAreaIds={props.collapsedFocusAreaIds} setCollapsedFocusAreaIds={props.setCollapsedFocusAreaIds} />}
+        {sideTab === "pi" && <AiReviewPanel prUrl={props.review.pr.url} review={props.aiReview} setReview={props.setAiReview} runReview={props.runAiReview} sendMessage={props.sendAiReviewMessage} focusReview={props.focusReview} runFocusReview={props.runFocusReview} focusAreas={props.focusAreas} setActiveFocusAreaId={props.setActiveFocusAreaId} collapsedFocusAreaIds={props.collapsedFocusAreaIds} setCollapsedFocusAreaIds={props.setCollapsedFocusAreaIds} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} />}
         {sideTab === "comments" && <ExistingComments prUrl={props.review.pr.url} comments={props.review.comments} issueComments={props.review.issueComments} refreshGithubActivity={props.refreshGithubActivity} collapseSignal={props.commentCollapseSignal} commentsCollapsed={props.commentsCollapsed} toggleAllComments={props.toggleAllComments} />}
       </div>
     </aside>
@@ -748,8 +748,9 @@ function ReviewSummary({ drafts, setDrafts, editingDraftId, setEditingDraftId, s
   return <section className="panel"><h2>Draft review</h2><select className={`review-event ${event.toLowerCase().replace("_", "-")}`} value={event} onChange={(change) => setEvent(change.target.value as typeof event)}><option value="COMMENT">Not reviewed</option><option value="APPROVE">Approve</option><option value="REQUEST_CHANGES">Request changes</option></select><textarea value={body} onChange={(change) => setBody(change.target.value)} placeholder="Overall review body" />{drafts.length === 0 ? <p className="muted">No draft comments yet.</p> : drafts.map((draft) => <DraftView key={draft.id} draft={draft} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} />)}<button className={`review-submit ${event.toLowerCase().replace("_", "-")}`} disabled={submitting || (body.trim().length === 0 && drafts.length === 0)} onClick={() => void submitReview(event, body)}>{submitting ? "Submitting…" : `Submit review (${drafts.length})`}</button></section>;
 }
 
-function AiReviewPanel({ prUrl, review, setReview, runReview, sendMessage, focusReview, runFocusReview, focusAreas, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds }: { prUrl: string; review: AiReview; setReview: (review: AiReview) => void; runReview: () => Promise<void>; sendMessage: (message: string) => Promise<void>; focusReview: FocusReview; runFocusReview: () => Promise<void>; focusAreas: FocusArea[]; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"] }) {
+function AiReviewPanel({ prUrl, review, setReview, runReview, sendMessage, focusReview, runFocusReview, focusAreas, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds, openFiles, setOpenFiles }: { prUrl: string; review: AiReview; setReview: (review: AiReview) => void; runReview: () => Promise<void>; sendMessage: (message: string) => Promise<void>; focusReview: FocusReview; runFocusReview: () => Promise<void>; focusAreas: FocusArea[]; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"]; openFiles: Record<string, boolean>; setOpenFiles: (open: Record<string, boolean>) => void }) {
   const [draft, setDraft] = useState("");
+  const [viewedFocusIds, setViewedFocusIds] = useState<Record<string, boolean>>({});
   const focusAreaCount = focusAreas.length;
   const allFocusCollapsed = focusAreaCount > 0 && focusAreas.every((area) => collapsedFocusAreaIds[area.id]);
   const hasMessages = review.messages.length > 0 || review.text.length > 0;
@@ -767,15 +768,33 @@ function AiReviewPanel({ prUrl, review, setReview, runReview, sendMessage, focus
   function jumpToFocusArea(area: FocusArea): void {
     setActiveFocusAreaId(area.id);
     setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: false }));
-    window.setTimeout(() => document.getElementById(`focus-area-${area.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
+    if (openFiles[area.path] === false) setOpenFiles({ ...openFiles, [area.path]: true });
+    window.setTimeout(() => document.getElementById(`focus-area-${area.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
+  }
+  function toggleFocusViewed(area: FocusArea): void {
+    const next = !viewedFocusIds[area.id];
+    setViewedFocusIds((current) => ({ ...current, [area.id]: next }));
+    if (next) setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: true }));
   }
   const composer = <div className="ai-chat-composer"><textarea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submitChat(); } }} placeholder="Ask Pi about this PR…" /><Button variant="muted" onClick={submitChat} disabled={review.running || draft.trim().length === 0}>{review.running ? "Sending…" : "Send"}</Button></div>;
+  const viewedCount = focusAreas.filter((area) => viewedFocusIds[area.id]).length;
   const focusAreaLinks = focusAreaCount > 0 && <div className="focus-area-links" aria-label="Focus areas">
     <div className="focus-area-links-head">
-      <strong>{focusAreaCount} focus area{focusAreaCount === 1 ? "" : "s"}</strong>
+      <strong>{viewedCount}/{focusAreaCount} focus area{focusAreaCount === 1 ? "" : "s"} reviewed</strong>
       <Button variant="muted" className="small-muted-button" onClick={toggleFocusAreas}>{allFocusCollapsed ? "Expand all" : "Collapse all"}</Button>
     </div>
-    {focusAreas.map((area, index) => <button key={area.id} type="button" onClick={() => jumpToFocusArea(area)}><strong>{index + 1}. {area.title}</strong><span>{area.path}:{area.startLine === area.endLine ? area.startLine : `${area.startLine}-${area.endLine}`}</span></button>)}
+    {focusAreas.map((area, index) => {
+      const viewed = viewedFocusIds[area.id] ?? false;
+      return <div key={area.id} className={`focus-area-link-row${viewed ? " viewed" : ""}`}>
+        <label className="focus-area-check" title="Mark as reviewed" onClick={(event) => event.stopPropagation()}>
+          <input type="checkbox" checked={viewed} onChange={() => toggleFocusViewed(area)} />
+        </label>
+        <button type="button" onClick={() => jumpToFocusArea(area)}>
+          <strong>{index + 1}. {area.title}</strong>
+          <span>{area.path}:{area.startLine === area.endLine ? area.startLine : `${area.startLine}-${area.endLine}`}</span>
+        </button>
+      </div>;
+    })}
   </div>;
   void setReview;
   return <section className="panel ai-review">
