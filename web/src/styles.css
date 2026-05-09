@@ -834,25 +834,48 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .inline-thread.existing.github-thread.minimized {
-  margin-top: 2px;
-  margin-bottom: 2px;
-  border-color: color-mix(in srgb, var(--thread-accent) 28%, var(--border));
-  background: color-mix(in srgb, var(--thread-accent) 8%, var(--panel));
+  margin: 0;
+  height: 0;
+  overflow: visible;
+  border: none;
+  background: none;
+  box-shadow: none;
+  position: relative;
+  z-index: 5;
 }
 
 .inline-thread.existing.github-thread.minimized .thread-head {
-  min-height: 28px;
-  padding: 2px 8px;
-  background: transparent;
+  position: absolute;
+  left: 0;
+  top: 0;
+  min-height: 0;
+  padding: 1px 6px;
+  background: color-mix(in srgb, var(--thread-accent) 18%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--thread-accent) 32%, var(--border));
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  width: 96px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
 }
 
 .inline-thread.existing.github-thread.minimized .thread-title {
-  gap: 6px;
+  gap: 4px;
 }
 
 .inline-thread.existing.github-thread.minimized .thread-title strong,
 .inline-thread.existing.github-thread.minimized .thread-title span {
-  font-size: 0.78rem;
+  font-size: 0.7rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inline-thread.existing.github-thread.minimized .thread-title span {
+  display: none;
+}
+
+.inline-thread.existing.github-thread.minimized .actions {
+  display: none;
 }
 
 .github-thread.minimized .ui-button-icon {
