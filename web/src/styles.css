@@ -217,6 +217,14 @@ a { color: var(--link); text-decoration: none; }
   flex: 0 0 auto;
 }
 
+.toolbar-actions > button,
+.toolbar-actions > select,
+.open-form input,
+.open-form button {
+  height: 32px;
+  box-sizing: border-box;
+}
+
 .open-form {
   display: flex;
   flex-flow: row nowrap;
@@ -227,7 +235,7 @@ a { color: var(--link); text-decoration: none; }
 .open-form input {
   width: min(32vw, 430px);
   min-width: 220px;
-  padding: 0.52rem 0.6rem;
+  padding: 0 0.6rem;
 }
 
 .open-form button,
@@ -1617,6 +1625,14 @@ a { color: var(--link); text-decoration: none; }
   display: grid;
   gap: 6px;
   margin-top: 8px;
+}
+
+.focus-area-links-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.82rem;
+  color: var(--attention);
 }
 
 .focus-area-links button {

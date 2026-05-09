@@ -701,6 +701,7 @@ function FocusAreaInline({ prUrl, area, active, setActiveFocusAreaId, collapsedF
   const [draft, setDraft] = useState("");
   const [asking, setAsking] = useState(false);
   const [messages, setMessages] = useState<Array<{ role: "user" | "pi"; text: string }>>([]);
+  void active; void setActiveFocusAreaId;
   function saveDraftComment() {
     const body = draft.trim();
     if (body.length === 0) return;
@@ -723,7 +724,7 @@ function FocusAreaInline({ prUrl, area, active, setActiveFocusAreaId, collapsedF
     }
   }
   if (collapsed) return <button id={`focus-area-${area.id}`} className="inline-thread collapsed focus-area-collapsed" onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: false }))}>▶ Focus area · {area.title}</button>;
-  return <div id={`focus-area-${area.id}`} className={`inline-thread review-thread focus-area-inline${active ? " active" : ""}`}><div className="thread-head"><div><strong>Focus area</strong><span>{area.path}:{area.startLine === area.endLine ? area.startLine : `${area.startLine}-${area.endLine}`}</span></div><div className="actions"><button onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: true }))}>Collapse</button><button onClick={() => setActiveFocusAreaId(active ? null : area.id)}>{active ? "Unfocus" : "Focus"}</button></div></div><div className="thread-messages"><div className="thread-note pi"><div className="message-role">Pi focus</div><MarkdownText text={area.body} fileLinks={{ prUrl }} /></div>{messages.map((message, index) => <div className={`thread-note ${message.role}`} key={index}><div className="message-role">{message.role === "user" ? "You" : "Pi"}</div><MarkdownText text={message.text} fileLinks={{ prUrl }} /></div>)}</div><div className="composer"><textarea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey) { event.preventDefault(); void ask(); } }} placeholder="Ask Pi or write a draft comment about this focus area" /><div className="actions"><button onClick={saveDraftComment} disabled={draft.trim().length === 0}>Add draft comment</button><button onClick={() => void ask()} disabled={asking || draft.trim().length === 0}>{asking ? <span className="spinner-label"><span className="spinner" aria-hidden="true" />Asking</span> : "Ask Pi"}</button></div></div></div>;
+  return <div id={`focus-area-${area.id}`} className="inline-thread review-thread focus-area-inline"><div className="thread-head"><div><strong>Focus area</strong><span>{area.path}:{area.startLine === area.endLine ? area.startLine : `${area.startLine}-${area.endLine}`}</span></div><div className="actions"><button onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: true }))}>Collapse</button></div></div><div className="thread-messages"><div className="thread-note pi"><div className="message-role">Pi focus</div><MarkdownText text={area.body} fileLinks={{ prUrl }} /></div>{messages.map((message, index) => <div className={`thread-note ${message.role}`} key={index}><div className="message-role">{message.role === "user" ? "You" : "Pi"}</div><MarkdownText text={message.text} fileLinks={{ prUrl }} /></div>)}</div><div className="composer"><textarea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey) { event.preventDefault(); void ask(); } }} placeholder="Ask Pi or write a draft comment about this focus area" /><div className="actions"><button onClick={saveDraftComment} disabled={draft.trim().length === 0}>Add draft comment</button><button onClick={() => void ask()} disabled={asking || draft.trim().length === 0}>{asking ? <span className="spinner-label"><span className="spinner" aria-hidden="true" />Asking</span> : "Ask Pi"}</button></div></div></div>;
 }
 
 function ThreadBox({ prUrl, thread, setThread, closeThread, addDraft, askThread }: { prUrl: string; thread: Thread; setThread: (thread: Thread) => void; closeThread: () => void; addDraft: () => void; askThread: (thread: Thread) => Promise<void> }) {
@@ -750,7 +751,7 @@ function ReviewSummary({ drafts, setDrafts, editingDraftId, setEditingDraftId, s
 function AiReviewPanel({ prUrl, review, setReview, runReview, sendMessage, focusReview, runFocusReview, focusAreas, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds }: { prUrl: string; review: AiReview; setReview: (review: AiReview) => void; runReview: () => Promise<void>; sendMessage: (message: string) => Promise<void>; focusReview: FocusReview; runFocusReview: () => Promise<void>; focusAreas: FocusArea[]; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"] }) {
   const [draft, setDraft] = useState("");
   const focusAreaCount = focusAreas.length;
-  const anyFocusAreasCollapsed = focusAreaCount > 0 && focusAreas.some((area) => collapsedFocusAreaIds[area.id]);
+  const allFocusCollapsed = focusAreaCount > 0 && focusAreas.every((area) => collapsedFocusAreaIds[area.id]);
   const hasMessages = review.messages.length > 0 || review.text.length > 0;
   const messages = review.messages.length > 0 ? review.messages : review.text.length > 0 ? [{ role: "pi" as const, text: review.text }] : [];
   const body = messages.length > 0 ? <div className="ai-chat-messages">{messages.map((message, index) => <div className={`ai-chat-message ${message.role}`} key={index}><div className="message-role">{message.role === "user" ? "You" : "Pi"}</div><MarkdownText text={message.text} fileLinks={{ prUrl }} /></div>)}</div> : <p className="muted">Run review or ask Pi about this PR.</p>;
@@ -761,7 +762,7 @@ function AiReviewPanel({ prUrl, review, setReview, runReview, sendMessage, focus
     void sendMessage(message);
   }
   function toggleFocusAreas(): void {
-    setCollapsedFocusAreaIds(Object.fromEntries(focusAreas.map((area) => [area.id, !anyFocusAreasCollapsed])));
+    setCollapsedFocusAreaIds(Object.fromEntries(focusAreas.map((area) => [area.id, !allFocusCollapsed])));
   }
   function jumpToFocusArea(area: FocusArea): void {
     setActiveFocusAreaId(area.id);
@@ -769,20 +770,20 @@ function AiReviewPanel({ prUrl, review, setReview, runReview, sendMessage, focus
     window.setTimeout(() => document.getElementById(`focus-area-${area.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
   }
   const composer = <div className="ai-chat-composer"><textarea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submitChat(); } }} placeholder="Ask Pi about this PR…" /><Button variant="muted" onClick={submitChat} disabled={review.running || draft.trim().length === 0}>{review.running ? "Sending…" : "Send"}</Button></div>;
-  const focusAreaLinks = focusAreaCount > 0 && <div className="focus-area-links" aria-label="Focus areas">{focusAreas.map((area, index) => <button key={area.id} type="button" onClick={() => jumpToFocusArea(area)}><strong>{index + 1}. {area.title}</strong><span>{area.path}:{area.startLine === area.endLine ? area.startLine : `${area.startLine}-${area.endLine}`}</span></button>)}</div>;
-  return <>
-    <section className="panel ai-review">
-      <div className="thread-head"><h2>Pi review</h2><div className="actions"><Button className="focus-review-run" variant="muted" onClick={() => void runFocusReview()} disabled={focusReview.running}>{focusReview.running ? "Scanning…" : focusAreaCount > 0 ? `Focus scan (${focusAreaCount})` : "Focus scan"}</Button><Button variant="muted" onClick={() => setReview({ ...review, expanded: true })} disabled={!hasMessages}>Focus</Button>{focusAreaCount > 0 && <Button variant="muted" onClick={toggleFocusAreas}>{anyFocusAreasCollapsed ? "Expand focus" : "Collapse focus"}</Button>}</div></div>
-      <Button onClick={() => void runReview()} disabled={review.running}>{review.running ? "Reviewing…" : hasMessages ? "Run again" : "Run review"}</Button>
-      {focusReview.text.length > 0 && (focusAreaCount > 0 ? <p className="focus-review-note">{focusAreaCount} focus area{focusAreaCount === 1 ? "" : "s"}{anyFocusAreasCollapsed ? " available inline." : " highlighted inline."}</p> : <p className="focus-review-note clean">Focus scan clean: nothing specific to dig into.</p>)}
-      {focusAreaLinks}
-      {body}{composer}
-    </section>
-    <ModalShell open={review.expanded} onOpenChange={(open) => setReview({ ...review, expanded: open })} label="Pi review">
-      <div className="thread-head"><h2>Pi review</h2><div className="actions"><Button variant="muted" onClick={() => void runReview()} disabled={review.running}>{review.running ? "Reviewing…" : hasMessages ? "Run again" : "Run review"}</Button><Button variant="muted" onClick={() => setReview({ ...review, expanded: false })}>Close</Button></div></div>
-      <div className="review-modal-body ai-review-dialogue">{body}{composer}</div>
-    </ModalShell>
-  </>;
+  const focusAreaLinks = focusAreaCount > 0 && <div className="focus-area-links" aria-label="Focus areas">
+    <div className="focus-area-links-head">
+      <strong>{focusAreaCount} focus area{focusAreaCount === 1 ? "" : "s"}</strong>
+      <Button variant="muted" className="small-muted-button" onClick={toggleFocusAreas}>{allFocusCollapsed ? "Expand all" : "Collapse all"}</Button>
+    </div>
+    {focusAreas.map((area, index) => <button key={area.id} type="button" onClick={() => jumpToFocusArea(area)}><strong>{index + 1}. {area.title}</strong><span>{area.path}:{area.startLine === area.endLine ? area.startLine : `${area.startLine}-${area.endLine}`}</span></button>)}
+  </div>;
+  void setReview;
+  return <section className="panel ai-review">
+    <div className="thread-head"><h2>Pi</h2><div className="actions"><Button className="focus-review-run" variant="muted" onClick={() => void runFocusReview()} disabled={focusReview.running}>{focusReview.running ? "Scanning…" : "Focus scan"}</Button><Button variant="muted" onClick={() => void runReview()} disabled={review.running}>{review.running ? "Reviewing…" : hasMessages ? "Run again" : "Run review"}</Button></div></div>
+    {focusReview.text.length > 0 && focusAreaCount === 0 && <p className="focus-review-note clean">Focus scan clean: nothing specific to dig into.</p>}
+    {focusAreaLinks}
+    {body}{composer}
+  </section>;
 }
 
 function diagnosticsText(value: unknown): string {
