@@ -40,6 +40,30 @@ function startPiReviewJob(prKey: string, prompt: string, sessionKind?: string): 
   return job;
 }
 
+function sse(res: ServerResponse, event: string, data: unknown): void {
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(data)}\n\n`);
+}
+
+async function streamAskPi(res: ServerResponse, prKey: string, prompt: string, purpose?: string): Promise<void> {
+  res.writeHead(200, {
+    "cache-control": "no-cache, no-transform",
+    "connection": "keep-alive",
+    "content-type": "text/event-stream; charset=utf-8",
+  });
+  logger.info("pi", "stream prompt start", { prKey, purpose: purpose ?? "chat", chars: prompt.length });
+  try {
+    const answer = await askPi(prKey, prompt, purpose, (delta) => sse(res, "delta", { delta }));
+    sse(res, "done", { answer });
+    logger.info("pi", "stream prompt done", { prKey, purpose: purpose ?? "chat", answerChars: answer.length });
+  } catch (error) {
+    logger.error("pi", "stream prompt failed", { prKey, purpose: purpose ?? "chat", error: error instanceof Error ? error.message : String(error) });
+    sse(res, "error", { error: error instanceof Error ? error.message : String(error) });
+  } finally {
+    res.end();
+  }
+}
+
 const contentTypes: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
   ".html": "text/html; charset=utf-8",
@@ -143,10 +167,17 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     return;
   }
 
+  if (req.method === "POST" && url.pathname === "/api/ask/stream") {
+    const payload = recordFromBody(await readBody(req));
+    if (typeof payload.prKey !== "string" || typeof payload.prompt !== "string") throw new Error("Expected prKey and prompt");
+    await streamAskPi(res, payload.prKey, payload.prompt, typeof payload.purpose === "string" ? payload.purpose : undefined);
+    return;
+  }
+
   if (req.method === "POST" && url.pathname === "/api/ask") {
     const payload = recordFromBody(await readBody(req));
     if (typeof payload.prKey !== "string" || typeof payload.prompt !== "string") throw new Error("Expected prKey and prompt");
-    sendJson(res, 200, { answer: await askPi(payload.prKey, payload.prompt) });
+    sendJson(res, 200, { answer: await askPi(payload.prKey, payload.prompt, typeof payload.purpose === "string" ? payload.purpose : undefined) });
     return;
   }
 
@@ -223,7 +254,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const pr = await upsertPullRequest(data.pr);
     const worktreeDir = await preparePrWorktree(ref, data.raw.base.repo.clone_url, data.pr.headSha);
     await registerPiSessionCwd(pr.key, worktreeDir);
-    prewarmPiSession(pr.key);
+    prewarmPiSession(pr.key, ["chat", "inline-chat", "focus-chat"]);
     logger.info("api", "open PR complete", { key: pr.key, filesChanged: pr.filesChanged, existingCommentCount: pr.existingCommentCount, worktreeDir });
     sendJson(res, 200, { ...data, pr, worktreeDir });
     return;

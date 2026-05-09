@@ -24,7 +24,20 @@ export function languageForPath(path: string | null | undefined): string {
   return "";
 }
 
+const highlightedCache = new Map<string, string>();
+const maxHighlightedCacheEntries = 5000;
+
 export function highlightedHtml(code: string, language: string): string {
-  if (language.length > 0 && hljs.getLanguage(language) != null) return hljs.highlight(code, { language }).value;
-  return hljs.highlightAuto(code).value;
+  const key = `${language}\0${code}`;
+  const cached = highlightedCache.get(key);
+  if (cached != null) return cached;
+  const html = language.length > 0 && hljs.getLanguage(language) != null ? hljs.highlight(code, { language }).value : escapeHtml(code);
+  highlightedCache.set(key, html);
+  const oldestKey = highlightedCache.keys().next().value;
+  if (highlightedCache.size > maxHighlightedCacheEntries && oldestKey != null) highlightedCache.delete(oldestKey);
+  return html;
+}
+
+function escapeHtml(value: string): string {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 }

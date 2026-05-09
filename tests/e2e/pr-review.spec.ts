@@ -8,9 +8,20 @@ async function openFirstFile(page: Page) {
   await expect(firstFile.locator(".diff-row").first()).toBeVisible();
 }
 
+async function mockAskPi(page: Page, answerForPrompt: (body: { prompt?: string }) => string) {
+  await page.route(/\/api\/ask\/stream$/, async (route) => {
+    const answer = answerForPrompt(route.request().postDataJSON() as { prompt?: string });
+    await route.fulfill({ contentType: "text/event-stream", body: `event: delta\ndata: ${JSON.stringify({ delta: answer })}\n\nevent: done\ndata: ${JSON.stringify({ answer })}\n\n` });
+  });
+  await page.route(/\/api\/ask$/, async (route) => {
+    const answer = answerForPrompt(route.request().postDataJSON() as { prompt?: string });
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ answer }) });
+  });
+}
+
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
-  await page.getByPlaceholder("OWNER/REPO#123 or GitHub PR URL").fill(prUrl);
+  await page.locator("input").first().fill(prUrl);
   await page.getByRole("button", { name: "Open" }).click();
   await expect(page.locator(".review-layout")).toBeVisible({ timeout: 60_000 });
 });
@@ -134,12 +145,7 @@ test("shows readable Pi diagnostics", async ({ page }) => {
 });
 
 test("renders inline Ask Pi responses as markdown", async ({ page }) => {
-  await page.route("**/api/ask", async (route) => {
-    await route.fulfill({
-      contentType: "application/json",
-      body: JSON.stringify({ answer: "**Finding:** check `batch_offset`.\n\n```cpp\nreturn batch_offset;\n```" }),
-    });
-  });
+  await mockAskPi(page, () => "**Finding:** check `batch_offset`.\n\n```cpp\nreturn batch_offset;\n```");
 
   await openFirstFile(page);
   await page.locator(".file").first().locator(".diff-row.added").first().click();
@@ -207,13 +213,7 @@ test("runs the right-sidebar Pi review panel and continues the chat with Enter",
   await page.route(/\/api\/pi\/review$/, async (route) => {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { id: "review-job" } }) });
   });
-  await page.route("**/api/ask", async (route) => {
-    const body = route.request().postDataJSON() as { prompt?: string };
-    await route.fulfill({
-      contentType: "application/json",
-      body: JSON.stringify({ answer: body.prompt?.includes("latest question") ? "Follow-up answer about `cu_seqlens_q`." : "Unexpected ask response" }),
-    });
-  });
+  await mockAskPi(page, (body) => body.prompt?.includes("latest question") ? "Follow-up answer about `cu_seqlens_q`." : "Unexpected ask response");
 
   await page.getByRole("button", { name: "Run review" }).click();
 

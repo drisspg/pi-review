@@ -28,6 +28,7 @@ const sessions = new Map<string, Promise<SessionRecord>>();
 const cwdByPr = new Map<string, string>();
 const lastPromptByPr = new Map<string, { chars: number; preview: string; startedAt: string }>();
 const promptQueueByPr = new Map<string, Promise<void>>();
+const promptStateByPr = new Map<string, { status: "queued" | "running" | "complete" | "failed"; purpose: string; chars: number; queuedAt: string; startedAt?: string; finishedAt?: string; answerChars?: number; error?: string }>();
 
 function safe(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "unknown";
@@ -53,11 +54,13 @@ async function createSession(prKey: string, purpose = "chat"): Promise<SessionRe
   const cwd = cwdByPr.get(prKey) ?? process.cwd();
   const sessionDir = sessionDirForPr(prKey, purpose);
   await mkdir(sessionDir, { recursive: true });
+  const startedAt = performance.now();
   logger.info("pi", "create session", { prKey, purpose, cwd, sessionDir });
   const { session } = await createAgentSession({
     cwd,
     sessionManager: SessionManager.continueRecent(cwd, sessionDir),
   });
+  logger.info("pi", "create session complete", { prKey, purpose, ms: Math.round(performance.now() - startedAt) });
   return session as SessionRecord;
 }
 
@@ -70,8 +73,10 @@ function getSession(prKey: string, purpose = "chat"): Promise<SessionRecord> {
   return created;
 }
 
-export function prewarmPiSession(prKey: string): void {
-  void getSession(prKey).catch((error: unknown) => logger.error("pi", "prewarm failed", { prKey, error: error instanceof Error ? error.message : String(error) }));
+export function prewarmPiSession(prKey: string, purposes = ["chat"]): void {
+  for (const purpose of purposes) {
+    void getSession(prKey, purpose).catch((error: unknown) => logger.error("pi", "prewarm failed", { prKey, purpose, error: error instanceof Error ? error.message : String(error) }));
+  }
 }
 
 function modelLabel(model: SessionRecord["model"]): string | null {
@@ -82,6 +87,23 @@ function modelLabel(model: SessionRecord["model"]): string | null {
 
 export async function piDiagnostics(prKey: string): Promise<Record<string, unknown>> {
   const session = await getSession(prKey);
+  const prPrefix = `${safe(prKey)}--`;
+  const sessionSummaries = await Promise.all([...sessions.entries()].filter(([key]) => key.startsWith(prPrefix)).map(async ([key, sessionPromise]) => {
+    const purpose = key.slice(prPrefix.length);
+    const state = promptStateByPr.get(key) ?? null;
+    const settled = await Promise.race([sessionPromise.then((value) => ({ status: "ready" as const, value })), new Promise<{ status: "creating" }>((resolveCreating) => setTimeout(() => resolveCreating({ status: "creating" }), 0))]);
+    return {
+      purpose,
+      ready: settled.status === "ready",
+      sessionFile: settled.status === "ready" ? settled.value.sessionFile ?? null : null,
+      sessionId: settled.status === "ready" ? settled.value.sessionId ?? null : null,
+      isStreaming: settled.status === "ready" ? settled.value.isStreaming ?? null : null,
+      activeTools: settled.status === "ready" ? settled.value.getActiveToolNames?.() ?? [] : [],
+      lastPrompt: lastPromptByPr.get(key) ?? null,
+      promptState: state == null ? null : { ...state, elapsedMs: Math.round(Date.parse(state.finishedAt ?? new Date().toISOString()) - Date.parse(state.startedAt ?? state.queuedAt)) },
+      queued: promptQueueByPr.has(key),
+    };
+  }));
   return {
     prKey,
     cwd: cwdByPr.get(prKey) ?? process.cwd(),
@@ -96,6 +118,7 @@ export async function piDiagnostics(prKey: string): Promise<Record<string, unkno
     activeTools: session.getActiveToolNames?.() ?? [],
     tools: session.getAllTools?.().map((tool) => ({ name: tool.name, source: tool.source })).filter((tool) => tool.name != null) ?? [],
     lastPrompt: lastPromptByPr.get(sessionKeyForPr(prKey)) ?? null,
+    sessions: sessionSummaries,
   };
 }
 
@@ -115,6 +138,7 @@ export async function disposePiSession(prKey: string): Promise<void> {
   cwdByPr.delete(prKey);
   for (const key of [...lastPromptByPr.keys()]) if (key.startsWith(`${safe(prKey)}--`)) lastPromptByPr.delete(key);
   for (const key of [...promptQueueByPr.keys()]) if (key.startsWith(`${safe(prKey)}--`)) promptQueueByPr.delete(key);
+  for (const key of [...promptStateByPr.keys()]) if (key.startsWith(`${safe(prKey)}--`)) promptStateByPr.delete(key);
   for (const [, sessionPromise] of sessionEntries) {
     const session = await sessionPromise;
     await session.abort?.();
@@ -143,13 +167,16 @@ function textDeltaFromEvent(event: unknown): string {
   return update.assistantMessageEvent.delta ?? update.assistantMessageEvent.text ?? "";
 }
 
-async function runPiPrompt(prKey: string, prompt: string, purpose = "chat"): Promise<string> {
+async function runPiPrompt(prKey: string, prompt: string, purpose = "chat", onDelta?: (delta: string) => void): Promise<string> {
   const startedAt = performance.now();
   const sessionKey = sessionKeyForPr(prKey, purpose);
   const session = await getSession(prKey, purpose);
   let answer = "";
   const unsubscribe = session.subscribe((event) => {
-    answer += textDeltaFromEvent(event);
+    const delta = textDeltaFromEvent(event);
+    if (delta.length === 0) return;
+    answer += delta;
+    onDelta?.(delta);
   });
   lastPromptByPr.set(sessionKey, { chars: prompt.length, preview: prompt.slice(0, 1600), startedAt: new Date().toISOString() });
   logger.info("pi", "prompt start", { prKey, purpose, chars: prompt.length });
@@ -162,17 +189,24 @@ async function runPiPrompt(prKey: string, prompt: string, purpose = "chat"): Pro
   }
 }
 
-export async function askPi(prKey: string, prompt: string, purpose = "chat"): Promise<string> {
+export async function askPi(prKey: string, prompt: string, purpose = "chat", onDelta?: (delta: string) => void): Promise<string> {
   const sessionKey = sessionKeyForPr(prKey, purpose);
   const previous = promptQueueByPr.get(sessionKey) ?? Promise.resolve();
+  promptStateByPr.set(sessionKey, { status: "queued", purpose, chars: prompt.length, queuedAt: new Date().toISOString() });
   let releaseQueue: () => void = () => undefined;
   const queued = previous.catch(() => undefined).then(() => new Promise<void>((resolveQueue) => {
     releaseQueue = resolveQueue;
   }));
   promptQueueByPr.set(sessionKey, queued);
   await previous.catch(() => undefined);
+  promptStateByPr.set(sessionKey, { status: "running", purpose, chars: prompt.length, queuedAt: promptStateByPr.get(sessionKey)?.queuedAt ?? new Date().toISOString(), startedAt: new Date().toISOString() });
   try {
-    return await runPiPrompt(prKey, prompt, purpose);
+    const answer = await runPiPrompt(prKey, prompt, purpose, onDelta);
+    promptStateByPr.set(sessionKey, { ...promptStateByPr.get(sessionKey)!, status: "complete", finishedAt: new Date().toISOString(), answerChars: answer.length });
+    return answer;
+  } catch (error) {
+    promptStateByPr.set(sessionKey, { ...promptStateByPr.get(sessionKey)!, status: "failed", finishedAt: new Date().toISOString(), error: error instanceof Error ? error.message : String(error) });
+    throw error;
   } finally {
     releaseQueue();
     if (promptQueueByPr.get(sessionKey) === queued) promptQueueByPr.delete(sessionKey);

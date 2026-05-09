@@ -12,9 +12,9 @@ const fileReferenceUrlPrefix = "pi-review-file://";
 type FileLinkContext = { prUrl: string };
 type FileReference = { path: string; line: number; endLine?: number };
 
-export function CodeText({ code, language }: { code: string; language: string }) {
+export const CodeText = React.memo(function CodeText({ code, language }: { code: string; language: string }) {
   return <code dangerouslySetInnerHTML={{ __html: highlightedHtml(code, language) }} />;
-}
+});
 
 export function MarkdownText({ text, fileLinks }: { text: string; fileLinks?: FileLinkContext }) {
   const components = fileLinks == null ? { code: MarkdownCode } : { code: (props: MarkdownCodeProps) => <MarkdownCode {...props} fileLinks={fileLinks} />, a: (props: MarkdownAnchorProps) => <MarkdownAnchor {...props} fileLinks={fileLinks} /> };
