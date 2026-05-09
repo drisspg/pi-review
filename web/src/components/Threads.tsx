@@ -1,10 +1,8 @@
 import { useEffect, useState } from "react";
-import { ChevronDownIcon, ChevronRightIcon, KebabHorizontalIcon, LinkExternalIcon, ScreenFullIcon } from "@primer/octicons-react";
+import { ChevronDownIcon, ChevronRightIcon, LinkExternalIcon } from "@primer/octicons-react";
 
 import { api } from "../api";
-import { ActionMenu, ActionMenuItem } from "./ActionMenu";
 import { Button } from "./Button";
-import { ModalShell } from "./Modal";
 import { commentTarget, groupReviewComments, targetLabel } from "../lib/comments";
 import type { PullIssueComment, PullReviewComment } from "../types";
 import { MarkdownText } from "./Markdown";
