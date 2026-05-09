@@ -906,6 +906,19 @@ a { color: var(--link); text-decoration: none; }
   padding: 0.22rem 0.5rem;
 }
 
+.thread-github-link {
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted);
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.thread-github-link:hover {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
 .ui-button {
   display: inline-flex;
   gap: 6px;

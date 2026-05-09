@@ -39,41 +39,22 @@ function ReviewCommentTimeline({ comments }: { comments: Array<PullReviewComment
 
 function GitHubThreadCard({ className = "comment", title, subtitle, status, href, comments, reply, collapseSignal = 0, collapseComments = true, onJump }: { className?: string; title: string; subtitle: string; status?: string | null; href: string; comments: Array<PullReviewComment | PullIssueComment>; reply?: React.ReactNode; collapseSignal?: number; collapseComments?: boolean; onJump?: () => void }) {
   const [collapsed, setCollapsed] = useState(false);
-  const [focused, setFocused] = useState(false);
   useEffect(() => {
     if (collapseSignal > 0) setCollapsed(collapseComments);
   }, [collapseSignal, collapseComments]);
   const body = <><ReviewCommentTimeline comments={comments} />{reply}</>;
-  return <>
-    <div className={`${className} github-thread ${collapsed ? "minimized" : ""}`}>
-      <div className="thread-head">
-        <div className="thread-title">
-          <Button variant="icon" aria-label={collapsed ? "Expand thread" : "Collapse thread"} onClick={() => setCollapsed(!collapsed)}>{collapsed ? <ChevronRightIcon size={16} /> : <ChevronDownIcon size={16} />}</Button>
-          <div className={onJump != null ? "thread-title-link" : undefined} onClick={onJump} role={onJump != null ? "button" : undefined} tabIndex={onJump != null ? 0 : undefined}><strong>{title}</strong><span>{subtitle}</span>{status != null && <span className={`thread-status ${status.toLowerCase()}`}>{status}</span>}</div>
-        </div>
-        <div className="actions">
-          <Button variant="icon" className="subtle-icon-button" aria-label="Focus thread" onClick={() => setFocused(true)}><ScreenFullIcon size={16} /></Button>
-          <ActionMenu trigger={<Button variant="icon" aria-label="Thread actions"><KebabHorizontalIcon size={16} /></Button>}>
-            <ActionMenuItem asChild>
-              <a href={href} target="_blank" rel="noreferrer"><LinkExternalIcon size={16} />Open on GitHub</a>
-            </ActionMenuItem>
-            <ActionMenuItem onSelect={() => setFocused(true)}><ScreenFullIcon size={16} />Focus thread</ActionMenuItem>
-          </ActionMenu>
-        </div>
+  return <div className={`${className} github-thread ${collapsed ? "minimized" : ""}`}>
+    <div className="thread-head">
+      <div className="thread-title">
+        <Button variant="icon" aria-label={collapsed ? "Expand thread" : "Collapse thread"} onClick={() => setCollapsed(!collapsed)}>{collapsed ? <ChevronRightIcon size={16} /> : <ChevronDownIcon size={16} />}</Button>
+        <div className={onJump != null ? "thread-title-link" : undefined} onClick={onJump} role={onJump != null ? "button" : undefined} tabIndex={onJump != null ? 0 : undefined}><strong>{title}</strong><span>{subtitle}</span>{status != null && <span className={`thread-status ${status.toLowerCase()}`}>{status}</span>}</div>
       </div>
-      {!collapsed && body}
+      <div className="actions">
+        <a href={href} target="_blank" rel="noreferrer" className="thread-github-link"><LinkExternalIcon size={14} /></a>
+      </div>
     </div>
-    <ModalShell open={focused} onOpenChange={setFocused} label={title} className="github-thread-modal">
-      <div className="thread-head">
-        <div><h2>{title}</h2><span>{subtitle}</span>{status != null && <span className={`thread-status ${status.toLowerCase()}`}>{status}</span>}</div>
-        <div className="actions">
-          <a href={href} target="_blank" rel="noreferrer"><LinkExternalIcon size={16} /> Open on GitHub</a>
-          <Button variant="muted" onClick={() => setFocused(false)}>Close</Button>
-        </div>
-      </div>
-      <div className="review-modal-body github-thread-dialog-body">{body}</div>
-    </ModalShell>
-  </>;
+    {!collapsed && body}
+  </div>;
 }
 
 function ThreadReplyBox({ prUrl, kind, commentId, refreshGithubActivity }: { prUrl: string; kind: "issue" | "review"; commentId?: number; refreshGithubActivity: () => Promise<void> }) {
