@@ -1216,7 +1216,25 @@ a { color: var(--link); text-decoration: none; }
   justify-content: space-between;
   gap: 8px;
   align-items: center;
+}
+
+.thread-head {
   flex-wrap: wrap;
+}
+
+.actions {
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+}
+
+.close-thread-button {
+  color: var(--danger-text);
+}
+
+.close-thread-button:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border-color: var(--danger);
 }
 
 .fold {
