@@ -2,7 +2,7 @@
 
 Standalone Pi SDK-backed GitHub PR review app.
 
-This project replaces the heavyweight `github-pr-review.ts` Pi extension prototype in `reference/` with a local web app/server that owns PR review state, renders a GitHub-style diff UI, and uses the Pi SDK for inline Ask Pi threads.
+This project is a local web app/server that owns PR review state, renders a GitHub-style diff UI, and uses the Pi SDK for inline Ask Pi threads.
 
 ## Features
 
@@ -112,5 +112,3 @@ pi-sessions/               # persistent Pi SDK sessions per PR
 
 - The backend lives in `src/`.
 - The React/Vite UI lives in `web/src/`.
-- The migration plan is in `PLAN.md`.
-- The old extension prototype is kept in `reference/` for behavior reference.
