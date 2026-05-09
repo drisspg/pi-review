@@ -261,7 +261,7 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .open-form button,
-.actions button:first-child,
+.composer .actions button:first-child,
 .panel > button:last-child {
   background: var(--accent);
   border-color: var(--accent);
@@ -699,6 +699,7 @@ a { color: var(--link); text-decoration: none; }
 .diff-row:not(.hunk):not(.meta) { cursor: pointer; }
 .diff-row:hover, .diff-row.selected { background: rgba(177, 186, 196, 0.09); }
 .diff-row.range-selecting { background: rgba(47, 129, 247, 0.24); }
+.diff-row.in-thread-range { background: rgba(47, 129, 247, 0.12); box-shadow: inset 3px 0 rgba(47, 129, 247, 0.5); }
 .diff-row.focus-highlight { background: color-mix(in srgb, var(--attention) 18%, transparent); box-shadow: inset 3px 0 color-mix(in srgb, var(--attention) 70%, transparent); }
 .diff-row.focus-highlight-active { background: color-mix(in srgb, var(--attention) 32%, transparent); box-shadow: inset 4px 0 var(--attention); }
 .num { color: #6e7681; text-align: right; user-select: none; }
