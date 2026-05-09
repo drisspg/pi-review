@@ -1,7 +1,9 @@
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { extname, join, normalize, resolve } from "node:path";
+import { extname, join, normalize, resolve, sep } from "node:path";
+import { promisify } from "node:util";
 
 import { addIssueComment, fetchFileText, fetchPullRequestReviewData, replyToReviewComment, submitPullRequestReview } from "./github.js";
 import { inputFromBody, prKeyForRef, readBody, recordFromBody, refFromBody, sendJson, viewedPayloadFromBody } from "./http.js";
@@ -9,10 +11,11 @@ import { logger } from "./logger.js";
 import { askPi, disposePiSession, disposePiSessions, piDiagnostics, prewarmPiSession, registerPiSessionCwd, setPiModel } from "./pi-session.js";
 import { parsePullRequestRef } from "./pr.js";
 import { listRecentPullRequests, markPullRequestReviewed, removePullRequest, setFileViewed, upsertPullRequest } from "./state.js";
-import { cleanupPrWorktree, preparePrWorktree } from "./worktrees.js";
+import { cleanupPrWorktree, preparePrWorktree, worktreeDirForRef } from "./worktrees.js";
 
 const DEFAULT_PORT = 43133;
 const WEB_ROOT = resolve(process.cwd(), "dist-web");
+const execFileAsync = promisify(execFile);
 
 type PiReviewJob = {
   id: string;
@@ -52,6 +55,16 @@ async function sendStatic(res: ServerResponse, pathname: string): Promise<void> 
   const data = await readFile(finalPath);
   res.writeHead(200, { "content-type": contentTypes[extname(finalPath)] ?? "application/octet-stream" });
   res.end(data);
+}
+
+async function openInEditor(prUrl: string, path: string, line?: number): Promise<string> {
+  const worktreeDir = worktreeDirForRef(parsePullRequestRef(prUrl));
+  const filePath = resolve(worktreeDir, path);
+  if (filePath !== worktreeDir && !filePath.startsWith(`${worktreeDir}${sep}`)) throw new Error("File path escapes PR worktree");
+  const target = `${filePath}:${line ?? 1}:1`;
+  const url = `vscode://file${encodeURI(target)}`;
+  await execFileAsync("open", [url]);
+  return target;
 }
 
 async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -120,6 +133,13 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const ref = refFromBody(payload);
     if (typeof payload.path !== "string" || typeof payload.sha !== "string") throw new Error("Expected path and sha");
     sendJson(res, 200, { text: await fetchFileText(ref, payload.path, payload.sha) });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/file/open") {
+    const payload = recordFromBody(await readBody(req));
+    if (typeof payload.prUrl !== "string" || typeof payload.path !== "string") throw new Error("Expected prUrl and path");
+    sendJson(res, 200, { target: await openInEditor(payload.prUrl, payload.path, typeof payload.line === "number" ? payload.line : undefined) });
     return;
   }
 

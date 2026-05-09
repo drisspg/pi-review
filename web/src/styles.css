@@ -867,6 +867,24 @@ a { color: var(--link); text-decoration: none; }
   background: transparent;
   font-size: 12px;
 }
+
+.file-reference-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.file-reference-links button {
+  max-width: 100%;
+  min-height: 24px;
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .markdown blockquote {
   padding-left: 10px;
   border-left: 3px solid var(--border);
@@ -1147,7 +1165,44 @@ a { color: var(--link); text-decoration: none; }
   color: var(--success);
 }
 
+.focus-area-links {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.focus-area-links button {
+  display: grid;
+  gap: 2px;
+  padding: 7px 9px;
+  border-color: color-mix(in srgb, var(--attention) 32%, var(--border));
+  background: color-mix(in srgb, var(--attention) 7%, var(--panel2));
+  text-align: left;
+}
+
+.focus-area-links button:hover {
+  border-color: var(--attention);
+  background: color-mix(in srgb, var(--attention) 12%, var(--panel2));
+}
+
+.focus-area-links strong {
+  overflow: hidden;
+  color: var(--attention);
+  font-size: 0.8rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.focus-area-links span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .focus-area-inline {
+  scroll-margin-block: 120px;
   border-color: color-mix(in srgb, var(--attention) 45%, var(--border));
   background: color-mix(in srgb, var(--attention) 8%, var(--panel));
   box-shadow: inset 3px 0 var(--attention);
@@ -1158,6 +1213,7 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .focus-area-collapsed {
+  scroll-margin-block: 120px;
   border-color: color-mix(in srgb, var(--attention) 45%, var(--border));
   box-shadow: inset 3px 0 var(--attention);
 }

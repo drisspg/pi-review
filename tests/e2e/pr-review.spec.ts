@@ -29,7 +29,7 @@ test("removes a previous PR from local history", async ({ page }) => {
 });
 
 test("opens a PR and renders GitHub-style file diffs", async ({ page }) => {
-  await expect(page.getByText("fix address access for varlen attn split kv").first()).toBeVisible();
+  await expect(page.getByText("github.com/Dao-AILab/flash-attention#2542").first()).toBeVisible();
   await expect(page.locator(".file")).toHaveCount(2);
   await openFirstFile(page);
   await expect(page.locator(".diff-row.added").first()).toBeVisible();
@@ -196,8 +196,13 @@ test("shows a clean focus scan status when there are no focus areas", async ({ p
 });
 
 test("runs the right-sidebar Pi review panel and continues the chat with Enter", async ({ page }) => {
+  let openedFile: unknown = null;
+  await page.route(/\/api\/file\/open$/, async (route) => {
+    openedFile = route.request().postDataJSON();
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ target: "opened" }) });
+  });
   await page.route(/\/api\/pi\/review\/status$/, async (route) => {
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { status: "complete", answer: "- **Correctness:** inspect `cu_seqlens_q`." } }) });
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { status: "complete", answer: "- **Correctness:** inspect `csrc/flash_attn/src/flash_fwd_kernel.h:1276`." } }) });
   });
   await page.route(/\/api\/pi\/review$/, async (route) => {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { id: "review-job" } }) });
@@ -214,6 +219,8 @@ test("runs the right-sidebar Pi review panel and continues the chat with Enter",
 
   const dialog = page.getByRole("dialog");
   await expect(dialog).toContainText("Correctness:");
+  await dialog.getByRole("button", { name: "csrc/flash_attn/src/flash_fwd_kernel.h:1276" }).click();
+  expect(openedFile).toMatchObject({ path: "csrc/flash_attn/src/flash_fwd_kernel.h", line: 1276 });
   await expect(dialog.getByRole("button", { name: "Run again" })).toBeEnabled();
   await dialog.getByPlaceholder("Ask Pi about this PR…").fill("what should I test?");
   await dialog.getByPlaceholder("Ask Pi about this PR…").press("Enter");
