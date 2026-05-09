@@ -554,6 +554,19 @@ a { color: var(--link); text-decoration: none; }
   min-width: 0;
 }
 
+.file-summary-left {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.collapse-chevron {
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
 .file-summary strong {
   overflow-wrap: anywhere;
 }
