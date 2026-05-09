@@ -4,7 +4,7 @@ const prUrl = process.env.PI_REVIEW_TEST_PR ?? "https://github.com/Dao-AILab/fla
 
 async function openFirstFile(page: Page) {
   const firstFile = page.locator(".file").first();
-  if (await firstFile.locator(".diff-row").count() === 0) await firstFile.getByRole("button", { name: /Expand/ }).click();
+  if (await firstFile.locator(".diff-row").count() === 0) await firstFile.locator(".file-summary-left").click();
   await expect(firstFile.locator(".diff-row").first()).toBeVisible();
 }
 
@@ -33,10 +33,10 @@ test("removes a previous PR from local history", async ({ page }) => {
   });
 
   await page.getByRole("button", { name: "Home" }).click();
-  const firstRow = page.locator(".history-row").first();
-  const key = await firstRow.locator("span").textContent();
+  const firstRow = page.locator(".pr-card").first();
+  const key = await firstRow.locator(".pr-card-key").textContent();
   await firstRow.getByTitle("Remove saved PR and cleanup worktree").click();
-  if (key != null) await expect(page.locator(".history-row", { hasText: key.split(" · ")[0] })).toHaveCount(0);
+  if (key != null) await expect(page.locator(".pr-card", { hasText: key })).toHaveCount(0);
 });
 
 test("opens a PR and renders GitHub-style file diffs", async ({ page }) => {
@@ -61,11 +61,11 @@ test("creates, edits, and removes draft comments", async ({ page }) => {
   await page.getByRole("button", { name: "Add draft comment" }).first().click();
 
   await expect(page.locator(".inline-thread.draft").first()).toContainText("first draft");
-  await page.getByTitle("Edit draft").first().click();
+  await page.getByLabel("Edit draft").first().click();
   await page.locator(".draft-card textarea").first().fill("edited draft");
   await expect(page.locator(".inline-thread.draft").first()).toContainText("edited draft");
 
-  await page.locator(".inline-thread.draft").first().getByRole("button", { name: "Remove" }).click();
+  await page.locator(".inline-thread.draft").first().getByLabel("Remove draft").click();
   await expect(page.locator(".inline-thread.draft")).toHaveCount(0);
 });
 
@@ -105,21 +105,19 @@ test("dragging diff rows opens a multiline thread", async ({ page }) => {
 });
 
 test("renders existing GitHub comments as markdown", async ({ page }) => {
-  await expect(page.locator(".comment .markdown").first()).toContainText("Before #2448");
-  await expect(page.locator(".comment pre code").first()).toContainText("set_params_splitkv");
+  await page.getByRole("tab", { name: /Comments/ }).click();
+  await expect(page.locator(".github-thread .markdown").first()).toContainText("Before #2448");
+  await expect(page.locator(".github-thread pre code").first()).toContainText("set_params_splitkv");
 });
 
 test("collapses and focuses existing comment threads", async ({ page }) => {
-  const thread = page.locator(".comment.github-thread").first();
+  await page.getByRole("tab", { name: /Comments/ }).click();
+  const thread = page.locator(".github-thread").first();
   await expect(thread.locator(".markdown").first()).toBeVisible();
   await thread.getByLabel("Collapse thread").click();
   await expect(thread.locator(".markdown")).toHaveCount(0);
   await thread.getByLabel("Expand thread").click();
   await expect(thread.locator(".markdown").first()).toBeVisible();
-  await thread.getByLabel("Focus thread").click();
-  await expect(page.getByRole("dialog")).toContainText("Conversation thread");
-  await page.getByRole("button", { name: "Close" }).click();
-  await expect(page.getByRole("dialog")).toHaveCount(0);
 });
 
 test("switches GitHub-style themes", async ({ page }) => {
@@ -131,7 +129,7 @@ test("shows readable Pi diagnostics", async ({ page }) => {
   await page.route("**/api/pi/diagnostics", async (route) => {
     await route.fulfill({
       contentType: "application/json",
-      body: JSON.stringify({ diagnostics: { prKey: "github.com/o/r#1", cwd: "/tmp/pr", sessionFile: "/tmp/session.jsonl", sessionId: "abc", model: "anthropic/claude", thinkingLevel: "medium", activeTools: ["read", "bash"], availableModels: [{ provider: "anthropic", id: "claude" }], tools: [{ name: "read" }], lastPrompt: { chars: 42, startedAt: "now", preview: "Review this PR" } } }),
+      body: JSON.stringify({ diagnostics: { prKey: "github.com/o/r#1", cwd: "/tmp/pr", sessionFile: "/tmp/session.jsonl", sessionId: "abc", model: "anthropic/claude", thinkingLevel: "medium", activeTools: ["read", "bash"], availableModels: [{ provider: "anthropic", id: "claude" }], tools: [{ name: "read" }], lastPrompt: { chars: 42, startedAt: "now", preview: "Review this PR" }, sessions: [{ purpose: "inline-chat", ready: true, queued: false, promptState: { status: "running", elapsedMs: 12000, chars: 42, answerChars: 0 }, lastPrompt: { preview: "Inline question" } }] } }),
     });
   });
 
@@ -142,6 +140,8 @@ test("shows readable Pi diagnostics", async ({ page }) => {
   await expect(dialog.locator("dd", { hasText: "/tmp/pr" })).toBeVisible();
   await expect(dialog.locator(".prompt-preview", { hasText: "Review this PR" })).toBeVisible();
   await expect(dialog).toContainText("Pi runs");
+  await expect(dialog).toContainText("inline-chat · ready");
+  await expect(dialog).toContainText("running · 12s");
 });
 
 test("renders inline Ask Pi responses as markdown", async ({ page }) => {
@@ -171,6 +171,7 @@ test("runs a separate focus areas review and highlights referenced lines", async
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { id: "focus-job" } }) });
   });
 
+  await page.getByRole("tab", { name: "Pi" }).click();
   await page.getByRole("button", { name: "Focus scan" }).click();
 
   const focusArea = page.locator(".focus-area-inline");
@@ -182,8 +183,10 @@ test("runs a separate focus areas review and highlights referenced lines", async
   await focusArea.getByPlaceholder("Ask Pi or write a draft comment about this focus area").fill("please check this tradeoff");
   await focusArea.getByRole("button", { name: "Add draft comment" }).click();
   await expect(page.locator(".inline-thread.draft")).toContainText("please check this tradeoff");
+  await page.getByRole("tab", { name: /Review/ }).click();
   await expect(page.getByRole("button", { name: "Submit review (1)" })).toBeEnabled();
-  await expect(page.locator(".ai-review")).toContainText("1 focus area highlighted inline");
+  await page.getByRole("tab", { name: "Pi" }).click();
+  await expect(page.locator(".ai-review")).toContainText("0/1 focus area reviewed");
   await expect(row).toHaveClass(/focus-highlight-active/);
 });
 
@@ -195,6 +198,7 @@ test("shows a clean focus scan status when there are no focus areas", async ({ p
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { id: "clean-focus-job" } }) });
   });
 
+  await page.getByRole("tab", { name: "Pi" }).click();
   await page.getByRole("button", { name: "Focus scan" }).click();
 
   await expect(page.locator(".ai-review")).toContainText("Focus scan clean");
@@ -215,9 +219,10 @@ test("runs the right-sidebar Pi review panel and continues the chat with Enter",
   });
   await mockAskPi(page, (body) => body.prompt?.includes("latest question") ? "Follow-up answer about `cu_seqlens_q`." : "Unexpected ask response");
 
-  await page.getByRole("button", { name: "Run review" }).click();
+  await page.getByRole("tab", { name: "Pi" }).click();
+  await page.getByRole("button", { name: "Full review" }).click();
 
-  const dialog = page.getByRole("dialog");
+  const dialog = page.locator(".ai-review");
   await expect(dialog).toContainText("Correctness:");
   await Promise.all([
     page.waitForRequest(/\/api\/file\/open$/),
