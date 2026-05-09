@@ -528,7 +528,82 @@ function relativeTime(iso: string | null | undefined): string {
 function ReviewPage(props: DiffProps & { aiReview: AiReview; setAiReview: (review: AiReview) => void; runAiReview: () => Promise<void>; sendAiReviewMessage: (message: string) => Promise<void>; focusReview: FocusReview; setFocusReview: (review: FocusReview) => void; runFocusReview: () => Promise<void>; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<void>; submitting: boolean; refreshingActivity: boolean }) {
   const commentToggleLabel = props.commentsCollapsed ? "Expand all comments" : "Collapse all comments";
   const diffViewLabel = props.diffViewMode === "unified" ? "Split view" : "Unified view";
-  return <div className="review-layout" style={{ gridTemplateColumns: `minmax(0, 1fr) 12px ${props.sideWidth}px` }}><main className="files"><div className="comment-tools"><button className="small-muted-button" onClick={() => props.setDiffViewMode(props.diffViewMode === "unified" ? "split" : "unified")}>{diffViewLabel}</button><button className="small-muted-button" onClick={props.toggleAllComments}>{commentToggleLabel}</button></div>{props.review.files.map((file) => <FileDiff key={file.filename} file={file} {...props} />)}</main><div className="resize-handle" role="separator" aria-label="Resize side panel" onMouseDown={(event) => startResizeSidePanel(event, props.sideWidth, props.setSideWidth)} /><aside className="side"><ReviewSummary pr={props.review.pr} drafts={props.drafts} setDrafts={props.setDrafts} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} submitReview={props.submitReview} submitting={props.submitting} refreshGithubActivity={props.refreshGithubActivity} refreshingActivity={props.refreshingActivity} /><AiReviewPanel prUrl={props.review.pr.url} review={props.aiReview} setReview={props.setAiReview} runReview={props.runAiReview} sendMessage={props.sendAiReviewMessage} focusReview={props.focusReview} runFocusReview={props.runFocusReview} focusAreas={props.focusAreas} setActiveFocusAreaId={props.setActiveFocusAreaId} collapsedFocusAreaIds={props.collapsedFocusAreaIds} setCollapsedFocusAreaIds={props.setCollapsedFocusAreaIds} /><ExistingComments prUrl={props.review.pr.url} comments={props.review.comments} issueComments={props.review.issueComments} refreshGithubActivity={props.refreshGithubActivity} collapseSignal={props.commentCollapseSignal} commentsCollapsed={props.commentsCollapsed} toggleAllComments={props.toggleAllComments} /></aside></div>;
+  const [sideTab, setSideTab] = useState<"review" | "pi" | "comments">("review");
+  const draftCount = props.drafts.length;
+  const piActivity = props.aiReview.messages.length + (props.aiReview.text.length > 0 && props.aiReview.messages.length === 0 ? 1 : 0);
+  const focusCount = props.focusAreas.length;
+  const piBadge = focusCount > 0 ? focusCount : piActivity > 0 ? piActivity : null;
+  const commentCount = props.review.comments.length + props.review.issueComments.length;
+  return <div className="review-layout" style={{ gridTemplateColumns: `minmax(0, 1fr) 12px ${props.sideWidth}px` }}>
+    <main className="files">
+      <PrHeaderStrip pr={props.review.pr} refreshGithubActivity={props.refreshGithubActivity} refreshingActivity={props.refreshingActivity} />
+      <FileNavigator files={props.review.files} fileReviews={props.review.fileReviews} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} />
+      <div className="comment-tools">
+        <button className="small-muted-button" onClick={() => props.setDiffViewMode(props.diffViewMode === "unified" ? "split" : "unified")}>{diffViewLabel}</button>
+        <button className="small-muted-button" onClick={props.toggleAllComments}>{commentToggleLabel}</button>
+      </div>
+      {props.review.files.map((file) => <FileDiff key={file.filename} file={file} {...props} />)}
+    </main>
+    <div className="resize-handle" role="separator" aria-label="Resize side panel" onMouseDown={(event) => startResizeSidePanel(event, props.sideWidth, props.setSideWidth)} />
+    <aside className="side">
+      <nav className="side-tabs" role="tablist" aria-label="Review side panel">
+        <button role="tab" aria-selected={sideTab === "review"} className={`side-tab${sideTab === "review" ? " active" : ""}`} onClick={() => setSideTab("review")}>Review{draftCount > 0 && <span className="side-tab-badge">{draftCount}</span>}</button>
+        <button role="tab" aria-selected={sideTab === "pi"} className={`side-tab${sideTab === "pi" ? " active" : ""}`} onClick={() => setSideTab("pi")}>Pi{piBadge != null && <span className="side-tab-badge">{piBadge}</span>}</button>
+        <button role="tab" aria-selected={sideTab === "comments"} className={`side-tab${sideTab === "comments" ? " active" : ""}`} onClick={() => setSideTab("comments")}>Comments{commentCount > 0 && <span className="side-tab-badge">{commentCount}</span>}</button>
+      </nav>
+      <div className="side-tab-panels">
+        {sideTab === "review" && <ReviewSummary pr={props.review.pr} drafts={props.drafts} setDrafts={props.setDrafts} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} submitReview={props.submitReview} submitting={props.submitting} />}
+        {sideTab === "pi" && <AiReviewPanel prUrl={props.review.pr.url} review={props.aiReview} setReview={props.setAiReview} runReview={props.runAiReview} sendMessage={props.sendAiReviewMessage} focusReview={props.focusReview} runFocusReview={props.runFocusReview} focusAreas={props.focusAreas} setActiveFocusAreaId={props.setActiveFocusAreaId} collapsedFocusAreaIds={props.collapsedFocusAreaIds} setCollapsedFocusAreaIds={props.setCollapsedFocusAreaIds} />}
+        {sideTab === "comments" && <ExistingComments prUrl={props.review.pr.url} comments={props.review.comments} issueComments={props.review.issueComments} refreshGithubActivity={props.refreshGithubActivity} collapseSignal={props.commentCollapseSignal} commentsCollapsed={props.commentsCollapsed} toggleAllComments={props.toggleAllComments} />}
+      </div>
+    </aside>
+    {draftCount > 0 && sideTab !== "review" && <Button className="floating-submit" onClick={() => setSideTab("review")}>Review draft ({draftCount}) →</Button>}
+  </div>;
+}
+
+function PrHeaderStrip({ pr, refreshGithubActivity, refreshingActivity }: { pr: StoredPullRequest; refreshGithubActivity: () => Promise<void>; refreshingActivity: boolean }) {
+  const status = reviewStatus(pr);
+  return <section className="pr-header-strip">
+    <div className="pr-header-main">
+      <h1 className="pr-header-title">{pr.title}</h1>
+      <div className="pr-header-meta">
+        <span className={`review-status ${status.tone}`}>{status.label}</span>
+        <span>{pr.key}</span>
+        <span>{pr.state}</span>
+        <span>{pr.filesChanged} files</span>
+        <span>{pr.existingCommentCount} comments</span>
+        <span>head {shortSha(pr.headSha)}</span>
+      </div>
+    </div>
+    <div className="pr-header-actions">
+      <a href={pr.url} target="_blank" rel="noreferrer">Open GitHub ↗</a>
+      <button onClick={() => void refreshGithubActivity()} disabled={refreshingActivity}>{refreshingActivity ? "Fetching…" : "Fetch activity"}</button>
+    </div>
+  </section>;
+}
+
+function FileNavigator({ files, fileReviews, openFiles, setOpenFiles }: { files: PullFile[]; fileReviews: FileReviewState[]; openFiles: Record<string, boolean>; setOpenFiles: (open: Record<string, boolean>) => void }) {
+  const [open, setOpen] = useState(false);
+  const viewedCount = files.filter((file) => fileReviews.find((state) => state.path === file.filename)?.viewed).length;
+  function jumpTo(filename: string) {
+    if (openFiles[filename] === false) setOpenFiles({ ...openFiles, [filename]: true });
+    window.setTimeout(() => document.getElementById(`file-${filename}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+  }
+  return <details className="file-navigator" open={open} onToggle={(event) => setOpen((event.target as HTMLDetailsElement).open)}>
+    <summary><span><strong>Files</strong> · {viewedCount}/{files.length} viewed</span><span className="muted">{open ? "Hide" : "Show"} list</span></summary>
+    <ol className="file-navigator-list">
+      {files.map((file) => {
+        const viewed = fileReviews.find((state) => state.path === file.filename)?.viewed ?? false;
+        return <li key={file.filename} className={viewed ? "viewed" : ""}>
+          <button onClick={() => jumpTo(file.filename)}>
+            <span className="file-nav-check" aria-hidden="true">{viewed ? "✓" : "•"}</span>
+            <span className="file-nav-path">{file.filename}</span>
+            <span className="file-nav-stats"><span className="stat-add">+{file.additions}</span> <span className="stat-del">-{file.deletions}</span></span>
+          </button>
+        </li>;
+      })}
+    </ol>
+  </details>;
 }
 
 function startResizeSidePanel(event: React.MouseEvent, initialWidth: number, setSideWidth: (width: number) => void): void {
@@ -550,7 +625,7 @@ function FileDiff({ file, review, openFiles, setOpenFiles, expandedContext, setE
   const rows = useMemo(() => parsePatchRows(file.patch), [file.patch]);
   const fileReview = review.fileReviews.find((state) => state.path === file.filename);
   const open = openFiles[file.filename] ?? true;
-  return <section className="file"><button className="file-summary" onClick={() => setOpenFiles({ ...openFiles, [file.filename]: !open })}><div><strong>{file.filename}</strong><span>{file.status} · <span className="stat-add">+{file.additions}</span> / <span className="stat-del">-{file.deletions}</span></span></div><span>{open ? "Collapse" : "Expand"}</span></button>{open && <><div className="file-actions"><label className="viewed-toggle"><input type="checkbox" checked={fileReview?.viewed ?? false} onChange={(event) => void setViewed(file, event.target.checked)} /> Viewed</label></div><div className="patch">{rows.length === 0 ? <DiffRowView row={{ kind: "meta", oldLine: null, newLine: null, text: "Patch unavailable. Click to attach a file-level note.", hunk: "" }} target={{ path: file.filename, line: null, side: "RIGHT", hunk: "" }} threads={threads} setThreads={setThreads} toggleThread={toggleThread} comments={review.comments} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} prUrl={review.pr.url} refreshGithubActivity={refreshGithubActivity} collapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} diffViewMode={diffViewMode} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} /> : <FoldedRows file={file} rows={rows} comments={review.comments} threads={threads} setThreads={setThreads} toggleThread={toggleThread} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} prUrl={review.pr.url} refreshGithubActivity={refreshGithubActivity} collapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} diffViewMode={diffViewMode} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} />}</div></>}</section>;
+  return <section className="file" id={`file-${file.filename}`}><button className="file-summary" onClick={() => setOpenFiles({ ...openFiles, [file.filename]: !open })}><div><strong>{file.filename}</strong><span>{file.status} · <span className="stat-add">+{file.additions}</span> / <span className="stat-del">-{file.deletions}</span></span></div><span>{open ? "Collapse" : "Expand"}</span></button>{open && <><div className="file-actions"><label className="viewed-toggle"><input type="checkbox" checked={fileReview?.viewed ?? false} onChange={(event) => void setViewed(file, event.target.checked)} /> Viewed</label></div><div className="patch">{rows.length === 0 ? <DiffRowView row={{ kind: "meta", oldLine: null, newLine: null, text: "Patch unavailable. Click to attach a file-level note.", hunk: "" }} target={{ path: file.filename, line: null, side: "RIGHT", hunk: "" }} threads={threads} setThreads={setThreads} toggleThread={toggleThread} comments={review.comments} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} prUrl={review.pr.url} refreshGithubActivity={refreshGithubActivity} collapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} diffViewMode={diffViewMode} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} /> : <FoldedRows file={file} rows={rows} comments={review.comments} threads={threads} setThreads={setThreads} toggleThread={toggleThread} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} prUrl={review.pr.url} refreshGithubActivity={refreshGithubActivity} collapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} diffViewMode={diffViewMode} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} />}</div></>}</section>;
 }
 
 function FoldedRows({ file, rows, comments, threads, setThreads, toggleThread, expandedNeighborRows, expandNeighbor, drafts, setDrafts, editingDraftId, setEditingDraftId, askThread, askFocusArea, dragSelection, beginDrag, updateDrag, finishDrag, handleRowClick, prUrl, refreshGithubActivity, collapseSignal, commentsCollapsed, diffViewMode, focusAreas, activeFocusAreaId, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds }: { file: PullFile; rows: DiffRow[]; comments: PullReviewComment[]; threads: Record<string, Thread>; setThreads: DiffProps["setThreads"]; toggleThread: (target: Target, extend?: boolean) => void; expandedContext: Record<string, boolean>; setExpandedContext: (expanded: Record<string, boolean>) => void; expandedNeighborRows: Record<string, DiffRow[]>; expandNeighbor: (file: PullFile, key: string, startLine: number, endLine: number) => Promise<void>; drafts: DraftComment[]; setDrafts: (drafts: DraftComment[]) => void; editingDraftId: string | null; setEditingDraftId: (id: string | null) => void; askThread: (thread: Thread) => Promise<void>; askFocusArea: (area: FocusArea, question: string) => Promise<string>; dragSelection: DragSelection | null; beginDrag: (target: Target) => void; updateDrag: (target: Target) => void; finishDrag: (target: Target) => void; handleRowClick: (target: Target, extend: boolean) => void; prUrl: string; refreshGithubActivity: () => Promise<void>; collapseSignal: number; commentsCollapsed: boolean; diffViewMode: DiffViewMode; focusAreas: FocusArea[]; activeFocusAreaId: string | null; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"] }) {
@@ -666,11 +741,10 @@ function reviewStatus(pr: StoredPullRequest): { label: string; tone: string } {
   return { label: "Reviewed", tone: "success" };
 }
 
-function ReviewSummary({ pr, drafts, setDrafts, editingDraftId, setEditingDraftId, submitReview, submitting, refreshGithubActivity, refreshingActivity }: { pr: StoredPullRequest; drafts: DraftComment[]; setDrafts: (drafts: DraftComment[]) => void; editingDraftId: string | null; setEditingDraftId: (id: string | null) => void; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<void>; submitting: boolean; refreshGithubActivity: () => Promise<void>; refreshingActivity: boolean }) {
+function ReviewSummary({ drafts, setDrafts, editingDraftId, setEditingDraftId, submitReview, submitting }: { pr: StoredPullRequest; drafts: DraftComment[]; setDrafts: (drafts: DraftComment[]) => void; editingDraftId: string | null; setEditingDraftId: (id: string | null) => void; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<void>; submitting: boolean }) {
   const [event, setEvent] = useState<"COMMENT" | "APPROVE" | "REQUEST_CHANGES">("COMMENT");
   const [body, setBody] = useState("");
-  const status = reviewStatus(pr);
-  return <section className="panel"><h2>{pr.title}</h2><div className="meta"><span>{pr.key}</span><span>{pr.state}</span><span>{pr.filesChanged} files</span><span>{pr.existingCommentCount} comments</span><span>head {shortSha(pr.headSha)}</span><span className={`review-status ${status.tone}`}>{status.label}</span></div><div className="link-row"><a href={pr.url} target="_blank" rel="noreferrer">Open GitHub</a><button onClick={() => void refreshGithubActivity()} disabled={refreshingActivity}>{refreshingActivity ? "Fetching…" : "Fetch GitHub activity"}</button></div><h2>Draft review</h2><select className={`review-event ${event.toLowerCase().replace("_", "-")}`} value={event} onChange={(change) => setEvent(change.target.value as typeof event)}><option value="COMMENT">Not reviewed</option><option value="APPROVE">Approve</option><option value="REQUEST_CHANGES">Request changes</option></select><textarea value={body} onChange={(change) => setBody(change.target.value)} placeholder="Overall review body" />{drafts.length === 0 ? <p className="muted">No draft comments yet.</p> : drafts.map((draft) => <DraftView key={draft.id} draft={draft} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} />)}<button className={`review-submit ${event.toLowerCase().replace("_", "-")}`} disabled={submitting || (body.trim().length === 0 && drafts.length === 0)} onClick={() => void submitReview(event, body)}>{submitting ? "Submitting…" : `Submit review (${drafts.length})`}</button></section>;
+  return <section className="panel"><h2>Draft review</h2><select className={`review-event ${event.toLowerCase().replace("_", "-")}`} value={event} onChange={(change) => setEvent(change.target.value as typeof event)}><option value="COMMENT">Not reviewed</option><option value="APPROVE">Approve</option><option value="REQUEST_CHANGES">Request changes</option></select><textarea value={body} onChange={(change) => setBody(change.target.value)} placeholder="Overall review body" />{drafts.length === 0 ? <p className="muted">No draft comments yet.</p> : drafts.map((draft) => <DraftView key={draft.id} draft={draft} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} />)}<button className={`review-submit ${event.toLowerCase().replace("_", "-")}`} disabled={submitting || (body.trim().length === 0 && drafts.length === 0)} onClick={() => void submitReview(event, body)}>{submitting ? "Submitting…" : `Submit review (${drafts.length})`}</button></section>;
 }
 
 function AiReviewPanel({ prUrl, review, setReview, runReview, sendMessage, focusReview, runFocusReview, focusAreas, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds }: { prUrl: string; review: AiReview; setReview: (review: AiReview) => void; runReview: () => Promise<void>; sendMessage: (message: string) => Promise<void>; focusReview: FocusReview; runFocusReview: () => Promise<void>; focusAreas: FocusArea[]; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"] }) {
