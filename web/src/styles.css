@@ -698,8 +698,6 @@ a { color: var(--link); text-decoration: none; }
 
 .diff-row:not(.hunk):not(.meta) { cursor: pointer; }
 .diff-row:hover, .diff-row.selected { background: rgba(177, 186, 196, 0.09); }
-.diff-row.range-selecting { background: rgba(47, 129, 247, 0.24); }
-.diff-row.in-thread-range { background: rgba(47, 129, 247, 0.12); box-shadow: inset 3px 0 rgba(47, 129, 247, 0.5); }
 .diff-row.focus-highlight { background: color-mix(in srgb, var(--attention) 18%, transparent); box-shadow: inset 3px 0 color-mix(in srgb, var(--attention) 70%, transparent); }
 .diff-row.focus-highlight-active { background: color-mix(in srgb, var(--attention) 32%, transparent); box-shadow: inset 4px 0 var(--attention); }
 .num { color: #6e7681; text-align: right; user-select: none; }
@@ -721,6 +719,8 @@ a { color: var(--link); text-decoration: none; }
 }
 .hunk { color: #79c0ff; background: var(--panel2); }
 .meta { color: var(--muted); }
+.diff-row.in-thread-range { background: rgba(47, 129, 247, 0.12); box-shadow: inset 3px 0 rgba(47, 129, 247, 0.5); }
+.diff-row.range-selecting { background: rgba(47, 129, 247, 0.24); }
 
 .pill {
   border: 1px solid var(--border);
@@ -731,7 +731,7 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .inline-thread {
-  margin: 0.45rem 16px 0.7rem 112px;
+  margin: 0.35rem 16px 0.55rem 112px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--panel);
@@ -762,11 +762,23 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .inline-thread.collapsed {
-  display: block;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   width: calc(100% - 128px);
-  padding: 0.55rem 0.7rem;
+  padding: 0.3rem 0.6rem;
   text-align: left;
   color: var(--muted);
+  font-size: 0.82rem;
+  background: transparent;
+  border-color: color-mix(in srgb, var(--thread-accent) 25%, var(--border));
+  border-style: dashed;
+}
+
+.inline-thread.collapsed:hover {
+  background: var(--thread-bg);
+  border-style: solid;
+  color: var(--text);
 }
 
 .inline-thread p { margin: 0; white-space: pre-wrap; }
