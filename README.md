@@ -31,15 +31,27 @@ Check GitHub auth:
 gh auth status
 ```
 
-## Commands
+## Quick start
 
-Install dependencies:
+From a fresh clone, one command installs dependencies, builds the app, and starts the local server:
 
 ```sh
-npm install
+npm start
 ```
 
-Run dev mode, no build step:
+Open http://127.0.0.1:43133.
+
+Or clone and start in one shell command:
+
+```sh
+git clone https://github.com/drisspg/pi-review && cd pi-review && npm start
+```
+
+`npm start` automatically runs `npm install` when dependencies are missing or stale, runs `npm run build` when the built server/web assets are missing or stale, then starts the production server.
+
+## Commands
+
+Run dev mode with file watching:
 
 ```sh
 npm run dev
@@ -47,13 +59,17 @@ npm run dev
 
 Open http://127.0.0.1:5173.
 
-Build and run production server:
+Build only:
 
 ```sh
-npm run build && npm start
+npm run build
 ```
 
-Open http://127.0.0.1:43133.
+Run an already-built production server without install/build checks:
+
+```sh
+npm run start:built
+```
 
 Validation loop:
 
