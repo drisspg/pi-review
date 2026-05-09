@@ -1338,64 +1338,85 @@ a { color: var(--link); text-decoration: none; }
   color: var(--text);
 }
 
-.pending-draft {
-  grid-template-columns: minmax(180px, 0.34fr) minmax(260px, 1fr) auto;
-  gap: 12px;
-  align-items: center;
-  border-top: 0;
+.draft-card {
+  border: 1px solid color-mix(in srgb, var(--thread-accent) 30%, var(--border));
   border-radius: 8px;
-  padding: 10px 12px;
-  overflow: hidden;
+  background: color-mix(in srgb, var(--thread-accent) 5%, var(--panel2));
+  padding: 8px 10px;
+  display: grid;
+  gap: 6px;
   animation: pending-draft-enter 140ms ease-out;
-  transition: opacity 160ms ease, transform 160ms ease, border-color 160ms ease, background 160ms ease;
+  transition: opacity 160ms ease, transform 160ms ease;
 }
 
-.pending-draft.editing {
-  border-color: color-mix(in srgb, var(--accent) 46%, var(--attention));
+.draft-card.editing {
+  border-color: color-mix(in srgb, var(--accent) 46%, var(--thread-accent));
   background: color-mix(in srgb, var(--accent) 8%, var(--panel));
 }
 
-.pending-draft.removing {
+.draft-card.removing {
   opacity: 0;
   transform: translateX(12px) scale(0.985);
 }
 
-.pending-draft-meta {
-  display: grid;
-  gap: 3px;
+.draft-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.draft-card-location {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
   min-width: 0;
 }
 
-.pending-draft-meta strong {
-  color: var(--attention);
+.draft-card-location strong {
+  color: var(--thread-accent);
   font-size: 0.82rem;
-}
-
-.pending-draft-meta span {
   overflow: hidden;
-  color: var(--muted);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.pending-draft-body {
+.draft-card-location.clickable {
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 2px 4px;
+  margin: -2px -4px;
+}
+
+.draft-card-location.clickable:hover {
+  background: color-mix(in srgb, var(--thread-accent) 12%, transparent);
+}
+
+.draft-card-location.clickable:hover strong {
+  color: var(--accent);
+}
+
+.draft-card-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.draft-card-body {
   min-width: 0;
 }
 
-.pending-draft p {
+.draft-card-body p {
   margin: 0;
+  font-size: 0.88rem;
   overflow-wrap: anywhere;
 }
 
-.pending-draft textarea {
+.draft-card-body textarea {
   min-height: 42px;
   width: 100%;
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
-}
-
-.pending-draft-actions {
-  justify-content: flex-end;
 }
 
 .draft-icon-button {

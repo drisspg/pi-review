@@ -1,7 +1,7 @@
 import React, { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ChevronDownIcon, ChevronRightIcon, XIcon } from "@primer/octicons-react";
-import { api } from "./api";
+import { api, askPi as askPiApi } from "./api";
 import { Button } from "./components/Button";
 import { CodeText, MarkdownText } from "./components/Markdown";
 import { ModalShell } from "./components/Modal";
@@ -34,7 +34,7 @@ type DiffProps = {
   editingDraftId: string | null;
   setEditingDraftId: (id: string | null) => void;
   askThread: (thread: Thread) => Promise<void>;
-  askFocusArea: (area: FocusArea, question: string) => Promise<string>;
+  askFocusArea: (area: FocusArea, question: string, onDelta?: (answer: string) => void) => Promise<string>;
   sideWidth: number;
   setSideWidth: (width: number) => void;
   dragSelection: DragSelection | null;
@@ -289,10 +289,10 @@ function App() {
     toggleThread(target, extend);
   }
 
-  async function askFocusArea(area: FocusArea, question: string): Promise<string> {
+  async function askFocusArea(area: FocusArea, question: string, onDelta?: (answer: string) => void): Promise<string> {
     if (review == null) return "Open a PR before asking Pi.";
     const prompt = `Review PR ${review.pr.key}. Focus area: ${area.path}:${area.startLine === area.endLine ? area.startLine : `${area.startLine}-${area.endLine}`}\n\nFocus finding:\n${area.body}\n\nQuestion: ${question}`;
-    const { answer } = await api<{ answer: string }>("/api/ask", { method: "POST", body: JSON.stringify({ prKey: review.pr.key, prompt }) });
+    const answer = await askPiApi({ prKey: review.pr.key, prompt, purpose: "focus-chat" }, onDelta);
     await refreshLogs();
     return answer;
   }
@@ -300,14 +300,16 @@ function App() {
   async function askThread(thread: Thread) {
     if (review == null || thread.draft.trim().length === 0) return;
     const question = thread.draft.trim();
-    setThreads((current) => ({ ...current, [thread.key]: { ...thread, asking: true, draft: "", messages: [...thread.messages, { role: "user", text: question }] } }));
+    setThreads((current) => ({ ...current, [thread.key]: { ...thread, asking: true, draft: "", messages: [...thread.messages, { role: "user", text: question }, { role: "pi", text: "" }] } }));
     try {
       const prompt = `Review PR ${review.pr.key}. File: ${thread.target.path}. Lines: ${thread.target.line == null ? "file" : thread.target.startLine != null && thread.target.startLine !== thread.target.line ? `${thread.target.startLine}-${thread.target.line}` : thread.target.line}. Side: ${thread.target.side}. Hunk: ${thread.target.hunk}\n\nQuestion: ${question}`;
-      const { answer } = await api<{ answer: string }>("/api/ask", { method: "POST", body: JSON.stringify({ prKey: review.pr.key, prompt }) });
-      setThreads((current) => ({ ...current, [thread.key]: { ...current[thread.key], asking: false, messages: [...(current[thread.key]?.messages ?? []), { role: "pi", text: answer }] } }));
+      const setAnswer = (answer: string) => setThreads((current) => ({ ...current, [thread.key]: { ...current[thread.key], messages: [...(current[thread.key]?.messages ?? []).slice(0, -1), { role: "pi", text: answer }] } }));
+      const answer = await askPiApi({ prKey: review.pr.key, prompt, purpose: "inline-chat" }, setAnswer);
+      setThreads((current) => ({ ...current, [thread.key]: { ...current[thread.key], asking: false, messages: [...(current[thread.key]?.messages ?? []).slice(0, -1), { role: "pi", text: answer }] } }));
       await refreshLogs();
     } catch (err) {
-      setThreads((current) => ({ ...current, [thread.key]: { ...current[thread.key], asking: false, messages: [...(current[thread.key]?.messages ?? []), { role: "pi", text: `Ask Pi failed: ${err instanceof Error ? err.message : String(err)}` }] } }));
+      const text = `Ask Pi failed: ${err instanceof Error ? err.message : String(err)}`;
+      setThreads((current) => ({ ...current, [thread.key]: { ...current[thread.key], asking: false, messages: [...(current[thread.key]?.messages ?? []).slice(0, -1), { role: "pi", text }] } }));
     }
   }
 
@@ -357,15 +359,16 @@ function App() {
   async function sendAiReviewMessage(message: string) {
     if (review == null || aiReview.running || message.trim().length === 0) return;
     const question = message.trim();
-    setAiReview((current) => ({ ...current, open: true, expanded: true, running: true, messages: [...current.messages, { role: "user", text: question }] }));
+    setAiReview((current) => ({ ...current, open: true, expanded: true, running: true, messages: [...current.messages, { role: "user", text: question }, { role: "pi", text: "" }] }));
     try {
       const previous = aiReview.messages.map((entry) => `${entry.role === "user" ? "User" : "Pi"}: ${entry.text}`).join("\n\n");
       const prompt = `Continue discussing PR ${review.pr.key}. Answer the user's latest question using the checked-out PR worktree. Be concise and cite files/lines when useful.\n\nPrevious dialogue:\n${previous || "(none)"}\n\nUser: ${question}`;
-      const { answer } = await api<{ answer: string }>("/api/ask", { method: "POST", body: JSON.stringify({ prKey: review.pr.key, prompt }) });
-      setAiReview((current) => ({ ...current, open: true, expanded: true, running: false, text: answer, messages: [...current.messages, { role: "pi", text: answer }] }));
+      const setAnswer = (answer: string) => setAiReview((current) => ({ ...current, open: true, expanded: true, text: answer, messages: [...current.messages.slice(0, -1), { role: "pi", text: answer }] }));
+      const answer = await askPiApi({ prKey: review.pr.key, prompt, purpose: "chat" }, setAnswer);
+      setAiReview((current) => ({ ...current, open: true, expanded: true, running: false, text: answer, messages: [...current.messages.slice(0, -1), { role: "pi", text: answer }] }));
     } catch (err) {
       const text = `Ask Pi failed: ${err instanceof Error ? err.message : String(err)}`;
-      setAiReview((current) => ({ ...current, open: true, expanded: true, running: false, text, messages: [...current.messages, { role: "pi", text }] }));
+      setAiReview((current) => ({ ...current, open: true, expanded: true, running: false, text, messages: [...current.messages.slice(0, -1), { role: "pi", text }] }));
     }
   }
 
@@ -562,7 +565,7 @@ function ReviewPage(props: DiffProps & { aiReview: AiReview; setAiReview: (revie
         <button role="tab" aria-selected={sideTab === "comments"} className={`side-tab${sideTab === "comments" ? " active" : ""}`} onClick={() => setSideTab("comments")}>Comments{commentCount > 0 && <span className="side-tab-badge">{commentCount}</span>}</button>
       </nav>
       <div className="side-tab-panels">
-        {sideTab === "review" && <ReviewSummary pr={props.review.pr} drafts={props.drafts} setDrafts={props.setDrafts} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} submitReview={props.submitReview} submitting={props.submitting} />}
+        {sideTab === "review" && <ReviewSummary pr={props.review.pr} drafts={props.drafts} setDrafts={props.setDrafts} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} submitReview={props.submitReview} submitting={props.submitting} onJumpToDraft={(draft) => jumpToComment(draft.path, draft.line)} />}
         {sideTab === "pi" && <AiReviewPanel prUrl={props.review.pr.url} review={props.aiReview} setReview={props.setAiReview} runReview={props.runAiReview} sendMessage={props.sendAiReviewMessage} focusReview={props.focusReview} runFocusReview={props.runFocusReview} focusAreas={props.focusAreas} setActiveFocusAreaId={props.setActiveFocusAreaId} collapsedFocusAreaIds={props.collapsedFocusAreaIds} setCollapsedFocusAreaIds={props.setCollapsedFocusAreaIds} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} />}
         {sideTab === "comments" && <ExistingComments prUrl={props.review.pr.url} comments={props.review.comments} issueComments={props.review.issueComments} refreshGithubActivity={props.refreshGithubActivity} collapseSignal={props.commentCollapseSignal} commentsCollapsed={props.commentsCollapsed} toggleAllComments={props.toggleAllComments} onJumpToComment={jumpToComment} />}
       </div>
@@ -680,7 +683,7 @@ function updateDraft(drafts: DraftComment[], setDrafts: (drafts: DraftComment[])
   setDrafts(drafts.map((draft) => draft.id === id ? { ...draft, body } : draft));
 }
 
-function DraftView({ draft, drafts, setDrafts, editingDraftId, setEditingDraftId }: { draft: DraftComment; drafts: DraftComment[]; setDrafts: (drafts: DraftComment[]) => void; editingDraftId: string | null; setEditingDraftId: (id: string | null) => void }) {
+function DraftView({ draft, drafts, setDrafts, editingDraftId, setEditingDraftId, onJump }: { draft: DraftComment; drafts: DraftComment[]; setDrafts: (drafts: DraftComment[]) => void; editingDraftId: string | null; setEditingDraftId: (id: string | null) => void; onJump?: () => void }) {
   const editing = editingDraftId === draft.id;
   const [removing, setRemoving] = useState(false);
   function removeDraft(): void {
@@ -688,7 +691,18 @@ function DraftView({ draft, drafts, setDrafts, editingDraftId, setEditingDraftId
     setRemoving(true);
     window.setTimeout(() => setDrafts(drafts.filter((item) => item.id !== draft.id)), 160);
   }
-  return <div className={`comment draft-card pending-draft${editing ? " editing" : ""}${removing ? " removing" : ""}`}><div className="pending-draft-meta"><strong>Pending draft</strong><span>{targetLabel(draft)}</span></div><div className="pending-draft-body">{editing ? <textarea autoFocus value={draft.body} onChange={(event) => updateDraft(drafts, setDrafts, draft.id, event.target.value)} /> : <p>{draft.body}</p>}</div><div className="actions pending-draft-actions"><button className="draft-icon-button edit-draft-button" title={editing ? "Done editing" : "Edit draft"} onClick={() => setEditingDraftId(editing ? null : draft.id)}>{editing ? "Done" : "Edit"}</button><button className="draft-icon-button remove-draft-button" onClick={removeDraft} disabled={removing}>{removing ? "Removing…" : "Remove"}</button></div></div>;
+  return <div className={`draft-card${editing ? " editing" : ""}${removing ? " removing" : ""}`}>
+    <div className="draft-card-head">
+      <div className={`draft-card-location${onJump != null ? " clickable" : ""}`} onClick={onJump} role={onJump != null ? "button" : undefined} tabIndex={onJump != null ? 0 : undefined}>
+        <strong>{targetLabel(draft)}</strong>
+      </div>
+      <div className="draft-card-actions">
+        <Button variant="icon" aria-label={editing ? "Done editing" : "Edit draft"} onClick={() => setEditingDraftId(editing ? null : draft.id)}>{editing ? <ChevronDownIcon size={14} /> : <ChevronRightIcon size={14} />}</Button>
+        <Button variant="icon" className="close-thread-button" aria-label="Remove draft" onClick={removeDraft} disabled={removing}><XIcon size={14} /></Button>
+      </div>
+    </div>
+    <div className="draft-card-body">{editing ? <textarea autoFocus value={draft.body} onChange={(event) => updateDraft(drafts, setDrafts, draft.id, event.target.value)} /> : <p>{draft.body}</p>}</div>
+  </div>;
 }
 
 function DiffRowView({ row, target, threads, setThreads, toggleThread, comments, drafts, setDrafts, editingDraftId, setEditingDraftId, askThread, askFocusArea, dragSelection, beginDrag, updateDrag, finishDrag, handleRowClick, prUrl, refreshGithubActivity, collapseSignal, commentsCollapsed, diffViewMode, focusAreas, activeFocusAreaId, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds }: { row: DiffRow; target: Target | null; threads: Record<string, Thread>; setThreads: DiffProps["setThreads"]; toggleThread: (target: Target, extend?: boolean) => void; comments: PullReviewComment[]; drafts: DraftComment[]; setDrafts: (drafts: DraftComment[]) => void; editingDraftId: string | null; setEditingDraftId: (id: string | null) => void; askThread: (thread: Thread) => Promise<void>; askFocusArea: (area: FocusArea, question: string) => Promise<string>; dragSelection: DragSelection | null; beginDrag: (target: Target) => void; updateDrag: (target: Target) => void; finishDrag: (target: Target) => void; handleRowClick: (target: Target, extend: boolean) => void; prUrl: string; refreshGithubActivity: () => Promise<void>; collapseSignal: number; commentsCollapsed: boolean; diffViewMode: DiffViewMode; focusAreas: FocusArea[]; activeFocusAreaId: string | null; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"] }) {
@@ -707,7 +721,7 @@ function DiffRowView({ row, target, threads, setThreads, toggleThread, comments,
   return <><div className={`diff-row ${diffViewMode} ${row.kind} ${thread != null && !thread.collapsed ? "selected" : ""} ${selecting ? "range-selecting" : ""} ${inThreadRange ? "in-thread-range" : ""}`} data-path={target?.path} data-line={target?.line ?? undefined} data-side={target?.side} data-hunk={target?.hunk} onMouseDown={(event) => { if (target != null && event.button === 0) { event.preventDefault(); beginDrag(target); } }} onMouseEnter={() => { if (target != null && dragSelection != null) updateDrag(target); }} onMouseUp={() => { if (target != null) finishDrag(target); }} onClick={(event) => { if (target != null) handleRowClick(target, event.shiftKey); }}>{diffViewMode === "split" ? splitCells : unifiedCells}</div>{inlineCommentThreads.map((commentThread) => <ExistingReviewThread key={commentThread.map((comment) => comment.id).join(":")} comments={commentThread} prUrl={prUrl} refreshGithubActivity={refreshGithubActivity} collapseSignal={collapseSignal} collapseComments={commentsCollapsed} />)}{rowFocusAreas.map((area) => <FocusAreaInline key={area.id} prUrl={prUrl} area={area} active={area.id === activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} askFocusArea={askFocusArea} addDraft={(body) => setDrafts([...drafts, { id: newId(), path: area.path, line: area.endLine, startLine: area.startLine, side: "RIGHT", body }])} />)}{inlineDrafts.map((draft) => <div className="inline-thread draft" key={draft.id}><DraftView draft={draft} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} /></div>)}{thread != null && <ThreadBox prUrl={prUrl} thread={thread} setThread={(next) => setThreads((current) => ({ ...current, [next.key]: next }))} closeThread={() => setThreads((current) => { const next = { ...current }; delete next[thread.key]; return next; })} addDraft={() => { if (thread.draft.trim().length > 0) setDrafts([...drafts, { id: newId(), path: thread.target.path, line: thread.target.line, startLine: thread.target.startLine, side: thread.target.side, body: thread.draft.trim() }]); setThreads((current) => { const next = { ...current }; if (thread.messages.length === 0) delete next[thread.key]; else next[thread.key] = { ...thread, draft: "", collapsed: true }; return next; }); }} askThread={askThread} />}</>;
 }
 
-function FocusAreaInline({ prUrl, area, active, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds, askFocusArea, addDraft }: { prUrl: string; area: FocusArea; active: boolean; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"]; askFocusArea: (area: FocusArea, question: string) => Promise<string>; addDraft: (body: string) => void }) {
+function FocusAreaInline({ prUrl, area, active, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds, askFocusArea, addDraft }: { prUrl: string; area: FocusArea; active: boolean; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"]; askFocusArea: DiffProps["askFocusArea"]; addDraft: (body: string) => void }) {
   const collapsed = collapsedFocusAreaIds[area.id] ?? false;
   const [draft, setDraft] = useState("");
   const [asking, setAsking] = useState(false);
@@ -724,12 +738,13 @@ function FocusAreaInline({ prUrl, area, active, setActiveFocusAreaId, collapsedF
     if (question.length === 0 || asking) return;
     setDraft("");
     setAsking(true);
-    setMessages((current) => [...current, { role: "user", text: question }]);
+    setMessages((current) => [...current, { role: "user", text: question }, { role: "pi", text: "" }]);
     try {
-      const answer = await askFocusArea(area, question);
-      setMessages((current) => [...current, { role: "pi", text: answer }]);
+      const setAnswer = (answer: string) => setMessages((current) => [...current.slice(0, -1), { role: "pi", text: answer }]);
+      const answer = await askFocusArea(area, question, setAnswer);
+      setMessages((current) => [...current.slice(0, -1), { role: "pi", text: answer }]);
     } catch (err) {
-      setMessages((current) => [...current, { role: "pi", text: `Ask Pi failed: ${err instanceof Error ? err.message : String(err)}` }]);
+      setMessages((current) => [...current.slice(0, -1), { role: "pi", text: `Ask Pi failed: ${err instanceof Error ? err.message : String(err)}` }]);
     } finally {
       setAsking(false);
     }
@@ -753,10 +768,10 @@ function reviewStatus(pr: StoredPullRequest): { label: string; tone: string } {
   return { label: "Reviewed", tone: "success" };
 }
 
-function ReviewSummary({ drafts, setDrafts, editingDraftId, setEditingDraftId, submitReview, submitting }: { pr: StoredPullRequest; drafts: DraftComment[]; setDrafts: (drafts: DraftComment[]) => void; editingDraftId: string | null; setEditingDraftId: (id: string | null) => void; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<void>; submitting: boolean }) {
+function ReviewSummary({ drafts, setDrafts, editingDraftId, setEditingDraftId, submitReview, submitting, onJumpToDraft }: { pr: StoredPullRequest; drafts: DraftComment[]; setDrafts: (drafts: DraftComment[]) => void; editingDraftId: string | null; setEditingDraftId: (id: string | null) => void; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<void>; submitting: boolean; onJumpToDraft?: (draft: DraftComment) => void }) {
   const [event, setEvent] = useState<"COMMENT" | "APPROVE" | "REQUEST_CHANGES">("COMMENT");
   const [body, setBody] = useState("");
-  return <section className="panel"><h2>Draft review</h2><select className={`review-event ${event.toLowerCase().replace("_", "-")}`} value={event} onChange={(change) => setEvent(change.target.value as typeof event)}><option value="COMMENT">Not reviewed</option><option value="APPROVE">Approve</option><option value="REQUEST_CHANGES">Request changes</option></select><textarea value={body} onChange={(change) => setBody(change.target.value)} placeholder="Overall review body" />{drafts.length === 0 ? <p className="muted">No draft comments yet.</p> : drafts.map((draft) => <DraftView key={draft.id} draft={draft} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} />)}<button className={`review-submit ${event.toLowerCase().replace("_", "-")}`} disabled={submitting || (body.trim().length === 0 && drafts.length === 0)} onClick={() => void submitReview(event, body)}>{submitting ? "Submitting…" : `Submit review (${drafts.length})`}</button></section>;
+  return <section className="panel"><h2>Draft review</h2><select className={`review-event ${event.toLowerCase().replace("_", "-")}`} value={event} onChange={(change) => setEvent(change.target.value as typeof event)}><option value="COMMENT">Not reviewed</option><option value="APPROVE">Approve</option><option value="REQUEST_CHANGES">Request changes</option></select><textarea value={body} onChange={(change) => setBody(change.target.value)} placeholder="Overall review body" />{drafts.length === 0 ? <p className="muted">No draft comments yet.</p> : drafts.map((draft) => <DraftView key={draft.id} draft={draft} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} onJump={onJumpToDraft != null ? () => onJumpToDraft(draft) : undefined} />)}<button className={`review-submit ${event.toLowerCase().replace("_", "-")}`} disabled={submitting || (body.trim().length === 0 && drafts.length === 0)} onClick={() => void submitReview(event, body)}>{submitting ? "Submitting…" : `Submit review (${drafts.length})`}</button></section>;
 }
 
 function AiReviewPanel({ prUrl, review, setReview, runReview, sendMessage, focusReview, runFocusReview, focusAreas, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds, openFiles, setOpenFiles }: { prUrl: string; review: AiReview; setReview: (review: AiReview) => void; runReview: () => Promise<void>; sendMessage: (message: string) => Promise<void>; focusReview: FocusReview; runFocusReview: () => Promise<void>; focusAreas: FocusArea[]; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"]; openFiles: Record<string, boolean>; setOpenFiles: (open: Record<string, boolean>) => void }) {
