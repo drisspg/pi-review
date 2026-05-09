@@ -115,6 +115,26 @@ button {
 
 button:hover { border-color: var(--muted); }
 button:disabled { cursor: not-allowed; opacity: 0.55; }
+
+.spinner-label {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+}
+
+.spinner {
+  width: 0.9em;
+  height: 0.9em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spinner-rotate 650ms linear infinite;
+}
+
+@keyframes spinner-rotate {
+  to { transform: rotate(360deg); }
+}
+
 a { color: var(--link); text-decoration: none; }
 
 .app-shell {
