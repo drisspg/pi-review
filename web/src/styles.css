@@ -137,6 +137,27 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 
 a { color: var(--link); text-decoration: none; }
 
+.loading-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  min-height: 60vh;
+  color: var(--muted);
+}
+
+.loading-cog {
+  width: 48px;
+  height: 48px;
+  animation: spinner-rotate 1.5s linear infinite;
+}
+
+.loading-page p {
+  margin: 0;
+  font-size: 1rem;
+}
+
 .app-shell {
   min-height: 100vh;
   padding: 12px;
@@ -537,27 +558,33 @@ a { color: var(--link); text-decoration: none; }
   z-index: 20;
   width: 100%;
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
-  text-align: left;
   background: color-mix(in srgb, var(--panel) 94%, var(--bg));
-  border: 0;
   border-bottom: 1px solid var(--border);
-  border-radius: 0;
-  padding: 10px 12px;
+  padding: 0 12px 0 0;
   backdrop-filter: blur(8px);
-}
-
-.file-summary div {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
 }
 
 .file-summary-left {
   display: flex;
   gap: 8px;
   align-items: center;
+  min-width: 0;
+  flex: 1;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 0;
+  padding: 10px 12px;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.file-summary-left:hover {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
 }
 
 .collapse-chevron {
@@ -1631,6 +1658,22 @@ a { color: var(--link); text-decoration: none; }
 .focus-review .markdown {
   max-height: 360px;
   overflow: auto;
+}
+
+.pi-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.pi-action {
+  display: grid;
+  gap: 4px;
+}
+
+.pi-action span {
+  font-size: 0.75rem;
+  line-height: 1.35;
 }
 
 .focus-review-run {
