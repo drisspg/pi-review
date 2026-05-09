@@ -230,6 +230,7 @@ a { color: var(--link); text-decoration: none; }
   flex-flow: row nowrap;
   min-width: 0;
   gap: 6px;
+  margin: 0;
 }
 
 .open-form input {
@@ -824,6 +825,21 @@ a { color: var(--link); text-decoration: none; }
   align-items: baseline;
   flex-wrap: wrap;
   min-width: 0;
+}
+
+.thread-title-link {
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 2px 4px;
+  margin: -2px -4px;
+}
+
+.thread-title-link:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.thread-title-link:hover strong {
+  color: var(--accent);
 }
 
 .thread-status {
