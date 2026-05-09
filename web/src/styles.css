@@ -868,22 +868,17 @@ a { color: var(--link); text-decoration: none; }
   font-size: 12px;
 }
 
-.file-reference-links {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
+.file-reference-link {
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
 }
 
-.file-reference-links button {
-  max-width: 100%;
-  min-height: 24px;
-  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+.file-reference-link code {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
   color: var(--accent);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .markdown blockquote {
   padding-left: 10px;

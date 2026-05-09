@@ -219,7 +219,10 @@ test("runs the right-sidebar Pi review panel and continues the chat with Enter",
 
   const dialog = page.getByRole("dialog");
   await expect(dialog).toContainText("Correctness:");
-  await dialog.getByRole("button", { name: "csrc/flash_attn/src/flash_fwd_kernel.h:1276" }).click();
+  await Promise.all([
+    page.waitForRequest(/\/api\/file\/open$/),
+    dialog.getByRole("link", { name: "csrc/flash_attn/src/flash_fwd_kernel.h:1276" }).click(),
+  ]);
   expect(openedFile).toMatchObject({ path: "csrc/flash_attn/src/flash_fwd_kernel.h", line: 1276 });
   await expect(dialog.getByRole("button", { name: "Run again" })).toBeEnabled();
   await dialog.getByPlaceholder("Ask Pi about this PR…").fill("what should I test?");
