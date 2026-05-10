@@ -66,6 +66,7 @@ export type StoredPullRequest = {
   ref: PullRequestRef;
   url: string;
   title: string;
+  body: string | null;
   state: string;
   author: string | null;
   baseSha: string;

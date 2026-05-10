@@ -73,6 +73,7 @@ function toStoredPullRequest(ref: PullRequestRef, pr: PullRequest, files: PullFi
     ref,
     url: pr.html_url,
     title: pr.title,
+    body: pr.body ?? null,
     state: pr.state,
     author: pr.user?.login ?? null,
     baseSha: pr.base.sha,

@@ -589,6 +589,7 @@ function ReviewPage(props: DiffProps & { aiReview: AiReview; setAiReview: (revie
   return <div className="review-layout" style={{ gridTemplateColumns: `minmax(0, 1fr) 12px ${props.sideWidth}px` }}>
     <main className="files">
       <PrHeaderStrip pr={props.review.pr} refreshGithubActivity={props.refreshGithubActivity} refreshingActivity={props.refreshingActivity} />
+      <PrSummary pr={props.review.pr} />
       <FileNavigator files={props.review.files} fileReviews={props.review.fileReviews} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} />
       <div className="comment-tools">
         <button className="small-muted-button" onClick={() => props.setDiffViewMode(props.diffViewMode === "unified" ? "split" : "unified")}>{diffViewLabel}</button>
@@ -631,6 +632,20 @@ function PrHeaderStrip({ pr, refreshGithubActivity, refreshingActivity }: { pr: 
       <a href={pr.url} target="_blank" rel="noreferrer">Open GitHub ↗</a>
       <button onClick={() => void refreshGithubActivity()} disabled={refreshingActivity}>{refreshingActivity ? "Fetching…" : "Fetch activity"}</button>
     </div>
+  </section>;
+}
+
+function PrSummary({ pr }: { pr: StoredPullRequest }) {
+  const [collapsed, setCollapsed] = useState(false);
+  const summary = pr.body?.trim();
+  return <section className={`pr-summary github-thread${collapsed ? " minimized" : ""}`}>
+    <div className="thread-head">
+      <div className="thread-title">
+        <Button variant="icon" aria-label={collapsed ? "Expand PR summary" : "Collapse PR summary"} onClick={() => setCollapsed(!collapsed)}>{collapsed ? <ChevronRightIcon size={16} /> : <ChevronDownIcon size={16} />}</Button>
+        <div><strong>PR summary</strong><span>{summary == null || summary.length === 0 ? "No summary provided" : `${summary.split(/\s+/).slice(0, 12).join(" ")}${summary.split(/\s+/).length > 12 ? "…" : ""}`}</span></div>
+      </div>
+    </div>
+    {!collapsed && <div className="pr-summary-body">{summary == null || summary.length === 0 ? <p className="muted">No PR summary provided.</p> : <MarkdownText text={summary} fileLinks={{ prUrl: pr.url }} />}</div>}
   </section>;
 }
 

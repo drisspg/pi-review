@@ -28,6 +28,29 @@ function resolvedLabel(comments: PullReviewComment[]): string | null {
   return resolved == null ? null : resolved ? "Resolved" : "Unresolved";
 }
 
+function reviewerHandle(input: string): string {
+  return input.trim().replace(/^@+/, "").toLowerCase();
+}
+
+function commentIncludesReviewer(comment: PullReviewComment | PullIssueComment, reviewer: string): boolean {
+  if (reviewer.length === 0) return true;
+  const login = comment.user?.login?.toLowerCase();
+  return login === reviewer || new RegExp(`(^|\\W)@${reviewer.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=\\W|$)`, "i").test(comment.body);
+}
+
+function threadIncludesReviewer(comments: Array<PullReviewComment | PullIssueComment>, reviewer: string): boolean {
+  return comments.some((comment) => commentIncludesReviewer(comment, reviewer));
+}
+
+function reviewerOptions(comments: Array<PullReviewComment | PullIssueComment>): string[] {
+  const reviewers = new Set<string>();
+  for (const comment of comments) {
+    if (comment.user?.login != null) reviewers.add(comment.user.login);
+    for (const match of comment.body.matchAll(/@([A-Za-z0-9-]+)/g)) reviewers.add(match[1]);
+  }
+  return [...reviewers].sort((a, b) => a.localeCompare(b));
+}
+
 export function ExistingReviewThread({ comments, prUrl, refreshGithubActivity, collapseSignal = 0, collapseComments = true }: { comments: PullReviewComment[]; prUrl: string; refreshGithubActivity: () => Promise<void>; collapseSignal?: number; collapseComments?: boolean }) {
   const status = resolvedLabel(comments);
   return <GitHubThreadCard className="inline-thread existing" title="GitHub thread" subtitle={`${targetLabel(commentTarget(comments[0]))} · ${commentCountLabel(comments.length)}`} status={status} href={comments[0].html_url} comments={comments} collapseSignal={collapseSignal} collapseComments={collapseComments} reply={<ThreadReplyBox prUrl={prUrl} kind="review" commentId={comments[0].id} refreshGithubActivity={refreshGithubActivity} />} />;
@@ -75,7 +98,15 @@ function ThreadReplyBox({ prUrl, kind, commentId, refreshGithubActivity }: { prU
 }
 
 export function ExistingComments({ prUrl, comments, issueComments, refreshGithubActivity, collapseSignal, commentsCollapsed, toggleAllComments, onJumpToComment }: { prUrl: string; comments: PullReviewComment[]; issueComments: PullIssueComment[]; refreshGithubActivity: () => Promise<void>; collapseSignal: number; commentsCollapsed: boolean; toggleAllComments: () => void; onJumpToComment?: (path: string, line: number | null) => void }) {
+  const [reviewerFilter, setReviewerFilter] = useState("");
   const reviewThreads = groupReviewComments(comments);
+  const reviewer = reviewerHandle(reviewerFilter);
+  const allComments = [...comments, ...issueComments];
+  const reviewers = reviewerOptions(allComments);
+  const filteredIssueComments = threadIncludesReviewer(issueComments, reviewer) ? issueComments : [];
+  const filteredReviewThreads = reviewThreads.filter((thread) => threadIncludesReviewer(thread, reviewer));
+  const visibleCount = filteredReviewThreads.reduce((count, thread) => count + thread.length, filteredIssueComments.length);
+  const totalCount = comments.length + issueComments.length;
   const toggleLabel = commentsCollapsed ? "Expand all" : "Collapse all";
-  return <section className="panel"><div className="section-head"><h2>Existing comments</h2>{comments.length + issueComments.length > 0 && <Button variant="muted" className="small-muted-button" onClick={toggleAllComments}>{toggleLabel}</Button>}</div>{comments.length + issueComments.length === 0 ? <p className="muted">No existing comments.</p> : <>{issueComments.length > 0 && <GitHubThreadCard title="Conversation thread" subtitle={commentCountLabel(issueComments.length)} href={issueComments[0].html_url} comments={issueComments} collapseSignal={collapseSignal} collapseComments={commentsCollapsed} reply={<ThreadReplyBox prUrl={prUrl} kind="issue" refreshGithubActivity={refreshGithubActivity} />} />}{reviewThreads.map((thread) => { const target = commentTarget(thread[0]); return <GitHubThreadCard key={thread.map((comment) => comment.id).join(":")} title="Review thread" subtitle={`${targetLabel(target)} · ${commentCountLabel(thread.length)}`} status={resolvedLabel(thread)} href={thread[0].html_url} comments={thread} collapseSignal={collapseSignal} collapseComments={commentsCollapsed} reply={<ThreadReplyBox prUrl={prUrl} kind="review" commentId={thread[0].id} refreshGithubActivity={refreshGithubActivity} />} onJump={onJumpToComment != null ? () => onJumpToComment(target.path, target.line) : undefined} />; })}</>}</section>;
+  return <section className="panel"><div className="section-head"><h2>Existing comments</h2>{totalCount > 0 && <Button variant="muted" className="small-muted-button" onClick={toggleAllComments}>{toggleLabel}</Button>}</div>{totalCount === 0 ? <p className="muted">No existing comments.</p> : <><div className="comment-filter"><label>Filter @<input value={reviewerFilter} onChange={(event) => setReviewerFilter(event.target.value)} placeholder="reviewer" /></label>{reviewerFilter.trim().length > 0 && <Button variant="muted" className="small-muted-button" onClick={() => setReviewerFilter("")}>Clear</Button>}<span className="muted">{reviewer.length === 0 ? `${totalCount} shown` : `${visibleCount}/${totalCount} shown`}</span></div>{reviewers.length > 0 && <div className="reviewer-chips">{reviewers.map((login) => <button type="button" key={login} className={reviewer === login.toLowerCase() ? "active" : ""} onClick={() => setReviewerFilter(`@${login}`)}>@{login}</button>)}</div>}{visibleCount === 0 ? <p className="muted">No comments match @{reviewer}.</p> : <>{filteredIssueComments.length > 0 && <GitHubThreadCard title="Conversation thread" subtitle={commentCountLabel(filteredIssueComments.length)} href={filteredIssueComments[0].html_url} comments={filteredIssueComments} collapseSignal={collapseSignal} collapseComments={commentsCollapsed} reply={<ThreadReplyBox prUrl={prUrl} kind="issue" refreshGithubActivity={refreshGithubActivity} />} />}{filteredReviewThreads.map((thread) => { const target = commentTarget(thread[0]); return <GitHubThreadCard key={thread.map((comment) => comment.id).join(":")} title="Review thread" subtitle={`${targetLabel(target)} · ${commentCountLabel(thread.length)}`} status={resolvedLabel(thread)} href={thread[0].html_url} comments={thread} collapseSignal={collapseSignal} collapseComments={commentsCollapsed} reply={<ThreadReplyBox prUrl={prUrl} kind="review" commentId={thread[0].id} refreshGithubActivity={refreshGithubActivity} />} onJump={onJumpToComment != null ? () => onJumpToComment(target.path, target.line) : undefined} />; })}</>}</>}</section>;
 }

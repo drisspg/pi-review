@@ -447,6 +447,27 @@ a { color: var(--link); text-decoration: none; }
   white-space: nowrap;
 }
 
+.pr-summary {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.pr-summary .thread-head {
+  border-bottom: 1px solid var(--border);
+}
+
+.pr-summary.minimized .thread-head {
+  border-bottom: 0;
+}
+
+.pr-summary-body {
+  padding: 12px;
+}
+
+.pr-summary-body > p {
+  margin: 0;
+}
+
 .file-navigator {
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1156,6 +1177,50 @@ a { color: var(--link); text-decoration: none; }
   gap: 8px;
   align-items: end;
   padding: 0 12px 12px 54px;
+}
+
+.comment-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 10px 0;
+}
+
+.comment-filter label {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.comment-filter input {
+  width: 150px;
+  min-height: 28px;
+  padding: 0.2rem 0.45rem;
+}
+
+.reviewer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+
+.reviewer-chips button {
+  min-height: 26px;
+  padding: 0.12rem 0.45rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  background: transparent;
+  border-radius: 999px;
+}
+
+.reviewer-chips button.active {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .thread-reply textarea {
