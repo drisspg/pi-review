@@ -1,4 +1,5 @@
-import React from "react";
+import { CheckIcon, CopyIcon } from "@primer/octicons-react";
+import React, { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -17,11 +18,12 @@ export const CodeText = React.memo(function CodeText({ code, language }: { code:
 });
 
 export function MarkdownText({ text, fileLinks }: { text: string; fileLinks?: FileLinkContext }) {
-  const components = fileLinks == null ? { code: MarkdownCode } : { code: (props: MarkdownCodeProps) => <MarkdownCode {...props} fileLinks={fileLinks} />, a: (props: MarkdownAnchorProps) => <MarkdownAnchor {...props} fileLinks={fileLinks} /> };
+  const components = fileLinks == null ? { code: MarkdownCode, pre: MarkdownPre } : { code: (props: MarkdownCodeProps) => <MarkdownCode {...props} fileLinks={fileLinks} />, pre: MarkdownPre, a: (props: MarkdownAnchorProps) => <MarkdownAnchor {...props} fileLinks={fileLinks} /> };
   return <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm, remarkFileReferenceLinks]} components={components}>{text}</ReactMarkdown></div>;
 }
 
 type MarkdownCodeProps = { className?: string; children?: React.ReactNode; fileLinks?: FileLinkContext };
+type MarkdownPreProps = React.HTMLAttributes<HTMLPreElement> & { children?: React.ReactNode };
 type MarkdownAnchorProps = React.AnchorHTMLAttributes<HTMLAnchorElement> & { fileLinks?: FileLinkContext };
 
 function MarkdownCode({ className, children, fileLinks }: MarkdownCodeProps) {
@@ -32,6 +34,19 @@ function MarkdownCode({ className, children, fileLinks }: MarkdownCodeProps) {
   }
   const language = className?.match(/language-(\w+)/)?.[1] ?? "";
   return <code dangerouslySetInnerHTML={{ __html: highlightedHtml(code, language) }} />;
+}
+
+function MarkdownPre({ children, ...props }: MarkdownPreProps) {
+  const [copied, setCopied] = useState(false);
+  const code = codeBlockText(children);
+
+  async function copyCode() {
+    await writeClipboard(code);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1400);
+  }
+
+  return <div className="markdown-code-block"><button className="markdown-copy-button" type="button" onClick={() => void copyCode()} aria-label={copied ? "Copied code" : "Copy code"} title={copied ? "Copied" : "Copy"}>{copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}</button><pre {...props}>{children}</pre></div>;
 }
 
 function MarkdownAnchor({ href, children, fileLinks, ...props }: MarkdownAnchorProps) {
@@ -104,6 +119,28 @@ function fileReferenceHref(reference: FileReference): string {
 
 function isNode(value: unknown): value is { type?: string; value?: unknown; children?: unknown[] } {
   return typeof value === "object" && value !== null;
+}
+
+function codeBlockText(value: React.ReactNode): string {
+  if (typeof value === "string" || typeof value === "number") return String(value);
+  if (Array.isArray(value)) return value.map(codeBlockText).join("");
+  if (React.isValidElement<{ children?: React.ReactNode }>(value)) return codeBlockText(value.props.children);
+  return "";
+}
+
+async function writeClipboard(text: string) {
+  if (navigator.clipboard != null) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.append(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
 }
 
 async function openFileReference(context: FileLinkContext, reference: FileReference) {

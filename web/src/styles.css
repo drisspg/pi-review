@@ -878,7 +878,49 @@ a { color: var(--link); text-decoration: none; }
   display: none;
 }
 
-.github-thread.minimized .ui-button-icon {
+.inline-thread.focus-area-minimized {
+  margin: 0;
+  height: 0;
+  overflow: visible;
+  border: none;
+  background: none;
+  box-shadow: none;
+  position: relative;
+  z-index: 5;
+}
+
+.inline-thread.focus-area-minimized .thread-head {
+  position: absolute;
+  left: 0;
+  top: 0;
+  min-height: 0;
+  padding: 1px 6px;
+  background: color-mix(in srgb, var(--attention) 18%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--attention) 32%, var(--border));
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  width: 96px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
+}
+
+.inline-thread.focus-area-minimized .thread-title {
+  gap: 4px;
+}
+
+.inline-thread.focus-area-minimized .thread-title strong,
+.inline-thread.focus-area-minimized .thread-title span {
+  font-size: 0.7rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inline-thread.focus-area-minimized .thread-title span {
+  display: none;
+}
+
+.github-thread.minimized .ui-button-icon,
+.focus-area-minimized .ui-button-icon {
   width: 24px;
   height: 24px;
   min-height: 24px;
@@ -1178,7 +1220,7 @@ a { color: var(--link); text-decoration: none; }
 
 .markdown > :first-child { margin-top: 0; }
 .markdown > :last-child { margin-bottom: 0; }
-.markdown p, .markdown ul, .markdown ol, .markdown pre, .markdown blockquote { margin: 0 0 0.75rem; }
+.markdown p, .markdown ul, .markdown ol, .markdown .markdown-code-block, .markdown blockquote { margin: 0 0 0.75rem; }
 .markdown ul, .markdown ol { padding-left: 1.25rem; }
 .markdown li + li { margin-top: 0.2rem; }
 .markdown code {
@@ -1189,8 +1231,38 @@ a { color: var(--link); text-decoration: none; }
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.88em;
 }
+.markdown-code-block {
+  position: relative;
+}
+
+.markdown-code-block .markdown-copy-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+  color: var(--muted);
+  background: var(--panel);
+  opacity: 0;
+  transition: opacity 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.markdown-code-block:hover .markdown-copy-button,
+.markdown-code-block .markdown-copy-button:focus-visible {
+  opacity: 1;
+}
+
+.markdown-code-block .markdown-copy-button:hover {
+  color: var(--text);
+}
+
 .markdown pre {
   overflow: auto;
+  margin: 0;
   padding: 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
