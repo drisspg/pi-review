@@ -112,6 +112,7 @@ function App() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [aiReview, setAiReview] = useState<AiReview>({ expanded: false, open: false, running: false, text: "", messages: [] });
   const [focusReview, setFocusReview] = useState<FocusReview>({ expanded: false, open: false, running: false, text: "" });
+  const activeReviewKeyRef = useRef<string | null>(null);
   const [activeFocusAreaId, setActiveFocusAreaId] = useState<string | null>(null);
   const [collapsedFocusAreaIds, setCollapsedFocusAreaIds] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
@@ -178,6 +179,7 @@ function App() {
     setError(null);
     try {
       const data = await api<OpenResponse>("/api/pr/open", { method: "POST", body: JSON.stringify({ input: nextInput }) });
+      activeReviewKeyRef.current = data.pr.key;
       setReview(data);
       setInput(data.pr.url);
       setOpenFiles(Object.fromEntries(data.files.map((file) => [file.filename, !data.fileReviews.find((state) => state.path === file.filename)?.viewed])));
@@ -192,6 +194,7 @@ function App() {
       setFocusReview({ expanded: false, open: false, running: false, text: "" });
       setActiveFocusAreaId(null);
       setCollapsedFocusAreaIds({});
+      void runAutomaticPiReviews(data);
       await Promise.all([refreshHistory(), refreshLogs()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -333,26 +336,40 @@ function App() {
     setExpandedNeighborRows((current) => ({ ...current, [key]: contextRowsFromText(text, startLine, endLine) }));
   }
 
+  async function runAutomaticPiReviews(nextReview: OpenResponse) {
+    await Promise.all([runAiReviewFor(nextReview, true), runFocusReviewFor(nextReview, true)]);
+    await refreshLogs();
+  }
+
   async function runAiReview() {
     if (review == null || aiReview.running) return;
-    setAiReview((current) => ({ ...current, open: true, expanded: true, running: true }));
-    const diffSummary = review.files.map((file) => `## ${file.filename}\n${file.patch ?? "Patch unavailable"}`).join("\n\n");
-    const prompt = `Run a concise code review for ${review.pr.key}. Focus on correctness, edge cases, tests, and concrete actionable findings. Avoid generic praise. Return markdown with bullets and file/line references where possible.\n\n${diffSummary}`;
+    await runAiReviewFor(review, false);
+  }
+
+  async function runAiReviewFor(targetReview: OpenResponse, background: boolean) {
+    setAiReview((current) => ({ ...current, open: !background || current.open, expanded: !background || current.expanded, running: true }));
+    const diffSummary = targetReview.files.map((file) => `## ${file.filename}
+${file.patch ?? "Patch unavailable"}`).join("\n\n");
+    const prompt = `Run a concise code review for ${targetReview.pr.key}. Focus on correctness, edge cases, tests, and concrete actionable findings. Avoid generic praise. Return markdown with bullets and file/line references where possible.
+
+${diffSummary}`;
     try {
-      const { job } = await api<{ job: { id: string } }>("/api/pi/review", { method: "POST", body: JSON.stringify({ prKey: review.pr.key, prompt }) });
+      const { job } = await api<{ job: { id: string } }>("/api/pi/review", { method: "POST", body: JSON.stringify({ prKey: targetReview.pr.key, prompt }) });
       for (;;) {
         await sleep(800);
         const { job: status } = await api<{ job: { status: "running" | "complete" | "failed"; answer?: string; error?: string } }>("/api/pi/review/status", { method: "POST", body: JSON.stringify({ jobId: job.id }) });
         if (status.status === "running") continue;
+        if (activeReviewKeyRef.current !== targetReview.pr.key) return;
         if (status.status === "failed") throw new Error(status.error ?? "AI review failed");
         if (status.status !== "complete") throw new Error("AI review returned an unknown job status");
         const answer = status.answer ?? "AI review completed without output.";
-        setAiReview((current) => ({ ...current, open: true, expanded: true, running: false, text: answer, messages: [...current.messages, { role: "pi", text: answer }] }));
+        setAiReview((current) => ({ ...current, open: !background || current.open, expanded: !background || current.expanded, running: false, text: answer, messages: [...current.messages, { role: "pi", text: answer }] }));
         break;
       }
     } catch (err) {
+      if (activeReviewKeyRef.current !== targetReview.pr.key) return;
       const text = `AI review failed: ${err instanceof Error ? err.message : String(err)}`;
-      setAiReview((current) => ({ ...current, open: true, expanded: true, running: false, text, messages: [...current.messages, { role: "pi", text }] }));
+      setAiReview((current) => ({ ...current, open: !background || current.open, expanded: !background || current.expanded, running: false, text, messages: [...current.messages, { role: "pi", text }] }));
     }
   }
 
@@ -374,25 +391,43 @@ function App() {
 
   async function runFocusReview() {
     if (review == null || focusReview.running) return;
-    setFocusReview((current) => ({ ...current, open: true, running: true }));
-    const diffSummary = review.files.map((file) => `## ${file.filename}\nStatus: ${file.status}, +${file.additions}/-${file.deletions}\n${file.patch ?? "Patch unavailable"}`).join("\n\n");
-    const prompt = `You are a second, independent PR-review pass for ${review.pr.key}. Look specifically for areas worth deeper human review, not a normal exhaustive review. Prioritize:\n- code that feels inconsistent with nearby codebase patterns or API conventions\n- surprising behavior, hidden assumptions, edge cases, or subtle tradeoffs\n- tests, migrations, performance, concurrency, or compatibility risks that deserve investigation\n- places where the implementation may be valid but reviewers should explicitly decide if the tradeoff is acceptable\n\nReturn markdown with a short "Focus areas" list. Start each item with a clickable-style location in this exact format: \`path:startLine-endLine — short title\` or \`path:line — short title\`. Then include why it is weird or worth investigation and a concrete reviewer question. Avoid generic praise and avoid blocking language unless there is strong evidence.\n\nPR title: ${review.pr.title}\n\n${diffSummary}`;
+    await runFocusReviewFor(review, false);
+  }
+
+  async function runFocusReviewFor(targetReview: OpenResponse, background: boolean) {
+    setFocusReview((current) => ({ ...current, open: !background || current.open, running: true }));
+    const diffSummary = targetReview.files.map((file) => `## ${file.filename}
+Status: ${file.status}, +${file.additions}/-${file.deletions}
+${file.patch ?? "Patch unavailable"}`).join("\n\n");
+    const prompt = `You are a second, independent PR-review pass for ${targetReview.pr.key}. Look specifically for areas worth deeper human review, not a normal exhaustive review. Prioritize:
+- code that feels inconsistent with nearby codebase patterns or API conventions
+- surprising behavior, hidden assumptions, edge cases, or subtle tradeoffs
+- tests, migrations, performance, concurrency, or compatibility risks that deserve investigation
+- places where the implementation may be valid but reviewers should explicitly decide if the tradeoff is acceptable
+
+Return markdown with a short "Focus areas" list. Start each item with a clickable-style location in this exact format: \`path:startLine-endLine — short title\` or \`path:line — short title\`. Then include why it is weird or worth investigation and a concrete reviewer question. Avoid generic praise and avoid blocking language unless there is strong evidence.
+
+PR title: ${targetReview.pr.title}
+
+${diffSummary}`;
     try {
-      const { job } = await api<{ job: { id: string } }>("/api/pi/focus-review", { method: "POST", body: JSON.stringify({ prKey: review.pr.key, prompt }) });
+      const { job } = await api<{ job: { id: string } }>("/api/pi/focus-review", { method: "POST", body: JSON.stringify({ prKey: targetReview.pr.key, prompt }) });
       for (;;) {
         await sleep(800);
         const { job: status } = await api<{ job: { status: "running" | "complete" | "failed"; answer?: string; error?: string } }>("/api/pi/focus-review/status", { method: "POST", body: JSON.stringify({ jobId: job.id }) });
         if (status.status === "running") continue;
+        if (activeReviewKeyRef.current !== targetReview.pr.key) return;
         if (status.status === "failed") throw new Error(status.error ?? "Focus review failed");
         if (status.status !== "complete") throw new Error("Focus review returned an unknown job status");
         const answer = status.answer ?? "Focus scan completed without output.";
-        setFocusReview((current) => ({ ...current, open: true, running: false, text: answer }));
+        setFocusReview((current) => ({ ...current, open: !background || current.open, running: false, text: answer }));
         setActiveFocusAreaId(parseFocusAreas(answer)[0]?.id ?? null);
         break;
       }
     } catch (err) {
+      if (activeReviewKeyRef.current !== targetReview.pr.key) return;
       const text = `Focus review failed: ${err instanceof Error ? err.message : String(err)}`;
-      setFocusReview((current) => ({ ...current, open: true, running: false, text }));
+      setFocusReview((current) => ({ ...current, open: !background || current.open, running: false, text }));
     }
   }
 
@@ -413,7 +448,10 @@ function App() {
     try {
       await api("/api/pr/cleanup", { method: "POST", body: JSON.stringify({ input: pr.url || prUrlFromKey(pr.key) }) });
       setPrs((current) => current.filter((item) => item.key !== pr.key));
-      if (review?.pr.key === pr.key) setReview(null);
+      if (review?.pr.key === pr.key) {
+        activeReviewKeyRef.current = null;
+        setReview(null);
+      }
       await refreshLogs();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -421,6 +459,7 @@ function App() {
   }
 
   function goHome() {
+    activeReviewKeyRef.current = null;
     setReview(null);
     setError(null);
     setDiagnostics(null);
