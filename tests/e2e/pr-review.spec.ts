@@ -126,6 +126,23 @@ test("renders existing GitHub comments as markdown", async ({ page }) => {
   await expect(page.locator(".github-thread pre code").first()).toContainText("set_params_splitkv");
 });
 
+test("edits an existing GitHub comment", async ({ page }) => {
+  let editPayload: unknown = null;
+  await page.route("**/api/comment/edit", async (route) => {
+    editPayload = route.request().postDataJSON();
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ result: { ok: true } }) });
+  });
+
+  await page.getByRole("tab", { name: /Comments/ }).click();
+  const firstThread = page.locator(".side .github-thread").first();
+  await firstThread.getByRole("button", { name: "Edit" }).first().click();
+  await firstThread.getByLabel("Edit comment").fill("edited from pi-review");
+  await firstThread.getByRole("button", { name: "Save" }).click();
+
+  await expect.poll(() => editPayload).toMatchObject({ body: "edited from pi-review" });
+  await expect(firstThread.locator(".markdown").first()).toContainText("edited from pi-review");
+});
+
 test("collapses and focuses existing comment threads", async ({ page }) => {
   await page.getByRole("tab", { name: /Comments/ }).click();
   const thread = page.locator(".github-thread").first();
@@ -179,6 +196,8 @@ test("runs a separate focus areas review and highlights referenced lines", async
   const path = await row.getAttribute("data-path");
   const line = await row.getAttribute("data-line");
   if (path == null || line == null) throw new Error("Missing diff row target");
+  await page.locator(".file").first().locator(".file-summary-left").click();
+  await expect(page.locator(".file").first().locator(".diff-row")).toHaveCount(0);
 
   await page.route(/\/api\/pi\/focus-review\/status$/, async (route) => {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { status: "complete", answer: `## Focus areas\n- \`${path}:${line}-${Number.parseInt(line, 10) + 1} — convention mismatch\`: check whether this matches local tiling conventions.` } }) });

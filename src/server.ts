@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { extname, join, normalize, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 
-import { addIssueComment, fetchFileText, fetchPullRequestReviewData, replyToReviewComment, submitPullRequestReview } from "./github.js";
+import { addIssueComment, editIssueComment, editReviewComment, fetchFileText, fetchPullRequestReviewData, replyToReviewComment, submitPullRequestReview } from "./github.js";
 import { inputFromBody, prKeyForRef, readBody, recordFromBody, refFromBody, sendJson, viewedPayloadFromBody } from "./http.js";
 import { logger } from "./logger.js";
 import { askPi, disposePiSession, disposePiSessions, piDiagnostics, prewarmPiSession, registerPiSessionCwd, setPiModel } from "./pi-session.js";
@@ -243,6 +243,20 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     }
     if (typeof payload.commentId !== "number") throw new Error("Expected commentId");
     sendJson(res, 200, { result: await replyToReviewComment(ref, payload.commentId, payload.body.trim()) });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/comment/edit") {
+    const payload = recordFromBody(await readBody(req));
+    const ref = refFromBody(payload);
+    if (typeof payload.commentId !== "number") throw new Error("Expected commentId");
+    if (typeof payload.body !== "string" || payload.body.trim().length === 0) throw new Error("Expected non-empty body");
+    if (payload.kind === "issue") {
+      sendJson(res, 200, { result: await editIssueComment(ref, payload.commentId, payload.body.trim()) });
+      return;
+    }
+    if (payload.kind !== "review") throw new Error("Expected comment kind");
+    sendJson(res, 200, { result: await editReviewComment(ref, payload.commentId, payload.body.trim()) });
     return;
   }
 

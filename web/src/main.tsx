@@ -139,6 +139,20 @@ function App() {
   }, [theme]);
 
   const focusAreas = useMemo(() => parseFocusAreas(focusReview.text), [focusReview.text]);
+  useEffect(() => {
+    if (focusAreas.length === 0) return;
+    setOpenFiles((current) => {
+      const next = { ...current };
+      let changed = false;
+      for (const area of focusAreas) {
+        if (next[area.path] !== true) {
+          next[area.path] = true;
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [focusAreas]);
   useEffect(() => highlightFocusAreas(focusAreas, activeFocusAreaId, collapsedFocusAreaIds), [focusAreas, activeFocusAreaId, collapsedFocusAreaIds, openFiles, expandedNeighborRows]);
   useEffect(() => setCollapsedFocusAreaIds((current) => Object.fromEntries(Object.entries(current).filter(([id]) => focusAreas.some((area) => area.id === id)))), [focusAreas]);
 
@@ -868,8 +882,12 @@ function AiReviewPanel({ prUrl, review, setReview, runReview, sendMessage, focus
   function jumpToFocusArea(area: FocusArea): void {
     setActiveFocusAreaId(area.id);
     setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: false }));
-    if (openFiles[area.path] === false) setOpenFiles({ ...openFiles, [area.path]: true });
-    window.setTimeout(() => document.getElementById(`focus-area-${area.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
+    setOpenFiles({ ...openFiles, [area.path]: true });
+    window.setTimeout(() => {
+      const focusCard = document.getElementById(`focus-area-${area.id}`);
+      const lineRow = document.querySelector(`.diff-row[data-path="${CSS.escape(area.path)}"][data-line="${area.startLine}"]`);
+      (focusCard ?? lineRow)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 50);
   }
   function toggleFocusViewed(area: FocusArea): void {
     const next = !viewedFocusIds[area.id];

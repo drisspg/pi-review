@@ -131,14 +131,14 @@ export async function fetchFileText(ref: PullRequestRef, path: string, sha: stri
   return stdout.replace(/\r\n/g, "\n");
 }
 
-async function ghApiPost(ref: PullRequestRef, path: string, payload: unknown, scope: string): Promise<unknown> {
+async function ghApiWrite(ref: PullRequestRef, method: "POST" | "PATCH", path: string, payload: unknown, scope: string): Promise<unknown> {
   const dir = await mkdtemp(join(tmpdir(), "pi-review-"));
   const inputPath = join(dir, "payload.json");
   await writeFile(inputPath, JSON.stringify(payload), "utf8");
   const startedAt = performance.now();
   logger.info("github", `${scope} start`, { ref });
   try {
-    const { stdout, stderr } = await execFileAsync("gh", ["api", path, "--method", "POST", "--input", inputPath], { maxBuffer: 50 * 1024 * 1024 });
+    const { stdout, stderr } = await execFileAsync("gh", ["api", path, "--method", method, "--input", inputPath], { maxBuffer: 50 * 1024 * 1024 });
     logger.info("github", `${scope} complete`, { ref, ms: Math.round(performance.now() - startedAt), bytes: stdout.length, stderr: stderr.trim() || undefined });
     return JSON.parse(stdout) as unknown;
   } catch (error) {
@@ -147,6 +147,14 @@ async function ghApiPost(ref: PullRequestRef, path: string, payload: unknown, sc
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+}
+
+async function ghApiPost(ref: PullRequestRef, path: string, payload: unknown, scope: string): Promise<unknown> {
+  return ghApiWrite(ref, "POST", path, payload, scope);
+}
+
+async function ghApiPatch(ref: PullRequestRef, path: string, payload: unknown, scope: string): Promise<unknown> {
+  return ghApiWrite(ref, "PATCH", path, payload, scope);
 }
 
 export async function submitPullRequestReview(ref: PullRequestRef, payload: unknown): Promise<unknown> {
@@ -159,6 +167,14 @@ export async function replyToReviewComment(ref: PullRequestRef, commentId: numbe
 
 export async function addIssueComment(ref: PullRequestRef, body: string): Promise<unknown> {
   return ghApiPost(ref, `/repos/${ref.owner}/${ref.repo}/issues/${ref.number}/comments`, { body }, "add issue comment");
+}
+
+export async function editReviewComment(ref: PullRequestRef, commentId: number, body: string): Promise<unknown> {
+  return ghApiPatch(ref, `/repos/${ref.owner}/${ref.repo}/pulls/comments/${commentId}`, { body }, "edit review comment");
+}
+
+export async function editIssueComment(ref: PullRequestRef, commentId: number, body: string): Promise<unknown> {
+  return ghApiPatch(ref, `/repos/${ref.owner}/${ref.repo}/issues/comments/${commentId}`, { body }, "edit issue comment");
 }
 
 export async function fetchPullRequestSummary(ref: PullRequestRef): Promise<StoredPullRequest> {
