@@ -439,7 +439,7 @@ ${file.patch ?? "Patch unavailable"}`).join("\n\n");
 - tests, migrations, performance, concurrency, or compatibility risks that deserve investigation
 - places where the implementation may be valid but reviewers should explicitly decide if the tradeoff is acceptable
 
-Return markdown with a short "Focus areas" list. Start each item with a clickable-style location in this exact format: \`path:startLine-endLine — short title\` or \`path:line — short title\`. Then include why it is weird or worth investigation and a concrete reviewer question. Avoid generic praise and avoid blocking language unless there is strong evidence.
+Return markdown with a "Focus areas" list. Start each item with a clickable-style location in this exact format: \`path:startLine-endLine — short title\` or \`path:line — short title\`. Then include why it is weird or worth investigation and a concrete reviewer question. Avoid generic praise and avoid blocking language unless there is strong evidence.
 
 PR title: ${targetReview.pr.title}
 
