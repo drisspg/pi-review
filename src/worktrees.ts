@@ -28,6 +28,16 @@ async function gitAllowFailure(args: string[], cwd?: string): Promise<void> {
   }
 }
 
+async function currentWorktreeHead(worktreeDir: string): Promise<string | null> {
+  if (!existsSync(worktreeDir)) return null;
+  try {
+    return await git(["rev-parse", "HEAD"], worktreeDir);
+  } catch (error) {
+    logger.debug("worktree", "failed to read existing worktree head", { worktreeDir, error: error instanceof Error ? error.message : String(error) });
+    return null;
+  }
+}
+
 export function worktreeDirForRef(ref: PullRequestRef): string {
   return resolve(STATE_ROOT, "worktrees", safe(ref.host), safe(ref.owner), safe(ref.repo), `pr-${ref.number}`);
 }
@@ -46,6 +56,10 @@ export async function preparePrWorktree(ref: PullRequestRef, cloneUrl: string, h
   await mkdir(resolve(worktreeDir, ".."), { recursive: true });
   if (!existsSync(resolve(repoDir, ".git"))) {
     await git(["clone", cloneUrl, repoDir]);
+  }
+  if (await currentWorktreeHead(worktreeDir) === headSha) {
+    logger.info("worktree", "prepare skipped; existing worktree is current", { worktreeDir, ms: Math.round(performance.now() - startedAt) });
+    return worktreeDir;
   }
   await gitAllowFailure(["worktree", "remove", "--force", worktreeDir], repoDir);
   await rm(worktreeDir, { recursive: true, force: true });

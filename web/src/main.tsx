@@ -112,6 +112,7 @@ function App() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [aiReview, setAiReview] = useState<AiReview>({ expanded: false, open: false, running: false, text: "", messages: [] });
   const [focusReview, setFocusReview] = useState<FocusReview>({ expanded: false, open: false, running: false, text: "" });
+  const reviewCacheRef = useRef<Map<string, OpenResponse>>(new Map());
   const activeReviewKeyRef = useRef<string | null>(null);
   const [activeFocusAreaId, setActiveFocusAreaId] = useState<string | null>(null);
   const [collapsedFocusAreaIds, setCollapsedFocusAreaIds] = useState<Record<string, boolean>>({});
@@ -174,26 +175,42 @@ function App() {
     };
   });
 
+  function cacheReview(data: OpenResponse) {
+    reviewCacheRef.current.set(data.pr.url, data);
+    reviewCacheRef.current.set(data.pr.key, data);
+  }
+
+  function showReview(data: OpenResponse) {
+    activeReviewKeyRef.current = data.pr.key;
+    setReview(data);
+    setInput(data.pr.url);
+    setOpenFiles(Object.fromEntries(data.files.map((file) => [file.filename, !data.fileReviews.find((state) => state.path === file.filename)?.viewed])));
+    setThreads({});
+    setActiveTarget(null);
+    dragSelectionRef.current = null;
+    setDragSelection(null);
+    setDrafts([]);
+    setExpandedNeighborRows({});
+    setEditingDraftId(null);
+    setAiReview({ expanded: false, open: false, running: false, text: "", messages: [] });
+    setFocusReview({ expanded: false, open: false, running: false, text: "" });
+    setActiveFocusAreaId(null);
+    setCollapsedFocusAreaIds({});
+  }
+
   async function openPr(nextInput: string) {
-    setBusy(true);
     setError(null);
+    const cached = reviewCacheRef.current.get(nextInput);
+    if (cached != null) {
+      showReview(cached);
+      void refreshLogs();
+      return;
+    }
+    setBusy(true);
     try {
       const data = await api<OpenResponse>("/api/pr/open", { method: "POST", body: JSON.stringify({ input: nextInput }) });
-      activeReviewKeyRef.current = data.pr.key;
-      setReview(data);
-      setInput(data.pr.url);
-      setOpenFiles(Object.fromEntries(data.files.map((file) => [file.filename, !data.fileReviews.find((state) => state.path === file.filename)?.viewed])));
-      setThreads({});
-      setActiveTarget(null);
-      dragSelectionRef.current = null;
-      setDragSelection(null);
-      setDrafts([]);
-      setExpandedNeighborRows({});
-      setEditingDraftId(null);
-      setAiReview({ expanded: false, open: false, running: false, text: "", messages: [] });
-      setFocusReview({ expanded: false, open: false, running: false, text: "" });
-      setActiveFocusAreaId(null);
-      setCollapsedFocusAreaIds({});
+      cacheReview(data);
+      showReview(data);
       void runAutomaticPiReviews(data);
       await Promise.all([refreshHistory(), refreshLogs()]);
     } catch (err) {
@@ -209,6 +226,7 @@ function App() {
     setError(null);
     try {
       const data = await api<OpenResponse>("/api/pr/activity", { method: "POST", body: JSON.stringify({ input: review.pr.url }) });
+      cacheReview(data);
       setReview(data);
       setOpenFiles((current) => ({ ...Object.fromEntries(data.files.map((file) => [file.filename, !data.fileReviews.find((state) => state.path === file.filename)?.viewed])), ...current }));
       await Promise.all([refreshHistory(), refreshLogs()]);
@@ -224,7 +242,9 @@ function App() {
     const fileReview = review.fileReviews.find((state) => state.path === file.filename);
     if (fileReview == null) return;
     await api("/api/file/viewed", { method: "POST", body: JSON.stringify({ ...fileReview, viewed }) });
-    setReview({ ...review, fileReviews: review.fileReviews.map((state) => state.path === file.filename ? { ...state, viewed } : state) });
+    const nextReview = { ...review, fileReviews: review.fileReviews.map((state) => state.path === file.filename ? { ...state, viewed } : state) };
+    cacheReview(nextReview);
+    setReview(nextReview);
     setOpenFiles({ ...openFiles, [file.filename]: !viewed });
   }
 
@@ -766,7 +786,7 @@ function DiffRowView({ row, target, threads, setThreads, toggleThread, comments,
   const inlineDrafts = target == null ? [] : drafts.filter((draft) => draftMatchesTarget(draft, target));
   const selecting = isTargetInSelection(target, dragSelection);
   const inThreadRange = target != null && target.line != null && Object.values(threads).some((t) => !t.collapsed && t.target.path === target.path && t.target.startLine != null && t.target.line != null && target.line! >= t.target.startLine && target.line! <= t.target.line);
-  const rowFocusAreas = target == null ? [] : focusAreas.filter((area) => area.path === target.path && target.line === area.endLine);
+  const rowFocusAreas = target == null ? [] : focusAreas.filter((area) => target.side === "RIGHT" && area.path === target.path && target.line === area.startLine);
   const language = languageForPath(target?.path);
   const hasThreadPill = thread != null || inlineCommentThreads.length + inlineDrafts.length + rowFocusAreas.length > 0;
   const threadPill = hasThreadPill ? <span className="pill">{(thread == null ? 0 : 1) + inlineCommentThreads.length + inlineDrafts.length + rowFocusAreas.length}</span> : null;
@@ -803,7 +823,7 @@ function FocusAreaInline({ prUrl, area, active, setActiveFocusAreaId, collapsedF
       setAsking(false);
     }
   }
-  if (collapsed) return <div id={`focus-area-${area.id}`} className="inline-thread review-thread focus-area-inline focus-area-minimized minimized"><div className="thread-head"><div className="thread-title"><Button variant="icon" aria-label="Expand focus area" onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: false }))}><ChevronRightIcon size={16} /></Button><div><strong>Focus area</strong><span>{area.title}</span></div></div></div></div>;
+  if (collapsed) return <div id={`focus-area-${area.id}`} className="inline-thread review-thread focus-area-inline focus-area-minimized focus-area-collapsed minimized" onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: false }))}><div className="thread-head"><div className="thread-title"><Button variant="icon" aria-label="Expand focus area" onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: false }))}><ChevronRightIcon size={16} /></Button><div><strong>Focus area</strong><span>{area.title}</span></div></div></div></div>;
   return <div id={`focus-area-${area.id}`} className={`inline-thread review-thread focus-area-inline${active ? " active" : ""}`}><div className="thread-head"><div><strong>Focus area</strong><span>{area.path}:{area.startLine === area.endLine ? area.startLine : `${area.startLine}-${area.endLine}`}</span></div><div className="actions"><Button variant="icon" aria-label="Collapse focus area" onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: true }))}><ChevronDownIcon size={16} /></Button></div></div><div className="thread-messages"><div className="thread-note pi"><div className="message-role">Pi focus</div><MarkdownText text={area.body} fileLinks={{ prUrl }} /></div>{messages.map((message, index) => <div className={`thread-note ${message.role}`} key={index}><div className="message-role">{message.role === "user" ? "You" : "Pi"}</div><MarkdownText text={message.text} fileLinks={{ prUrl }} /></div>)}</div><div className="composer"><textarea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey) { event.preventDefault(); void ask(); } }} placeholder="Ask Pi or write a draft comment about this focus area" /><div className="actions"><button onClick={saveDraftComment} disabled={draft.trim().length === 0}>Add draft comment</button><button onClick={() => void ask()} disabled={asking || draft.trim().length === 0}>{asking ? <span className="spinner-label"><span className="spinner" aria-hidden="true" />Asking</span> : "Ask Pi"}</button></div></div></div>;
 }
 

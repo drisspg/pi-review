@@ -39,6 +39,22 @@ test("removes a previous PR from local history", async ({ page }) => {
   if (key != null) await expect(page.locator(".pr-card", { hasText: key })).toHaveCount(0);
 });
 
+test("reopens a previously loaded PR from the client cache", async ({ page }) => {
+  let openRequests = 0;
+  await page.route("**/api/pr/open", async (route) => {
+    openRequests += 1;
+    await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "cache miss" }) });
+  });
+
+  await page.getByRole("button", { name: "Home" }).click();
+  await page.locator(".pr-card").first().locator(".pr-card-body").click();
+
+  await expect(page.locator(".review-layout")).toBeVisible();
+  await expect(page.getByText("github.com/Dao-AILab/flash-attention#2542").first()).toBeVisible();
+  await page.waitForTimeout(250);
+  expect(openRequests).toBe(0);
+});
+
 test("opens a PR and renders GitHub-style file diffs", async ({ page }) => {
   await expect(page.getByText("github.com/Dao-AILab/flash-attention#2542").first()).toBeVisible();
   await expect(page.locator(".file")).toHaveCount(2);
