@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <radialGradient id="bg" cx="35%" cy="28%" r="75%">
+      <stop stop-color="#f7d38b"/>
+      <stop offset="0.55" stop-color="#d29922"/>
+      <stop offset="1" stop-color="#7c4a03"/>
+    </radialGradient>
+  </defs>
+  <circle cx="32" cy="32" r="30" fill="#2d333b"/>
+  <circle cx="32" cy="32" r="24" fill="url(#bg)"/>
+  <path d="M32 8v24l20-12A24 24 0 0 0 32 8Z" fill="#2d333b"/>
+  <path d="M18 31h9M37 31h9M23 43h18" stroke="#7c4a03" stroke-width="4" stroke-linecap="round" opacity="0.55"/>
+  <text x="31" y="43" text-anchor="middle" font-family="Georgia, Times New Roman, serif" font-size="34" font-weight="700" fill="#ffffff">π</text>
+</svg>

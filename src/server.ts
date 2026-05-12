@@ -71,14 +71,15 @@ const contentTypes: Record<string, string> = {
   ".svg": "image/svg+xml",
 };
 
-async function sendStatic(res: ServerResponse, pathname: string): Promise<void> {
-  const candidate = normalize(pathname).replace(/^([/\\])+/, "");
+async function sendStatic(res: ServerResponse, pathname: string, head = false): Promise<void> {
+  const staticPathname = pathname === "/favicon.ico" ? "/favicon.svg" : pathname;
+  const candidate = normalize(staticPathname).replace(/^([/\\])+/, "");
   const filePath = resolve(join(WEB_ROOT, candidate.length > 0 ? candidate : "index.html"));
   const safePath = filePath.startsWith(WEB_ROOT) ? filePath : join(WEB_ROOT, "index.html");
-  const finalPath = pathname.startsWith("/assets/") ? safePath : join(WEB_ROOT, "index.html");
+  const finalPath = staticPathname.startsWith("/assets/") || staticPathname === "/favicon.svg" ? safePath : join(WEB_ROOT, "index.html");
   const data = await readFile(finalPath);
   res.writeHead(200, { "content-type": contentTypes[extname(finalPath)] ?? "application/octet-stream" });
-  res.end(data);
+  res.end(head ? undefined : data);
 }
 
 async function openInEditor(prUrl: string, path: string, line?: number): Promise<string> {
@@ -274,8 +275,8 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     return;
   }
 
-  if (req.method === "GET") {
-    await sendStatic(res, url.pathname);
+  if (req.method === "GET" || req.method === "HEAD") {
+    await sendStatic(res, url.pathname, req.method === "HEAD");
     return;
   }
 
