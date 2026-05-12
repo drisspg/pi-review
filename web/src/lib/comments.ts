@@ -4,6 +4,10 @@ export function targetKey(target: Target): string {
   return `${target.path}:${target.side}:${target.startLine ?? target.line ?? "file"}:${target.line ?? "file"}`;
 }
 
+export function commentThreadDomId(target: Target): string {
+  return `github-thread-${targetKey(target)}`;
+}
+
 export function commentTarget(comment: PullReviewComment): Target {
   return { path: comment.path, startLine: comment.start_line ?? comment.line ?? comment.original_line ?? null, line: comment.line ?? comment.original_line ?? null, side: comment.side ?? comment.original_side ?? "RIGHT", hunk: "" };
 }

@@ -122,8 +122,8 @@ test("dragging diff rows opens a multiline thread", async ({ page }) => {
 
 test("renders existing GitHub comments as markdown", async ({ page }) => {
   await page.getByRole("tab", { name: /Comments/ }).click();
-  await expect(page.locator(".github-thread .markdown").first()).toContainText("Before #2448");
-  await expect(page.locator(".github-thread pre code").first()).toContainText("set_params_splitkv");
+  await expect(page.locator(".side .github-thread .markdown").first()).toContainText("Before #2448");
+  await expect(page.locator(".side .github-thread pre code").first()).toContainText("set_params_splitkv");
 });
 
 test("edits an existing GitHub comment", async ({ page }) => {
@@ -145,7 +145,7 @@ test("edits an existing GitHub comment", async ({ page }) => {
 
 test("collapses and focuses existing comment threads", async ({ page }) => {
   await page.getByRole("tab", { name: /Comments/ }).click();
-  const thread = page.locator(".github-thread").first();
+  const thread = page.locator(".side .github-thread").first();
   await expect(thread.locator(".markdown").first()).toBeVisible();
   await thread.getByLabel("Collapse thread").click();
   await expect(thread.locator(".markdown")).toHaveCount(0);

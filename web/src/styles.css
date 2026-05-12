@@ -1013,17 +1013,21 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .thread-title-link {
+  flex: 1;
   cursor: pointer;
   border-radius: 4px;
   padding: 2px 4px;
   margin: -2px -4px;
 }
 
-.thread-title-link:hover {
+.thread-title-link:hover,
+.thread-title-link:focus-visible {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
+  outline: none;
 }
 
-.thread-title-link:hover strong {
+.thread-title-link:hover strong,
+.thread-title-link:focus-visible strong {
   color: var(--accent);
 }
 
@@ -1222,7 +1226,23 @@ a { color: var(--link); text-decoration: none; }
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   align-items: end;
+}
+
+.thread-reply-box {
   padding: 0 12px 12px 54px;
+}
+
+.github-comment-edit {
+  padding: 10px;
+}
+
+.thread-reply textarea {
+  min-height: 64px;
+}
+
+.side .thread-reply {
+  grid-template-columns: minmax(0, 1fr);
+  padding-inline: 12px;
 }
 
 .comment-filter {
