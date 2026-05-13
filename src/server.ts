@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { extname, join, normalize, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 
-import { addIssueComment, editIssueComment, editReviewComment, fetchFileText, fetchPullRequestReviewData, replyToReviewComment, submitPullRequestReview } from "./github.js";
+import { addIssueComment, editIssueComment, editReviewComment, editReviewSummary, fetchFileText, fetchPullRequestReviewData, replyToReviewComment, submitPullRequestReview } from "./github.js";
 import { inputFromBody, prKeyForRef, readBody, recordFromBody, refFromBody, sendJson, viewedPayloadFromBody } from "./http.js";
 import { logger } from "./logger.js";
 import { askPi, disposePiSession, disposePiSessions, piDiagnostics, prewarmPiSession, registerPiSessionCwd, setPiModel } from "./pi-session.js";
@@ -254,6 +254,10 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (typeof payload.body !== "string" || payload.body.trim().length === 0) throw new Error("Expected non-empty body");
     if (payload.kind === "issue") {
       sendJson(res, 200, { result: await editIssueComment(ref, payload.commentId, payload.body.trim()) });
+      return;
+    }
+    if (payload.kind === "review-summary") {
+      sendJson(res, 200, { result: await editReviewSummary(ref, payload.commentId, payload.body.trim()) });
       return;
     }
     if (payload.kind !== "review") throw new Error("Expected comment kind");

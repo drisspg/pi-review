@@ -106,6 +106,22 @@ test("supports multiline draft ranges", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Submit review (1)" })).toBeEnabled();
 });
 
+test("clears the review form after submitting", async ({ page }) => {
+  let submitRequests = 0;
+  await page.route("**/api/review/submit", async (route) => {
+    submitRequests += 1;
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ result: { ok: true } }) });
+  });
+
+  await page.getByPlaceholder("Overall review body").fill("looks good");
+  await page.getByRole("button", { name: "Submit review (0)" }).click();
+
+  await expect(page.getByRole("button", { name: "Review submitted" })).toBeDisabled();
+  await expect(page.getByPlaceholder("Overall review body")).toHaveValue("");
+  await expect(page.locator(".side")).toContainText("Review submitted.");
+  expect(submitRequests).toBe(1);
+});
+
 test("dragging diff rows opens a multiline thread", async ({ page }) => {
   await openFirstFile(page);
   const rows = page.locator(".file").first().locator(".diff-row.added");

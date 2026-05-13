@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import { logger } from "./logger.js";
 import { prKey } from "./pr.js";
 import { listFileReviews } from "./state.js";
-import type { PullFile, PullIssueComment, PullRequest, PullRequestRef, PullRequestReviewData, PullRequestReviewDecision, PullReviewComment, StoredPullRequest } from "./types.js";
+import type { PullFile, PullIssueComment, PullRequest, PullRequestRef, PullRequestReviewData, PullRequestReviewDecision, PullRequestReviewSummary, PullReviewComment, StoredPullRequest } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -67,7 +67,7 @@ async function fetchReviewThreadStates(ref: PullRequestRef): Promise<Map<number,
   return states;
 }
 
-function toStoredPullRequest(ref: PullRequestRef, pr: PullRequest, files: PullFile[], comments: PullReviewComment[], issueComments: PullIssueComment[], reviewDecision: PullRequestReviewDecision): StoredPullRequest {
+function toStoredPullRequest(ref: PullRequestRef, pr: PullRequest, files: PullFile[], comments: PullReviewComment[], issueComments: PullIssueComment[], reviewSummaries: PullRequestReviewSummary[], reviewDecision: PullRequestReviewDecision): StoredPullRequest {
   return {
     key: prKey(ref),
     ref,
@@ -79,7 +79,7 @@ function toStoredPullRequest(ref: PullRequestRef, pr: PullRequest, files: PullFi
     baseSha: pr.base.sha,
     headSha: pr.head.sha,
     filesChanged: files.length,
-    existingCommentCount: comments.length + issueComments.length,
+    existingCommentCount: comments.length + issueComments.length + reviewSummaries.length,
     lastOpenedAt: new Date().toISOString(),
     lastReviewedHeadSha: null,
     lastReviewEvent: null,
@@ -93,17 +93,19 @@ function fileFingerprint(file: PullFile): string {
 
 export async function fetchPullRequestReviewData(ref: PullRequestRef): Promise<PullRequestReviewData> {
   logger.info("github", "fetch PR review data", { ref });
-  const [rawPr, files, rawComments, issueComments, threadStates, reviewDecision] = await Promise.all([
+  const [rawPr, files, rawComments, issueComments, rawReviewSummaries, threadStates, reviewDecision] = await Promise.all([
     ghApi<PullRequest>(apiBase(ref)),
     ghApi<PullFile[]>(`${apiBase(ref)}/files`),
     ghApi<PullReviewComment[]>(`${apiBase(ref)}/comments`),
     ghApi<PullIssueComment[]>(`/repos/${ref.owner}/${ref.repo}/issues/${ref.number}/comments`),
+    ghApi<PullRequestReviewSummary[]>(`${apiBase(ref)}/reviews`),
     fetchReviewThreadStates(ref),
     fetchReviewDecision(ref),
   ]);
   const comments = rawComments.map((comment) => ({ ...comment, ...threadStates.get(comment.id) }));
-  const pr = toStoredPullRequest(ref, rawPr, files, comments, issueComments, reviewDecision);
-  logger.info("github", "fetched PR review data", { key: pr.key, title: pr.title, files: files.length, reviewComments: comments.length, issueComments: issueComments.length });
+  const reviewSummaries = rawReviewSummaries.filter((review) => review.body.trim().length > 0);
+  const pr = toStoredPullRequest(ref, rawPr, files, comments, issueComments, reviewSummaries, reviewDecision);
+  logger.info("github", "fetched PR review data", { key: pr.key, title: pr.title, files: files.length, reviewComments: comments.length, issueComments: issueComments.length, reviewSummaries: reviewSummaries.length });
   const storedFileReviews = await listFileReviews(pr.key);
   const fileReviews = files.map((file) => {
     const fingerprint = fileFingerprint(file);
@@ -115,7 +117,7 @@ export async function fetchPullRequestReviewData(ref: PullRequestRef): Promise<P
       updatedAt: new Date().toISOString(),
     };
   });
-  return { pr, raw: rawPr, files, comments, issueComments, fileReviews };
+  return { pr, raw: rawPr, files, comments, issueComments, reviewSummaries, fileReviews };
 }
 
 export function fingerprintPullFile(file: PullFile): string {
@@ -175,6 +177,10 @@ export async function editReviewComment(ref: PullRequestRef, commentId: number, 
 
 export async function editIssueComment(ref: PullRequestRef, commentId: number, body: string): Promise<unknown> {
   return ghApiPatch(ref, `/repos/${ref.owner}/${ref.repo}/issues/comments/${commentId}`, { body }, "edit issue comment");
+}
+
+export async function editReviewSummary(ref: PullRequestRef, reviewId: number, body: string): Promise<unknown> {
+  return ghApiPatch(ref, `${apiBase(ref)}/reviews/${reviewId}`, { body }, "edit review summary");
 }
 
 export async function fetchPullRequestSummary(ref: PullRequestRef): Promise<StoredPullRequest> {

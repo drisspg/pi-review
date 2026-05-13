@@ -61,6 +61,16 @@ export type PullIssueComment = {
   updated_at?: string;
 };
 
+export type PullRequestReviewSummary = {
+  id: number;
+  body: string;
+  html_url: string;
+  user?: GitHubUser;
+  state: string;
+  submitted_at?: string | null;
+  updated_at?: string;
+};
+
 export type StoredPullRequest = {
   key: string;
   ref: PullRequestRef;
@@ -93,6 +103,7 @@ export type PullRequestReviewData = {
   files: PullFile[];
   comments: PullReviewComment[];
   issueComments: PullIssueComment[];
+  reviewSummaries: PullRequestReviewSummary[];
   fileReviews: FileReviewState[];
 };
 
