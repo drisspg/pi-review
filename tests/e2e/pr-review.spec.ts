@@ -125,6 +125,7 @@ test("clears the review form after submitting", async ({ page }) => {
 test("dragging diff rows opens a multiline thread", async ({ page }) => {
   await openFirstFile(page);
   const rows = page.locator(".file").first().locator(".diff-row.added");
+  await rows.nth(0).scrollIntoViewIfNeeded();
   const start = await rows.nth(0).boundingBox();
   const end = await rows.nth(3).boundingBox();
   if (start == null || end == null) throw new Error("Missing drag row boxes");
@@ -271,7 +272,7 @@ test("runs the right-sidebar Pi review panel and continues the chat with Enter",
   await mockAskPi(page, (body) => body.prompt?.includes("latest question") ? "Follow-up answer about `cu_seqlens_q`." : "Unexpected ask response");
 
   await page.getByRole("tab", { name: "Pi" }).click();
-  await page.getByRole("button", { name: "Full review" }).click();
+  await page.getByRole("button", { name: /Full review|Run again/ }).click();
 
   const dialog = page.locator(".ai-review");
   await expect(dialog).toContainText("Correctness:");
