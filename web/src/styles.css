@@ -798,7 +798,7 @@ a { color: var(--link); text-decoration: none; }
 }
 .hunk { color: #79c0ff; background: var(--panel2); }
 .meta { color: var(--muted); }
-.diff-row.in-thread-range { background: rgba(47, 129, 247, 0.12); box-shadow: inset 3px 0 rgba(47, 129, 247, 0.5); }
+.diff-row.in-thread-range { background: rgba(47, 129, 247, 0.22); box-shadow: inset 3px 0 rgba(47, 129, 247, 0.7); }
 .diff-row.range-selecting { background: rgba(47, 129, 247, 0.24); }
 
 .pill {
@@ -891,7 +891,6 @@ a { color: var(--link); text-decoration: none; }
 .inline-thread > .markdown,
 .inline-thread > a,
 .inline-thread > .draft-card,
-.review-thread > .range-control,
 .review-thread > .thread-messages,
 .review-thread > .composer {
   margin: 10px 12px;
@@ -1436,19 +1435,6 @@ a { color: var(--link); text-decoration: none; }
   background: var(--panel2);
 }
 
-.range-control {
-  display: inline-flex;
-  gap: 8px;
-  align-items: center;
-  width: fit-content;
-  color: var(--muted);
-  font-size: 0.82rem;
-}
-
-.range-control input {
-  width: 86px;
-  padding: 0.25rem 0.4rem;
-}
 
 .thread-head, .actions {
   display: flex;

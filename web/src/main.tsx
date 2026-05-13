@@ -614,13 +614,22 @@ function ReviewPage(props: DiffProps & { aiReview: AiReview; setAiReview: (revie
   function jumpToComment(target: Target): void {
     if (props.openFiles[target.path] === false) props.setOpenFiles({ ...props.openFiles, [target.path]: true });
     if (props.commentsCollapsed) props.toggleAllComments();
-    window.setTimeout(() => {
+    let attempts = 0;
+    const maxAttempts = 20;
+    const interval = 100;
+    function tryScroll() {
       const thread = document.getElementById(commentThreadDomId(target));
       const row = target.line != null
         ? document.querySelector(`.diff-row[data-path="${CSS.escape(target.path)}"][data-line="${target.line}"][data-side="${target.side}"]`)
         : document.getElementById(`file-${target.path}`);
-      (thread ?? row)?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 50);
+      const element = thread ?? row;
+      if (element) {
+        element.scrollIntoView({ behavior: "smooth", block: "center" });
+      } else if (++attempts < maxAttempts) {
+        window.setTimeout(tryScroll, interval);
+      }
+    }
+    window.setTimeout(tryScroll, 50);
   }
   return <div className="review-layout" style={{ gridTemplateColumns: `minmax(0, 1fr) 12px ${props.sideWidth}px` }}>
     <main className="files">
@@ -867,7 +876,7 @@ function DraftView({ draft, drafts, setDrafts, editingDraftId, setEditingDraftId
 
 function DiffRowView({ row, target, threads, setThreads, toggleThread, comments, drafts, setDrafts, editingDraftId, setEditingDraftId, askThread, askFocusArea, dragSelection, beginDrag, updateDrag, finishDrag, handleRowClick, prUrl, refreshGithubActivity, collapseSignal, commentsCollapsed, diffViewMode, focusAreas, activeFocusAreaId, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds }: { row: DiffRow; target: Target | null; threads: Record<string, Thread>; setThreads: DiffProps["setThreads"]; toggleThread: (target: Target, extend?: boolean) => void; comments: PullReviewComment[]; drafts: DraftComment[]; setDrafts: (drafts: DraftComment[]) => void; editingDraftId: string | null; setEditingDraftId: (id: string | null) => void; askThread: (thread: Thread) => Promise<void>; askFocusArea: (area: FocusArea, question: string) => Promise<string>; dragSelection: DragSelection | null; beginDrag: (target: Target) => void; updateDrag: (target: Target) => void; finishDrag: (target: Target) => void; handleRowClick: (target: Target, extend: boolean) => void; prUrl: string; refreshGithubActivity: () => Promise<void>; collapseSignal: number; commentsCollapsed: boolean; diffViewMode: DiffViewMode; focusAreas: FocusArea[]; activeFocusAreaId: string | null; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"] }) {
   const thread = target == null ? null : threadForTarget(threads, target);
-  const inlineCommentThreads = target == null ? [] : groupReviewComments(comments).filter((thread) => targetKey(commentTarget(thread[0])) === targetKey(target));
+  const inlineCommentThreads = target == null ? [] : groupReviewComments(comments).filter((thread) => { const ct = commentTarget(thread[0]); return ct.path === target.path && ct.side === target.side && ct.line === target.line; });
   const inlineDrafts = target == null ? [] : drafts.filter((draft) => draftMatchesTarget(draft, target));
   const selecting = isTargetInSelection(target, dragSelection);
   const inThreadRange = target != null && target.line != null && Object.values(threads).some((t) => !t.collapsed && t.target.path === target.path && t.target.startLine != null && t.target.line != null && target.line! >= t.target.startLine && target.line! <= t.target.line);
@@ -914,7 +923,7 @@ function FocusAreaInline({ prUrl, area, active, setActiveFocusAreaId, collapsedF
 
 function ThreadBox({ prUrl, thread, setThread, closeThread, addDraft, askThread }: { prUrl: string; thread: Thread; setThread: (thread: Thread) => void; closeThread: () => void; addDraft: () => void; askThread: (thread: Thread) => Promise<void> }) {
   if (thread.collapsed) return <button className="inline-thread collapsed" onClick={() => setThread({ ...thread, collapsed: false })}><ChevronRightIcon size={14} /> Thread on {thread.target.line == null ? "file" : targetLabel(thread.target)}</button>;
-  return <div className="inline-thread review-thread"><div className="thread-head"><div><strong>Line thread</strong><span>{targetLabel(thread.target)}</span></div><div className="actions">{(thread.draft.trim().length > 0 || thread.messages.length > 0) && <Button variant="icon" aria-label="Collapse thread" onClick={() => setThread({ ...thread, collapsed: true })}><ChevronDownIcon size={16} /></Button>}<Button variant="icon" className="close-thread-button" aria-label="Close thread" onClick={closeThread}><XIcon size={16} /></Button></div></div>{thread.target.line != null && <label className="range-control">Range end <input type="number" value={thread.target.line} min={thread.target.startLine ?? thread.target.line} onChange={(event) => setThread({ ...thread, target: { ...thread.target, startLine: thread.target.startLine ?? thread.target.line, line: Number.parseInt(event.target.value, 10) || thread.target.line } })} /></label>}{thread.messages.length > 0 && <div className="thread-messages">{thread.messages.map((message, index) => <div className={`thread-note ${message.role}`} key={index}><div className="message-role">{message.role === "user" ? "You" : "Pi"}</div><MarkdownText text={message.text} fileLinks={{ prUrl }} /></div>)}</div>}<div className="composer"><textarea value={thread.draft} onChange={(event) => setThread({ ...thread, draft: event.target.value })} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey && thread.draft.trim().length > 0 && !thread.asking) { event.preventDefault(); void askThread(thread); } }} placeholder="Write a draft comment or ask Pi about this line" /><div className="actions"><button onClick={addDraft} disabled={thread.draft.trim().length === 0}>Add draft comment</button><button onClick={() => void askThread(thread)} disabled={thread.asking || thread.draft.trim().length === 0}>{thread.asking ? <span className="spinner-label"><span className="spinner" aria-hidden="true" />Asking</span> : "Ask Pi"}</button></div></div></div>;
+  return <div className="inline-thread review-thread"><div className="thread-head"><div><strong>Line thread</strong><span>{targetLabel(thread.target)}</span></div><div className="actions">{(thread.draft.trim().length > 0 || thread.messages.length > 0) && <Button variant="icon" aria-label="Collapse thread" onClick={() => setThread({ ...thread, collapsed: true })}><ChevronDownIcon size={16} /></Button>}<Button variant="icon" className="close-thread-button" aria-label="Close thread" onClick={closeThread}><XIcon size={16} /></Button></div></div>{thread.messages.length > 0 && <div className="thread-messages">{thread.messages.map((message, index) => <div className={`thread-note ${message.role}`} key={index}><div className="message-role">{message.role === "user" ? "You" : "Pi"}</div><MarkdownText text={message.text} fileLinks={{ prUrl }} /></div>)}</div>}<div className="composer"><textarea value={thread.draft} onChange={(event) => setThread({ ...thread, draft: event.target.value })} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey && thread.draft.trim().length > 0 && !thread.asking) { event.preventDefault(); void askThread(thread); } }} placeholder="Write a draft comment or ask Pi about this line" /><div className="actions"><button onClick={addDraft} disabled={thread.draft.trim().length === 0}>Add draft comment</button><button onClick={() => void askThread(thread)} disabled={thread.asking || thread.draft.trim().length === 0}>{thread.asking ? <span className="spinner-label"><span className="spinner" aria-hidden="true" />Asking</span> : "Ask Pi"}</button></div></div></div>;
 }
 
 function reviewStatus(pr: StoredPullRequest): { label: string; tone: string } {
