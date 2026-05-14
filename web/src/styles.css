@@ -262,7 +262,7 @@ a { color: var(--link); text-decoration: none; }
 
 .open-form button,
 .composer .actions button:first-child,
-.panel > button:last-child {
+.panel > button:last-child:not(.review-submit) {
   background: var(--accent);
   border-color: var(--accent);
   color: white;
@@ -1242,6 +1242,11 @@ a { color: var(--link); text-decoration: none; }
 .side .thread-reply {
   grid-template-columns: minmax(0, 1fr);
   padding-inline: 12px;
+}
+
+.comment-placement-note {
+  margin: 4px 0 10px;
+  line-height: 1.35;
 }
 
 .comment-filter {

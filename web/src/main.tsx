@@ -57,11 +57,15 @@ function focusReviewHasNoFindings(text: string): boolean {
   return text.trim().length > 0 && parseFocusAreas(text).length === 0;
 }
 
+function focusAreaPath(path: string): string {
+  return path.trim().replace(/^[-*]\s+/, "").trim();
+}
+
 function parseFocusAreas(text: string): FocusArea[] {
   const location = /(?:^|[`\s(*-])([\w./@+-][\w./@+ -]*?\.[\w+-]+):(\d+)(?:-(\d+))?(?:\s*[—-]\s*([^\n]+))?/gm;
   const areas: FocusArea[] = [];
   for (const match of text.matchAll(location)) {
-    const path = match[1].trim();
+    const path = focusAreaPath(match[1]);
     const startLine = Number.parseInt(match[2], 10);
     const endLine = Number.parseInt(match[3] ?? match[2], 10);
     if (!Number.isFinite(startLine) || !Number.isFinite(endLine)) continue;

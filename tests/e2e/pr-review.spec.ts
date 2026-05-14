@@ -217,7 +217,7 @@ test("runs a separate focus areas review and highlights referenced lines", async
   await expect(page.locator(".file").first().locator(".diff-row")).toHaveCount(0);
 
   await page.route(/\/api\/pi\/focus-review\/status$/, async (route) => {
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { status: "complete", answer: `## Focus areas\n- \`${path}:${line}-${Number.parseInt(line, 10) + 1} — convention mismatch\`: check whether this matches local tiling conventions.` } }) });
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { status: "complete", answer: `## Focus areas\n1. convention mismatch\n- ${path}:${line}-${Number.parseInt(line, 10) + 1} — check whether this matches local tiling conventions.` } }) });
   });
   await page.route(/\/api\/pi\/focus-review$/, async (route) => {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { id: "focus-job" } }) });
