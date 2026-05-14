@@ -2124,17 +2124,34 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .ai-chat-message {
-  display: grid;
-  grid-template-columns: 46px minmax(0, 1fr);
-  gap: 8px;
   padding: 8px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--panel);
 }
 
+.ai-chat-message summary {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  cursor: pointer;
+}
+
+.ai-chat-message[open] summary {
+  margin-bottom: 8px;
+}
+
 .ai-chat-message.user {
   background: color-mix(in srgb, var(--accent) 7%, var(--panel));
+}
+
+.ai-chat-message.stale {
+  opacity: 0.72;
+}
+
+.stale-review-label {
+  color: var(--muted);
+  font-size: 0.78rem;
 }
 
 .ai-chat-composer {

@@ -266,7 +266,7 @@ function App() {
     setDrafts([]);
     setExpandedNeighborRows({});
     setEditingDraftId(null);
-    setAiReview({ expanded: false, open: false, running: false, text: data.aiReview?.answer ?? "", messages: data.aiReview == null ? [] : [{ role: "pi", text: data.aiReview.answer }] });
+    setAiReview({ expanded: false, open: false, running: false, text: data.aiReview?.answer ?? "", messages: data.aiReview == null ? [] : [{ role: "pi", text: data.aiReview.answer, title: "Latest saved review" }] });
     setAiReviewId(data.aiReview?.id ?? null);
     const savedAreas = parseFocusAreas(data.focusScan?.answer ?? "");
     setFocusReview({ expanded: false, open: false, running: false, text: data.focusScan?.answer ?? "" });
@@ -495,14 +495,17 @@ ${diffSummary}`;
         if (status.status === "failed") throw new Error(status.error ?? "AI review failed");
         if (status.status !== "complete") throw new Error("AI review returned an unknown job status");
         const answer = status.answer ?? "AI review completed without output.";
-        setAiReview((current) => ({ ...current, open: !background || current.open, expanded: !background || current.expanded, running: false, text: answer, messages: [...current.messages, { role: "pi", text: answer }] }));
+        setAiReview((current) => {
+          const previousReviews = current.messages.filter((message) => message.role === "pi").length;
+          return { ...current, open: !background || current.open, expanded: !background || current.expanded, running: false, text: answer, messages: [...current.messages.map((message) => message.role === "pi" ? { ...message, stale: true } : message), { role: "pi", text: answer, title: `Review ${previousReviews + 1}` }] };
+        });
         void saveAiReview(answer, null);
         break;
       }
     } catch (err) {
       if (activeReviewKeyRef.current !== targetReview.pr.key) return;
       const text = `AI review failed: ${err instanceof Error ? err.message : String(err)}`;
-      setAiReview((current) => ({ ...current, open: !background || current.open, expanded: !background || current.expanded, running: false, text, messages: [...current.messages, { role: "pi", text }] }));
+      setAiReview((current) => ({ ...current, open: !background || current.open, expanded: !background || current.expanded, running: false, text, messages: [...current.messages, { role: "pi", text, title: "Review failed" }] }));
     }
   }
 
@@ -1081,8 +1084,14 @@ function AiReviewPanel({ prUrl, review, setReview, runReview, sendMessage, focus
   const focusAreaCount = focusAreas.length;
   const allFocusCollapsed = focusAreaCount > 0 && focusAreas.every((area) => collapsedFocusAreaIds[area.id]);
   const hasMessages = review.messages.length > 0 || review.text.length > 0;
-  const messages = review.messages.length > 0 ? review.messages : review.text.length > 0 ? [{ role: "pi" as const, text: review.text }] : [];
-  const body = messages.length > 0 ? <div className="ai-chat-messages">{messages.map((message, index) => <div className={`ai-chat-message ${message.role}`} key={index}><div className="message-role">{message.role === "user" ? "You" : "Pi"}</div><MarkdownText text={message.text} fileLinks={{ prUrl }} /></div>)}</div> : <p className="muted">Run review or ask Pi about this PR.</p>;
+  const messages = review.messages.length > 0 ? review.messages : review.text.length > 0 ? [{ role: "pi" as const, text: review.text, title: "Latest review" }] : [];
+  const body = messages.length > 0 ? <div className="ai-chat-messages">{messages.map((message, index) => {
+    const isOlderReview = message.role === "pi" && message.stale === true;
+    return <details className={`ai-chat-message ${message.role}${isOlderReview ? " stale" : ""}`} key={index} open={!isOlderReview || message.role === "user"}>
+      <summary><span className="message-role">{message.title ?? (message.role === "user" ? "You" : `Review ${index + 1}`)}</span>{isOlderReview && <span className="stale-review-label">older; may be stale</span>}</summary>
+      <MarkdownText text={message.text} fileLinks={{ prUrl }} />
+    </details>;
+  })}</div> : <p className="muted">Run review or ask Pi about this PR.</p>;
   function submitChat() {
     if (draft.trim().length === 0 || review.running) return;
     const message = draft;
