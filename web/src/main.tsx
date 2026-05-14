@@ -10,7 +10,7 @@ import { commentTarget, commentThreadDomId, draftMatchesTarget, groupReviewComme
 import { contextRowsFromText, hunkNewStart, isTargetInSelection, lastNewLine, parsePatchRows, targetFromPoint, targetFromRow } from "./lib/diff";
 import { languageForPath } from "./lib/highlight";
 import { newId, prUrlFromKey, shortSha } from "./lib/pr";
-import type { AiReview, AiReviewRecord, DiffRow, DraftComment, DragSelection, FileReviewState, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, LogEntry, OpenResponse, PullFile, PullIssueComment, PullReviewComment, StoredPullRequest, Target, ThemeName, Thread } from "./types";
+import type { AiReview, AiReviewMessage, AiReviewRecord, DiffRow, DraftComment, DragSelection, FileReviewState, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, LogEntry, OpenResponse, PullFile, PullIssueComment, PullReviewComment, StoredPullRequest, Target, ThemeName, Thread } from "./types";
 import "./styles.css";
 
 type DiffViewMode = "unified" | "split";
@@ -55,6 +55,20 @@ type DiffProps = {
 
 function focusReviewHasNoFindings(text: string): boolean {
   return text.trim().length > 0 && parseFocusAreas(text).length === 0;
+}
+
+function generalReviewMessage(text: string): AiReviewMessage {
+  return { role: "pi", kind: "general-review", title: "General review", text };
+}
+
+function mergeGeneralReview(messages: AiReviewMessage[], text: string): AiReviewMessage[] {
+  const index = messages.findIndex((message) => message.kind === "general-review");
+  if (index === -1) return [generalReviewMessage(text), ...messages];
+  return messages.map((message, messageIndex) => messageIndex === index ? generalReviewMessage(text) : message);
+}
+
+function currentGeneralReviewText(review: AiReview): string {
+  return review.messages.find((message) => message.kind === "general-review")?.text.trim() ?? (review.messages.length === 0 ? review.text.trim() : "");
 }
 
 function focusAreaPath(path: string): string {
@@ -266,7 +280,7 @@ function App() {
     setDrafts([]);
     setExpandedNeighborRows({});
     setEditingDraftId(null);
-    setAiReview({ expanded: false, open: false, running: false, text: data.aiReview?.answer ?? "", messages: data.aiReview == null ? [] : [{ role: "pi", text: data.aiReview.answer, title: "Latest saved review" }] });
+    setAiReview({ expanded: false, open: false, running: false, text: data.aiReview?.answer ?? "", messages: data.aiReview == null ? [] : [generalReviewMessage(data.aiReview.answer)] });
     setAiReviewId(data.aiReview?.id ?? null);
     const savedAreas = parseFocusAreas(data.focusScan?.answer ?? "");
     setFocusReview({ expanded: false, open: false, running: false, text: data.focusScan?.answer ?? "" });
@@ -472,7 +486,8 @@ function App() {
     setAiReview((current) => ({ ...current, open: !background || current.open, expanded: !background || current.expanded, running: true }));
     const diffSummary = targetReview.files.map((file) => `## ${file.filename}
 ${file.patch ?? "Patch unavailable"}`).join("\n\n");
-    const previousAiReview = targetReview.aiReview?.answer.trim() || "No previous full review is stored.";
+    const visibleAiReview = targetReview.pr.key === review?.pr.key ? currentGeneralReviewText(aiReview) : "";
+    const previousAiReview = visibleAiReview || targetReview.aiReview?.answer.trim() || "No previous full review is stored.";
     const previousFocusAreas = targetReview.focusScan == null ? "No previous focus scan findings are stored." : focusScanHistoryPrompt(targetReview.focusScan.answer, targetReview.focusScan.areaStates);
     const prompt = `Run a concise code review for ${targetReview.pr.key}. Focus on correctness, edge cases, tests, and concrete actionable findings. Avoid generic praise. Return markdown with bullets and file/line references where possible.
 
@@ -495,33 +510,30 @@ ${diffSummary}`;
         if (status.status === "failed") throw new Error(status.error ?? "AI review failed");
         if (status.status !== "complete") throw new Error("AI review returned an unknown job status");
         const answer = status.answer ?? "AI review completed without output.";
-        setAiReview((current) => {
-          const previousReviews = current.messages.filter((message) => message.role === "pi").length;
-          return { ...current, open: !background || current.open, expanded: !background || current.expanded, running: false, text: answer, messages: [...current.messages.map((message) => message.role === "pi" ? { ...message, stale: true } : message), { role: "pi", text: answer, title: `Review ${previousReviews + 1}` }] };
-        });
-        void saveAiReview(answer, null);
+        setAiReview((current) => ({ ...current, open: !background || current.open, expanded: !background || current.expanded, running: false, text: answer, messages: mergeGeneralReview(current.messages, answer) }));
+        void saveAiReview(answer);
         break;
       }
     } catch (err) {
       if (activeReviewKeyRef.current !== targetReview.pr.key) return;
       const text = `AI review failed: ${err instanceof Error ? err.message : String(err)}`;
-      setAiReview((current) => ({ ...current, open: !background || current.open, expanded: !background || current.expanded, running: false, text, messages: [...current.messages, { role: "pi", text, title: "Review failed" }] }));
+      setAiReview((current) => ({ ...current, open: !background || current.open, expanded: !background || current.expanded, running: false, text, messages: [...current.messages, { role: "pi", kind: "chat", text, title: "Review failed" }] }));
     }
   }
 
   async function sendAiReviewMessage(message: string) {
     if (review == null || aiReview.running || message.trim().length === 0) return;
     const question = message.trim();
-    setAiReview((current) => ({ ...current, open: true, expanded: true, running: true, messages: [...current.messages, { role: "user", text: question }, { role: "pi", text: "" }] }));
+    setAiReview((current) => ({ ...current, open: true, expanded: true, running: true, messages: [...current.messages, { role: "user", kind: "chat", text: question }, { role: "pi", kind: "chat", text: "" }] }));
     try {
       const previous = aiReview.messages.map((entry) => `${entry.role === "user" ? "User" : "Pi"}: ${entry.text}`).join("\n\n");
       const prompt = `Continue discussing PR ${review.pr.key}. Answer the user's latest question using the checked-out PR worktree. Be concise and cite files/lines when useful.\n\nPrevious dialogue:\n${previous || "(none)"}\n\nUser: ${question}`;
-      const setAnswer = (answer: string) => setAiReview((current) => ({ ...current, open: true, expanded: true, text: answer, messages: [...current.messages.slice(0, -1), { role: "pi", text: answer }] }));
+      const setAnswer = (answer: string) => setAiReview((current) => ({ ...current, open: true, expanded: true, text: answer, messages: [...current.messages.slice(0, -1), { role: "pi", kind: "chat", text: answer }] }));
       const answer = await askPiApi({ prKey: review.pr.key, prompt, purpose: "chat" }, setAnswer);
-      setAiReview((current) => ({ ...current, open: true, expanded: true, running: false, text: answer, messages: [...current.messages.slice(0, -1), { role: "pi", text: answer }] }));
+      setAiReview((current) => ({ ...current, open: true, expanded: true, running: false, text: answer, messages: [...current.messages.slice(0, -1), { role: "pi", kind: "chat", text: answer }] }));
     } catch (err) {
       const text = `Ask Pi failed: ${err instanceof Error ? err.message : String(err)}`;
-      setAiReview((current) => ({ ...current, open: true, expanded: true, running: false, text, messages: [...current.messages.slice(0, -1), { role: "pi", text }] }));
+      setAiReview((current) => ({ ...current, open: true, expanded: true, running: false, text, messages: [...current.messages.slice(0, -1), { role: "pi", kind: "chat", text }] }));
     }
   }
 
@@ -1084,11 +1096,12 @@ function AiReviewPanel({ prUrl, review, setReview, runReview, sendMessage, focus
   const focusAreaCount = focusAreas.length;
   const allFocusCollapsed = focusAreaCount > 0 && focusAreas.every((area) => collapsedFocusAreaIds[area.id]);
   const hasMessages = review.messages.length > 0 || review.text.length > 0;
-  const messages = review.messages.length > 0 ? review.messages : review.text.length > 0 ? [{ role: "pi" as const, text: review.text, title: "Latest review" }] : [];
+  const messages = review.messages.length > 0 ? review.messages : review.text.length > 0 ? [generalReviewMessage(review.text)] : [];
   const body = messages.length > 0 ? <div className="ai-chat-messages">{messages.map((message, index) => {
-    const isOlderReview = message.role === "pi" && message.stale === true;
-    return <details className={`ai-chat-message ${message.role}${isOlderReview ? " stale" : ""}`} key={index} open={!isOlderReview || message.role === "user"}>
-      <summary><span className="message-role">{message.title ?? (message.role === "user" ? "You" : `Review ${index + 1}`)}</span>{isOlderReview && <span className="stale-review-label">older; may be stale</span>}</summary>
+    const isGeneralReview = message.kind === "general-review";
+    return <details className={`ai-chat-message ${message.role}${isGeneralReview ? " general-review" : ""}`} key={index} open>
+      <summary><span className="message-role">{message.title ?? (message.role === "user" ? "You" : "Pi")}</span>{isGeneralReview && <span className="general-review-label">updated on each rerun</span>}</summary>
+      {isGeneralReview && <p className="general-review-note">Rerunning review updates this card instead of adding a duplicate, so Pi can compare against the prior text and de-dupe findings. Follow-up chats stay below.</p>}
       <MarkdownText text={message.text} fileLinks={{ prUrl }} />
     </details>;
   })}</div> : <p className="muted">Run review or ask Pi about this PR.</p>;

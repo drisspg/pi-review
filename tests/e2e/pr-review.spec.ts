@@ -263,8 +263,9 @@ test("runs the right-sidebar Pi review panel and continues the chat with Enter",
     openedFile = route.request().postDataJSON();
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ target: "opened" }) });
   });
+  let reviewAnswer = "- **Correctness:** inspect `csrc/flash_attn/src/flash_fwd_kernel.h:1276`.";
   await page.route(/\/api\/pi\/review\/status$/, async (route) => {
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { status: "complete", answer: "- **Correctness:** inspect `csrc/flash_attn/src/flash_fwd_kernel.h:1276`." } }) });
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { status: "complete", answer: reviewAnswer } }) });
   });
   await page.route(/\/api\/pi\/review$/, async (route) => {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { id: "review-job" } }) });
@@ -281,7 +282,14 @@ test("runs the right-sidebar Pi review panel and continues the chat with Enter",
     dialog.getByRole("link", { name: "csrc/flash_attn/src/flash_fwd_kernel.h:1276" }).click(),
   ]);
   expect(openedFile).toMatchObject({ path: "csrc/flash_attn/src/flash_fwd_kernel.h", line: 1276 });
+  await expect(dialog.getByText("General review")).toHaveCount(1);
+  await expect(dialog.getByText("updated on each rerun")).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Run again" })).toBeEnabled();
+  reviewAnswer = "- **Tests:** rerun the CUDA smoke test.";
+  await dialog.getByRole("button", { name: "Run again" }).click();
+  await expect(dialog.getByText("CUDA smoke test")).toBeVisible();
+  await expect(dialog).not.toContainText("Correctness:");
+  await expect(dialog.getByText("General review")).toHaveCount(1);
   await dialog.getByPlaceholder("Ask Pi about this PR…").fill("what should I test?");
   await dialog.getByPlaceholder("Ask Pi about this PR…").press("Enter");
   await expect(dialog).toContainText("Follow-up answer");

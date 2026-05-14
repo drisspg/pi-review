@@ -2155,13 +2155,20 @@ a { color: var(--link); text-decoration: none; }
   background: color-mix(in srgb, var(--accent) 7%, var(--panel));
 }
 
-.ai-chat-message.stale {
-  opacity: 0.72;
+.ai-chat-message.general-review {
+  border-color: color-mix(in srgb, var(--attention) 55%, var(--border));
+  background: color-mix(in srgb, var(--attention) 8%, var(--panel));
 }
 
-.stale-review-label {
+.general-review-label {
   color: var(--muted);
   font-size: 0.78rem;
+}
+
+.general-review-note {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 0.82rem;
 }
 
 .ai-chat-composer {
