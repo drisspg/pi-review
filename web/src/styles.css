@@ -2160,17 +2160,6 @@ a { color: var(--link); text-decoration: none; }
   background: color-mix(in srgb, var(--attention) 8%, var(--panel));
 }
 
-.general-review-label {
-  color: var(--muted);
-  font-size: 0.78rem;
-}
-
-.general-review-note {
-  margin: 0 0 8px;
-  color: var(--muted);
-  font-size: 0.82rem;
-}
-
 .ai-chat-composer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

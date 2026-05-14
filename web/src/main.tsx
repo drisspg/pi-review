@@ -321,6 +321,11 @@ function App() {
       cacheReview(data);
       setReview(data);
       setOpenFiles((current) => ({ ...Object.fromEntries(data.files.map((file) => [file.filename, !data.fileReviews.find((state) => state.path === file.filename)?.viewed])), ...current }));
+      setAiReview((current) => ({ ...current, text: "", messages: current.messages.filter((message) => message.kind !== "general-review") }));
+      setFocusReview((current) => ({ ...current, text: "" }));
+      setViewedFocusAreaIds({});
+      setActiveFocusAreaId(null);
+      setCollapsedFocusAreaIds({});
       await Promise.all([refreshHistory(), refreshLogs()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -483,7 +488,7 @@ function App() {
   }
 
   async function runAiReviewFor(targetReview: OpenResponse, background: boolean) {
-    setAiReview((current) => ({ ...current, open: !background || current.open, expanded: !background || current.expanded, running: true }));
+    setAiReview((current) => ({ ...current, open: !background || current.open, expanded: !background || current.expanded, running: true, text: background ? current.text : "", messages: background ? current.messages : current.messages.filter((message) => message.kind !== "general-review") }));
     const diffSummary = targetReview.files.map((file) => `## ${file.filename}
 ${file.patch ?? "Patch unavailable"}`).join("\n\n");
     const visibleAiReview = targetReview.pr.key === review?.pr.key ? currentGeneralReviewText(aiReview) : "";
@@ -511,7 +516,7 @@ ${diffSummary}`;
         if (status.status !== "complete") throw new Error("AI review returned an unknown job status");
         const answer = status.answer ?? "AI review completed without output.";
         setAiReview((current) => ({ ...current, open: !background || current.open, expanded: !background || current.expanded, running: false, text: answer, messages: mergeGeneralReview(current.messages, answer) }));
-        void saveAiReview(answer);
+        void saveAiReview(answer, null);
         break;
       }
     } catch (err) {
@@ -543,7 +548,12 @@ ${diffSummary}`;
   }
 
   async function runFocusReviewFor(targetReview: OpenResponse, background: boolean) {
-    setFocusReview((current) => ({ ...current, open: !background || current.open, running: true }));
+    setFocusReview((current) => ({ ...current, open: !background || current.open, running: true, text: background ? current.text : "" }));
+    if (!background) {
+      setViewedFocusAreaIds({});
+      setActiveFocusAreaId(null);
+      setCollapsedFocusAreaIds({});
+    }
     const diffSummary = targetReview.files.map((file) => `## ${file.filename}
 Status: ${file.status}, +${file.additions}/-${file.deletions}
 ${file.patch ?? "Patch unavailable"}`).join("\n\n");
@@ -1100,8 +1110,7 @@ function AiReviewPanel({ prUrl, review, setReview, runReview, sendMessage, focus
   const body = messages.length > 0 ? <div className="ai-chat-messages">{messages.map((message, index) => {
     const isGeneralReview = message.kind === "general-review";
     return <details className={`ai-chat-message ${message.role}${isGeneralReview ? " general-review" : ""}`} key={index} open>
-      <summary><span className="message-role">{message.title ?? (message.role === "user" ? "You" : "Pi")}</span>{isGeneralReview && <span className="general-review-label">updated on each rerun</span>}</summary>
-      {isGeneralReview && <p className="general-review-note">Rerunning review updates this card instead of adding a duplicate, so Pi can compare against the prior text and de-dupe findings. Follow-up chats stay below.</p>}
+      <summary><span className="message-role">{message.title ?? (message.role === "user" ? "You" : "Pi")}</span></summary>
       <MarkdownText text={message.text} fileLinks={{ prUrl }} />
     </details>;
   })}</div> : <p className="muted">Run review or ask Pi about this PR.</p>;
@@ -1161,12 +1170,12 @@ function AiReviewPanel({ prUrl, review, setReview, runReview, sendMessage, focus
     <h2>Pi</h2>
     <div className="pi-actions">
       <div className="pi-action">
-        <Button className="focus-review-run" onClick={() => void runFocusReview()} disabled={focusReview.running}>{focusReview.running ? "Scanning…" : "Focus scan"}</Button>
-        <span className="muted">Find specific lines worth deeper review. Results appear inline in the diff.</span>
+        <Button className="focus-review-run" onClick={() => void runFocusReview()} disabled={focusReview.running}>{focusReview.running ? "Scanning…" : focusReview.text.length > 0 ? "Refresh focus scan" : "Focus scan"}</Button>
+        <span className="muted">Find specific lines worth deeper review. Refreshing clears the visible list and runs again.</span>
       </div>
       <div className="pi-action">
-        <Button onClick={() => void runReview()} disabled={review.running}>{review.running ? "Reviewing…" : hasMessages ? "Run again" : "Full review"}</Button>
-        <span className="muted">Run a general code review. Output appears in the chat below.</span>
+        <Button onClick={() => void runReview()} disabled={review.running}>{review.running ? "Reviewing…" : hasMessages ? "Refresh findings" : "Full review"}</Button>
+        <span className="muted">Run a general code review. Refreshing replaces the visible findings card.</span>
       </div>
     </div>
     {focusReviewHasNoFindings(focusReview.text) && <div className="focus-review-note clean" role="status"><strong>✓ Nothing new to focus on.</strong><span>All scanned up for this pass.</span></div>}

@@ -273,7 +273,7 @@ test("runs the right-sidebar Pi review panel and continues the chat with Enter",
   await mockAskPi(page, (body) => body.prompt?.includes("latest question") ? "Follow-up answer about `cu_seqlens_q`." : "Unexpected ask response");
 
   await page.getByRole("tab", { name: "Pi" }).click();
-  await page.getByRole("button", { name: /Full review|Run again/ }).click();
+  await page.getByRole("button", { name: /Full review|Refresh findings/ }).click();
 
   const dialog = page.locator(".ai-review");
   await expect(dialog).toContainText("Correctness:");
@@ -283,10 +283,9 @@ test("runs the right-sidebar Pi review panel and continues the chat with Enter",
   ]);
   expect(openedFile).toMatchObject({ path: "csrc/flash_attn/src/flash_fwd_kernel.h", line: 1276 });
   await expect(dialog.getByText("General review")).toHaveCount(1);
-  await expect(dialog.getByText("updated on each rerun")).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "Run again" })).toBeEnabled();
+  await expect(dialog.getByRole("button", { name: "Refresh findings" })).toBeEnabled();
   reviewAnswer = "- **Tests:** rerun the CUDA smoke test.";
-  await dialog.getByRole("button", { name: "Run again" }).click();
+  await dialog.getByRole("button", { name: "Refresh findings" }).click();
   await expect(dialog.getByText("CUDA smoke test")).toBeVisible();
   await expect(dialog).not.toContainText("Correctness:");
   await expect(dialog.getByText("General review")).toHaveCount(1);
