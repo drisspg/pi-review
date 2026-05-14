@@ -4,18 +4,19 @@ import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { homedir } from "node:os";
 
-import type { AppState, FileReviewState, FocusScanRecord, StoredPullRequest } from "./types.js";
+import type { AiReviewRecord, AppState, FileReviewState, FocusScanRecord, StoredPullRequest } from "./types.js";
 
 const STATE_PATH = resolve(homedir(), ".pi", "agent", "state", "pi-pr-review", "state.json");
 
 const maxFocusScansPerPr = 20;
+const maxAiReviewsPerPr = 20;
 
-const emptyState = (): AppState => ({ prs: [], fileReviews: [], focusScans: [] });
+const emptyState = (): AppState => ({ prs: [], fileReviews: [], focusScans: [], aiReviews: [] });
 
 export async function readState(): Promise<AppState> {
   if (!existsSync(STATE_PATH)) return emptyState();
   const state = JSON.parse(await readFile(STATE_PATH, "utf8")) as Partial<AppState>;
-  return { prs: state.prs ?? [], fileReviews: state.fileReviews ?? [], focusScans: state.focusScans ?? [] };
+  return { prs: state.prs ?? [], fileReviews: state.fileReviews ?? [], focusScans: state.focusScans ?? [], aiReviews: state.aiReviews ?? [] };
 }
 
 async function writeState(state: AppState): Promise<void> {
@@ -83,10 +84,38 @@ export async function saveFocusScan(scan: Omit<FocusScanRecord, "id" | "createdA
   return next;
 }
 
+export async function latestAiReview(prKey: string): Promise<AiReviewRecord | null> {
+  return (await readState()).aiReviews.filter((review) => review.prKey === prKey).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null;
+}
+
+export async function saveAiReview(review: Omit<AiReviewRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<AiReviewRecord, "id" | "createdAt">>): Promise<AiReviewRecord> {
+  const state = await readState();
+  const previous = review.id == null ? null : state.aiReviews.find((stored) => stored.id === review.id);
+  const now = new Date().toISOString();
+  const next: AiReviewRecord = {
+    id: review.id ?? randomUUID(),
+    prKey: review.prKey,
+    headSha: review.headSha,
+    answer: review.answer,
+    createdAt: previous?.createdAt ?? review.createdAt ?? now,
+    updatedAt: now,
+  };
+  state.aiReviews = [next, ...state.aiReviews.filter((stored) => stored.id !== next.id)];
+  const counts = new Map<string, number>();
+  state.aiReviews = state.aiReviews.filter((stored) => {
+    const count = counts.get(stored.prKey) ?? 0;
+    counts.set(stored.prKey, count + 1);
+    return count < maxAiReviewsPerPr;
+  });
+  await writeState(state);
+  return next;
+}
+
 export async function removePullRequest(prKey: string): Promise<void> {
   const state = await readState();
   state.prs = state.prs.filter((pr) => pr.key !== prKey);
   state.fileReviews = state.fileReviews.filter((review) => review.prKey !== prKey);
   state.focusScans = state.focusScans.filter((scan) => scan.prKey !== prKey);
+  state.aiReviews = state.aiReviews.filter((review) => review.prKey !== prKey);
   await writeState(state);
 }

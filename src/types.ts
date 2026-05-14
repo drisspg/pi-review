@@ -113,6 +113,15 @@ export type FocusScanRecord = {
   updatedAt: string;
 };
 
+export type AiReviewRecord = {
+  id: string;
+  prKey: string;
+  headSha: string;
+  answer: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type PullRequestReviewData = {
   pr: StoredPullRequest;
   raw: PullRequest;
@@ -122,10 +131,12 @@ export type PullRequestReviewData = {
   reviewSummaries: PullRequestReviewSummary[];
   fileReviews: FileReviewState[];
   focusScan?: FocusScanRecord | null;
+  aiReview?: AiReviewRecord | null;
 };
 
 export type AppState = {
   prs: StoredPullRequest[];
   fileReviews: FileReviewState[];
   focusScans: FocusScanRecord[];
+  aiReviews: AiReviewRecord[];
 };

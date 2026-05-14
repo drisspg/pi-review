@@ -10,7 +10,7 @@ import { commentTarget, commentThreadDomId, draftMatchesTarget, groupReviewComme
 import { contextRowsFromText, hunkNewStart, isTargetInSelection, lastNewLine, parsePatchRows, targetFromPoint, targetFromRow } from "./lib/diff";
 import { languageForPath } from "./lib/highlight";
 import { newId, prUrlFromKey, shortSha } from "./lib/pr";
-import type { AiReview, DiffRow, DraftComment, DragSelection, FileReviewState, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, LogEntry, OpenResponse, PullFile, PullIssueComment, PullReviewComment, StoredPullRequest, Target, ThemeName, Thread } from "./types";
+import type { AiReview, AiReviewRecord, DiffRow, DraftComment, DragSelection, FileReviewState, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, LogEntry, OpenResponse, PullFile, PullIssueComment, PullReviewComment, StoredPullRequest, Target, ThemeName, Thread } from "./types";
 import "./styles.css";
 
 type DiffViewMode = "unified" | "split";
@@ -168,6 +168,7 @@ function App() {
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [aiReview, setAiReview] = useState<AiReview>({ expanded: false, open: false, running: false, text: "", messages: [] });
+  const [aiReviewId, setAiReviewId] = useState<string | null>(null);
   const [focusReview, setFocusReview] = useState<FocusReview>({ expanded: false, open: false, running: false, text: "" });
   const [focusScanId, setFocusScanId] = useState<string | null>(null);
   const [viewedFocusAreaIds, setViewedFocusAreaIds] = useState<Record<string, boolean>>({});
@@ -265,7 +266,8 @@ function App() {
     setDrafts([]);
     setExpandedNeighborRows({});
     setEditingDraftId(null);
-    setAiReview({ expanded: false, open: false, running: false, text: "", messages: [] });
+    setAiReview({ expanded: false, open: false, running: false, text: data.aiReview?.answer ?? "", messages: data.aiReview == null ? [] : [{ role: "pi", text: data.aiReview.answer }] });
+    setAiReviewId(data.aiReview?.id ?? null);
     const savedAreas = parseFocusAreas(data.focusScan?.answer ?? "");
     setFocusReview({ expanded: false, open: false, running: false, text: data.focusScan?.answer ?? "" });
     setFocusScanId(data.focusScan?.id ?? null);
@@ -332,6 +334,16 @@ function App() {
     cacheReview(nextReview);
     setReview(nextReview);
     return scan.id;
+  }
+
+  async function saveAiReview(answer: string, id = aiReviewId): Promise<string | null> {
+    if (review == null || answer.trim().length === 0) return id;
+    const { review: savedReview } = await api<{ review: AiReviewRecord }>("/api/ai-review/save", { method: "POST", body: JSON.stringify({ id, prKey: review.pr.key, headSha: review.pr.headSha, answer }) });
+    setAiReviewId(savedReview.id);
+    const nextReview = { ...review, aiReview: savedReview };
+    cacheReview(nextReview);
+    setReview(nextReview);
+    return savedReview.id;
   }
 
   function pruneEmptyThreads() {
@@ -460,7 +472,17 @@ function App() {
     setAiReview((current) => ({ ...current, open: !background || current.open, expanded: !background || current.expanded, running: true }));
     const diffSummary = targetReview.files.map((file) => `## ${file.filename}
 ${file.patch ?? "Patch unavailable"}`).join("\n\n");
+    const previousAiReview = targetReview.aiReview?.answer.trim() || "No previous full review is stored.";
+    const previousFocusAreas = targetReview.focusScan == null ? "No previous focus scan findings are stored." : focusScanHistoryPrompt(targetReview.focusScan.answer, targetReview.focusScan.areaStates);
     const prompt = `Run a concise code review for ${targetReview.pr.key}. Focus on correctness, edge cases, tests, and concrete actionable findings. Avoid generic praise. Return markdown with bullets and file/line references where possible.
+
+Previous full review:
+${previousAiReview}
+
+Previous focus scan state:
+${previousFocusAreas}
+
+For reruns, do not repeat substantially identical findings from the previous full review or reviewed focus items unless the current diff materially changes the concern. Prefer genuinely new, unresolved, or still-unreviewed issues. If prior concerns now appear addressed, summarize that briefly instead of re-reporting them as findings.
 
 ${diffSummary}`;
     try {
@@ -474,6 +496,7 @@ ${diffSummary}`;
         if (status.status !== "complete") throw new Error("AI review returned an unknown job status");
         const answer = status.answer ?? "AI review completed without output.";
         setAiReview((current) => ({ ...current, open: !background || current.open, expanded: !background || current.expanded, running: false, text: answer, messages: [...current.messages, { role: "pi", text: answer }] }));
+        void saveAiReview(answer, null);
         break;
       }
     } catch (err) {

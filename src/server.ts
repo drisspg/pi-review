@@ -10,7 +10,7 @@ import { inputFromBody, prKeyForRef, readBody, recordFromBody, refFromBody, send
 import { logger } from "./logger.js";
 import { askPi, disposePiSession, disposePiSessions, piDiagnostics, prewarmPiSession, registerPiSessionCwd, setPiModel } from "./pi-session.js";
 import { parsePullRequestRef } from "./pr.js";
-import { latestFocusScan, listRecentPullRequests, markPullRequestReviewed, removePullRequest, saveFocusScan, setFileViewed, upsertPullRequest } from "./state.js";
+import { latestAiReview, latestFocusScan, listRecentPullRequests, markPullRequestReviewed, removePullRequest, saveAiReview, saveFocusScan, setFileViewed, upsertPullRequest } from "./state.js";
 import type { FocusAreaReviewState } from "./types.js";
 import { cleanupPrWorktree, preparePrWorktree, worktreeDirForRef } from "./worktrees.js";
 
@@ -143,7 +143,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const data = await fetchPullRequestReviewData(ref);
     const pr = await upsertPullRequest(data.pr);
     logger.info("api", "refresh PR activity complete", { key: pr.key, existingCommentCount: pr.existingCommentCount });
-    sendJson(res, 200, { ...data, pr, focusScan: await latestFocusScan(pr.key) });
+    sendJson(res, 200, { ...data, pr, focusScan: await latestFocusScan(pr.key), aiReview: await latestAiReview(pr.key) });
     return;
   }
 
@@ -217,6 +217,13 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     return;
   }
 
+  if (req.method === "POST" && url.pathname === "/api/ai-review/save") {
+    const payload = recordFromBody(await readBody(req));
+    if (typeof payload.prKey !== "string" || typeof payload.headSha !== "string" || typeof payload.answer !== "string") throw new Error("Expected AI review payload");
+    sendJson(res, 200, { review: await saveAiReview({ id: typeof payload.id === "string" ? payload.id : undefined, prKey: payload.prKey, headSha: payload.headSha, answer: payload.answer }) });
+    return;
+  }
+
   if (req.method === "POST" && url.pathname === "/api/pi/diagnostics") {
     const payload = recordFromBody(await readBody(req));
     if (typeof payload.prKey !== "string") throw new Error("Expected prKey");
@@ -283,7 +290,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     await registerPiSessionCwd(pr.key, worktreeDir);
     prewarmPiSession(pr.key, ["chat", "inline-chat", "focus-chat"]);
     logger.info("api", "open PR complete", { key: pr.key, filesChanged: pr.filesChanged, existingCommentCount: pr.existingCommentCount, worktreeDir });
-    sendJson(res, 200, { ...data, pr, focusScan: await latestFocusScan(pr.key), worktreeDir });
+    sendJson(res, 200, { ...data, pr, focusScan: await latestFocusScan(pr.key), aiReview: await latestAiReview(pr.key), worktreeDir });
     return;
   }
 
