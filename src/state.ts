@@ -1,18 +1,21 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { homedir } from "node:os";
 
-import type { AppState, FileReviewState, StoredPullRequest } from "./types.js";
+import type { AppState, FileReviewState, FocusScanRecord, StoredPullRequest } from "./types.js";
 
 const STATE_PATH = resolve(homedir(), ".pi", "agent", "state", "pi-pr-review", "state.json");
 
-const emptyState = (): AppState => ({ prs: [], fileReviews: [] });
+const maxFocusScansPerPr = 20;
+
+const emptyState = (): AppState => ({ prs: [], fileReviews: [], focusScans: [] });
 
 export async function readState(): Promise<AppState> {
   if (!existsSync(STATE_PATH)) return emptyState();
   const state = JSON.parse(await readFile(STATE_PATH, "utf8")) as Partial<AppState>;
-  return { prs: state.prs ?? [], fileReviews: state.fileReviews ?? [] };
+  return { prs: state.prs ?? [], fileReviews: state.fileReviews ?? [], focusScans: state.focusScans ?? [] };
 }
 
 async function writeState(state: AppState): Promise<void> {
@@ -52,9 +55,38 @@ export async function setFileViewed(review: FileReviewState): Promise<FileReview
   return review;
 }
 
+export async function latestFocusScan(prKey: string): Promise<FocusScanRecord | null> {
+  return (await readState()).focusScans.filter((scan) => scan.prKey === prKey).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null;
+}
+
+export async function saveFocusScan(scan: Omit<FocusScanRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<FocusScanRecord, "id" | "createdAt">>): Promise<FocusScanRecord> {
+  const state = await readState();
+  const previous = scan.id == null ? null : state.focusScans.find((stored) => stored.id === scan.id);
+  const now = new Date().toISOString();
+  const next: FocusScanRecord = {
+    id: scan.id ?? randomUUID(),
+    prKey: scan.prKey,
+    headSha: scan.headSha,
+    answer: scan.answer,
+    areaStates: scan.areaStates,
+    createdAt: previous?.createdAt ?? scan.createdAt ?? now,
+    updatedAt: now,
+  };
+  state.focusScans = [next, ...state.focusScans.filter((stored) => stored.id !== next.id)];
+  const counts = new Map<string, number>();
+  state.focusScans = state.focusScans.filter((stored) => {
+    const count = counts.get(stored.prKey) ?? 0;
+    counts.set(stored.prKey, count + 1);
+    return count < maxFocusScansPerPr;
+  });
+  await writeState(state);
+  return next;
+}
+
 export async function removePullRequest(prKey: string): Promise<void> {
   const state = await readState();
   state.prs = state.prs.filter((pr) => pr.key !== prKey);
   state.fileReviews = state.fileReviews.filter((review) => review.prKey !== prKey);
+  state.focusScans = state.focusScans.filter((scan) => scan.prKey !== prKey);
   await writeState(state);
 }

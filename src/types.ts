@@ -97,6 +97,22 @@ export type FileReviewState = {
   updatedAt: string;
 };
 
+export type FocusAreaReviewState = {
+  viewed: boolean;
+  collapsed: boolean;
+  updatedAt: string;
+};
+
+export type FocusScanRecord = {
+  id: string;
+  prKey: string;
+  headSha: string;
+  answer: string;
+  areaStates: Record<string, FocusAreaReviewState>;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type PullRequestReviewData = {
   pr: StoredPullRequest;
   raw: PullRequest;
@@ -105,9 +121,11 @@ export type PullRequestReviewData = {
   issueComments: PullIssueComment[];
   reviewSummaries: PullRequestReviewSummary[];
   fileReviews: FileReviewState[];
+  focusScan?: FocusScanRecord | null;
 };
 
 export type AppState = {
   prs: StoredPullRequest[];
   fileReviews: FileReviewState[];
+  focusScans: FocusScanRecord[];
 };

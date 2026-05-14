@@ -10,7 +10,8 @@ import { inputFromBody, prKeyForRef, readBody, recordFromBody, refFromBody, send
 import { logger } from "./logger.js";
 import { askPi, disposePiSession, disposePiSessions, piDiagnostics, prewarmPiSession, registerPiSessionCwd, setPiModel } from "./pi-session.js";
 import { parsePullRequestRef } from "./pr.js";
-import { listRecentPullRequests, markPullRequestReviewed, removePullRequest, setFileViewed, upsertPullRequest } from "./state.js";
+import { latestFocusScan, listRecentPullRequests, markPullRequestReviewed, removePullRequest, saveFocusScan, setFileViewed, upsertPullRequest } from "./state.js";
+import type { FocusAreaReviewState } from "./types.js";
 import { cleanupPrWorktree, preparePrWorktree, worktreeDirForRef } from "./worktrees.js";
 
 const DEFAULT_PORT = 43133;
@@ -142,7 +143,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const data = await fetchPullRequestReviewData(ref);
     const pr = await upsertPullRequest(data.pr);
     logger.info("api", "refresh PR activity complete", { key: pr.key, existingCommentCount: pr.existingCommentCount });
-    sendJson(res, 200, { ...data, pr });
+    sendJson(res, 200, { ...data, pr, focusScan: await latestFocusScan(pr.key) });
     return;
   }
 
@@ -206,6 +207,13 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const job = startPiReviewJob(payload.prKey, payload.prompt, "focus-review");
     logger.info("api", "focus review job started", { prKey: payload.prKey, jobId: job.id });
     sendJson(res, 202, { job });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/focus-scan/save") {
+    const payload = recordFromBody(await readBody(req));
+    if (typeof payload.prKey !== "string" || typeof payload.headSha !== "string" || typeof payload.answer !== "string" || typeof payload.areaStates !== "object" || payload.areaStates == null || Array.isArray(payload.areaStates)) throw new Error("Expected focus scan payload");
+    sendJson(res, 200, { scan: await saveFocusScan({ id: typeof payload.id === "string" ? payload.id : undefined, prKey: payload.prKey, headSha: payload.headSha, answer: payload.answer, areaStates: payload.areaStates as Record<string, FocusAreaReviewState> }) });
     return;
   }
 
@@ -275,7 +283,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     await registerPiSessionCwd(pr.key, worktreeDir);
     prewarmPiSession(pr.key, ["chat", "inline-chat", "focus-chat"]);
     logger.info("api", "open PR complete", { key: pr.key, filesChanged: pr.filesChanged, existingCommentCount: pr.existingCommentCount, worktreeDir });
-    sendJson(res, 200, { ...data, pr, worktreeDir });
+    sendJson(res, 200, { ...data, pr, focusScan: await latestFocusScan(pr.key), worktreeDir });
     return;
   }
 
