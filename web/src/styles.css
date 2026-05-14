@@ -1972,7 +1972,17 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .focus-review-note.clean {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--success) 10%, var(--panel));
   color: var(--success);
+}
+
+.focus-review-note.clean span {
+  color: var(--muted);
 }
 
 .focus-area-links {

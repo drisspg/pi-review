@@ -1156,7 +1156,7 @@ function AiReviewPanel({ prUrl, review, setReview, runReview, sendMessage, focus
         <span className="muted">Run a general code review. Output appears in the chat below.</span>
       </div>
     </div>
-    {focusReview.text.length > 0 && focusAreaCount === 0 && <p className="focus-review-note clean">Focus scan clean: nothing specific to dig into.</p>}
+    {focusReviewHasNoFindings(focusReview.text) && <div className="focus-review-note clean" role="status"><strong>✓ Nothing new to focus on.</strong><span>All scanned up for this pass.</span></div>}
     {focusAreaLinks}
     {body}{composer}
   </section>;
