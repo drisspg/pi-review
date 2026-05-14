@@ -123,6 +123,16 @@ function idsFromFocusStates(areas: FocusArea[], states: Record<string, FocusArea
   return Object.fromEntries(areas.filter((area) => findFocusState(area, states)?.[field] === true).map((area) => [area.id, true]));
 }
 
+function focusScanHistoryPrompt(answer: string, states: Record<string, FocusAreaReviewState>): string {
+  const areas = parseFocusAreas(answer);
+  if (areas.length === 0) return "No previous focus scan findings are stored.";
+  return areas.map((area, index) => {
+    const state = findFocusState(area, states);
+    const status = state?.viewed ? "reviewed" : "unreviewed";
+    return `${index + 1}. ${status}: ${area.path}:${area.startLine}-${area.endLine} — ${area.title}`;
+  }).join("\n");
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 }
@@ -499,11 +509,18 @@ ${diffSummary}`;
     const diffSummary = targetReview.files.map((file) => `## ${file.filename}
 Status: ${file.status}, +${file.additions}/-${file.deletions}
 ${file.patch ?? "Patch unavailable"}`).join("\n\n");
+    const previousScan = targetReview.focusScan;
+    const previousFocusAreas = previousScan == null ? "No previous focus scan findings are stored." : focusScanHistoryPrompt(previousScan.answer, previousScan.areaStates);
     const prompt = `You are a second, independent PR-review pass for ${targetReview.pr.key}. Look specifically for areas worth deeper human review, not a normal exhaustive review. Prioritize:
 - code that feels inconsistent with nearby codebase patterns or API conventions
 - surprising behavior, hidden assumptions, edge cases, or subtle tradeoffs
 - tests, migrations, performance, concurrency, or compatibility risks that deserve investigation
 - places where the implementation may be valid but reviewers should explicitly decide if the tradeoff is acceptable
+
+Previous focus scan state:
+${previousFocusAreas}
+
+If a finding is substantially the same as a previous reviewed finding, do not return it again unless the current diff materially changes the concern. If it is substantially the same as a previous unreviewed finding, keep it and use the closest current location. Prefer surfacing genuinely new or still-unreviewed findings over re-listing already-reviewed ones.
 
 Return markdown with a "Focus areas" list. Start each item with a clickable-style location in this exact format: \`path:startLine-endLine — short title\` or \`path:line — short title\`. Then include why it is weird or worth investigation and a concrete reviewer question. Avoid generic praise and avoid blocking language unless there is strong evidence.
 
