@@ -84,16 +84,43 @@ function focusAreaKey(area: FocusArea): string {
   return `${area.path}:${area.startLine}-${area.endLine}`;
 }
 
+function focusAreaFromKey(key: string): Pick<FocusArea, "path" | "startLine" | "endLine"> | null {
+  const match = /^(.*):(\d+)-(\d+)$/.exec(key);
+  if (match == null) return null;
+  return { path: match[1], startLine: Number.parseInt(match[2], 10), endLine: Number.parseInt(match[3], 10) };
+}
+
+function lineRangeOverlapScore(left: Pick<FocusArea, "startLine" | "endLine">, right: Pick<FocusArea, "startLine" | "endLine">): number {
+  const overlap = Math.max(0, Math.min(left.endLine, right.endLine) - Math.max(left.startLine, right.startLine) + 1);
+  return overlap / Math.max(1, Math.min(left.endLine - left.startLine + 1, right.endLine - right.startLine + 1));
+}
+
+function findFocusState(area: FocusArea, states: Record<string, FocusAreaReviewState>): FocusAreaReviewState | undefined {
+  const exact = states[focusAreaKey(area)];
+  if (exact != null) return exact;
+  let best: { score: number; distance: number; state: FocusAreaReviewState } | null = null;
+  for (const [key, state] of Object.entries(states)) {
+    const previous = focusAreaFromKey(key);
+    if (previous == null || previous.path !== area.path) continue;
+    const score = lineRangeOverlapScore(area, previous);
+    const distance = Math.min(Math.abs(area.startLine - previous.startLine), Math.abs(area.endLine - previous.endLine));
+    if (score < 0.5 && distance > 50) continue;
+    if (best == null || score > best.score || (score === best.score && distance < best.distance)) best = { score, distance, state };
+  }
+  return best?.state;
+}
+
 function statesFromFocusAreas(areas: FocusArea[], viewedIds: Record<string, boolean>, collapsedIds: Record<string, boolean>, previous: Record<string, FocusAreaReviewState> = {}): Record<string, FocusAreaReviewState> {
   const now = new Date().toISOString();
   return Object.fromEntries(areas.map((area) => {
     const key = focusAreaKey(area);
-    return [key, { viewed: viewedIds[area.id] ?? previous[key]?.viewed ?? false, collapsed: collapsedIds[area.id] ?? previous[key]?.collapsed ?? false, updatedAt: now }];
+    const previousState = findFocusState(area, previous);
+    return [key, { viewed: viewedIds[area.id] ?? previousState?.viewed ?? false, collapsed: collapsedIds[area.id] ?? previousState?.collapsed ?? false, updatedAt: now }];
   }));
 }
 
 function idsFromFocusStates(areas: FocusArea[], states: Record<string, FocusAreaReviewState>, field: "viewed" | "collapsed"): Record<string, boolean> {
-  return Object.fromEntries(areas.filter((area) => states[focusAreaKey(area)]?.[field] === true).map((area) => [area.id, true]));
+  return Object.fromEntries(areas.filter((area) => findFocusState(area, states)?.[field] === true).map((area) => [area.id, true]));
 }
 
 function sleep(ms: number): Promise<void> {
