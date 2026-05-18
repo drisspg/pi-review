@@ -1,9 +1,21 @@
-import { createAgentSession, SessionManager } from "@earendil-works/pi-coding-agent";
+import { AuthStorage, createAgentSession, ModelRegistry, SessionManager } from "@earendil-works/pi-coding-agent";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 
 import { logger } from "./logger.js";
+
+type TextPart = {
+  text?: string;
+  type?: string;
+};
+
+type MessageLike = {
+  content?: unknown;
+  errorMessage?: string;
+  role?: string;
+  stopReason?: string;
+};
 
 type SessionRecord = {
   abort?: () => Promise<void>;
@@ -23,6 +35,10 @@ type SessionRecord = {
   subscribe: (listener: (event: unknown) => void) => () => void;
   thinkingLevel?: string;
 };
+
+const DEFAULT_PI_MODEL_PROVIDER = "openai-codex";
+const DEFAULT_PI_MODEL_ID = "gpt-5.5";
+const DEFAULT_PI_THINKING_LEVEL = "high";
 
 const sessions = new Map<string, Promise<SessionRecord>>();
 const cwdByPr = new Map<string, string>();
@@ -56,11 +72,17 @@ async function createSession(prKey: string, purpose = "chat"): Promise<SessionRe
   await mkdir(sessionDir, { recursive: true });
   const startedAt = performance.now();
   logger.info("pi", "create session", { prKey, purpose, cwd, sessionDir });
+  const modelRegistry = ModelRegistry.create(AuthStorage.create());
+  const model = modelRegistry.find(DEFAULT_PI_MODEL_PROVIDER, DEFAULT_PI_MODEL_ID);
+  if (model == null) throw new Error(`Default Pi Review model not found: ${DEFAULT_PI_MODEL_PROVIDER}/${DEFAULT_PI_MODEL_ID}`);
   const { session } = await createAgentSession({
     cwd,
-    sessionManager: SessionManager.continueRecent(cwd, sessionDir),
+    model,
+    modelRegistry,
+    sessionManager: SessionManager.create(cwd, sessionDir),
+    thinkingLevel: DEFAULT_PI_THINKING_LEVEL,
   });
-  logger.info("pi", "create session complete", { prKey, purpose, ms: Math.round(performance.now() - startedAt) });
+  logger.info("pi", "create session complete", { prKey, purpose, model: `${DEFAULT_PI_MODEL_PROVIDER}/${DEFAULT_PI_MODEL_ID}`, thinkingLevel: DEFAULT_PI_THINKING_LEVEL, ms: Math.round(performance.now() - startedAt) });
   return session as SessionRecord;
 }
 
@@ -167,12 +189,44 @@ function textDeltaFromEvent(event: unknown): string {
   return update.assistantMessageEvent.delta ?? update.assistantMessageEvent.text ?? "";
 }
 
+function textFromMessage(message: unknown): string {
+  if (typeof message !== "object" || message == null) return "";
+  const { content, role } = message as MessageLike;
+  if (role != null && role !== "assistant") return "";
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content.map((part) => {
+    if (typeof part !== "object" || part == null) return "";
+    const textPart = part as TextPart;
+    return textPart.type === "text" && typeof textPart.text === "string" ? textPart.text : "";
+  }).join("");
+}
+
+function messageFromEvent(event: unknown): unknown {
+  if (typeof event !== "object" || event == null || !("type" in event)) return null;
+  const typedEvent = event as { message?: unknown; type?: string };
+  return typedEvent.type === "message_update" || typedEvent.type === "message_end" || typedEvent.type === "turn_end" ? typedEvent.message : null;
+}
+
+function errorFromMessage(message: unknown): string | null {
+  if (typeof message !== "object" || message == null) return null;
+  const { errorMessage, role, stopReason } = message as MessageLike;
+  if (role !== "assistant" || stopReason !== "error") return null;
+  return errorMessage ?? "Assistant stopped with an error.";
+}
+
 async function runPiPrompt(prKey: string, prompt: string, purpose = "chat", onDelta?: (delta: string) => void): Promise<string> {
   const startedAt = performance.now();
   const sessionKey = sessionKeyForPr(prKey, purpose);
   const session = await getSession(prKey, purpose);
   let answer = "";
+  let latestAssistantText = "";
+  let latestAssistantError: string | null = null;
   const unsubscribe = session.subscribe((event) => {
+    const message = messageFromEvent(event);
+    const assistantText = textFromMessage(message);
+    if (assistantText.trim().length > 0) latestAssistantText = assistantText;
+    latestAssistantError = errorFromMessage(message) ?? latestAssistantError;
     const delta = textDeltaFromEvent(event);
     if (delta.length === 0) return;
     answer += delta;
@@ -182,8 +236,13 @@ async function runPiPrompt(prKey: string, prompt: string, purpose = "chat", onDe
   logger.info("pi", "prompt start", { prKey, purpose, chars: prompt.length });
   try {
     await session.prompt(prompt);
-    logger.info("pi", "prompt complete", { prKey, purpose, ms: Math.round(performance.now() - startedAt), answerChars: answer.length });
-    return answer.trim() || "Pi completed without streamed text.";
+    const finalAnswer = answer.trim() || latestAssistantText.trim();
+    if (latestAssistantError != null) {
+      logger.error("pi", "prompt model error", { prKey, purpose, ms: Math.round(performance.now() - startedAt), error: latestAssistantError });
+      throw new Error(`Pi model error: ${latestAssistantError}`);
+    }
+    logger.info("pi", "prompt complete", { prKey, purpose, ms: Math.round(performance.now() - startedAt), answerChars: finalAnswer.length, streamedAnswerChars: answer.length });
+    return finalAnswer || "Pi completed without assistant text.";
   } finally {
     unsubscribe();
   }
