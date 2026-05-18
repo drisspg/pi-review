@@ -1,4 +1,4 @@
-import React, { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import React, { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ChevronDownIcon, ChevronRightIcon, XIcon } from "@primer/octicons-react";
 import { api, askPi as askPiApi } from "./api";
@@ -651,7 +651,7 @@ ${diffSummary}`;
     setCommentCollapseSignal((signal) => signal + 1);
   }
 
-  return <main className="app-shell"><header className="toolbar"><div className="toolbar-title"><strong>Pi PR Review</strong><span>{review == null ? "Paste a PR to start" : `${review.pr.key} · ${review.pr.title}`}</span></div><div className="toolbar-actions">{review != null && <><button type="button" onClick={goHome}>Home</button><button type="button" title="Pi session settings" onClick={() => { setSettingsOpen(true); void loadDiagnostics(); }}>⚙</button><button type="button" title="Pi session diagnostics" onClick={() => void showDiagnostics()}>🐞</button></>}<button type="button" title="Server log" onClick={() => { setLogsOpen(true); void refreshLogs(); }}>📜</button><select aria-label="Theme" value={theme} onChange={(event) => setTheme(event.target.value as ThemeName)}><option value="github-dark">GitHub dark</option><option value="github-dimmed">GitHub dimmed</option><option value="github-light">GitHub light</option></select>{review != null && <form className="open-form" onSubmit={submit}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="OWNER/REPO#123 or GitHub PR URL" /><button disabled={busy || input.trim().length === 0}>{busy ? "Fetching…" : "Open"}</button></form>}</div></header>{error != null && <div className="error">{error}</div>}{busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} aiReview={aiReview} setAiReview={setAiReview} runAiReview={runAiReview} sendAiReviewMessage={sendAiReviewMessage} focusReview={focusReview} setFocusReview={setFocusReview} runFocusReview={runFocusReview} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} viewedFocusAreaIds={viewedFocusAreaIds} setViewedFocusAreaIds={setViewedFocusAreaIds} saveFocusScan={saveFocusScan} submitReview={submitReview} submitting={submitting} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} />}{diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}{review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} close={() => setSettingsOpen(false)} />}{logsOpen && <LogsModal logs={logs} refreshLogs={refreshLogs} close={() => setLogsOpen(false)} />}</main>;
+  return <main className="app-shell"><header className="toolbar"><div className="toolbar-title"><strong>Pi PR Review</strong><span>{review == null ? "Paste a PR to start" : `${review.pr.key} · ${review.pr.title}`}</span></div><div className="toolbar-actions">{review != null && <><button type="button" onClick={goHome}>Home</button><button type="button" title="Pi session settings" onClick={() => { setSettingsOpen(true); void loadDiagnostics(); }}>⚙</button><button type="button" title="Pi session diagnostics" onClick={() => void showDiagnostics()}>🐞</button></>}<button type="button" title="Server log" onClick={() => { setLogsOpen(true); void refreshLogs(); }}>📜</button><select aria-label="Theme" value={theme} onChange={(event) => setTheme(event.target.value as ThemeName)}><option value="github-dark">GitHub dark</option><option value="github-dimmed">GitHub dimmed</option><option value="github-light">GitHub light</option></select>{review != null && <form className="open-form" onSubmit={submit}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="OWNER/REPO#123 or GitHub PR URL" /><button disabled={busy || input.trim().length === 0}>{busy ? "Fetching…" : "Open"}</button></form>}</div></header>{error != null && <div className="error">{error}</div>}{busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} aiReview={aiReview} setAiReview={setAiReview} runAiReview={runAiReview} sendAiReviewMessage={sendAiReviewMessage} focusReview={focusReview} setFocusReview={setFocusReview} runFocusReview={runFocusReview} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} viewedFocusAreaIds={viewedFocusAreaIds} setViewedFocusAreaIds={setViewedFocusAreaIds} saveFocusScan={saveFocusScan} submitReview={submitReview} submitting={submitting} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} />}{diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}{review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} openDiagnostics={() => { setSettingsOpen(false); void showDiagnostics(); }} close={() => setSettingsOpen(false)} />}{logsOpen && <LogsModal logs={logs} refreshLogs={refreshLogs} close={() => setLogsOpen(false)} />}</main>;
 }
 
 type StartFilter = "all" | "needs-review" | "in-progress" | "done";
@@ -1194,6 +1194,17 @@ function diagnosticsArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
+function PiCard({ title, count, defaultOpen, children }: { title: string; count?: number | string | null; defaultOpen?: boolean; children: ReactNode }) {
+  return <details className="pi-card" open={defaultOpen ?? true}>
+    <summary className="pi-card-summary">
+      <span className="pi-card-chevron" aria-hidden="true">›</span>
+      <span className="pi-card-title">{title}</span>
+      {count != null && count !== "" && <span className="pi-card-count">{count}</span>}
+    </summary>
+    <div className="pi-card-body">{children}</div>
+  </details>;
+}
+
 function DiagnosticsView({ diagnostics }: { diagnostics: Record<string, unknown> | null }) {
   if (diagnostics == null) return <p className="muted">Loading Pi diagnostics…</p>;
   const activeTools = diagnosticsArray(diagnostics.activeTools);
@@ -1201,39 +1212,262 @@ function DiagnosticsView({ diagnostics }: { diagnostics: Record<string, unknown>
   const models = diagnosticsArray(diagnostics.availableModels);
   const lastPrompt = diagnostics.lastPrompt as { chars?: number; preview?: string; startedAt?: string } | null;
   const sessions = diagnosticsArray(diagnostics.sessions) as Array<{ purpose?: string; ready?: boolean; queued?: boolean; isStreaming?: boolean | null; activeTools?: unknown[]; lastPrompt?: { chars?: number; preview?: string; startedAt?: string } | null; promptState?: { status?: string; elapsedMs?: number; chars?: number; answerChars?: number; error?: string } | null }>;
-  return <div className="diagnostics-view"><div className="diagnostics-grid"><div><span>Model</span><strong>{diagnosticsText(diagnostics.model)}</strong></div><div><span>Thinking</span><strong>{diagnosticsText(diagnostics.thinkingLevel)}</strong></div><div><span>Active tools</span><strong>{activeTools.length}</strong></div><div><span>Available models</span><strong>{models.length}</strong></div></div><section><h3>Pi session health</h3>{sessions.length === 0 ? <p className="muted">No Pi sessions for this PR yet.</p> : <div className="model-list">{sessions.map((session) => <div className="log" key={session.purpose}><span>{session.purpose} · {session.ready ? "ready" : "creating"}{session.queued ? " · queued" : ""}{session.isStreaming ? " · streaming" : ""}</span><p>{session.promptState == null ? "No prompt state" : `${session.promptState.status ?? "unknown"} · ${Math.round((session.promptState.elapsedMs ?? 0) / 1000)}s · ${session.promptState.chars ?? 0} prompt chars · ${session.promptState.answerChars ?? 0} answer chars`}</p>{session.promptState?.error != null && <code>{session.promptState.error}</code>}{session.lastPrompt?.preview != null && <pre className="prompt-preview">{session.lastPrompt.preview}</pre>}</div>)}</div>}</section><section><h3>Session</h3><dl><dt>PR key</dt><dd>{diagnosticsText(diagnostics.prKey)}</dd><dt>CWD</dt><dd>{diagnosticsText(diagnostics.cwd)}</dd><dt>Session file</dt><dd>{diagnosticsText(diagnostics.sessionFile)}</dd><dt>Session ID</dt><dd>{diagnosticsText(diagnostics.sessionId)}</dd></dl></section><section><h3>Last chat prompt</h3>{lastPrompt == null ? <p className="muted">No prompt sent yet.</p> : <><p className="muted">{lastPrompt.chars ?? 0} chars · {lastPrompt.startedAt ?? "unknown time"}</p><pre className="prompt-preview">{lastPrompt.preview}</pre></>}</section><details open><summary>Active tools ({activeTools.length})</summary><div className="chip-list">{activeTools.map((tool, index) => <span className="chip" key={index}>{diagnosticsText(tool)}</span>)}</div></details><details><summary>Available models ({models.length})</summary><div className="model-list">{models.map((model, index) => <code key={index}>{diagnosticsText(model)}</code>)}</div></details><details><summary>All tool definitions ({tools.length})</summary><div className="model-list">{tools.map((tool, index) => <code key={index}>{diagnosticsText(tool)}</code>)}</div></details><details><summary>Raw diagnostics</summary><pre className="diagnostics-json">{JSON.stringify(diagnostics, null, 2)}</pre></details></div>;
+  return <div className="pi-card-stack">
+    <PiCard title="Pi session health" count={sessions.length > 0 ? sessions.length : null}>
+      {sessions.length === 0 ? <p className="muted pi-empty">No Pi sessions for this PR yet.</p> : <div className="pi-session-list">{sessions.map((session) => <div className="pi-session" key={session.purpose}>
+        <div className="pi-session-head">
+          <span className={`pi-status-dot pi-status-${session.ready ? "ready" : "creating"}`} aria-hidden="true" />
+          <span className="pi-session-purpose">{session.purpose} · {session.ready ? "ready" : "creating"}{session.queued ? " · queued" : ""}{session.isStreaming ? " · streaming" : ""}</span>
+        </div>
+        <p className="pi-session-state muted">{session.promptState == null ? "No prompt state" : `${session.promptState.status ?? "unknown"} · ${Math.round((session.promptState.elapsedMs ?? 0) / 1000)}s · ${session.promptState.chars ?? 0} prompt chars · ${session.promptState.answerChars ?? 0} answer chars`}</p>
+        {session.promptState?.error != null && <code className="pi-session-error">{session.promptState.error}</code>}
+        {session.lastPrompt?.preview != null && <pre className="prompt-preview">{session.lastPrompt.preview}</pre>}
+      </div>)}</div>}
+    </PiCard>
+    <PiCard title="Session info">
+      <dl className="pi-kv">
+        <dt>PR key</dt><dd>{diagnosticsText(diagnostics.prKey)}</dd>
+        <dt>CWD</dt><dd>{diagnosticsText(diagnostics.cwd)}</dd>
+        <dt>Session file</dt><dd>{diagnosticsText(diagnostics.sessionFile)}</dd>
+        <dt>Session ID</dt><dd>{diagnosticsText(diagnostics.sessionId)}</dd>
+      </dl>
+    </PiCard>
+    <PiCard title="Last chat prompt" count={lastPrompt?.chars ?? null}>
+      {lastPrompt == null ? <p className="muted pi-empty">No prompt sent yet.</p> : <>
+        <p className="muted pi-card-meta">{lastPrompt.chars ?? 0} chars · {lastPrompt.startedAt ?? "unknown time"}</p>
+        <pre className="prompt-preview">{lastPrompt.preview}</pre>
+      </>}
+    </PiCard>
+    <PiCard title="Active tools" count={activeTools.length}>
+      {activeTools.length === 0 ? <p className="muted pi-empty">No tools active.</p> : <div className="chip-list">{activeTools.map((tool, index) => <span className="chip" key={index}>{diagnosticsText(tool)}</span>)}</div>}
+    </PiCard>
+    <PiCard title="Available models" count={models.length} defaultOpen={false}>
+      <div className="pi-code-list">{models.map((model, index) => <code key={index}>{diagnosticsText(model)}</code>)}</div>
+    </PiCard>
+    <PiCard title="All tool definitions" count={tools.length} defaultOpen={false}>
+      <div className="pi-code-list">{tools.map((tool, index) => <code key={index}>{diagnosticsText(tool)}</code>)}</div>
+    </PiCard>
+    <PiCard title="Raw diagnostics" defaultOpen={false}>
+      <pre className="diagnostics-json">{JSON.stringify(diagnostics, null, 2)}</pre>
+    </PiCard>
+  </div>;
 }
 
 function PiRunDiagnostics({ aiReview, focusReview, focusAreaCount }: { aiReview: AiReview; focusReview: FocusReview; focusAreaCount: number }) {
-  return <section><h3>Pi runs</h3><div className="diagnostics-grid"><div><span>Review chat</span><strong>{aiReview.running ? "running" : aiReview.messages.length > 0 ? `${aiReview.messages.length} messages` : "idle"}</strong></div><div><span>Focus scan</span><strong>{focusReview.running ? "running" : focusReview.text.length === 0 ? "not run" : focusAreaCount > 0 ? `${focusAreaCount} findings` : "clean"}</strong></div></div>{focusReview.text.length > 0 && <details open><summary>Focus scan output</summary><pre className="prompt-preview">{focusReview.text}</pre></details>}{aiReview.text.length > 0 && <details><summary>Latest Pi review/chat answer</summary><pre className="prompt-preview">{aiReview.text}</pre></details>}</section>;
+  const reviewStatus = aiReview.running ? "running" : aiReview.messages.length > 0 ? `${aiReview.messages.length} messages` : "idle";
+  const focusStatus = focusReview.running ? "running" : focusReview.text.length === 0 ? "not run" : focusAreaCount > 0 ? `${focusAreaCount} findings` : "clean";
+  return <div className="pi-card-stack">
+    <PiCard title="Pi runs">
+      <div className="pi-mini-grid">
+        <div><span>Review chat</span><strong>{reviewStatus}</strong></div>
+        <div><span>Focus scan</span><strong>{focusStatus}</strong></div>
+      </div>
+    </PiCard>
+    {focusReview.text.length > 0 && <PiCard title="Focus scan output"><pre className="prompt-preview">{focusReview.text}</pre></PiCard>}
+    {aiReview.text.length > 0 && <PiCard title="Latest Pi review/chat answer" defaultOpen={false}><pre className="prompt-preview">{aiReview.text}</pre></PiCard>}
+  </div>;
 }
 
 function DiagnosticsModal({ diagnostics, aiReview, focusReview, focusAreaCount, refresh, close }: { diagnostics: Record<string, unknown>; aiReview: AiReview; focusReview: FocusReview; focusAreaCount: number; refresh: () => Promise<Record<string, unknown> | null>; close: () => void }) {
-  return <ModalShell open onOpenChange={(open) => { if (!open) close(); }} label="Pi diagnostics">
-    <div className="thread-head"><h2>Pi diagnostics</h2><div className="actions"><button onClick={() => void refresh()}>Refresh</button><button onClick={close}>Close</button></div></div>
-    <PiRunDiagnostics aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreaCount} />
-    <DiagnosticsView diagnostics={diagnostics} />
+  const activeTools = diagnosticsArray(diagnostics.activeTools);
+  const models = diagnosticsArray(diagnostics.availableModels);
+  const sessions = diagnosticsArray(diagnostics.sessions);
+  const [refreshing, setRefreshing] = useState(false);
+  async function handleRefresh() {
+    setRefreshing(true);
+    try { await refresh(); } finally { setRefreshing(false); }
+  }
+  return <ModalShell open onOpenChange={(open) => { if (!open) close(); }} label="Pi diagnostics" className="pi-modal pi-diagnostics-modal">
+    <header className="pi-modal-head">
+      <div>
+        <h2>Pi diagnostics</h2>
+        <p className="muted">Read-only snapshot of this PR's Pi sessions</p>
+      </div>
+      <div className="pi-modal-head-actions">
+        <button type="button" onClick={() => void handleRefresh()} disabled={refreshing}>{refreshing ? "Refreshing…" : "Refresh"}</button>
+        <button type="button" className="pi-icon-button" onClick={close} aria-label="Close diagnostics">✕</button>
+      </div>
+    </header>
+    <div className="pi-modal-summary">
+      <div><span>Model</span><strong title={diagnosticsText(diagnostics.model)}>{diagnosticsText(diagnostics.model)}</strong></div>
+      <div><span>Reasoning</span><strong><span className="pi-pill">{diagnosticsText(diagnostics.thinkingLevel)}</span></strong></div>
+      <div><span>Sessions</span><strong>{sessions.length}</strong></div>
+      <div><span>Active tools</span><strong>{activeTools.length}</strong></div>
+      <div><span>Available models</span><strong>{models.length}</strong></div>
+    </div>
+    <div className="pi-modal-body">
+      <PiRunDiagnostics aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreaCount} />
+      <DiagnosticsView diagnostics={diagnostics} />
+    </div>
   </ModalShell>;
 }
 
-function PiSettingsModal({ prKey, diagnostics, setDiagnostics, close }: { prKey: string; diagnostics: Record<string, unknown> | null; setDiagnostics: (diagnostics: Record<string, unknown>) => void; close: () => void }) {
-  const models = Array.isArray(diagnostics?.availableModels) ? diagnostics.availableModels as Array<{ provider?: string; id?: string; name?: string }> : [];
+const THINKING_DESCRIPTIONS: Record<string, string> = {
+  off: "Answer directly without a reasoning pass",
+  minimal: "Tiny scratchpad before answering",
+  low: "Brief reasoning, fastest thoughtful tier",
+  medium: "Balanced reasoning depth (default)",
+  high: "Slower, deeper analysis",
+  xhigh: "Maximum reasoning effort",
+};
+
+const PROVIDER_LABELS: Record<string, string> = {
+  openai: "OpenAI",
+  "openai-codex": "OpenAI Codex",
+  anthropic: "Anthropic",
+  google: "Google",
+  gemini: "Gemini",
+  xai: "xAI",
+  meta: "Meta",
+  groq: "Groq",
+};
+
+type PiModelOption = { provider?: string; id?: string; name?: string };
+
+function PiSettingsModal({ prKey, diagnostics, setDiagnostics, openDiagnostics, close }: { prKey: string; diagnostics: Record<string, unknown> | null; setDiagnostics: (diagnostics: Record<string, unknown>) => void; openDiagnostics: () => void; close: () => void }) {
+  const models = (Array.isArray(diagnostics?.availableModels) ? diagnostics.availableModels as PiModelOption[] : []).filter((model) => typeof model.provider === "string" && typeof model.id === "string");
+  const thinkingLevels = (() => {
+    const raw = Array.isArray(diagnostics?.availableThinkingLevels) ? diagnostics.availableThinkingLevels as unknown[] : [];
+    const filtered = raw.filter((value): value is string => typeof value === "string" && value.length > 0);
+    return filtered.length > 0 ? filtered : ["off", "minimal", "low", "medium", "high", "xhigh"];
+  })();
   const currentModel = typeof diagnostics?.model === "string" ? diagnostics.model : "";
-  const [selected, setSelected] = useState(currentModel.includes("/") ? currentModel : "");
-  const [thinkingLevel, setThinkingLevel] = useState(typeof diagnostics?.thinkingLevel === "string" ? diagnostics.thinkingLevel : "");
+  const currentProvider = currentModel.includes("/") ? currentModel.slice(0, currentModel.indexOf("/")) : "";
+  const currentModelId = currentModel.includes("/") ? currentModel.slice(currentModel.indexOf("/") + 1) : "";
+  const currentThinking = typeof diagnostics?.thinkingLevel === "string" ? diagnostics.thinkingLevel : "";
+
+  const providers = useMemo(() => {
+    const seen = new Set<string>();
+    for (const model of models) if (typeof model.provider === "string") seen.add(model.provider);
+    return Array.from(seen).sort();
+  }, [models]);
+
+  const [provider, setProvider] = useState(currentProvider !== "" ? currentProvider : providers[0] ?? "");
+  const [modelId, setModelId] = useState(currentModelId);
+  const [thinking, setThinking] = useState(currentThinking);
+  const [filter, setFilter] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [applyError, setApplyError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (currentProvider !== "" && providers.includes(currentProvider)) setProvider(currentProvider);
+    else if (providers.length > 0 && !providers.includes(provider)) setProvider(providers[0]);
+    if (currentModelId !== "") setModelId(currentModelId);
+    if (currentThinking !== "") setThinking(currentThinking);
+  }, [currentProvider, currentModelId, currentThinking, providers.join("|")]);
+
+  const filteredModels = models.filter((model) => model.provider === provider && (filter.trim().length === 0 || `${model.id ?? ""} ${model.name ?? ""}`.toLowerCase().includes(filter.trim().toLowerCase())));
+  const modelChanged = modelId.length > 0 && `${provider}/${modelId}` !== currentModel;
+  const thinkingChanged = thinking.length > 0 && thinking !== currentThinking;
+  const hasChanges = modelChanged || thinkingChanged;
+
   async function apply() {
-    const [provider, ...rest] = selected.split("/");
-    const modelId = rest.join("/");
     if (provider.length === 0 || modelId.length === 0) return;
-    const data = await api<{ diagnostics: Record<string, unknown> }>("/api/pi/model", { method: "POST", body: JSON.stringify({ prKey, provider, modelId, thinkingLevel }) });
-    setDiagnostics(data.diagnostics);
+    setSaving(true);
+    setApplyError(null);
+    try {
+      const data = await api<{ diagnostics: Record<string, unknown> }>("/api/pi/model", { method: "POST", body: JSON.stringify({ prKey, provider, modelId, thinkingLevel: thinking }) });
+      setDiagnostics(data.diagnostics);
+      setSavedAt(Date.now());
+    } catch (err) {
+      setApplyError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
   }
-  return <ModalShell open onOpenChange={(open) => { if (!open) close(); }} label="Pi settings">
-    <div className="thread-head"><h2>Pi settings</h2><button onClick={close}>Close</button></div>
-    <label>Model<select value={selected} onChange={(event) => setSelected(event.target.value)}><option value="">Select model…</option>{models.map((model) => <option key={`${model.provider}/${model.id}`} value={`${model.provider}/${model.id}`}>{model.provider}/{model.id}{model.name != null ? ` · ${model.name}` : ""}</option>)}</select></label>
-    <label>Thinking<select value={thinkingLevel} onChange={(event) => setThinkingLevel(event.target.value)}><option value="">Keep current</option>{["off", "minimal", "low", "medium", "high", "xhigh"].map((level) => <option key={level} value={level}>{level}</option>)}</select></label>
-    <button onClick={() => void apply()} disabled={selected.length === 0}>Apply to this PR session</button>
-    <DiagnosticsView diagnostics={diagnostics} />
+
+  return <ModalShell open onOpenChange={(open) => { if (!open) close(); }} label="Pi settings" className="pi-modal pi-settings-modal">
+    <header className="pi-modal-head">
+      <div>
+        <h2>Pi settings</h2>
+        <p className="muted">Applies to this PR session</p>
+      </div>
+      <div className="pi-modal-head-actions">
+        <button type="button" className="pi-icon-button" onClick={close} aria-label="Close settings">✕</button>
+      </div>
+    </header>
+
+    <div className="pi-modal-summary">
+      <div>
+        <span>Model</span>
+        <strong title={currentModel || undefined}>{currentModel || "—"}</strong>
+      </div>
+      <div>
+        <span>Reasoning</span>
+        <strong><span className="pi-pill">{currentThinking || "default"}</span></strong>
+      </div>
+      <div>
+        <span>Available models</span>
+        <strong>{models.length}</strong>
+      </div>
+    </div>
+
+    <div className="pi-modal-body">
+      <section className="pi-settings-section">
+        <div className="pi-settings-section-head">
+          <h3>Model</h3>
+          <input className="pi-settings-search" type="search" placeholder="Filter models…" value={filter} onChange={(event) => setFilter(event.target.value)} />
+        </div>
+        {providers.length === 0 ? <p className="muted">No models reported by this Pi session yet.</p> : <>
+          <div className="pi-provider-tabs" role="tablist" aria-label="Provider">
+            {providers.map((entry) => {
+              const count = models.filter((model) => model.provider === entry).length;
+              const isActive = entry === provider;
+              const isCurrent = entry === currentProvider;
+              return <button key={entry} type="button" role="tab" aria-selected={isActive} className={`pi-provider-tab${isActive ? " active" : ""}${isCurrent ? " current" : ""}`} onClick={() => { setProvider(entry); setModelId(entry === currentProvider ? currentModelId : ""); }}>{PROVIDER_LABELS[entry] ?? entry}<span className="pi-count">{count}</span></button>;
+            })}
+          </div>
+          <div className="pi-model-options" role="radiogroup" aria-label="Model">
+            {filteredModels.length === 0 ? <p className="muted pi-empty">No models match this filter.</p> : filteredModels.map((model) => {
+              const id = model.id ?? "";
+              const value = `${model.provider}/${id}`;
+              const isSelected = modelId === id;
+              const isCurrent = value === currentModel;
+              return <label key={value} className={`pi-model-option${isSelected ? " selected" : ""}${isCurrent ? " current" : ""}`}>
+                <input type="radio" name="pi-model" checked={isSelected} onChange={() => setModelId(id)} />
+                <div className="pi-model-meta">
+                  <span className="pi-model-id">{id}</span>
+                  {model.name != null && model.name !== id && <span className="pi-model-name muted">{model.name}</span>}
+                </div>
+                {isCurrent && <span className="pi-tag">Current</span>}
+              </label>;
+            })}
+          </div>
+        </>}
+      </section>
+
+      <section className="pi-settings-section">
+        <div className="pi-settings-section-head">
+          <h3>Reasoning effort</h3>
+        </div>
+        <div className="pi-thinking-options" role="radiogroup" aria-label="Reasoning effort">
+          {thinkingLevels.map((level) => {
+            const isSelected = thinking === level;
+            const isCurrent = level === currentThinking;
+            return <label key={level} className={`pi-thinking-option${isSelected ? " selected" : ""}${isCurrent ? " current" : ""}`}>
+              <input type="radio" name="pi-thinking" checked={isSelected} onChange={() => setThinking(level)} />
+              <div className="pi-thinking-meta">
+                <span className="pi-thinking-label">{level}</span>
+                <span className="muted">{THINKING_DESCRIPTIONS[level] ?? ""}</span>
+              </div>
+              {isCurrent && <span className="pi-tag">Current</span>}
+            </label>;
+          })}
+        </div>
+      </section>
+    </div>
+
+    <footer className="pi-modal-foot">
+      <button type="button" className="pi-link-button" onClick={() => { close(); openDiagnostics(); }}>View diagnostics →</button>
+      <div className="pi-modal-foot-actions">
+        {applyError != null && <span className="pi-settings-error">{applyError}</span>}
+        {savedAt != null && applyError == null && !hasChanges && !saving && <span className="pi-settings-saved muted">Saved</span>}
+        {hasChanges && !saving && <span className="pi-settings-pending muted">Unsaved changes</span>}
+        <button type="button" onClick={close}>Cancel</button>
+        <button type="button" className="pi-primary" onClick={() => void apply()} disabled={!hasChanges || saving || modelId.length === 0}>{saving ? "Applying…" : "Apply"}</button>
+      </div>
+    </footer>
   </ModalShell>;
 }
 function LogsModal({ logs, refreshLogs, close }: { logs: LogEntry[]; refreshLogs: () => Promise<void>; close: () => void }) {
