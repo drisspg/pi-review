@@ -122,6 +122,29 @@ test("clears the review form after submitting", async ({ page }) => {
   expect(submitRequests).toBe(1);
 });
 
+test("shows failed review inline draft diagnostics", async ({ page }) => {
+  let submitPayload: { comments?: Array<{ draft_id?: string; path?: string; line?: number; body?: string }> } | null = null;
+  await page.route("**/api/review/submit", async (route) => {
+    submitPayload = route.request().postDataJSON();
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "gh: Unprocessable Entity (HTTP 422)\n\nInline comments in the failed review payload:\n1. draft=abc csrc/flash_attn/src/flash_fwd_kernel.h:1276 RIGHT — stale line draft\n\nIf GitHub returned HTTP 422, delete or recreate the listed draft whose path/line is stale, then retry." }),
+    });
+  });
+
+  await openFirstFile(page);
+  await page.locator(".file").first().locator(".diff-row.added").first().click();
+  await page.locator(".inline-thread textarea").first().fill("stale line draft");
+  await page.getByRole("button", { name: "Add draft comment" }).first().click();
+  await page.getByRole("button", { name: "Submit review (1)" }).click();
+
+  await expect(page.locator(".error")).toContainText("Inline comments in the failed review payload");
+  await expect(page.locator(".error")).toContainText("stale line draft");
+  await expect(page.locator(".error")).toContainText("delete or recreate the listed draft");
+  expect(submitPayload?.comments?.[0].draft_id).toBeTruthy();
+});
+
 test("dragging diff rows opens a multiline thread", async ({ page }) => {
   await openFirstFile(page);
   const rows = page.locator(".file").first().locator(".diff-row.added");

@@ -138,16 +138,18 @@ async function ghApiWrite(ref: PullRequestRef, method: "POST" | "PATCH", path: s
   const inputPath = join(dir, "payload.json");
   await writeFile(inputPath, JSON.stringify(payload), "utf8");
   const startedAt = performance.now();
+  let failed = false;
   logger.info("github", `${scope} start`, { ref });
   try {
     const { stdout, stderr } = await execFileAsync("gh", ["api", path, "--method", method, "--input", inputPath], { maxBuffer: 50 * 1024 * 1024 });
     logger.info("github", `${scope} complete`, { ref, ms: Math.round(performance.now() - startedAt), bytes: stdout.length, stderr: stderr.trim() || undefined });
     return JSON.parse(stdout) as unknown;
   } catch (error) {
-    logger.error("github", `${scope} failed`, { ref, error: error instanceof Error ? error.message : String(error) });
+    failed = true;
+    logger.error("github", `${scope} failed`, { ref, inputPath, error: error instanceof Error ? error.message : String(error) });
     throw error;
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    if (!failed) await rm(dir, { recursive: true, force: true });
   }
 }
 

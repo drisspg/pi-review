@@ -28,7 +28,45 @@ type PiReviewJob = {
   finishedAt?: string;
 };
 
+type ReviewSubmitComment = {
+  draft_id?: unknown;
+  path?: unknown;
+  line?: unknown;
+  start_line?: unknown;
+  side?: unknown;
+  start_side?: unknown;
+  body?: unknown;
+};
+
 const piReviewJobs = new Map<string, PiReviewJob>();
+
+function reviewSubmitCommentsFromPayload(comments: unknown): ReviewSubmitComment[] {
+  return Array.isArray(comments) ? comments.filter((comment): comment is ReviewSubmitComment => typeof comment === "object" && comment != null) : [];
+}
+
+function githubReviewComments(comments: ReviewSubmitComment[]): Array<Record<string, unknown>> {
+  return comments.map(({ path, line, start_line, side, start_side, body }) => ({
+    path,
+    line,
+    side,
+    body,
+    ...(typeof start_line === "number" && start_line !== line ? { start_line, start_side } : {}),
+  }));
+}
+
+function reviewSubmitDiagnostics(comments: ReviewSubmitComment[]): string {
+  if (comments.length === 0) return "No inline comments were included in the failed review payload.";
+  const rows = comments.map((comment, index) => {
+    const draftId = typeof comment.draft_id === "string" ? ` draft=${comment.draft_id}` : "";
+    const path = typeof comment.path === "string" ? comment.path : "<missing path>";
+    const line = typeof comment.line === "number" ? comment.line : "<missing line>";
+    const startLine = typeof comment.start_line === "number" && comment.start_line !== comment.line ? `${comment.start_line}-` : "";
+    const side = typeof comment.side === "string" ? comment.side : "<missing side>";
+    const body = typeof comment.body === "string" ? comment.body.replace(/\s+/g, " ").trim().slice(0, 120) : "<missing body>";
+    return `${index + 1}.${draftId} ${path}:${startLine}${line} ${side} — ${body}`;
+  });
+  return `Inline comments in the failed review payload:\n${rows.join("\n")}`;
+}
 
 function startPiReviewJob(prKey: string, prompt: string, sessionKind?: string): PiReviewJob {
   const job: PiReviewJob = { id: randomUUID(), prKey, status: "running", startedAt: new Date().toISOString() };
@@ -242,8 +280,15 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const payload = recordFromBody(await readBody(req));
     const ref = refFromBody(payload);
     if (payload.event !== "COMMENT" && payload.event !== "APPROVE" && payload.event !== "REQUEST_CHANGES") throw new Error("Expected review event");
-    logger.info("api", "submit review requested", { ref, comments: Array.isArray(payload.comments) ? payload.comments.length : 0, event: payload.event });
-    const result = await submitPullRequestReview(ref, { event: payload.event, body: payload.body, comments: payload.comments });
+    const comments = reviewSubmitCommentsFromPayload(payload.comments);
+    logger.info("api", "submit review requested", { ref, comments: comments.length, event: payload.event });
+    let result: unknown;
+    try {
+      result = await submitPullRequestReview(ref, { event: payload.event, body: payload.body, comments: githubReviewComments(comments) });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`${message}\n\n${reviewSubmitDiagnostics(comments)}\n\nIf GitHub returned HTTP 422, delete or recreate the listed draft whose path/line is stale, then retry.`);
+    }
     const reviewedPr = await markPullRequestReviewed(prKeyForRef(ref), typeof payload.headSha === "string" ? payload.headSha : "", payload.event);
     sendJson(res, 200, { result, pr: reviewedPr });
     return;

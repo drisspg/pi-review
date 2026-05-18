@@ -459,7 +459,7 @@ function App() {
     if (review == null || submitting) return false;
     setSubmitting(true);
     try {
-      await api("/api/review/submit", { method: "POST", body: JSON.stringify({ prUrl: review.pr.url, headSha: review.pr.headSha, event, body, comments: drafts.filter((draft) => draft.line != null).map(({ path, line, startLine, side, body }) => ({ path, line, side, body, ...(startLine != null && startLine !== line ? { start_line: startLine, start_side: side } : {}) })) }) });
+      await api("/api/review/submit", { method: "POST", body: JSON.stringify({ prUrl: review.pr.url, headSha: review.pr.headSha, event, body, comments: drafts.filter((draft) => draft.line != null).map(({ id, path, line, startLine, side, body }) => ({ draft_id: id, path, line, side, body, ...(startLine != null && startLine !== line ? { start_line: startLine, start_side: side } : {}) })) }) });
       setDrafts([]);
       await openPr(review.pr.url);
       return true;
