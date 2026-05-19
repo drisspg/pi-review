@@ -77,6 +77,30 @@ function messagesFromAiReviewRecord(review: AiReviewRecord | null | undefined): 
   return review.answer.trim().length > 0 ? [generalReviewMessage(review.answer)] : [];
 }
 
+function draftLocation(draft: DraftComment): string {
+  return `${draft.path}:${draft.line == null ? "file" : draft.startLine != null && draft.startLine !== draft.line ? `${draft.startLine}-${draft.line}` : draft.line}`;
+}
+
+function draftSubmitBlocker(files: PullFile[], draft: DraftComment): string | null {
+  if (draft.line == null) return null;
+  const file = files.find((candidate) => candidate.filename === draft.path);
+  if (file == null || file.patch == null) return "file is not in the loaded PR diff";
+  const lineForRow = (row: DiffRow) => draft.side === "RIGHT" ? row.newLine : row.oldLine;
+  const rows = parsePatchRows(file.patch);
+  const endRow = rows.find((row) => lineForRow(row) === draft.line);
+  if (endRow == null) return "end line is outside GitHub's diff hunks";
+  if (draft.startLine == null || draft.startLine === draft.line) return null;
+  const startRow = rows.find((row) => lineForRow(row) === draft.startLine);
+  if (startRow == null) return "start line is outside GitHub's diff hunks";
+  return startRow.hunk === endRow.hunk ? null : "range crosses GitHub diff hunks";
+}
+
+function invalidDraftMessage(files: PullFile[], drafts: DraftComment[]): string | null {
+  const invalidDrafts = drafts.map((draft) => ({ draft, reason: draftSubmitBlocker(files, draft) })).filter(({ reason }) => reason != null);
+  if (invalidDrafts.length === 0) return null;
+  return `Some draft comments cannot be submitted to GitHub because their saved line anchors are not valid review positions. Delete or recreate these drafts on visible diff lines, then retry:\n${invalidDrafts.map(({ draft, reason }, index) => `${index + 1}. ${draftLocation(draft)} — ${reason}`).join("\n")}`;
+}
+
 function focusAreaPath(path: string): string {
   return path.trim().replace(/^[-*]\s+/, "").trim();
 }
@@ -463,6 +487,11 @@ function App() {
 
   async function submitReview(event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string): Promise<boolean> {
     if (review == null || submitting) return false;
+    const invalidMessage = invalidDraftMessage(review.files, drafts);
+    if (invalidMessage != null) {
+      setError(invalidMessage);
+      return false;
+    }
     setSubmitting(true);
     try {
       await api("/api/review/submit", { method: "POST", body: JSON.stringify({ prUrl: review.pr.url, headSha: review.pr.headSha, event, body, comments: drafts.filter((draft) => draft.line != null).map(({ id, path, line, startLine, side, body }) => ({ draft_id: id, path, line, side, body, ...(startLine != null && startLine !== line ? { start_line: startLine, start_side: side } : {}) })) }) });
