@@ -95,13 +95,21 @@ function draftSubmitBlocker(files: PullFile[], draft: DraftComment): string | nu
   return startRow.hunk === endRow.hunk ? null : "range crosses GitHub diff hunks";
 }
 
-function invalidDraftMessage(files: PullFile[], drafts: DraftComment[]): string | null {
-  const invalidDrafts = drafts.map((draft) => ({ draft, reason: draftSubmitBlocker(files, draft) })).filter(({ reason }) => reason != null);
-  if (invalidDrafts.length === 0) return null;
-  return `Some draft comments cannot be submitted to GitHub because their saved line anchors are not valid review positions. Delete or recreate these drafts on visible diff lines, then retry:\n${invalidDrafts.map(({ draft, reason }, index) => `${index + 1}. ${draftLocation(draft)} — ${reason}`).join("\n")}`;
+function invalidDraftDetails(files: PullFile[], drafts: DraftComment[]): Array<{ index: number; draft: DraftComment; reason: string }> {
+  return drafts.map((draft, index) => ({ index, draft, reason: draftSubmitBlocker(files, draft) })).filter((item): item is { index: number; draft: DraftComment; reason: string } => item.reason != null);
 }
 
-function focusAreaPath(path: string): string {
+function invalidDraftMessage(details: Array<{ index: number; draft: DraftComment; reason: string }>): string {
+  return `Some draft comments cannot be submitted to GitHub because their saved line anchors are not valid review positions. I highlighted them in Draft review. Delete or recreate these drafts on visible diff lines, then retry:\n${details.map(({ index, draft, reason }) => `Draft #${index + 1}: ${draftLocation(draft)} — ${reason}`).join("\n")}`;
+}
+
+function draftIdsFromSubmitError(message: string, drafts: DraftComment[]): Record<string, boolean> {
+  const ids = Object.fromEntries([...message.matchAll(/draft=([^\s]+)/g)].map((match) => [match[1], true]));
+  if (Object.keys(ids).length > 0) return ids;
+  return Object.fromEntries(drafts.filter((draft) => message.includes(draftLocation(draft)) || message.includes(draft.body.trim().slice(0, 80))).map((draft) => [draft.id, true]));
+}
+
+function focusAreaPath(path: string) {
   return path.trim().replace(/^[-*]\s+/, "").trim();
 }
 
@@ -210,6 +218,7 @@ function App() {
   const suppressClickRef = useRef(false);
   const [drafts, setDrafts] = useState<DraftComment[]>([]);
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
+  const [invalidDraftIds, setInvalidDraftIds] = useState<Record<string, boolean>>({});
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [aiReview, setAiReview] = useState<AiReview>({ expanded: false, open: false, running: false, text: "", messages: [] });
   const [aiReviewId, setAiReviewId] = useState<string | null>(null);
@@ -310,6 +319,7 @@ function App() {
     setDrafts([]);
     setExpandedNeighborRows({});
     setEditingDraftId(null);
+    setInvalidDraftIds({});
     setAiReview({ expanded: false, open: false, running: false, text: data.aiReview?.answer ?? "", messages: messagesFromAiReviewRecord(data.aiReview) });
     setAiReviewId(data.aiReview?.id ?? null);
     const savedAreas = parseFocusAreas(data.focusScan?.answer ?? "");
@@ -487,11 +497,13 @@ function App() {
 
   async function submitReview(event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string): Promise<boolean> {
     if (review == null || submitting) return false;
-    const invalidMessage = invalidDraftMessage(review.files, drafts);
-    if (invalidMessage != null) {
-      setError(invalidMessage);
+    const invalidDrafts = invalidDraftDetails(review.files, drafts);
+    if (invalidDrafts.length > 0) {
+      setInvalidDraftIds(Object.fromEntries(invalidDrafts.map(({ draft }) => [draft.id, true])));
+      setError(invalidDraftMessage(invalidDrafts));
       return false;
     }
+    setInvalidDraftIds({});
     setSubmitting(true);
     try {
       await api("/api/review/submit", { method: "POST", body: JSON.stringify({ prUrl: review.pr.url, headSha: review.pr.headSha, event, body, comments: drafts.filter((draft) => draft.line != null).map(({ id, path, line, startLine, side, body }) => ({ draft_id: id, path, line, side, body, ...(startLine != null && startLine !== line ? { start_line: startLine, start_side: side } : {}) })) }) });
@@ -499,7 +511,9 @@ function App() {
       await openPr(review.pr.url);
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      setInvalidDraftIds(draftIdsFromSubmitError(message, drafts));
+      setError(message);
       return false;
     } finally {
       setSubmitting(false);
@@ -690,7 +704,7 @@ ${diffSummary}`;
     setCommentCollapseSignal((signal) => signal + 1);
   }
 
-  return <main className="app-shell"><header className="toolbar"><div className="toolbar-title"><strong>Pi PR Review</strong><span>{review == null ? "Paste a PR to start" : `${review.pr.key} · ${review.pr.title}`}</span></div><div className="toolbar-actions">{review != null && <><button type="button" onClick={goHome}>Home</button><button type="button" title="Pi session settings" onClick={() => { setSettingsOpen(true); void loadDiagnostics(); }}>⚙</button><button type="button" title="Pi session diagnostics" onClick={() => void showDiagnostics()}>🐞</button></>}<button type="button" title="Server log" onClick={() => { setLogsOpen(true); void refreshLogs(); }}>📜</button><select aria-label="Theme" value={theme} onChange={(event) => setTheme(event.target.value as ThemeName)}><option value="github-dark">GitHub dark</option><option value="github-dimmed">GitHub dimmed</option><option value="github-light">GitHub light</option></select>{review != null && <form className="open-form" onSubmit={submit}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="OWNER/REPO#123 or GitHub PR URL" /><button disabled={busy || input.trim().length === 0}>{busy ? "Fetching…" : "Open"}</button></form>}</div></header>{error != null && <div className="error">{error}</div>}{busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} aiReview={aiReview} setAiReview={setAiReview} runAiReview={runAiReview} sendAiReviewMessage={sendAiReviewMessage} focusReview={focusReview} setFocusReview={setFocusReview} runFocusReview={runFocusReview} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} viewedFocusAreaIds={viewedFocusAreaIds} setViewedFocusAreaIds={setViewedFocusAreaIds} saveFocusScan={saveFocusScan} submitReview={submitReview} submitting={submitting} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} />}{diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}{review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} openDiagnostics={() => { setSettingsOpen(false); void showDiagnostics(); }} close={() => setSettingsOpen(false)} />}{logsOpen && <LogsModal logs={logs} refreshLogs={refreshLogs} close={() => setLogsOpen(false)} />}</main>;
+  return <main className="app-shell"><header className="toolbar"><div className="toolbar-title"><strong>Pi PR Review</strong><span>{review == null ? "Paste a PR to start" : `${review.pr.key} · ${review.pr.title}`}</span></div><div className="toolbar-actions">{review != null && <><button type="button" onClick={goHome}>Home</button><button type="button" title="Pi session settings" onClick={() => { setSettingsOpen(true); void loadDiagnostics(); }}>⚙</button><button type="button" title="Pi session diagnostics" onClick={() => void showDiagnostics()}>🐞</button></>}<button type="button" title="Server log" onClick={() => { setLogsOpen(true); void refreshLogs(); }}>📜</button><select aria-label="Theme" value={theme} onChange={(event) => setTheme(event.target.value as ThemeName)}><option value="github-dark">GitHub dark</option><option value="github-dimmed">GitHub dimmed</option><option value="github-light">GitHub light</option></select>{review != null && <form className="open-form" onSubmit={submit}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="OWNER/REPO#123 or GitHub PR URL" /><button disabled={busy || input.trim().length === 0}>{busy ? "Fetching…" : "Open"}</button></form>}</div></header>{error != null && <div className="error">{error}</div>}{busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} aiReview={aiReview} setAiReview={setAiReview} runAiReview={runAiReview} sendAiReviewMessage={sendAiReviewMessage} focusReview={focusReview} setFocusReview={setFocusReview} runFocusReview={runFocusReview} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} viewedFocusAreaIds={viewedFocusAreaIds} setViewedFocusAreaIds={setViewedFocusAreaIds} saveFocusScan={saveFocusScan} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} />}{diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}{review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} openDiagnostics={() => { setSettingsOpen(false); void showDiagnostics(); }} close={() => setSettingsOpen(false)} />}{logsOpen && <LogsModal logs={logs} refreshLogs={refreshLogs} close={() => setLogsOpen(false)} />}</main>;
 }
 
 type StartFilter = "all" | "needs-review" | "in-progress" | "done";
@@ -781,7 +795,7 @@ function relativeTime(iso: string | null | undefined): string {
   return new Date(iso).toLocaleDateString();
 }
 
-function ReviewPage(props: DiffProps & { aiReview: AiReview; setAiReview: (review: AiReview) => void; runAiReview: () => Promise<void>; sendAiReviewMessage: (message: string) => Promise<void>; focusReview: FocusReview; setFocusReview: (review: FocusReview) => void; runFocusReview: () => Promise<void>; viewedFocusAreaIds: Record<string, boolean>; setViewedFocusAreaIds: React.Dispatch<React.SetStateAction<Record<string, boolean>>>; saveFocusScan: (answer: string, viewedIds: Record<string, boolean>, collapsedIds: Record<string, boolean>) => Promise<string | null>; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; submitting: boolean; refreshingActivity: boolean }) {
+function ReviewPage(props: DiffProps & { aiReview: AiReview; setAiReview: (review: AiReview) => void; runAiReview: () => Promise<void>; sendAiReviewMessage: (message: string) => Promise<void>; focusReview: FocusReview; setFocusReview: (review: FocusReview) => void; runFocusReview: () => Promise<void>; viewedFocusAreaIds: Record<string, boolean>; setViewedFocusAreaIds: React.Dispatch<React.SetStateAction<Record<string, boolean>>>; saveFocusScan: (answer: string, viewedIds: Record<string, boolean>, collapsedIds: Record<string, boolean>) => Promise<string | null>; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; submitting: boolean; invalidDraftIds: Record<string, boolean>; refreshingActivity: boolean }) {
   const commentToggleLabel = props.commentsCollapsed ? "Expand all comments" : "Collapse all comments";
   const diffViewLabel = props.diffViewMode === "unified" ? "Split view" : "Unified view";
   const [sideTab, setSideTab] = useState<"review" | "pi" | "comments">("review");
@@ -829,7 +843,7 @@ function ReviewPage(props: DiffProps & { aiReview: AiReview; setAiReview: (revie
         <button role="tab" aria-selected={sideTab === "comments"} className={`side-tab${sideTab === "comments" ? " active" : ""}`} onClick={() => setSideTab("comments")}><span className="side-tab-pie" aria-hidden="true">💬</span><span>Comments</span>{commentCount > 0 && <span className="side-tab-badge">{commentCount}</span>}</button>
       </nav>
       <div className="side-tab-panels">
-        {sideTab === "review" && <ReviewSummary pr={props.review.pr} drafts={props.drafts} setDrafts={props.setDrafts} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} submitReview={props.submitReview} submitting={props.submitting} onJumpToDraft={(draft) => jumpToComment({ ...draft, hunk: "" })} />}
+        {sideTab === "review" && <ReviewSummary pr={props.review.pr} drafts={props.drafts} setDrafts={props.setDrafts} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} submitReview={props.submitReview} submitting={props.submitting} invalidDraftIds={props.invalidDraftIds} onJumpToDraft={(draft) => jumpToComment({ ...draft, hunk: "" })} />}
         {sideTab === "pi" && <AiReviewPanel prUrl={props.review.pr.url} review={props.aiReview} setReview={props.setAiReview} runReview={props.runAiReview} sendMessage={props.sendAiReviewMessage} focusReview={props.focusReview} runFocusReview={props.runFocusReview} focusAreas={props.focusAreas} setActiveFocusAreaId={props.setActiveFocusAreaId} collapsedFocusAreaIds={props.collapsedFocusAreaIds} setCollapsedFocusAreaIds={props.setCollapsedFocusAreaIds} viewedFocusIds={props.viewedFocusAreaIds} setViewedFocusIds={props.setViewedFocusAreaIds} saveFocusScan={props.saveFocusScan} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} />}
         {sideTab === "comments" && <ExistingComments prUrl={props.review.pr.url} comments={props.review.comments} issueComments={props.review.issueComments} reviewSummaries={props.review.reviewSummaries} refreshGithubActivity={props.refreshGithubActivity} collapseSignal={props.commentCollapseSignal} commentsCollapsed={props.commentsCollapsed} toggleAllComments={props.toggleAllComments} onJumpToComment={jumpToComment} />}
       </div>
@@ -1031,7 +1045,7 @@ function updateDraft(drafts: DraftComment[], setDrafts: (drafts: DraftComment[])
   setDrafts(drafts.map((draft) => draft.id === id ? { ...draft, body } : draft));
 }
 
-function DraftView({ draft, drafts, setDrafts, editingDraftId, setEditingDraftId, onJump }: { draft: DraftComment; drafts: DraftComment[]; setDrafts: (drafts: DraftComment[]) => void; editingDraftId: string | null; setEditingDraftId: (id: string | null) => void; onJump?: () => void }) {
+function DraftView({ draft, index, invalid = false, drafts, setDrafts, editingDraftId, setEditingDraftId, onJump }: { draft: DraftComment; index?: number; invalid?: boolean; drafts: DraftComment[]; setDrafts: (drafts: DraftComment[]) => void; editingDraftId: string | null; setEditingDraftId: (id: string | null) => void; onJump?: () => void }) {
   const editing = editingDraftId === draft.id;
   const [removing, setRemoving] = useState(false);
   function removeDraft(): void {
@@ -1039,10 +1053,12 @@ function DraftView({ draft, drafts, setDrafts, editingDraftId, setEditingDraftId
     setRemoving(true);
     window.setTimeout(() => setDrafts(drafts.filter((item) => item.id !== draft.id)), 160);
   }
-  return <div className={`draft-card${editing ? " editing" : ""}${removing ? " removing" : ""}`}>
+  return <div className={`draft-card${editing ? " editing" : ""}${removing ? " removing" : ""}${invalid ? " invalid" : ""}`}>
     <div className="draft-card-head">
       <div className={`draft-card-location${onJump != null ? " clickable" : ""}`} onClick={onJump} role={onJump != null ? "button" : undefined} tabIndex={onJump != null ? 0 : undefined}>
+        {index != null && <span className="draft-card-index">#{index + 1}</span>}
         <strong>{targetLabel(draft)}</strong>
+        {invalid && <span className="draft-card-warning">needs re-anchor</span>}
       </div>
       <div className="draft-card-actions">
         <Button variant="icon" aria-label={editing ? "Done editing" : "Edit draft"} onClick={() => setEditingDraftId(editing ? null : draft.id)}>{editing ? <ChevronDownIcon size={14} /> : <ChevronRightIcon size={14} />}</Button>
@@ -1115,7 +1131,7 @@ function reviewStatus(pr: StoredPullRequest): { label: string; tone: string } {
   return { label: "Reviewed", tone: "success" };
 }
 
-function ReviewSummary({ drafts, setDrafts, editingDraftId, setEditingDraftId, submitReview, submitting, onJumpToDraft }: { pr: StoredPullRequest; drafts: DraftComment[]; setDrafts: (drafts: DraftComment[]) => void; editingDraftId: string | null; setEditingDraftId: (id: string | null) => void; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; submitting: boolean; onJumpToDraft?: (draft: DraftComment) => void }) {
+function ReviewSummary({ drafts, setDrafts, editingDraftId, setEditingDraftId, submitReview, submitting, invalidDraftIds, onJumpToDraft }: { pr: StoredPullRequest; drafts: DraftComment[]; setDrafts: (drafts: DraftComment[]) => void; editingDraftId: string | null; setEditingDraftId: (id: string | null) => void; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; submitting: boolean; invalidDraftIds: Record<string, boolean>; onJumpToDraft?: (draft: DraftComment) => void }) {
   const [event, setEvent] = useState<"COMMENT" | "APPROVE" | "REQUEST_CHANGES">("COMMENT");
   const [body, setBody] = useState("");
   const [submitted, setSubmitted] = useState(false);
@@ -1129,7 +1145,7 @@ function ReviewSummary({ drafts, setDrafts, editingDraftId, setEditingDraftId, s
       setSubmitted(true);
     }
   }
-  return <section className="panel"><h2>Draft review</h2><select className={`review-event ${event.toLowerCase().replace("_", "-")}`} value={event} onChange={(change) => { setEvent(change.target.value as typeof event); setSubmitted(false); }}><option value="COMMENT">Not reviewed</option><option value="APPROVE">Approve</option><option value="REQUEST_CHANGES">Request changes</option></select><textarea value={body} onChange={(change) => { setBody(change.target.value); setSubmitted(false); }} placeholder="Overall review body" />{drafts.length === 0 ? <p className="muted">{showSubmitted ? "Review submitted." : "No draft comments yet."}</p> : drafts.map((draft) => <DraftView key={draft.id} draft={draft} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} onJump={onJumpToDraft != null ? () => onJumpToDraft(draft) : undefined} />)}<button className={`review-submit ${event.toLowerCase().replace("_", "-")}`} disabled={submitting || !hasReviewContent} onClick={() => void handleSubmit()}>{submitting ? "Submitting…" : showSubmitted ? "Review submitted" : `Submit review (${drafts.length})`}</button></section>;
+  return <section className="panel"><h2>Draft review</h2><select className={`review-event ${event.toLowerCase().replace("_", "-")}`} value={event} onChange={(change) => { setEvent(change.target.value as typeof event); setSubmitted(false); }}><option value="COMMENT">Not reviewed</option><option value="APPROVE">Approve</option><option value="REQUEST_CHANGES">Request changes</option></select><textarea value={body} onChange={(change) => { setBody(change.target.value); setSubmitted(false); }} placeholder="Overall review body" />{drafts.length === 0 ? <p className="muted">{showSubmitted ? "Review submitted." : "No draft comments yet."}</p> : drafts.map((draft, index) => <DraftView key={draft.id} draft={draft} index={index} invalid={invalidDraftIds[draft.id] === true} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} onJump={onJumpToDraft != null ? () => onJumpToDraft(draft) : undefined} />)}<button className={`review-submit ${event.toLowerCase().replace("_", "-")}`} disabled={submitting || !hasReviewContent} onClick={() => void handleSubmit()}>{submitting ? "Submitting…" : showSubmitted ? "Review submitted" : `Submit review (${drafts.length})`}</button></section>;
 }
 
 function AiReviewPanel({ prUrl, review, setReview, runReview, sendMessage, focusReview, runFocusReview, focusAreas, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds, viewedFocusIds, setViewedFocusIds, saveFocusScan, openFiles, setOpenFiles }: { prUrl: string; review: AiReview; setReview: (review: AiReview) => void; runReview: () => Promise<void>; sendMessage: (message: string) => Promise<void>; focusReview: FocusReview; runFocusReview: () => Promise<void>; focusAreas: FocusArea[]; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"]; viewedFocusIds: Record<string, boolean>; setViewedFocusIds: React.Dispatch<React.SetStateAction<Record<string, boolean>>>; saveFocusScan: (answer: string, viewedIds: Record<string, boolean>, collapsedIds: Record<string, boolean>) => Promise<string | null>; openFiles: Record<string, boolean>; setOpenFiles: (open: Record<string, boolean>) => void }) {

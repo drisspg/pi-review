@@ -1430,14 +1430,27 @@ a { color: var(--link); text-decoration: none; }
 
 .composer {
   display: grid;
-  gap: 8px;
-  padding-top: 8px;
+  gap: 10px;
+  padding: 10px;
   border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel2) 72%, var(--panel));
+  border-radius: 0 0 6px 6px;
 }
 
 .composer textarea {
-  min-height: 92px;
-  background: var(--panel2);
+  min-height: 112px;
+  background: var(--panel);
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--border));
+  line-height: 1.45;
+}
+
+.composer textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.composer .actions {
+  justify-content: flex-end;
 }
 
 
@@ -1576,6 +1589,12 @@ a { color: var(--link); text-decoration: none; }
   transform: translateX(12px) scale(0.985);
 }
 
+.draft-card.invalid {
+  border-color: var(--danger);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--danger) 16%, var(--panel)) 0, var(--panel2) 180px);
+  box-shadow: inset 3px 0 var(--danger), 0 0 0 3px color-mix(in srgb, var(--danger) 18%, transparent);
+}
+
 .draft-card-head {
   display: flex;
   align-items: center;
@@ -1596,6 +1615,23 @@ a { color: var(--link); text-decoration: none; }
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.draft-card-index,
+.draft-card-warning {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-size: 0.72rem;
+  color: var(--muted);
+  background: var(--panel);
+  white-space: nowrap;
+}
+
+.draft-card-warning {
+  border-color: color-mix(in srgb, var(--danger) 50%, var(--border));
+  color: var(--danger-text);
+  background: color-mix(in srgb, var(--danger) 12%, var(--panel));
 }
 
 .draft-card-location.clickable {
