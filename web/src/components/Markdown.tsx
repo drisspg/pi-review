@@ -8,6 +8,7 @@ import { highlightedHtml } from "../lib/highlight";
 
 const fileReferencePattern = /((?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+\.[A-Za-z0-9_+-]+):(\d+)(?:-(\d+))?/g;
 const fileReferenceExactPattern = /^((?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+\.[A-Za-z0-9_+-]+):(\d+)(?:-(\d+))?$/;
+const fileReferenceCodePattern = /^((?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+\.[A-Za-z0-9_+-]+):(\d+)(?:-(\d+))?(?:\s+[—-].*)?$/;
 const fileReferenceUrlPrefix = "pi-review-file://";
 
 type FileLinkContext = { prUrl: string };
@@ -29,7 +30,7 @@ type MarkdownAnchorProps = React.AnchorHTMLAttributes<HTMLAnchorElement> & { fil
 function MarkdownCode({ className, children, fileLinks }: MarkdownCodeProps) {
   const code = String(children ?? "").replace(/\n$/, "");
   if (fileLinks != null) {
-    const reference = parseFileReference(code);
+    const reference = parseCodeFileReference(code);
     if (reference != null) return <FileReferenceAnchor context={fileLinks} reference={reference}><code>{code}</code></FileReferenceAnchor>;
   }
   const language = className?.match(/language-(\w+)/)?.[1] ?? "";
@@ -96,6 +97,11 @@ function splitTextReferences(value: string): unknown[] {
 
 function parseFileReference(value: string): FileReference | null {
   const match = value.match(fileReferenceExactPattern);
+  return match == null ? null : referenceFromMatch(match);
+}
+
+function parseCodeFileReference(value: string): FileReference | null {
+  const match = value.match(fileReferenceCodePattern);
   return match == null ? null : referenceFromMatch(match);
 }
 

@@ -8,6 +8,17 @@ async function openFirstFile(page: Page) {
   await expect(firstFile.locator(".diff-row").first()).toBeVisible();
 }
 
+async function openFileWithAddedRows(page: Page, minRows: number) {
+  const files = page.locator(".file");
+  for (let index = 0; index < await files.count(); index += 1) {
+    const file = files.nth(index);
+    if (await file.locator(".diff-row").count() === 0) await file.locator(".file-summary-left").click();
+    const rows = file.locator(".diff-row.added");
+    if (await rows.count() >= minRows) return rows;
+  }
+  throw new Error(`No file has ${minRows} added rows`);
+}
+
 async function mockAskPi(page: Page, answerForPrompt: (body: { prompt?: string }) => string) {
   await page.route(/\/api\/ask\/stream$/, async (route) => {
     const answer = answerForPrompt(route.request().postDataJSON() as { prompt?: string });
@@ -95,14 +106,21 @@ test("clears empty line threads when clicking elsewhere", async ({ page }) => {
 });
 
 test("supports multiline draft ranges", async ({ page }) => {
-  await openFirstFile(page);
-  await page.locator(".file").first().locator(".diff-row.added").first().click();
-  const rangeEnd = page.locator(".range-control input").first();
-  await rangeEnd.fill("1279");
+  const rows = await openFileWithAddedRows(page, 4);
+  await rows.nth(0).scrollIntoViewIfNeeded();
+  const firstLine = await rows.nth(0).getAttribute("data-line");
+  const lastLine = await rows.nth(3).getAttribute("data-line");
+  const start = await rows.nth(0).boundingBox();
+  const end = await rows.nth(3).boundingBox();
+  if (firstLine == null || lastLine == null || start == null || end == null) throw new Error("Missing drag row targets");
+  await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(end.x + end.width / 2, end.y + end.height / 2, { steps: 8 });
+  await page.mouse.up();
   await page.locator(".inline-thread textarea").first().fill("range draft");
   await page.getByRole("button", { name: "Add draft comment" }).first().click();
 
-  await expect(page.locator(".inline-thread.draft").first()).toContainText("1276-1279");
+  await expect(page.locator(".inline-thread.draft").first()).toContainText(`${firstLine}-${lastLine}`);
   await expect(page.getByRole("button", { name: "Submit review (1)" })).toBeEnabled();
 });
 
@@ -146,18 +164,19 @@ test("shows failed review inline draft diagnostics", async ({ page }) => {
 });
 
 test("dragging diff rows opens a multiline thread", async ({ page }) => {
-  await openFirstFile(page);
-  const rows = page.locator(".file").first().locator(".diff-row.added");
+  const rows = await openFileWithAddedRows(page, 4);
   await rows.nth(0).scrollIntoViewIfNeeded();
+  const firstLine = await rows.nth(0).getAttribute("data-line");
+  const lastLine = await rows.nth(3).getAttribute("data-line");
   const start = await rows.nth(0).boundingBox();
   const end = await rows.nth(3).boundingBox();
-  if (start == null || end == null) throw new Error("Missing drag row boxes");
+  if (firstLine == null || lastLine == null || start == null || end == null) throw new Error("Missing drag row targets");
   await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
   await page.mouse.down();
   await page.mouse.move(end.x + end.width / 2, end.y + end.height / 2, { steps: 8 });
   await page.mouse.up();
 
-  await expect(page.locator(".inline-thread.review-thread").first()).toContainText("1276-1279");
+  await expect(page.locator(".inline-thread.review-thread").first()).toContainText(`${firstLine}-${lastLine}`);
 });
 
 test("renders existing GitHub comments as markdown", async ({ page }) => {
@@ -228,6 +247,27 @@ test("renders inline Ask Pi responses as markdown", async ({ page }) => {
   const thread = page.locator(".thread-messages").first();
   await expect(thread).toContainText("Finding:");
   await expect(thread.locator("pre code")).toContainText("return batch_offset;");
+});
+
+test("opens code-wrapped file references in VS Code", async ({ page }) => {
+  await openFirstFile(page);
+  const row = page.locator(".file").first().locator(".diff-row.added").first();
+  const path = await row.getAttribute("data-path");
+  const line = await row.getAttribute("data-line");
+  if (path == null || line == null) throw new Error("Missing diff row target");
+  await mockAskPi(page, () => `Check \`${path}:${line} — suspicious location\`.`);
+  let openPayload: { path?: string; line?: number } | null = null;
+  await page.route("**/api/file/open", async (route) => {
+    openPayload = route.request().postDataJSON();
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ target: "/tmp/file" }) });
+  });
+
+  await row.click();
+  await page.locator(".inline-thread textarea").first().fill("where is this?");
+  await page.getByRole("button", { name: "Ask Pi" }).first().click();
+  await page.locator(".thread-messages .file-reference-link").first().click();
+
+  await expect.poll(() => openPayload).toMatchObject({ path, line: Number.parseInt(line, 10) });
 });
 
 test("runs a separate focus areas review and highlights referenced lines", async ({ page }) => {
