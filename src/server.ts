@@ -11,7 +11,7 @@ import { logger } from "./logger.js";
 import { askPi, disposePiSession, disposePiSessions, piDiagnostics, prewarmPiSession, registerPiSessionCwd, setPiModel } from "./pi-session.js";
 import { parsePullRequestRef } from "./pr.js";
 import { latestAiReview, latestFocusScan, listRecentPullRequests, markPullRequestReviewed, removePullRequest, saveAiReview, saveFocusScan, setFileViewed, upsertPullRequest } from "./state.js";
-import type { FocusAreaReviewState } from "./types.js";
+import type { AiReviewMessageRecord, FocusAreaReviewState } from "./types.js";
 import { cleanupPrWorktree, preparePrWorktree, worktreeDirForRef } from "./worktrees.js";
 
 const DEFAULT_PORT = 43133;
@@ -258,7 +258,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (req.method === "POST" && url.pathname === "/api/ai-review/save") {
     const payload = recordFromBody(await readBody(req));
     if (typeof payload.prKey !== "string" || typeof payload.headSha !== "string" || typeof payload.answer !== "string") throw new Error("Expected AI review payload");
-    sendJson(res, 200, { review: await saveAiReview({ id: typeof payload.id === "string" ? payload.id : undefined, prKey: payload.prKey, headSha: payload.headSha, answer: payload.answer }) });
+    sendJson(res, 200, { review: await saveAiReview({ id: typeof payload.id === "string" ? payload.id : undefined, prKey: payload.prKey, headSha: payload.headSha, answer: payload.answer, messages: Array.isArray(payload.messages) ? payload.messages as AiReviewMessageRecord[] : undefined }) });
     return;
   }
 

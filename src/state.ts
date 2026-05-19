@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { homedir } from "node:os";
@@ -21,7 +21,9 @@ export async function readState(): Promise<AppState> {
 
 async function writeState(state: AppState): Promise<void> {
   await mkdir(dirname(STATE_PATH), { recursive: true });
-  await writeFile(STATE_PATH, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+  const tempPath = `${STATE_PATH}.${randomUUID()}.tmp`;
+  await writeFile(tempPath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+  await rename(tempPath, STATE_PATH);
 }
 
 export async function listRecentPullRequests(): Promise<StoredPullRequest[]> {
@@ -97,6 +99,7 @@ export async function saveAiReview(review: Omit<AiReviewRecord, "id" | "createdA
     prKey: review.prKey,
     headSha: review.headSha,
     answer: review.answer,
+    messages: review.messages,
     createdAt: previous?.createdAt ?? review.createdAt ?? now,
     updatedAt: now,
   };

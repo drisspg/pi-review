@@ -113,11 +113,19 @@ export type FocusScanRecord = {
   updatedAt: string;
 };
 
+export type AiReviewMessageRecord = {
+  role: "user" | "pi";
+  text: string;
+  title?: string;
+  kind?: "general-review" | "chat";
+};
+
 export type AiReviewRecord = {
   id: string;
   prKey: string;
   headSha: string;
   answer: string;
+  messages?: AiReviewMessageRecord[];
   createdAt: string;
   updatedAt: string;
 };

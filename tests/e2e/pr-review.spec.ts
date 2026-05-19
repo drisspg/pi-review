@@ -265,6 +265,37 @@ test("runs a separate focus areas review and highlights referenced lines", async
   await expect(row).toHaveClass(/focus-highlight-active/);
 });
 
+test("minimizes focus area links after all are reviewed", async ({ page }) => {
+  await openFirstFile(page);
+  const rows = page.locator(".file").first().locator(".diff-row.added");
+  const firstPath = await rows.nth(0).getAttribute("data-path");
+  const firstLine = await rows.nth(0).getAttribute("data-line");
+  const secondPath = await rows.nth(1).getAttribute("data-path");
+  const secondLine = await rows.nth(1).getAttribute("data-line");
+  if (firstPath == null || firstLine == null || secondPath == null || secondLine == null) throw new Error("Missing diff row targets");
+
+  await page.route(/\/api\/pi\/focus-review\/status$/, async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { status: "complete", answer: `## Focus areas\n1. first finding\n- ${firstPath}:${firstLine} — check first.\n2. second finding\n- ${secondPath}:${secondLine} — check second.` } }) });
+  });
+  await page.route(/\/api\/pi\/focus-review$/, async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { id: "focus-minimize-job" } }) });
+  });
+  await page.route("**/api/focus-scan/save", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ scan: { id: "focus-minimize-scan" } }) });
+  });
+
+  await page.getByRole("tab", { name: "Pi" }).click();
+  await page.getByRole("button", { name: "Focus scan" }).click();
+  await expect(page.locator(".focus-area-link-row")).toHaveCount(2);
+  await page.locator(".focus-area-check input").nth(0).click();
+  await page.locator(".focus-area-check input").nth(1).click();
+
+  await expect(page.locator(".focus-area-links")).toContainText("2/2 focus areas reviewed");
+  await expect(page.locator(".focus-area-link-row")).toHaveCount(0);
+  await page.getByRole("button", { name: "Expand all" }).click();
+  await expect(page.locator(".focus-area-link-row")).toHaveCount(2);
+});
+
 test("shows a clean focus scan status when there are no focus areas", async ({ page }) => {
   await page.route(/\/api\/pi\/focus-review\/status$/, async (route) => {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { status: "complete", answer: "No focus areas found. All good." } }) });
@@ -278,6 +309,30 @@ test("shows a clean focus scan status when there are no focus areas", async ({ p
 
   await expect(page.locator(".ai-review")).toContainText("Focus scan clean");
   await expect(page.locator(".focus-area-inline")).toHaveCount(0);
+});
+
+test("persists Pi review chat across page reloads", async ({ page }) => {
+  await page.route(/\/api\/pi\/review\/status$/, async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { status: "complete", answer: "Initial review." } }) });
+  });
+  await mockAskPi(page, () => "Persisted answer about `cu_seqlens_q`.");
+
+  await page.getByRole("tab", { name: "Pi" }).click();
+  await page.locator(".ai-review").getByPlaceholder("Ask Pi about this PR…").fill("remember this conversation");
+  await expect(page.locator(".ai-review").getByRole("button", { name: "Send" })).toBeEnabled();
+  await Promise.all([
+    page.waitForResponse(/\/api\/ai-review\/save$/),
+    page.locator(".ai-review").getByPlaceholder("Ask Pi about this PR…").press("Enter"),
+  ]);
+  await expect(page.locator(".ai-review")).toContainText("remember this conversation");
+  await expect(page.locator(".ai-review")).toContainText("Persisted answer");
+
+  await page.reload();
+  await page.locator(".pr-card").first().locator(".pr-card-body").click();
+  await page.getByRole("tab", { name: "Pi" }).click();
+
+  await expect(page.locator(".ai-review")).toContainText("remember this conversation");
+  await expect(page.locator(".ai-review")).toContainText("Persisted answer");
 });
 
 test("runs the right-sidebar Pi review panel and continues the chat with Enter", async ({ page }) => {

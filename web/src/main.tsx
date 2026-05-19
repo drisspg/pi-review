@@ -71,6 +71,12 @@ function currentGeneralReviewText(review: AiReview): string {
   return review.messages.find((message) => message.kind === "general-review")?.text.trim() ?? (review.messages.length === 0 ? review.text.trim() : "");
 }
 
+function messagesFromAiReviewRecord(review: AiReviewRecord | null | undefined): AiReviewMessage[] {
+  if (review == null) return [];
+  if (review.messages != null && review.messages.length > 0) return review.messages;
+  return review.answer.trim().length > 0 ? [generalReviewMessage(review.answer)] : [];
+}
+
 function focusAreaPath(path: string): string {
   return path.trim().replace(/^[-*]\s+/, "").trim();
 }
@@ -280,7 +286,7 @@ function App() {
     setDrafts([]);
     setExpandedNeighborRows({});
     setEditingDraftId(null);
-    setAiReview({ expanded: false, open: false, running: false, text: data.aiReview?.answer ?? "", messages: data.aiReview == null ? [] : [generalReviewMessage(data.aiReview.answer)] });
+    setAiReview({ expanded: false, open: false, running: false, text: data.aiReview?.answer ?? "", messages: messagesFromAiReviewRecord(data.aiReview) });
     setAiReviewId(data.aiReview?.id ?? null);
     const savedAreas = parseFocusAreas(data.focusScan?.answer ?? "");
     setFocusReview({ expanded: false, open: false, running: false, text: data.focusScan?.answer ?? "" });
@@ -355,9 +361,9 @@ function App() {
     return scan.id;
   }
 
-  async function saveAiReview(answer: string, id = aiReviewId): Promise<string | null> {
+  async function saveAiReview(answer: string, messages: AiReviewMessage[], id = aiReviewId): Promise<string | null> {
     if (review == null || answer.trim().length === 0) return id;
-    const { review: savedReview } = await api<{ review: AiReviewRecord }>("/api/ai-review/save", { method: "POST", body: JSON.stringify({ id, prKey: review.pr.key, headSha: review.pr.headSha, answer }) });
+    const { review: savedReview } = await api<{ review: AiReviewRecord }>("/api/ai-review/save", { method: "POST", body: JSON.stringify({ id, prKey: review.pr.key, headSha: review.pr.headSha, answer, messages }) });
     setAiReviewId(savedReview.id);
     const nextReview = { ...review, aiReview: savedReview };
     cacheReview(nextReview);
@@ -515,8 +521,10 @@ ${diffSummary}`;
         if (status.status === "failed") throw new Error(status.error ?? "AI review failed");
         if (status.status !== "complete") throw new Error("AI review returned an unknown job status");
         const answer = status.answer ?? "AI review completed without output.";
-        setAiReview((current) => ({ ...current, open: !background || current.open, expanded: !background || current.expanded, running: false, text: answer, messages: mergeGeneralReview(current.messages, answer) }));
-        void saveAiReview(answer, null);
+        const baseMessages = background ? aiReview.messages : aiReview.messages.filter((message) => message.kind !== "general-review");
+        const nextMessages = mergeGeneralReview(baseMessages, answer);
+        setAiReview((current) => ({ ...current, open: !background || current.open, expanded: !background || current.expanded, running: false, text: answer, messages: nextMessages }));
+        void saveAiReview(answer, nextMessages, null);
         break;
       }
     } catch (err) {
@@ -535,7 +543,9 @@ ${diffSummary}`;
       const prompt = `Continue discussing PR ${review.pr.key}. Answer the user's latest question using the checked-out PR worktree. Be concise and cite files/lines when useful.\n\nPrevious dialogue:\n${previous || "(none)"}\n\nUser: ${question}`;
       const setAnswer = (answer: string) => setAiReview((current) => ({ ...current, open: true, expanded: true, text: answer, messages: [...current.messages.slice(0, -1), { role: "pi", kind: "chat", text: answer }] }));
       const answer = await askPiApi({ prKey: review.pr.key, prompt, purpose: "chat" }, setAnswer);
-      setAiReview((current) => ({ ...current, open: true, expanded: true, running: false, text: answer, messages: [...current.messages.slice(0, -1), { role: "pi", kind: "chat", text: answer }] }));
+      const nextMessages: AiReviewMessage[] = [...aiReview.messages, { role: "user", kind: "chat", text: question }, { role: "pi", kind: "chat", text: answer }];
+      setAiReview((current) => ({ ...current, open: true, expanded: true, running: false, text: answer, messages: nextMessages }));
+      void saveAiReview(currentGeneralReviewText({ ...aiReview, text: answer, messages: nextMessages }) || answer, nextMessages);
     } catch (err) {
       const text = `Ask Pi failed: ${err instanceof Error ? err.message : String(err)}`;
       setAiReview((current) => ({ ...current, open: true, expanded: true, running: false, text, messages: [...current.messages.slice(0, -1), { role: "pi", kind: "chat", text }] }));
@@ -1062,16 +1072,8 @@ function FocusAreaInline({ prUrl, area, active, setActiveFocusAreaId, collapsedF
 }
 
 function ThreadBox({ prUrl, thread, setThread, closeThread, addDraft, askThread }: { prUrl: string; thread: Thread; setThread: (thread: Thread) => void; closeThread: () => void; addDraft: () => void; askThread: (thread: Thread) => Promise<void> }) {
-  function updateRangeEnd(value: string) {
-    const line = Number.parseInt(value, 10);
-    const anchor = thread.target.startLine ?? thread.target.line;
-    if (!Number.isInteger(line) || anchor == null) return;
-    const target = { ...thread.target, startLine: Math.min(anchor, line), line: Math.max(anchor, line) };
-    setThread({ ...thread, key: targetKey(target), target });
-  }
-
   if (thread.collapsed) return <button className="inline-thread collapsed" onClick={() => setThread({ ...thread, collapsed: false })}><ChevronRightIcon size={14} /> Thread on {thread.target.line == null ? "file" : targetLabel(thread.target)}</button>;
-  return <div className="inline-thread review-thread"><div className="thread-head"><div><strong>Line thread</strong><span>{targetLabel(thread.target)}</span></div><div className="actions">{(thread.draft.trim().length > 0 || thread.messages.length > 0) && <Button variant="icon" aria-label="Collapse thread" onClick={() => setThread({ ...thread, collapsed: true })}><ChevronDownIcon size={16} /></Button>}<Button variant="icon" className="close-thread-button" aria-label="Close thread" onClick={closeThread}><XIcon size={16} /></Button></div></div>{thread.target.line != null && <label className="range-control">End line<input type="number" min={1} value={thread.target.line} onChange={(event) => updateRangeEnd(event.target.value)} /></label>}{thread.messages.length > 0 && <div className="thread-messages">{thread.messages.map((message, index) => <div className={`thread-note ${message.role}`} key={index}><div className="message-role">{message.role === "user" ? "You" : "Pi"}</div><MarkdownText text={message.text} fileLinks={{ prUrl }} /></div>)}</div>}<div className="composer"><textarea value={thread.draft} onChange={(event) => setThread({ ...thread, draft: event.target.value })} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey && thread.draft.trim().length > 0 && !thread.asking) { event.preventDefault(); void askThread(thread); } }} placeholder="Write a draft comment or ask Pi about this line" /><div className="actions"><button onClick={addDraft} disabled={thread.draft.trim().length === 0}>Add draft comment</button><button onClick={() => void askThread(thread)} disabled={thread.asking || thread.draft.trim().length === 0}>{thread.asking ? <span className="spinner-label"><span className="spinner" aria-hidden="true" />Asking</span> : "Ask Pi"}</button></div></div></div>;
+  return <div className="inline-thread review-thread"><div className="thread-head"><div><strong>Line thread</strong><span>{targetLabel(thread.target)}</span></div><div className="actions">{(thread.draft.trim().length > 0 || thread.messages.length > 0) && <Button variant="icon" aria-label="Collapse thread" onClick={() => setThread({ ...thread, collapsed: true })}><ChevronDownIcon size={16} /></Button>}<Button variant="icon" className="close-thread-button" aria-label="Close thread" onClick={closeThread}><XIcon size={16} /></Button></div></div>{thread.messages.length > 0 && <div className="thread-messages">{thread.messages.map((message, index) => <div className={`thread-note ${message.role}`} key={index}><div className="message-role">{message.role === "user" ? "You" : "Pi"}</div><MarkdownText text={message.text} fileLinks={{ prUrl }} /></div>)}</div>}<div className="composer"><textarea value={thread.draft} onChange={(event) => setThread({ ...thread, draft: event.target.value })} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey && thread.draft.trim().length > 0 && !thread.asking) { event.preventDefault(); void askThread(thread); } }} placeholder="Write a draft comment or ask Pi about this line" /><div className="actions"><button onClick={addDraft} disabled={thread.draft.trim().length === 0}>Add draft comment</button><button onClick={() => void askThread(thread)} disabled={thread.asking || thread.draft.trim().length === 0}>{thread.asking ? <span className="spinner-label"><span className="spinner" aria-hidden="true" />Asking</span> : "Ask Pi"}</button></div></div></div>;
 }
 
 function reviewStatus(pr: StoredPullRequest): { label: string; tone: string } {
@@ -1147,12 +1149,14 @@ function AiReviewPanel({ prUrl, review, setReview, runReview, sendMessage, focus
   }
   const composer = <div className="ai-chat-composer"><textarea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submitChat(); } }} placeholder="Ask Pi about this PR…" /><Button variant="muted" onClick={submitChat} disabled={review.running || draft.trim().length === 0}>{review.running ? "Sending…" : "Send"}</Button></div>;
   const viewedCount = focusAreas.filter((area) => viewedFocusIds[area.id]).length;
-  const focusAreaLinks = focusAreaCount > 0 && <div className="focus-area-links" aria-label="Focus areas">
+  const allFocusReviewed = focusAreaCount > 0 && viewedCount === focusAreaCount;
+  const focusLinksMinimized = allFocusReviewed && allFocusCollapsed;
+  const focusAreaLinks = focusAreaCount > 0 && <div className={`focus-area-links${focusLinksMinimized ? " minimized" : ""}`} aria-label="Focus areas">
     <div className="focus-area-links-head">
       <strong>{viewedCount}/{focusAreaCount} focus area{focusAreaCount === 1 ? "" : "s"} reviewed</strong>
       <Button variant="muted" className="small-muted-button" onClick={toggleFocusAreas}>{allFocusCollapsed ? "Expand all" : "Collapse all"}</Button>
     </div>
-    {focusAreas.map((area, index) => {
+    {!focusLinksMinimized && focusAreas.map((area, index) => {
       const viewed = viewedFocusIds[area.id] ?? false;
       return <div key={area.id} className={`focus-area-link-row${viewed ? " viewed" : ""}`}>
         <label className="focus-area-check" title="Mark as reviewed" onClick={(event) => event.stopPropagation()}>
