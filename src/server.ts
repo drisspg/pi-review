@@ -10,8 +10,8 @@ import { inputFromBody, prKeyForRef, readBody, recordFromBody, refFromBody, send
 import { logger } from "./logger.js";
 import { askPi, disposePiSession, disposePiSessions, piDiagnostics, prewarmPiSession, registerPiSessionCwd, setPiModel } from "./pi-session.js";
 import { parsePullRequestRef } from "./pr.js";
-import { latestAiReview, latestFocusScan, listRecentPullRequests, markPullRequestReviewed, removePullRequest, saveAiReview, saveFocusScan, setFileViewed, upsertPullRequest } from "./state.js";
-import type { AiReviewMessageRecord, FocusAreaReviewState } from "./types.js";
+import { currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, latestAiReview, latestFocusScan, listRecentPullRequests, listReviewMemoryRecords, markPullRequestReviewed, removePullRequest, reviewMemoryStats, saveAiReview, saveFocusScan, saveReviewMemory, saveReviewProfile, setFileViewed, upsertPullRequest } from "./state.js";
+import type { AiReviewMessageRecord, FocusAreaReviewState, ReviewMemoryComment } from "./types.js";
 import { cleanupPrWorktree, preparePrWorktree, worktreeDirForRef } from "./worktrees.js";
 
 const DEFAULT_PORT = 43133;
@@ -54,6 +54,23 @@ function githubReviewComments(comments: ReviewSubmitComment[]): Array<Record<str
   }));
 }
 
+function reviewMemoryComments(comments: ReviewSubmitComment[]): ReviewMemoryComment[] {
+  return comments.flatMap(reviewMemoryCommentFromPayload).filter((comment) => comment.body.length > 0);
+}
+
+function reviewMemoryCommentFromPayload(comment: ReviewSubmitComment): ReviewMemoryComment[] {
+  if (typeof comment.path !== "string" || typeof comment.body !== "string") return [];
+  const side: ReviewMemoryComment["side"] | null = comment.side === "RIGHT" || comment.side === "LEFT" ? comment.side : null;
+  if (side == null) return [];
+  return [{
+    path: comment.path,
+    line: typeof comment.line === "number" ? comment.line : null,
+    startLine: typeof comment.start_line === "number" ? comment.start_line : null,
+    side,
+    body: comment.body.trim(),
+  }];
+}
+
 function reviewSubmitDiagnostics(comments: ReviewSubmitComment[]): string {
   if (comments.length === 0) return "No inline comments were included in the failed review payload.";
   const rows = comments.map((comment, index) => {
@@ -77,6 +94,30 @@ function startPiReviewJob(prKey: string, prompt: string, sessionKind?: string): 
     piReviewJobs.set(job.id, { ...job, status: "failed", error: error instanceof Error ? error.message : String(error), finishedAt: new Date().toISOString() });
   });
   return job;
+}
+
+async function distillReviewMemory(): Promise<string> {
+  const existingProfile = await currentReviewProfile();
+  const source = await currentReviewMemoryDistillationSource();
+  const prompt = `Distill Driss's code-review preferences from raw submitted review comments into an actionable reviewer profile.
+
+Return only markdown with these sections:
+# Driss review profile
+## What to flag
+## What to usually ignore
+## Severity calibration
+## Comment style
+## Review prompt rules
+
+Make the profile compact and directive. Prefer durable patterns over one-off specifics. Include actionable rules a future reviewer can follow. Do not include raw examples verbatim except short representative phrases when needed.
+
+Existing profile:
+${existingProfile?.text ?? "No existing profile."}
+
+Raw review evidence:
+${source}`;
+  const answer = await askPi("review-memory", prompt, "review-memory-distill");
+  return (await saveReviewProfile(answer)).text;
 }
 
 function sse(res: ServerResponse, event: string, data: unknown): void {
@@ -151,6 +192,28 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
 
   if (req.method === "GET" && url.pathname === "/api/logs") {
     sendJson(res, 200, { logs: logger.entries() });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/review-memory") {
+    const limit = Number.parseInt(url.searchParams.get("limit") ?? "50", 10);
+    sendJson(res, 200, { prompt: await currentReviewMemoryPrompt(), profile: await currentReviewProfile(), records: await listReviewMemoryRecords(Number.isFinite(limit) ? Math.max(1, Math.min(200, limit)) : 50), stats: await reviewMemoryStats() });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/review-memory/distill") {
+    logger.info("api", "review memory distillation requested");
+    sendJson(res, 200, { profile: await distillReviewMemory() });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/review-memory/capture") {
+    const payload = recordFromBody(await readBody(req));
+    if (typeof payload.prKey !== "string" || typeof payload.headSha !== "string") throw new Error("Expected prKey and headSha");
+    if (payload.event !== "COMMENT" && payload.event !== "APPROVE" && payload.event !== "REQUEST_CHANGES") throw new Error("Expected review event");
+    const memory = await saveReviewMemory({ prKey: payload.prKey, headSha: payload.headSha, event: payload.event, body: typeof payload.body === "string" ? payload.body.trim() : "", comments: reviewMemoryComments(reviewSubmitCommentsFromPayload(payload.comments)) });
+    logger.info("api", "review memory captured", { prKey: payload.prKey, comments: memory.comments.length, event: payload.event });
+    sendJson(res, 200, { memory });
     return;
   }
 
@@ -289,7 +352,9 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       const message = error instanceof Error ? error.message : String(error);
       throw new Error(`${message}\n\n${reviewSubmitDiagnostics(comments)}\n\nIf GitHub returned HTTP 422, delete or recreate the listed draft whose path/line is stale, then retry.`);
     }
-    const reviewedPr = await markPullRequestReviewed(prKeyForRef(ref), typeof payload.headSha === "string" ? payload.headSha : "", payload.event);
+    const prKey = prKeyForRef(ref);
+    await saveReviewMemory({ prKey, headSha: typeof payload.headSha === "string" ? payload.headSha : "", event: payload.event, body: typeof payload.body === "string" ? payload.body.trim() : "", comments: reviewMemoryComments(comments) });
+    const reviewedPr = await markPullRequestReviewed(prKey, typeof payload.headSha === "string" ? payload.headSha : "", payload.event);
     sendJson(res, 200, { result, pr: reviewedPr });
     return;
   }

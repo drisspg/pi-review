@@ -2366,6 +2366,7 @@ a { color: var(--link); text-decoration: none; }
 
 .pi-settings-modal { width: min(1080px, 96vw); }
 .pi-diagnostics-modal { width: min(1200px, 96vw); }
+.review-memory-modal { width: min(1280px, 96vw); }
 
 .pi-modal-head {
   display: flex;
@@ -2460,6 +2461,138 @@ a { color: var(--link); text-decoration: none; }
   padding: 14px 20px;
   overflow: auto;
   max-height: calc(90vh - 220px);
+}
+
+.memory-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 10px 20px 0;
+  background: var(--panel);
+}
+
+.memory-tabs button {
+  min-height: 30px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  color: var(--muted);
+  background: transparent;
+}
+
+.memory-tabs button.active {
+  color: var(--text);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+}
+
+.review-memory-body {
+  max-height: calc(90vh - 260px);
+}
+
+.review-memory-summary strong {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+.memory-section {
+  display: grid;
+  gap: 12px;
+}
+
+.memory-empty,
+.memory-distillation-map,
+.memory-record {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel2);
+  padding: 12px;
+}
+
+.memory-empty h3,
+.memory-distillation-map h3 {
+  margin: 0 0 4px;
+}
+
+.memory-empty p,
+.memory-distillation-map p {
+  margin: 0;
+}
+
+.memory-examples {
+  align-content: start;
+}
+
+.memory-record {
+  padding: 0;
+  overflow: hidden;
+}
+
+.memory-record summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  padding: 10px 12px;
+  list-style: none;
+  border-bottom: 1px solid transparent;
+}
+
+.memory-record[open] summary {
+  border-bottom-color: var(--border);
+}
+
+.memory-record summary strong,
+.memory-record summary span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-record summary span {
+  color: var(--muted);
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+
+.memory-record-block {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.memory-record-block + .memory-record-block {
+  border-top: 1px solid var(--border);
+}
+
+.memory-record-block h4 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.memory-comment {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  background: var(--panel);
+}
+
+.memory-comment span {
+  color: var(--link);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.memory-comment p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.memory-prompt-preview {
+  max-height: none;
 }
 
 .pi-settings-section {

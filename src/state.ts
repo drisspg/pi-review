@@ -4,19 +4,24 @@ import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { homedir } from "node:os";
 
-import type { AiReviewRecord, AppState, FileReviewState, FocusScanRecord, StoredPullRequest } from "./types.js";
+import type { AiReviewRecord, AppState, FileReviewState, FocusScanRecord, ReviewMemoryProfile, ReviewMemoryRecord, StoredPullRequest } from "./types.js";
 
 const STATE_PATH = resolve(homedir(), ".pi", "agent", "state", "pi-pr-review", "state.json");
+const REVIEW_MEMORY_NOTES_PATH = resolve(homedir(), "agent_notes", "findings", "pi_review_preferences.md");
+const REVIEW_PROFILE_PATH = resolve(homedir(), "agent_notes", "findings", "pi_review_profile.md");
 
 const maxFocusScansPerPr = 20;
 const maxAiReviewsPerPr = 20;
+const maxReviewMemoryRecords = 10_000;
+const maxReviewMemoryPromptRecords = 12;
+const maxReviewMemoryDistillationRecords = 250;
 
-const emptyState = (): AppState => ({ prs: [], fileReviews: [], focusScans: [], aiReviews: [] });
+const emptyState = (): AppState => ({ prs: [], fileReviews: [], focusScans: [], aiReviews: [], reviewMemory: [], reviewProfile: null });
 
 export async function readState(): Promise<AppState> {
   if (!existsSync(STATE_PATH)) return emptyState();
   const state = JSON.parse(await readFile(STATE_PATH, "utf8")) as Partial<AppState>;
-  return { prs: state.prs ?? [], fileReviews: state.fileReviews ?? [], focusScans: state.focusScans ?? [], aiReviews: state.aiReviews ?? [] };
+  return { prs: state.prs ?? [], fileReviews: state.fileReviews ?? [], focusScans: state.focusScans ?? [], aiReviews: state.aiReviews ?? [], reviewMemory: state.reviewMemory ?? [], reviewProfile: state.reviewProfile ?? null };
 }
 
 async function writeState(state: AppState): Promise<void> {
@@ -24,6 +29,82 @@ async function writeState(state: AppState): Promise<void> {
   const tempPath = `${STATE_PATH}.${randomUUID()}.tmp`;
   await writeFile(tempPath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
   await rename(tempPath, STATE_PATH);
+}
+
+async function writeReviewMemoryNotes(records: ReviewMemoryRecord[]): Promise<void> {
+  await mkdir(dirname(REVIEW_MEMORY_NOTES_PATH), { recursive: true });
+  await writeFile(REVIEW_MEMORY_NOTES_PATH, reviewMemoryPrompt(records), "utf8");
+}
+
+async function writeReviewProfile(profile: ReviewMemoryProfile): Promise<void> {
+  await mkdir(dirname(REVIEW_PROFILE_PATH), { recursive: true });
+  await writeFile(REVIEW_PROFILE_PATH, profile.text, "utf8");
+}
+
+function reviewMemoryLocation(comment: ReviewMemoryRecord["comments"][number]): string {
+  const line = comment.line == null ? "file" : comment.startLine != null && comment.startLine !== comment.line ? `${comment.startLine}-${comment.line}` : `${comment.line}`;
+  return `${comment.path}:${line}`;
+}
+
+export function reviewMemoryPrompt(records: ReviewMemoryRecord[]): string {
+  if (records.length === 0) return "No review preference examples have been captured yet.";
+  const examples = records.slice(0, maxReviewMemoryPromptRecords).map((record, index) => {
+    const comments = record.comments.length === 0 ? "No inline comments." : record.comments.map((comment) => `- ${reviewMemoryLocation(comment)}: ${comment.body}`).join("\n");
+    const body = record.body.trim().length === 0 ? "No overall body." : record.body.trim();
+    return `## Example ${index + 1}: ${record.prKey} (${record.event})\nOverall review body:\n${body}\n\nInline comments:\n${comments}`;
+  });
+  return `# Driss review preference examples\n\nThese are examples of review comments Driss actually submitted. Use them as positive examples of what he considered worth saying. Prefer similar specificity, severity, and style. Do not copy comments verbatim unless the same issue is present. Avoid over-indexing on one example when the current diff points elsewhere.\n\n${examples.join("\n\n")}`;
+}
+
+function reviewMemoryDistillationSource(records: ReviewMemoryRecord[]): string {
+  if (records.length === 0) return "No review preference examples have been captured yet.";
+  return records.slice(0, maxReviewMemoryDistillationRecords).map((record, index) => {
+    const comments = record.comments.length === 0 ? "No inline comments." : record.comments.map((comment) => `- ${reviewMemoryLocation(comment)}: ${comment.body}`).join("\n");
+    const body = record.body.trim().length === 0 ? "No overall body." : record.body.trim();
+    return `## Raw review ${index + 1}: ${record.prKey} (${record.event}, ${record.createdAt})\nOverall review body:\n${body}\n\nInline comments:\n${comments}`;
+  }).join("\n\n");
+}
+
+export async function currentReviewMemoryDistillationSource(): Promise<string> {
+  return reviewMemoryDistillationSource((await readState()).reviewMemory);
+}
+
+export async function currentReviewMemoryContext(): Promise<string> {
+  const state = await readState();
+  const profile = state.reviewProfile?.text.trim();
+  return [
+    profile == null || profile.length === 0 ? "# Driss review profile\n\nNo distilled review profile has been generated yet." : profile,
+    reviewMemoryPrompt(state.reviewMemory),
+  ].join("\n\n---\n\n");
+}
+
+export async function currentReviewProfile(): Promise<ReviewMemoryProfile | null> {
+  return (await readState()).reviewProfile;
+}
+
+export async function listReviewMemoryRecords(limit = 50): Promise<ReviewMemoryRecord[]> {
+  return (await readState()).reviewMemory.slice(0, limit);
+}
+
+export async function reviewMemoryStats(): Promise<{ recordCount: number; inlineCommentCount: number; prCount: number; latestCreatedAt: string | null; profileUpdatedAt: string | null; profileSourceRecordCount: number | null }> {
+  const state = await readState();
+  return {
+    recordCount: state.reviewMemory.length,
+    inlineCommentCount: state.reviewMemory.reduce((total, record) => total + record.comments.length, 0),
+    prCount: new Set(state.reviewMemory.map((record) => record.prKey)).size,
+    latestCreatedAt: state.reviewMemory[0]?.createdAt ?? null,
+    profileUpdatedAt: state.reviewProfile?.updatedAt ?? null,
+    profileSourceRecordCount: state.reviewProfile?.sourceRecordCount ?? null,
+  };
+}
+
+export async function saveReviewProfile(text: string): Promise<ReviewMemoryProfile> {
+  const state = await readState();
+  const profile: ReviewMemoryProfile = { text: text.trim(), sourceRecordCount: state.reviewMemory.length, updatedAt: new Date().toISOString() };
+  state.reviewProfile = profile;
+  await writeState(state);
+  await writeReviewProfile(profile);
+  return profile;
 }
 
 export async function listRecentPullRequests(): Promise<StoredPullRequest[]> {
@@ -112,6 +193,19 @@ export async function saveAiReview(review: Omit<AiReviewRecord, "id" | "createdA
   });
   await writeState(state);
   return next;
+}
+
+export async function saveReviewMemory(record: Omit<ReviewMemoryRecord, "id" | "createdAt">): Promise<ReviewMemoryRecord> {
+  const state = await readState();
+  const next: ReviewMemoryRecord = { ...record, id: randomUUID(), createdAt: new Date().toISOString() };
+  state.reviewMemory = [next, ...state.reviewMemory].slice(0, maxReviewMemoryRecords);
+  await writeState(state);
+  await writeReviewMemoryNotes(state.reviewMemory);
+  return next;
+}
+
+export async function currentReviewMemoryPrompt(): Promise<string> {
+  return currentReviewMemoryContext();
 }
 
 export async function removePullRequest(prKey: string): Promise<void> {

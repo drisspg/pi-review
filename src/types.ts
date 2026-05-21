@@ -130,6 +130,30 @@ export type AiReviewRecord = {
   updatedAt: string;
 };
 
+export type ReviewMemoryComment = {
+  path: string;
+  line: number | null;
+  startLine?: number | null;
+  side: "RIGHT" | "LEFT";
+  body: string;
+};
+
+export type ReviewMemoryRecord = {
+  id: string;
+  prKey: string;
+  headSha: string;
+  event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES";
+  body: string;
+  comments: ReviewMemoryComment[];
+  createdAt: string;
+};
+
+export type ReviewMemoryProfile = {
+  text: string;
+  sourceRecordCount: number;
+  updatedAt: string;
+};
+
 export type PullRequestReviewData = {
   pr: StoredPullRequest;
   raw: PullRequest;
@@ -147,4 +171,6 @@ export type AppState = {
   fileReviews: FileReviewState[];
   focusScans: FocusScanRecord[];
   aiReviews: AiReviewRecord[];
+  reviewMemory: ReviewMemoryRecord[];
+  reviewProfile: ReviewMemoryProfile | null;
 };

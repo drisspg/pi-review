@@ -10,7 +10,7 @@ import { commentTarget, commentThreadDomId, draftMatchesTarget, groupReviewComme
 import { contextRowsFromText, hunkNewStart, isTargetInSelection, lastNewLine, parsePatchRows, targetFromPoint, targetFromRow } from "./lib/diff";
 import { languageForPath } from "./lib/highlight";
 import { newId, prUrlFromKey, shortSha } from "./lib/pr";
-import type { AiReview, AiReviewMessage, AiReviewRecord, DiffRow, DraftComment, DragSelection, FileReviewState, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, LogEntry, OpenResponse, PullFile, PullIssueComment, PullReviewComment, StoredPullRequest, Target, ThemeName, Thread } from "./types";
+import type { AiReview, AiReviewMessage, AiReviewRecord, DiffRow, DraftComment, DragSelection, FileReviewState, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, LogEntry, OpenResponse, PullFile, PullIssueComment, PullReviewComment, ReviewMemoryRecord, ReviewMemoryResponse, StoredPullRequest, Target, ThemeName, Thread } from "./types";
 import "./styles.css";
 
 type DiffViewMode = "unified" | "split";
@@ -236,6 +236,10 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [diagnostics, setDiagnostics] = useState<Record<string, unknown> | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
+  const [reviewMemory, setReviewMemory] = useState<ReviewMemoryResponse | null>(null);
+  const [memoryLoading, setMemoryLoading] = useState(false);
+  const [memoryDistilling, setMemoryDistilling] = useState(false);
   const [theme, setTheme] = useState<ThemeName>(() => localStorage.getItem("pi-review-theme") as ThemeName || "github-dark");
   const [commentCollapseSignal, setCommentCollapseSignal] = useState(0);
   const [commentsCollapsed, setCommentsCollapsed] = useState(false);
@@ -526,6 +530,10 @@ function App() {
     setExpandedNeighborRows((current) => ({ ...current, [key]: contextRowsFromText(text, startLine, endLine) }));
   }
 
+  async function loadReviewMemoryPrompt(): Promise<string> {
+    return (await api<{ prompt: string }>("/api/review-memory")).prompt;
+  }
+
   async function runAutomaticPiReviews(nextReview: OpenResponse) {
     await Promise.all([runAiReviewFor(nextReview, true), runFocusReviewFor(nextReview, true)]);
     await refreshLogs();
@@ -543,7 +551,11 @@ ${file.patch ?? "Patch unavailable"}`).join("\n\n");
     const visibleAiReview = targetReview.pr.key === review?.pr.key ? currentGeneralReviewText(aiReview) : "";
     const previousAiReview = visibleAiReview || targetReview.aiReview?.answer.trim() || "No previous full review is stored.";
     const previousFocusAreas = targetReview.focusScan == null ? "No previous focus scan findings are stored." : focusScanHistoryPrompt(targetReview.focusScan.answer, targetReview.focusScan.areaStates);
+    const reviewMemory = await loadReviewMemoryPrompt();
     const prompt = `Run a concise code review for ${targetReview.pr.key}. Focus on correctness, edge cases, tests, and concrete actionable findings. Avoid generic praise. Return markdown with bullets and file/line references where possible.
+
+Reviewer preference memory:
+${reviewMemory}
 
 Previous full review:
 ${previousAiReview}
@@ -612,11 +624,15 @@ Status: ${file.status}, +${file.additions}/-${file.deletions}
 ${file.patch ?? "Patch unavailable"}`).join("\n\n");
     const previousScan = targetReview.focusScan;
     const previousFocusAreas = previousScan == null ? "No previous focus scan findings are stored." : focusScanHistoryPrompt(previousScan.answer, previousScan.areaStates);
+    const reviewMemory = await loadReviewMemoryPrompt();
     const prompt = `You are a second, independent PR-review pass for ${targetReview.pr.key}. Look specifically for areas worth deeper human review, not a normal exhaustive review. Prioritize:
 - code that feels inconsistent with nearby codebase patterns or API conventions
 - surprising behavior, hidden assumptions, edge cases, or subtle tradeoffs
 - tests, migrations, performance, concurrency, or compatibility risks that deserve investigation
 - places where the implementation may be valid but reviewers should explicitly decide if the tradeoff is acceptable
+
+Reviewer preference memory:
+${reviewMemory}
 
 Previous focus scan state:
 ${previousFocusAreas}
@@ -667,6 +683,32 @@ ${diffSummary}`;
     await loadDiagnostics();
   }
 
+  async function loadReviewMemory() {
+    setMemoryLoading(true);
+    try {
+      const data = await api<ReviewMemoryResponse>("/api/review-memory?limit=80");
+      setReviewMemory(data);
+      return data;
+    } finally {
+      setMemoryLoading(false);
+    }
+  }
+
+  async function showReviewMemory() {
+    setMemoryOpen(true);
+    await loadReviewMemory();
+  }
+
+  async function distillReviewMemory() {
+    setMemoryDistilling(true);
+    try {
+      await api<{ profile: string }>("/api/review-memory/distill", { method: "POST", body: JSON.stringify({}) });
+      await loadReviewMemory();
+    } finally {
+      setMemoryDistilling(false);
+    }
+  }
+
   async function cleanupPr(pr: StoredPullRequest) {
     if (!confirm(`Remove ${pr.key} from history and delete its local worktree/session cache?`)) return;
     setError(null);
@@ -704,7 +746,7 @@ ${diffSummary}`;
     setCommentCollapseSignal((signal) => signal + 1);
   }
 
-  return <main className="app-shell"><header className="toolbar"><div className="toolbar-title"><strong>Pi PR Review</strong><span>{review == null ? "Paste a PR to start" : `${review.pr.key} · ${review.pr.title}`}</span></div><div className="toolbar-actions">{review != null && <><button type="button" onClick={goHome}>Home</button><button type="button" title="Pi session settings" onClick={() => { setSettingsOpen(true); void loadDiagnostics(); }}>⚙</button><button type="button" title="Pi session diagnostics" onClick={() => void showDiagnostics()}>🐞</button></>}<button type="button" title="Server log" onClick={() => { setLogsOpen(true); void refreshLogs(); }}>📜</button><select aria-label="Theme" value={theme} onChange={(event) => setTheme(event.target.value as ThemeName)}><option value="github-dark">GitHub dark</option><option value="github-dimmed">GitHub dimmed</option><option value="github-light">GitHub light</option></select>{review != null && <form className="open-form" onSubmit={submit}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="OWNER/REPO#123 or GitHub PR URL" /><button disabled={busy || input.trim().length === 0}>{busy ? "Fetching…" : "Open"}</button></form>}</div></header>{error != null && <div className="error">{error}</div>}{busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} aiReview={aiReview} setAiReview={setAiReview} runAiReview={runAiReview} sendAiReviewMessage={sendAiReviewMessage} focusReview={focusReview} setFocusReview={setFocusReview} runFocusReview={runFocusReview} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} viewedFocusAreaIds={viewedFocusAreaIds} setViewedFocusAreaIds={setViewedFocusAreaIds} saveFocusScan={saveFocusScan} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} />}{diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}{review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} openDiagnostics={() => { setSettingsOpen(false); void showDiagnostics(); }} close={() => setSettingsOpen(false)} />}{logsOpen && <LogsModal logs={logs} refreshLogs={refreshLogs} close={() => setLogsOpen(false)} />}</main>;
+  return <main className="app-shell"><header className="toolbar"><div className="toolbar-title"><strong>Pi PR Review</strong><span>{review == null ? "Paste a PR to start" : `${review.pr.key} · ${review.pr.title}`}</span></div><div className="toolbar-actions">{review != null && <><button type="button" onClick={goHome}>Home</button><button type="button" title="Pi session settings" onClick={() => { setSettingsOpen(true); void loadDiagnostics(); }}>⚙</button><button type="button" title="Pi session diagnostics" onClick={() => void showDiagnostics()}>🐞</button></>}<button type="button" title="Review memory" onClick={() => void showReviewMemory()}>🧠</button><button type="button" title="Server log" onClick={() => { setLogsOpen(true); void refreshLogs(); }}>📜</button><select aria-label="Theme" value={theme} onChange={(event) => setTheme(event.target.value as ThemeName)}><option value="github-dark">GitHub dark</option><option value="github-dimmed">GitHub dimmed</option><option value="github-light">GitHub light</option></select>{review != null && <form className="open-form" onSubmit={submit}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="OWNER/REPO#123 or GitHub PR URL" /><button disabled={busy || input.trim().length === 0}>{busy ? "Fetching…" : "Open"}</button></form>}</div></header>{error != null && <div className="error">{error}</div>}{busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} aiReview={aiReview} setAiReview={setAiReview} runAiReview={runAiReview} sendAiReviewMessage={sendAiReviewMessage} focusReview={focusReview} setFocusReview={setFocusReview} runFocusReview={runFocusReview} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} viewedFocusAreaIds={viewedFocusAreaIds} setViewedFocusAreaIds={setViewedFocusAreaIds} saveFocusScan={saveFocusScan} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} />}{diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}{review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} openDiagnostics={() => { setSettingsOpen(false); void showDiagnostics(); }} close={() => setSettingsOpen(false)} />}{memoryOpen && <ReviewMemoryModal memory={reviewMemory} loading={memoryLoading} distilling={memoryDistilling} refresh={() => void loadReviewMemory()} distill={() => void distillReviewMemory()} close={() => setMemoryOpen(false)} />}{logsOpen && <LogsModal logs={logs} refreshLogs={refreshLogs} close={() => setLogsOpen(false)} />}</main>;
 }
 
 type StartFilter = "all" | "needs-review" | "in-progress" | "done";
@@ -1519,6 +1561,75 @@ function PiSettingsModal({ prKey, diagnostics, setDiagnostics, openDiagnostics, 
     </footer>
   </ModalShell>;
 }
+type ReviewMemoryTab = "profile" | "examples" | "prompt";
+
+function reviewMemoryProfileSections(text: string): string[] {
+  return [...text.matchAll(/^##\s+(.+)$/gm)].map((match) => match[1]).filter((section) => section.length > 0);
+}
+
+function reviewMemoryRecordTitle(record: ReviewMemoryRecord): string {
+  return `${record.prKey} · ${record.event} · ${relativeTime(record.createdAt)}`;
+}
+
+function reviewMemoryLocation(comment: ReviewMemoryRecord["comments"][number]): string {
+  const line = comment.line == null ? "file" : comment.startLine != null && comment.startLine !== comment.line ? `${comment.startLine}-${comment.line}` : comment.line;
+  return `${comment.path}:${line}`;
+}
+
+function ReviewMemoryModal({ memory, loading, distilling, refresh, distill, close }: { memory: ReviewMemoryResponse | null; loading: boolean; distilling: boolean; refresh: () => void; distill: () => void; close: () => void }) {
+  const [tab, setTab] = useState<ReviewMemoryTab>("profile");
+  const profileText = memory?.profile?.text.trim() ?? "";
+  const profileSections = profileText.length === 0 ? [] : reviewMemoryProfileSections(profileText);
+  return <ModalShell open onOpenChange={(open) => { if (!open) close(); }} label="Review memory" className="pi-modal review-memory-modal">
+    <header className="pi-modal-head">
+      <div>
+        <h2>Review memory</h2>
+        <p className="muted">Raw review feedback becomes examples; distillation turns it into prompt rules.</p>
+      </div>
+      <div className="pi-modal-head-actions">
+        <button type="button" onClick={refresh} disabled={loading || distilling}>{loading ? "Refreshing…" : "Refresh"}</button>
+        <button type="button" className="pi-primary" onClick={distill} disabled={loading || distilling || (memory?.stats.recordCount ?? 0) === 0}>{distilling ? "Distilling…" : "Distill profile"}</button>
+        <button type="button" className="pi-icon-button" onClick={close} aria-label="Close review memory">✕</button>
+      </div>
+    </header>
+    {memory == null ? <div className="pi-modal-body"><p className="muted">{loading ? "Loading review memory…" : "No review memory loaded yet."}</p></div> : <>
+      <div className="pi-modal-summary review-memory-summary">
+        <div><span>Raw reviews</span><strong>{memory.stats.recordCount}</strong></div>
+        <div><span>Inline comments</span><strong>{memory.stats.inlineCommentCount}</strong></div>
+        <div><span>Sources</span><strong>{memory.stats.prCount}</strong></div>
+        <div><span>Profile</span><strong>{memory.profile == null ? "not distilled" : relativeTime(memory.profile.updatedAt)}</strong></div>
+        <div><span>Profile records</span><strong>{memory.profile?.sourceRecordCount ?? "—"}</strong></div>
+      </div>
+      <nav className="memory-tabs" role="tablist" aria-label="Review memory sections">
+        {(["profile", "examples", "prompt"] as const).map((id) => <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? "active" : ""} onClick={() => setTab(id)}>{id === "profile" ? "Distilled profile" : id === "examples" ? "Raw examples" : "Prompt context"}</button>)}
+      </nav>
+      <div className="pi-modal-body review-memory-body">
+        {tab === "profile" && <section className="memory-section">
+          {profileText.length === 0 ? <div className="memory-empty"><h3>No distilled profile yet</h3><p className="muted">Capture a few reviews, then run distillation to turn them into actionable review rules.</p></div> : <>
+            <div className="memory-distillation-map">
+              <h3>Current distillation</h3>
+              <p className="muted">These sections are injected before examples in future review prompts.</p>
+              <div className="chip-list">{profileSections.map((section) => <span className="chip" key={section}>{section}</span>)}</div>
+            </div>
+            <MarkdownText text={profileText} />
+          </>}
+        </section>}
+        {tab === "examples" && <section className="memory-section memory-examples">
+          {memory.records.length === 0 ? <p className="muted">No raw examples captured yet.</p> : memory.records.map((record) => <details className="memory-record" key={record.id}>
+            <summary><strong>{reviewMemoryRecordTitle(record)}</strong><span>{record.comments.length} inline · head {shortSha(record.headSha)}</span></summary>
+            {record.body.trim().length > 0 && <div className="memory-record-block"><h4>Overall</h4><MarkdownText text={record.body} /></div>}
+            <div className="memory-record-block"><h4>Inline comments</h4>{record.comments.length === 0 ? <p className="muted">No inline comments.</p> : record.comments.map((comment, index) => <div className="memory-comment" key={index}><span>{reviewMemoryLocation(comment)}</span><p>{comment.body}</p></div>)}</div>
+          </details>)}
+        </section>}
+        {tab === "prompt" && <section className="memory-section">
+          <p className="muted">This is the exact review memory context sent to Pi Review prompts and exposed to the `/review` workflow.</p>
+          <pre className="prompt-preview memory-prompt-preview">{memory.prompt}</pre>
+        </section>}
+      </div>
+    </>}
+  </ModalShell>;
+}
+
 function LogsModal({ logs, refreshLogs, close }: { logs: LogEntry[]; refreshLogs: () => Promise<void>; close: () => void }) {
   return <ModalShell open onOpenChange={(open) => { if (!open) close(); }} label="Server log">
     <div className="thread-head"><h2>Server log</h2><div className="actions"><button onClick={() => void refreshLogs()}>Refresh</button><button onClick={close}>Close</button></div></div>

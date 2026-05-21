@@ -108,6 +108,26 @@ worktrees/                 # per-PR worktrees
 pi-sessions/               # persistent Pi SDK sessions per PR
 ```
 
+Submitted review comments are also captured as raw preference memory in `state.json` with a 10,000-review cap and mirrored as prompt examples to:
+
+```text
+~/agent_notes/findings/pi_review_preferences.md
+```
+
+Distill raw examples into an actionable reviewer profile with:
+
+```sh
+curl -X POST http://127.0.0.1:43133/api/review-memory/distill
+```
+
+The distilled profile is stored in `state.json` and mirrored to:
+
+```text
+~/agent_notes/findings/pi_review_profile.md
+```
+
+Pi Review includes the profile plus recent examples in future review prompts. Use the 🧠 toolbar button to inspect raw examples, the current distilled profile, and the exact prompt context. The shared `/review` skill reads the same profile/examples before launching a reviewer, and the Pi `/diff-review` extension writes submitted review feedback into the same store. External tools can capture into the same store with `POST /api/review-memory/capture` using `{ prKey, headSha, event, body, comments }`.
+
 ## Development notes
 
 - The backend lives in `src/`.
