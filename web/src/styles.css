@@ -1218,13 +1218,6 @@ a { color: var(--link); text-decoration: none; }
   background: var(--border);
 }
 
-.github-comment.commenter-blue { --commenter: #58a6ff; }
-.github-comment.commenter-purple { --commenter: #bc8cff; }
-.github-comment.commenter-green { --commenter: #56d364; }
-.github-comment.commenter-orange { --commenter: #f2cc60; }
-.github-comment.commenter-pink { --commenter: #ff7bba; }
-.github-comment.commenter-teal { --commenter: #39c5cf; }
-
 .github-comment::after {
   content: "";
   position: absolute;
