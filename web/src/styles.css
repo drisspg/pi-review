@@ -310,6 +310,7 @@ a { color: var(--link); text-decoration: none; }
 .resize-handle {
   position: sticky;
   top: 12px;
+  z-index: 30;
   width: 12px;
   height: calc(100vh - 24px);
   cursor: col-resize;
@@ -332,11 +333,20 @@ a { color: var(--link); text-decoration: none; }
 .side {
   position: sticky;
   top: 12px;
+  z-index: 40;
   display: grid;
   gap: 0;
   grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
   max-height: calc(100vh - 24px);
   overflow: hidden;
+}
+
+.side.maximized {
+  border-left: 1px solid var(--border);
+  border-radius: 10px 0 0 10px;
+  background: var(--panel);
+  box-shadow: -18px 0 36px rgba(1, 4, 9, 0.38);
 }
 
 .side-tabs {
@@ -473,7 +483,27 @@ a { color: var(--link); text-decoration: none; }
   overflow: auto;
   display: grid;
   gap: 10px;
+  min-width: 0;
   padding-top: 4px;
+}
+
+.side.maximized .side-tab-panels {
+  padding: 8px 10px 0;
+  background: var(--panel);
+}
+
+.side .panel,
+.side .markdown,
+.side .markdown-code-block,
+.side .ai-chat-messages,
+.side .ai-chat-message,
+.side .ai-chat-composer {
+  min-width: 0;
+}
+
+.side .ai-chat-composer textarea {
+  width: 100%;
+  min-width: 0;
 }
 
 .pr-header-strip {

@@ -898,7 +898,7 @@ function ReviewPage(props: DiffProps & { aiReview: AiReview; setAiReview: (revie
       {props.review.files.map((file) => <FileDiff key={file.filename} file={file} {...props} />)}
     </main>
     <div className="resize-handle" role="separator" aria-label="Resize side panel" onMouseDown={(event) => startResizeSidePanel(event, props.sideWidth, props.setSideWidth)} />
-    <aside className="side">
+    <aside className={`side${sideMaximized ? " maximized" : ""}`}>
       <nav className="side-tabs" role="tablist" aria-label="Review side panel">
         <button role="tab" aria-selected={sideTab === "review"} className={`side-tab${sideTab === "review" ? " active" : ""}`} onClick={() => setSideTab("review")}><span className="side-tab-pie" aria-hidden="true">🥧</span><span>Review</span>{draftCount > 0 && <span className="side-tab-badge">{draftCount}</span>}</button>
         <button role="tab" aria-selected={sideTab === "pi"} className={`side-tab${sideTab === "pi" ? " active" : ""}`} onClick={() => setSideTab("pi")}><span className="side-tab-pie" aria-hidden="true">π</span><span>Pi</span>{piBadge != null && <span className="side-tab-badge">{piBadge}</span>}</button>
