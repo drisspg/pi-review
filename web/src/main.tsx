@@ -399,13 +399,16 @@ function App() {
     return scan.id;
   }
 
-  async function saveAiReview(answer: string, messages: AiReviewMessage[], id = aiReviewId): Promise<string | null> {
-    if (review == null || answer.trim().length === 0) return id;
-    const { review: savedReview } = await api<{ review: AiReviewRecord }>("/api/ai-review/save", { method: "POST", body: JSON.stringify({ id, prKey: review.pr.key, headSha: review.pr.headSha, answer, messages }) });
-    setAiReviewId(savedReview.id);
-    const nextReview = { ...review, aiReview: savedReview };
+  async function saveAiReviewFor(targetReview: OpenResponse, answer: string, messages: AiReviewMessage[], id: string | null = targetReview.aiReview?.id ?? null): Promise<string | null> {
+    if (answer.trim().length === 0) return id;
+    const { review: savedReview } = await api<{ review: AiReviewRecord }>("/api/ai-review/save", { method: "POST", body: JSON.stringify({ id, prKey: targetReview.pr.key, headSha: targetReview.pr.headSha, answer, messages }) });
+    const cached = reviewCacheRef.current.get(targetReview.pr.key) ?? targetReview;
+    const nextReview = { ...cached, aiReview: savedReview };
     cacheReview(nextReview);
-    setReview(nextReview);
+    if (activeReviewKeyRef.current === targetReview.pr.key) {
+      setAiReviewId(savedReview.id);
+      setReview(nextReview);
+    }
     return savedReview.id;
   }
 
@@ -579,7 +582,7 @@ ${diffSummary}`;
         const baseMessages = background ? aiReview.messages : aiReview.messages.filter((message) => message.kind !== "general-review");
         const nextMessages = mergeGeneralReview(baseMessages, answer);
         setAiReview((current) => ({ ...current, open: !background || current.open, expanded: !background || current.expanded, running: false, text: answer, messages: nextMessages }));
-        void saveAiReview(answer, nextMessages, null);
+        void saveAiReviewFor(targetReview, answer, nextMessages, null);
         break;
       }
     } catch (err) {
@@ -591,17 +594,23 @@ ${diffSummary}`;
 
   async function sendAiReviewMessage(message: string) {
     if (review == null || aiReview.running || message.trim().length === 0) return;
+    const targetReview = review;
+    const startingReview = aiReview;
     const question = message.trim();
     setAiReview((current) => ({ ...current, open: true, expanded: true, running: true, messages: [...current.messages, { role: "user", kind: "chat", text: question }, { role: "pi", kind: "chat", text: "" }] }));
     try {
-      const previous = aiReview.messages.map((entry) => `${entry.role === "user" ? "User" : "Pi"}: ${entry.text}`).join("\n\n");
-      const prompt = `Continue discussing PR ${review.pr.key}. Answer the user's latest question using the checked-out PR worktree. Be concise and cite files/lines when useful.\n\nPrevious dialogue:\n${previous || "(none)"}\n\nUser: ${question}`;
-      const setAnswer = (answer: string) => setAiReview((current) => ({ ...current, open: true, expanded: true, text: answer, messages: [...current.messages.slice(0, -1), { role: "pi", kind: "chat", text: answer }] }));
-      const answer = await askPiApi({ prKey: review.pr.key, prompt, purpose: "chat" }, setAnswer);
-      const nextMessages: AiReviewMessage[] = [...aiReview.messages, { role: "user", kind: "chat", text: question }, { role: "pi", kind: "chat", text: answer }];
-      setAiReview((current) => ({ ...current, open: true, expanded: true, running: false, text: answer, messages: nextMessages }));
-      void saveAiReview(currentGeneralReviewText({ ...aiReview, text: answer, messages: nextMessages }) || answer, nextMessages);
+      const previous = startingReview.messages.map((entry) => `${entry.role === "user" ? "User" : "Pi"}: ${entry.text}`).join("\n\n");
+      const prompt = `Continue discussing PR ${targetReview.pr.key}. Answer the user's latest question using the checked-out PR worktree. Be concise and cite files/lines when useful.\n\nPrevious dialogue:\n${previous || "(none)"}\n\nUser: ${question}`;
+      const setAnswer = (answer: string) => {
+        if (activeReviewKeyRef.current !== targetReview.pr.key) return;
+        setAiReview((current) => ({ ...current, open: true, expanded: true, text: answer, messages: [...current.messages.slice(0, -1), { role: "pi", kind: "chat", text: answer }] }));
+      };
+      const answer = await askPiApi({ prKey: targetReview.pr.key, prompt, purpose: "chat" }, setAnswer);
+      const nextMessages: AiReviewMessage[] = [...startingReview.messages, { role: "user", kind: "chat", text: question }, { role: "pi", kind: "chat", text: answer }];
+      if (activeReviewKeyRef.current === targetReview.pr.key) setAiReview((current) => ({ ...current, open: true, expanded: true, running: false, text: answer, messages: nextMessages }));
+      void saveAiReviewFor(targetReview, currentGeneralReviewText({ ...startingReview, text: answer, messages: nextMessages }) || answer, nextMessages, aiReviewId);
     } catch (err) {
+      if (activeReviewKeyRef.current !== targetReview.pr.key) return;
       const text = `Ask Pi failed: ${err instanceof Error ? err.message : String(err)}`;
       setAiReview((current) => ({ ...current, open: true, expanded: true, running: false, text, messages: [...current.messages.slice(0, -1), { role: "pi", kind: "chat", text }] }));
     }
