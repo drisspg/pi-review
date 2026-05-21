@@ -837,10 +837,30 @@ function relativeTime(iso: string | null | undefined): string {
   return new Date(iso).toLocaleDateString();
 }
 
+function maxSidePanelWidth(): number {
+  return typeof window === "undefined" ? 900 : Math.max(380, window.innerWidth - 96);
+}
+
+function clampSidePanelWidth(width: number): number {
+  return Math.min(maxSidePanelWidth(), Math.max(300, width));
+}
+
 function ReviewPage(props: DiffProps & { aiReview: AiReview; setAiReview: (review: AiReview) => void; runAiReview: () => Promise<void>; sendAiReviewMessage: (message: string) => Promise<void>; focusReview: FocusReview; setFocusReview: (review: FocusReview) => void; runFocusReview: () => Promise<void>; viewedFocusAreaIds: Record<string, boolean>; setViewedFocusAreaIds: React.Dispatch<React.SetStateAction<Record<string, boolean>>>; saveFocusScan: (answer: string, viewedIds: Record<string, boolean>, collapsedIds: Record<string, boolean>) => Promise<string | null>; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; submitting: boolean; invalidDraftIds: Record<string, boolean>; refreshingActivity: boolean }) {
   const commentToggleLabel = props.commentsCollapsed ? "Expand all comments" : "Collapse all comments";
   const diffViewLabel = props.diffViewMode === "unified" ? "Split view" : "Unified view";
   const [sideTab, setSideTab] = useState<"review" | "pi" | "comments">("review");
+  const restoreSideWidthRef = useRef<number | null>(null);
+  const maxWidth = maxSidePanelWidth();
+  const sideMaximized = props.sideWidth >= maxWidth - 24;
+  function toggleSideMaximized(): void {
+    if (sideMaximized) {
+      props.setSideWidth(clampSidePanelWidth(restoreSideWidthRef.current ?? 420));
+      restoreSideWidthRef.current = null;
+      return;
+    }
+    restoreSideWidthRef.current = props.sideWidth;
+    props.setSideWidth(maxWidth);
+  }
   const draftCount = props.drafts.length;
   const piActivity = props.aiReview.messages.length + (props.aiReview.text.length > 0 && props.aiReview.messages.length === 0 ? 1 : 0);
   const focusCount = props.focusAreas.length;
@@ -883,6 +903,7 @@ function ReviewPage(props: DiffProps & { aiReview: AiReview; setAiReview: (revie
         <button role="tab" aria-selected={sideTab === "review"} className={`side-tab${sideTab === "review" ? " active" : ""}`} onClick={() => setSideTab("review")}><span className="side-tab-pie" aria-hidden="true">🥧</span><span>Review</span>{draftCount > 0 && <span className="side-tab-badge">{draftCount}</span>}</button>
         <button role="tab" aria-selected={sideTab === "pi"} className={`side-tab${sideTab === "pi" ? " active" : ""}`} onClick={() => setSideTab("pi")}><span className="side-tab-pie" aria-hidden="true">π</span><span>Pi</span>{piBadge != null && <span className="side-tab-badge">{piBadge}</span>}</button>
         <button role="tab" aria-selected={sideTab === "comments"} className={`side-tab${sideTab === "comments" ? " active" : ""}`} onClick={() => setSideTab("comments")}><span className="side-tab-pie" aria-hidden="true">💬</span><span>Comments</span>{commentCount > 0 && <span className="side-tab-badge">{commentCount}</span>}</button>
+        <button type="button" className="side-maximize-button" title={sideMaximized ? "Restore side panel" : "Maximize side panel"} aria-label={sideMaximized ? "Restore side panel" : "Maximize side panel"} onClick={toggleSideMaximized}>{sideMaximized ? "⇥" : "⇤"}</button>
       </nav>
       <div className="side-tab-panels">
         {sideTab === "review" && <ReviewSummary pr={props.review.pr} drafts={props.drafts} setDrafts={props.setDrafts} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} submitReview={props.submitReview} submitting={props.submitting} invalidDraftIds={props.invalidDraftIds} onJumpToDraft={(draft) => jumpToComment({ ...draft, hunk: "" })} />}
@@ -957,7 +978,7 @@ function startResizeSidePanel(event: React.MouseEvent, initialWidth: number, set
   event.preventDefault();
   const startX = event.clientX;
   function move(moveEvent: MouseEvent) {
-    const nextWidth = Math.min(900, Math.max(300, initialWidth - (moveEvent.clientX - startX)));
+    const nextWidth = clampSidePanelWidth(initialWidth - (moveEvent.clientX - startX));
     setSideWidth(nextWidth);
   }
   function stop() {

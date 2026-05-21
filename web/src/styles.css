@@ -355,7 +355,8 @@ a { color: var(--link); text-decoration: none; }
 
 .side-tab {
   position: relative;
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -425,6 +426,26 @@ a { color: var(--link); text-decoration: none; }
   background: color-mix(in srgb, #d29922 18%, transparent);
   line-height: 1;
   transform-origin: center;
+}
+
+.side-maximize-button {
+  flex: 0 0 auto;
+  align-self: center;
+  min-height: 30px;
+  width: 34px;
+  padding: 0;
+  border-color: color-mix(in srgb, var(--border) 80%, transparent);
+  background: color-mix(in srgb, var(--panel2) 78%, transparent);
+  color: var(--muted);
+  border-radius: 8px;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.side-maximize-button:hover {
+  color: var(--text);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel2));
 }
 
 .side-tab-badge {
