@@ -2591,6 +2591,34 @@ a { color: var(--link); text-decoration: none; }
   white-space: pre-wrap;
 }
 
+.memory-file {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--panel);
+}
+
+.memory-file summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px;
+  cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.memory-file summary span {
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+.memory-file-patch {
+  max-height: 360px;
+  border-width: 1px 0 0;
+  border-radius: 0;
+}
+
 .memory-prompt-preview {
   max-height: none;
 }

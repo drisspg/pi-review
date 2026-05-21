@@ -11,7 +11,7 @@ import { logger } from "./logger.js";
 import { askPi, disposePiSession, disposePiSessions, piDiagnostics, prewarmPiSession, registerPiSessionCwd, setPiModel } from "./pi-session.js";
 import { parsePullRequestRef } from "./pr.js";
 import { currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, latestAiReview, latestFocusScan, listRecentPullRequests, listReviewMemoryRecords, markPullRequestReviewed, removePullRequest, reviewMemoryStats, saveAiReview, saveFocusScan, saveReviewMemory, saveReviewProfile, setFileViewed, upsertPullRequest } from "./state.js";
-import type { AiReviewMessageRecord, FocusAreaReviewState, ReviewMemoryComment } from "./types.js";
+import type { AiReviewMessageRecord, FocusAreaReviewState, PullFile, ReviewMemoryChangeSet, ReviewMemoryComment } from "./types.js";
 import { cleanupPrWorktree, preparePrWorktree, worktreeDirForRef } from "./worktrees.js";
 
 const DEFAULT_PORT = 43133;
@@ -56,6 +56,26 @@ function githubReviewComments(comments: ReviewSubmitComment[]): Array<Record<str
 
 function reviewMemoryComments(comments: ReviewSubmitComment[]): ReviewMemoryComment[] {
   return comments.flatMap(reviewMemoryCommentFromPayload).filter((comment) => comment.body.length > 0);
+}
+
+function reviewMemoryFiles(files: PullFile[], comments: ReviewMemoryComment[]): ReviewMemoryChangeSet["files"] {
+  const commentedPaths = new Set(comments.map((comment) => comment.path));
+  return files.filter((file) => commentedPaths.size === 0 || commentedPaths.has(file.filename)).map((file) => ({
+    path: file.filename,
+    status: file.status,
+    additions: file.additions,
+    deletions: file.deletions,
+    patch: file.patch,
+  }));
+}
+
+function reviewMemoryChangeSet(data: Awaited<ReturnType<typeof fetchPullRequestReviewData>>, comments: ReviewMemoryComment[]): ReviewMemoryChangeSet {
+  return {
+    title: data.raw.title,
+    url: data.raw.html_url,
+    source: `${data.raw.base.repo.full_name}#${data.raw.number}`,
+    files: reviewMemoryFiles(data.files, comments),
+  };
 }
 
 function reviewMemoryCommentFromPayload(comment: ReviewSubmitComment): ReviewMemoryComment[] {
@@ -211,7 +231,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const payload = recordFromBody(await readBody(req));
     if (typeof payload.prKey !== "string" || typeof payload.headSha !== "string") throw new Error("Expected prKey and headSha");
     if (payload.event !== "COMMENT" && payload.event !== "APPROVE" && payload.event !== "REQUEST_CHANGES") throw new Error("Expected review event");
-    const memory = await saveReviewMemory({ prKey: payload.prKey, headSha: payload.headSha, event: payload.event, body: typeof payload.body === "string" ? payload.body.trim() : "", comments: reviewMemoryComments(reviewSubmitCommentsFromPayload(payload.comments)) });
+    const memory = await saveReviewMemory({ prKey: payload.prKey, headSha: payload.headSha, event: payload.event, body: typeof payload.body === "string" ? payload.body.trim() : "", comments: reviewMemoryComments(reviewSubmitCommentsFromPayload(payload.comments)), changeSet: typeof payload.changeSet === "object" && payload.changeSet != null && !Array.isArray(payload.changeSet) ? payload.changeSet as ReviewMemoryChangeSet : undefined });
     logger.info("api", "review memory captured", { prKey: payload.prKey, comments: memory.comments.length, event: payload.event });
     sendJson(res, 200, { memory });
     return;
@@ -353,7 +373,9 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       throw new Error(`${message}\n\n${reviewSubmitDiagnostics(comments)}\n\nIf GitHub returned HTTP 422, delete or recreate the listed draft whose path/line is stale, then retry.`);
     }
     const prKey = prKeyForRef(ref);
-    await saveReviewMemory({ prKey, headSha: typeof payload.headSha === "string" ? payload.headSha : "", event: payload.event, body: typeof payload.body === "string" ? payload.body.trim() : "", comments: reviewMemoryComments(comments) });
+    const memoryComments = reviewMemoryComments(comments);
+    const reviewData = await fetchPullRequestReviewData(ref);
+    await saveReviewMemory({ prKey, headSha: typeof payload.headSha === "string" ? payload.headSha : "", event: payload.event, body: typeof payload.body === "string" ? payload.body.trim() : "", comments: memoryComments, changeSet: reviewMemoryChangeSet(reviewData, memoryComments) });
     const reviewedPr = await markPullRequestReviewed(prKey, typeof payload.headSha === "string" ? payload.headSha : "", payload.event);
     sendJson(res, 200, { result, pr: reviewedPr });
     return;

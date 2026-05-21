@@ -138,6 +138,21 @@ export type ReviewMemoryComment = {
   body: string;
 };
 
+export type ReviewMemoryFile = {
+  path: string;
+  status?: string;
+  additions?: number;
+  deletions?: number;
+  patch?: string;
+};
+
+export type ReviewMemoryChangeSet = {
+  title?: string;
+  url?: string;
+  source?: string;
+  files: ReviewMemoryFile[];
+};
+
 export type ReviewMemoryRecord = {
   id: string;
   prKey: string;
@@ -145,6 +160,7 @@ export type ReviewMemoryRecord = {
   event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES";
   body: string;
   comments: ReviewMemoryComment[];
+  changeSet?: ReviewMemoryChangeSet;
   createdAt: string;
 };
 

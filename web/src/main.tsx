@@ -1571,6 +1571,13 @@ function reviewMemoryRecordTitle(record: ReviewMemoryRecord): string {
   return `${record.prKey} · ${record.event} · ${relativeTime(record.createdAt)}`;
 }
 
+function reviewMemoryChangeSetSummary(record: ReviewMemoryRecord): string {
+  if (record.changeSet == null) return "No change-set snapshot stored.";
+  const fileCount = record.changeSet.files.length;
+  const stats = record.changeSet.files.reduce((total, file) => ({ additions: total.additions + (file.additions ?? 0), deletions: total.deletions + (file.deletions ?? 0) }), { additions: 0, deletions: 0 });
+  return `${fileCount} files · +${stats.additions} -${stats.deletions}`;
+}
+
 function reviewMemoryLocation(comment: ReviewMemoryRecord["comments"][number]): string {
   const line = comment.line == null ? "file" : comment.startLine != null && comment.startLine !== comment.line ? `${comment.startLine}-${comment.line}` : comment.line;
   return `${comment.path}:${line}`;
@@ -1619,6 +1626,7 @@ function ReviewMemoryModal({ memory, loading, distilling, refresh, distill, clos
             <summary><strong>{reviewMemoryRecordTitle(record)}</strong><span>{record.comments.length} inline · head {shortSha(record.headSha)}</span></summary>
             {record.body.trim().length > 0 && <div className="memory-record-block"><h4>Overall</h4><MarkdownText text={record.body} /></div>}
             <div className="memory-record-block"><h4>Inline comments</h4>{record.comments.length === 0 ? <p className="muted">No inline comments.</p> : record.comments.map((comment, index) => <div className="memory-comment" key={index}><span>{reviewMemoryLocation(comment)}</span><p>{comment.body}</p></div>)}</div>
+            <div className="memory-record-block"><h4>Change-set context</h4>{record.changeSet == null ? <p className="muted">No change-set snapshot stored for this record.</p> : <><p className="muted">{record.changeSet.title ?? record.changeSet.source ?? "Stored diff context"} · {reviewMemoryChangeSetSummary(record)}</p>{record.changeSet.files.map((file) => <details className="memory-file" key={file.path}><summary>{file.path}<span>{file.status ?? ""} {file.additions == null ? "" : `+${file.additions}`} {file.deletions == null ? "" : `-${file.deletions}`}</span></summary><pre className="prompt-preview memory-file-patch">{file.patch ?? "Patch unavailable."}</pre></details>)}</>}</div>
           </details>)}
         </section>}
         {tab === "prompt" && <section className="memory-section">

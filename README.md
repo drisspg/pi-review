@@ -108,7 +108,7 @@ worktrees/                 # per-PR worktrees
 pi-sessions/               # persistent Pi SDK sessions per PR
 ```
 
-Submitted review comments are also captured as raw preference memory in `state.json` with a 10,000-review cap and mirrored as prompt examples to:
+Submitted review comments are also captured as raw preference memory in `state.json` with a 10,000-review cap. Each memory record stores the submitted comments plus a bounded change-set snapshot for the commented files so later distillation can inspect the code context. Recent examples are mirrored to:
 
 ```text
 ~/agent_notes/findings/pi_review_preferences.md

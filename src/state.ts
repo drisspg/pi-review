@@ -15,6 +15,8 @@ const maxAiReviewsPerPr = 20;
 const maxReviewMemoryRecords = 10_000;
 const maxReviewMemoryPromptRecords = 12;
 const maxReviewMemoryDistillationRecords = 250;
+const maxReviewMemoryPromptPatchChars = 4_000;
+const maxReviewMemoryDistillationPatchChars = 12_000;
 
 const emptyState = (): AppState => ({ prs: [], fileReviews: [], focusScans: [], aiReviews: [], reviewMemory: [], reviewProfile: null });
 
@@ -46,12 +48,26 @@ function reviewMemoryLocation(comment: ReviewMemoryRecord["comments"][number]): 
   return `${comment.path}:${line}`;
 }
 
+function truncateText(text: string, maxChars: number): string {
+  return text.length <= maxChars ? text : `${text.slice(0, maxChars)}\n… truncated ${text.length - maxChars} chars …`;
+}
+
+function reviewMemoryChangeSetBlock(record: ReviewMemoryRecord, maxPatchChars: number): string {
+  if (record.changeSet == null) return "No change-set snapshot stored for this review.";
+  const header = [record.changeSet.title, record.changeSet.url, record.changeSet.source].filter((value) => value != null && value.length > 0).join("\n");
+  const files = record.changeSet.files.map((file) => {
+    const stats = [file.status, file.additions == null ? null : `+${file.additions}`, file.deletions == null ? null : `-${file.deletions}`].filter(Boolean).join(" ");
+    return `### ${file.path}${stats.length > 0 ? ` (${stats})` : ""}\n${file.patch == null || file.patch.length === 0 ? "Patch unavailable." : truncateText(file.patch, maxPatchChars)}`;
+  }).join("\n\n");
+  return `${header.length > 0 ? `${header}\n\n` : ""}${files.length > 0 ? files : "No files stored."}`;
+}
+
 export function reviewMemoryPrompt(records: ReviewMemoryRecord[]): string {
   if (records.length === 0) return "No review preference examples have been captured yet.";
   const examples = records.slice(0, maxReviewMemoryPromptRecords).map((record, index) => {
     const comments = record.comments.length === 0 ? "No inline comments." : record.comments.map((comment) => `- ${reviewMemoryLocation(comment)}: ${comment.body}`).join("\n");
     const body = record.body.trim().length === 0 ? "No overall body." : record.body.trim();
-    return `## Example ${index + 1}: ${record.prKey} (${record.event})\nOverall review body:\n${body}\n\nInline comments:\n${comments}`;
+    return `## Example ${index + 1}: ${record.prKey} (${record.event})\nOverall review body:\n${body}\n\nInline comments:\n${comments}\n\nChange-set context:\n${reviewMemoryChangeSetBlock(record, maxReviewMemoryPromptPatchChars)}`;
   });
   return `# Driss review preference examples\n\nThese are examples of review comments Driss actually submitted. Use them as positive examples of what he considered worth saying. Prefer similar specificity, severity, and style. Do not copy comments verbatim unless the same issue is present. Avoid over-indexing on one example when the current diff points elsewhere.\n\n${examples.join("\n\n")}`;
 }
@@ -61,7 +77,7 @@ function reviewMemoryDistillationSource(records: ReviewMemoryRecord[]): string {
   return records.slice(0, maxReviewMemoryDistillationRecords).map((record, index) => {
     const comments = record.comments.length === 0 ? "No inline comments." : record.comments.map((comment) => `- ${reviewMemoryLocation(comment)}: ${comment.body}`).join("\n");
     const body = record.body.trim().length === 0 ? "No overall body." : record.body.trim();
-    return `## Raw review ${index + 1}: ${record.prKey} (${record.event}, ${record.createdAt})\nOverall review body:\n${body}\n\nInline comments:\n${comments}`;
+    return `## Raw review ${index + 1}: ${record.prKey} (${record.event}, ${record.createdAt})\nOverall review body:\n${body}\n\nInline comments:\n${comments}\n\nChange-set context:\n${reviewMemoryChangeSetBlock(record, maxReviewMemoryDistillationPatchChars)}`;
   }).join("\n\n");
 }
 
