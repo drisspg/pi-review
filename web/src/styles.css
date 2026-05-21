@@ -2249,8 +2249,10 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .ai-chat-composer textarea {
-  min-height: 44px;
+  min-height: 92px;
+  max-height: 34vh;
   resize: vertical;
+  overflow: auto;
 }
 
 .ai-review-dialogue {

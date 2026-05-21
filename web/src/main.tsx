@@ -189,6 +189,12 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 }
 
+function autoGrowTextarea(element: HTMLTextAreaElement | null): void {
+  if (element == null) return;
+  element.style.height = "auto";
+  element.style.height = `${Math.min(element.scrollHeight, Math.round(window.innerHeight * 0.34))}px`;
+}
+
 function highlightFocusAreas(areas: FocusArea[], activeId: string | null, collapsedIds: Record<string, boolean>): void {
   document.querySelectorAll(".diff-row.focus-highlight, .diff-row.focus-highlight-active").forEach((row) => row.classList.remove("focus-highlight", "focus-highlight-active"));
   for (const area of areas.filter((candidate) => !collapsedIds[candidate.id])) {
@@ -1222,6 +1228,8 @@ function ReviewSummary({ drafts, setDrafts, editingDraftId, setEditingDraftId, s
 
 function AiReviewPanel({ prUrl, review, setReview, runReview, sendMessage, focusReview, runFocusReview, focusAreas, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds, viewedFocusIds, setViewedFocusIds, saveFocusScan, openFiles, setOpenFiles }: { prUrl: string; review: AiReview; setReview: (review: AiReview) => void; runReview: () => Promise<void>; sendMessage: (message: string) => Promise<void>; focusReview: FocusReview; runFocusReview: () => Promise<void>; focusAreas: FocusArea[]; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"]; viewedFocusIds: Record<string, boolean>; setViewedFocusIds: React.Dispatch<React.SetStateAction<Record<string, boolean>>>; saveFocusScan: (answer: string, viewedIds: Record<string, boolean>, collapsedIds: Record<string, boolean>) => Promise<string | null>; openFiles: Record<string, boolean>; setOpenFiles: (open: Record<string, boolean>) => void }) {
   const [draft, setDraft] = useState("");
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => autoGrowTextarea(composerRef.current), [draft]);
   const focusAreaCount = focusAreas.length;
   const allFocusCollapsed = focusAreaCount > 0 && focusAreas.every((area) => collapsedFocusAreaIds[area.id]);
   const hasMessages = review.messages.length > 0 || review.text.length > 0;
@@ -1264,7 +1272,7 @@ function AiReviewPanel({ prUrl, review, setReview, runReview, sendMessage, focus
     if (next) setCollapsedFocusAreaIds(nextCollapsedIds);
     void saveFocusScan(focusReview.text, nextViewedIds, nextCollapsedIds);
   }
-  const composer = <div className="ai-chat-composer"><textarea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submitChat(); } }} placeholder="Ask Pi about this PR…" /><Button variant="muted" onClick={submitChat} disabled={review.running || draft.trim().length === 0}>{review.running ? "Sending…" : "Send"}</Button></div>;
+  const composer = <div className="ai-chat-composer"><textarea ref={composerRef} value={draft} onChange={(event) => setDraft(event.target.value)} onInput={(event) => autoGrowTextarea(event.currentTarget)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submitChat(); } }} placeholder="Ask Pi about this PR…" /><Button variant="muted" onClick={submitChat} disabled={review.running || draft.trim().length === 0}>{review.running ? "Sending…" : "Send"}</Button></div>;
   const viewedCount = focusAreas.filter((area) => viewedFocusIds[area.id]).length;
   const allFocusReviewed = focusAreaCount > 0 && viewedCount === focusAreaCount;
   const focusLinksMinimized = allFocusReviewed && allFocusCollapsed;
