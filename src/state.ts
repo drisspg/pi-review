@@ -155,8 +155,8 @@ export async function setFileViewed(review: FileReviewState): Promise<FileReview
   return review;
 }
 
-export async function latestFocusScan(prKey: string): Promise<FocusScanRecord | null> {
-  return (await readState()).focusScans.filter((scan) => scan.prKey === prKey).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null;
+export async function listFocusScans(prKey: string): Promise<FocusScanRecord[]> {
+  return (await readState()).focusScans.filter((scan) => scan.prKey === prKey).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
 export async function saveFocusScan(scan: Omit<FocusScanRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<FocusScanRecord, "id" | "createdAt">>): Promise<FocusScanRecord> {
@@ -183,8 +183,8 @@ export async function saveFocusScan(scan: Omit<FocusScanRecord, "id" | "createdA
   return next;
 }
 
-export async function latestAiReview(prKey: string): Promise<AiReviewRecord | null> {
-  return (await readState()).aiReviews.filter((review) => review.prKey === prKey).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null;
+export async function listAiReviews(prKey: string): Promise<AiReviewRecord[]> {
+  return (await readState()).aiReviews.filter((review) => review.prKey === prKey).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
 export async function saveAiReview(review: Omit<AiReviewRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<AiReviewRecord, "id" | "createdAt">>): Promise<AiReviewRecord> {

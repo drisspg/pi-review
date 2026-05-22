@@ -10,8 +10,8 @@ import { inputFromBody, prKeyForRef, readBody, recordFromBody, refFromBody, send
 import { logger } from "./logger.js";
 import { askPi, disposePiSession, disposePiSessions, piDiagnostics, prewarmPiSession, registerPiSessionCwd, setPiModel } from "./pi-session.js";
 import { parsePullRequestRef } from "./pr.js";
-import { currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, latestAiReview, latestFocusScan, listRecentPullRequests, listReviewMemoryRecords, markPullRequestReviewed, removePullRequest, reviewMemoryStats, saveAiReview, saveFocusScan, saveReviewMemory, saveReviewProfile, setFileViewed, upsertPullRequest } from "./state.js";
-import type { AiReviewMessageRecord, FocusAreaReviewState, PullFile, ReviewMemoryChangeSet, ReviewMemoryComment } from "./types.js";
+import { currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, listAiReviews, listFocusScans, listRecentPullRequests, listReviewMemoryRecords, markPullRequestReviewed, removePullRequest, reviewMemoryStats, saveAiReview, saveFocusScan, saveReviewMemory, saveReviewProfile, setFileViewed, upsertPullRequest } from "./state.js";
+import type { AiReviewMessageRecord, FocusAreaReviewState, PullFile, PullRequestReviewResponse, ReviewMemoryChangeSet, ReviewMemoryComment, StoredPullRequest } from "./types.js";
 import { cleanupPrWorktree, preparePrWorktree, worktreeDirForRef } from "./worktrees.js";
 
 const DEFAULT_PORT = 43133;
@@ -76,6 +76,11 @@ function reviewMemoryChangeSet(data: Awaited<ReturnType<typeof fetchPullRequestR
     source: `${data.raw.base.repo.full_name}#${data.raw.number}`,
     files: reviewMemoryFiles(data.files, comments),
   };
+}
+
+async function hydrateReviewResponse(data: Awaited<ReturnType<typeof fetchPullRequestReviewData>>, pr: StoredPullRequest, extra: Partial<Pick<PullRequestReviewResponse, "worktreeDir">> = {}): Promise<PullRequestReviewResponse> {
+  const [focusScans, aiReviews] = await Promise.all([listFocusScans(pr.key), listAiReviews(pr.key)]);
+  return { ...data, pr, focusScan: focusScans[0] ?? null, focusScans, aiReview: aiReviews[0] ?? null, aiReviews, ...extra };
 }
 
 function reviewMemoryCommentFromPayload(comment: ReviewSubmitComment): ReviewMemoryComment[] {
@@ -264,7 +269,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const data = await fetchPullRequestReviewData(ref);
     const pr = await upsertPullRequest(data.pr);
     logger.info("api", "refresh PR activity complete", { key: pr.key, existingCommentCount: pr.existingCommentCount });
-    sendJson(res, 200, { ...data, pr, focusScan: await latestFocusScan(pr.key), aiReview: await latestAiReview(pr.key) });
+    sendJson(res, 200, await hydrateReviewResponse(data, pr));
     return;
   }
 
@@ -422,7 +427,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     await registerPiSessionCwd(pr.key, worktreeDir);
     prewarmPiSession(pr.key, ["chat", "inline-chat", "focus-chat"]);
     logger.info("api", "open PR complete", { key: pr.key, filesChanged: pr.filesChanged, existingCommentCount: pr.existingCommentCount, worktreeDir });
-    sendJson(res, 200, { ...data, pr, focusScan: await latestFocusScan(pr.key), aiReview: await latestAiReview(pr.key), worktreeDir });
+    sendJson(res, 200, await hydrateReviewResponse(data, pr, { worktreeDir }));
     return;
   }
 

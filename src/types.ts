@@ -178,8 +178,14 @@ export type PullRequestReviewData = {
   issueComments: PullIssueComment[];
   reviewSummaries: PullRequestReviewSummary[];
   fileReviews: FileReviewState[];
-  focusScan?: FocusScanRecord | null;
-  aiReview?: AiReviewRecord | null;
+};
+
+export type PullRequestReviewResponse = PullRequestReviewData & {
+  focusScan: FocusScanRecord | null;
+  focusScans: FocusScanRecord[];
+  aiReview: AiReviewRecord | null;
+  aiReviews: AiReviewRecord[];
+  worktreeDir?: string;
 };
 
 export type AppState = {

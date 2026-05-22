@@ -26,4 +26,4 @@ export type ReviewMemoryStats = { recordCount: number; inlineCommentCount: numbe
 export type ReviewMemoryResponse = { prompt: string; profile: ReviewMemoryProfile | null; records: ReviewMemoryRecord[]; stats: ReviewMemoryStats };
 export type AiReview = { expanded: boolean; open: boolean; running: boolean; text: string; messages: AiReviewMessage[] };
 export type ThemeName = "github-dark" | "github-light" | "github-dimmed";
-export type OpenResponse = { pr: StoredPullRequest; files: PullFile[]; comments: PullReviewComment[]; issueComments: PullIssueComment[]; reviewSummaries: PullRequestReviewSummary[]; fileReviews: FileReviewState[]; focusScan?: FocusScanRecord | null; aiReview?: AiReviewRecord | null };
+export type OpenResponse = { pr: StoredPullRequest; files: PullFile[]; comments: PullReviewComment[]; issueComments: PullIssueComment[]; reviewSummaries: PullRequestReviewSummary[]; fileReviews: FileReviewState[]; focusScan: FocusScanRecord | null; focusScans: FocusScanRecord[]; aiReview: AiReviewRecord | null; aiReviews: AiReviewRecord[] };
