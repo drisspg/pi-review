@@ -78,12 +78,6 @@ function generalReviewMessage(text: string): AiReviewMessage {
   return { role: "pi", kind: "general-review", title: "General review", text };
 }
 
-function mergeGeneralReview(messages: AiReviewMessage[], text: string): AiReviewMessage[] {
-  const index = messages.findIndex((message) => message.kind === "general-review");
-  if (index === -1) return [generalReviewMessage(text), ...messages];
-  return messages.map((message, messageIndex) => messageIndex === index ? generalReviewMessage(text) : message);
-}
-
 function currentGeneralReviewText(review: AiReview): string {
   return review.messages.find((message) => message.kind === "general-review")?.text.trim() ?? (review.messages.length === 0 ? review.text.trim() : "");
 }
@@ -582,7 +576,12 @@ function App() {
   }
 
   async function runAutomaticPiReviews(nextReview: OpenResponse) {
-    await Promise.all([runAiReviewFor(nextReview, true), runFocusReviewFor(nextReview, true)]);
+    const aiReviewUpToDate = nextReview.aiReview != null && nextReview.aiReview.headSha === nextReview.pr.headSha && nextReview.aiReview.answer.trim().length > 0;
+    const focusScanUpToDate = nextReview.focusScan != null && nextReview.focusScan.headSha === nextReview.pr.headSha && nextReview.focusScan.answer.trim().length > 0;
+    await Promise.all([
+      aiReviewUpToDate ? Promise.resolve() : runAiReviewFor(nextReview, true),
+      focusScanUpToDate ? Promise.resolve() : runFocusReviewFor(nextReview, true),
+    ]);
     await refreshLogs();
   }
 
@@ -592,7 +591,7 @@ function App() {
   }
 
   async function runAiReviewFor(targetReview: OpenResponse, background: boolean) {
-    setAiReview((current) => ({ ...current, open: !background || current.open, expanded: !background || current.expanded, running: true, text: background ? current.text : "", messages: background ? current.messages : current.messages.filter((message) => message.kind !== "general-review") }));
+    setAiReview((current) => ({ ...current, open: !background || current.open, expanded: !background || current.expanded, running: true, text: background ? current.text : "", messages: background ? current.messages : [] }));
     const diffSummary = targetReview.files.map((file) => `## ${file.filename}
 ${file.patch ?? "Patch unavailable"}`).join("\n\n");
     const visibleAiReview = targetReview.pr.key === review?.pr.key ? currentGeneralReviewText(aiReview) : "";
@@ -623,8 +622,7 @@ ${diffSummary}`;
         if (status.status === "failed") throw new Error(status.error ?? "AI review failed");
         if (status.status !== "complete") throw new Error("AI review returned an unknown job status");
         const answer = status.answer ?? "AI review completed without output.";
-        const baseMessages = background ? aiReview.messages : aiReview.messages.filter((message) => message.kind !== "general-review");
-        const nextMessages = mergeGeneralReview(baseMessages, answer);
+        const nextMessages: AiReviewMessage[] = [generalReviewMessage(answer)];
         setAiReview((current) => ({ ...current, open: !background || current.open, expanded: !background || current.expanded, running: false, text: answer, messages: nextMessages }));
         void saveAiReviewFor(targetReview, answer, nextMessages, null);
         break;
