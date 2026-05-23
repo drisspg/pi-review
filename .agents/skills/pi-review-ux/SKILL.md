@@ -47,6 +47,27 @@ The full project validation is:
 npm run validate
 ```
 
+## Fast inner loop for tests
+
+`npm run test:e2e` cold-starts a freshly-built server every invocation (~30s of overhead before tests even start). For iteration, use the fast path instead:
+
+1. Start a long-running test server in a separate terminal (vite-builds once, then runs the server via `tsx` so no `tsc` step):
+
+   ```bash
+   npm run test:server
+   ```
+
+2. Run targeted tests in fast mode (reuses the running server, parallelizes with `workers=3`, drops trace/video):
+
+   ```bash
+   npm run test:e2e:fast -- -g "pattern"
+   npm run test:e2e:fast -- tests/e2e/pr-review.spec.ts -g "Pi review"
+   ```
+
+Per-test cost drops from ~7s to ~2.5s; full `pr-review` suite drops from ~1m49s to ~1m13s. After editing `web/src/`, the next fast-mode run rebuilds via `vite build` (~0.8s) automatically; after editing `src/server.ts`, restart `npm run test:server`.
+
+Two tests are known fixture-drift failures unrelated to fast mode (`opens a PR and renders GitHub-style file diffs` and `minimizes focus area links after all are reviewed`) — verify on `HEAD` before treating them as regressions.
+
 ## UX review checklist
 
 - Drive the changed flow in the browser instead of only reading code.
