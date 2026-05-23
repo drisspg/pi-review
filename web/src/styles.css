@@ -889,17 +889,22 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .inline-thread.collapsed {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 4px;
-  width: calc(100% - 128px);
-  padding: 0.3rem 0.6rem;
+  width: fit-content;
+  max-width: 280px;
+  margin: 0.15rem 16px 0.15rem auto;
+  padding: 0.15rem 0.55rem;
   text-align: left;
   color: var(--muted);
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   background: transparent;
   border-color: color-mix(in srgb, var(--thread-accent) 25%, var(--border));
   border-style: dashed;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .inline-thread.collapsed:hover {
@@ -972,7 +977,7 @@ a { color: var(--link); text-decoration: none; }
 
 .inline-thread.existing.github-thread.minimized .thread-head {
   position: absolute;
-  left: 0;
+  right: 16px;
   top: 0;
   min-height: 0;
   padding: 1px 6px;
@@ -1005,7 +1010,10 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .inline-thread.focus-area-minimized {
-  margin: 4px 0;
+  display: flex;
+  width: fit-content;
+  max-width: 280px;
+  margin: 4px 16px 4px auto;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--attention) 32%, var(--border));
   background: color-mix(in srgb, var(--attention) 10%, var(--panel));
