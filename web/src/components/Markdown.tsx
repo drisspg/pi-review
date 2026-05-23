@@ -5,6 +5,7 @@ import remarkGfm from "remark-gfm";
 
 import { api } from "../api";
 import { highlightedHtml } from "../lib/highlight";
+import { Mermaid } from "./Mermaid";
 
 const fileReferencePattern = /((?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+\.[A-Za-z0-9_+-]+):(\d+)(?:-(\d+))?/g;
 const fileReferenceExactPattern = /^((?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+\.[A-Za-z0-9_+-]+):(\d+)(?:-(\d+))?$/;
@@ -40,6 +41,8 @@ function MarkdownCode({ className, children, fileLinks }: MarkdownCodeProps) {
 function MarkdownPre({ children, ...props }: MarkdownPreProps) {
   const [copied, setCopied] = useState(false);
   const code = codeBlockText(children);
+  const language = preBlockLanguage(children);
+  if (language === "mermaid") return <div className="markdown-mermaid-block"><Mermaid code={code} /></div>;
 
   async function copyCode() {
     await writeClipboard(code);
@@ -48,6 +51,20 @@ function MarkdownPre({ children, ...props }: MarkdownPreProps) {
   }
 
   return <div className="markdown-code-block"><button className="markdown-copy-button" type="button" onClick={() => void copyCode()} aria-label={copied ? "Copied code" : "Copy code"} title={copied ? "Copied" : "Copy"}>{copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}</button><pre {...props}>{children}</pre></div>;
+}
+
+function preBlockLanguage(children: React.ReactNode): string | null {
+  if (Array.isArray(children)) {
+    for (const child of children) {
+      const match = preBlockLanguage(child);
+      if (match != null) return match;
+    }
+    return null;
+  }
+  if (!React.isValidElement<{ className?: string }>(children)) return null;
+  const className = children.props.className ?? "";
+  const match = className.match(/language-([\w-]+)/);
+  return match == null ? null : match[1];
 }
 
 function MarkdownAnchor({ href, children, fileLinks, ...props }: MarkdownAnchorProps) {
