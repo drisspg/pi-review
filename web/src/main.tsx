@@ -68,9 +68,6 @@ type PiPanelProps = {
   viewedFocusIds: Record<string, boolean>;
   setViewedFocusIds: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   saveFocusScan: (answer: string, viewedIds: Record<string, boolean>, collapsedIds: Record<string, boolean>) => Promise<string | null>;
-  flowDag: FlowDag;
-  runFlowDag: () => Promise<void>;
-  closeFlowDag: () => void;
 };
 
 function focusReviewHasNoFindings(text: string): boolean {
@@ -268,6 +265,7 @@ function App() {
   const [focusReview, setFocusReview] = useState<FocusReview>({ expanded: false, open: false, running: false, text: "" });
   const [focusScanId, setFocusScanId] = useState<string | null>(null);
   const [flowDag, setFlowDag] = useState<FlowDag>({ running: false, text: "", error: null });
+  const [flowDagOpen, setFlowDagOpen] = useState(false);
   const [viewedFocusAreaIds, setViewedFocusAreaIds] = useState<Record<string, boolean>>({});
   const reviewCacheRef = useRef<Map<string, OpenResponse>>(new Map());
   const activeReviewKeyRef = useRef<string | null>(null);
@@ -394,6 +392,7 @@ function App() {
     showAiReviewRecord(data.aiReview);
     showFocusScanRecord(data.focusScan);
     setFlowDag({ running: false, text: "", error: null });
+    setFlowDagOpen(false);
   }
 
   async function openPr(nextInput: string) {
@@ -607,9 +606,25 @@ function App() {
   async function runFlowDag() {
     if (review == null || flowDag.running) return;
     const targetReview = review;
+    setFlowDagOpen(true);
     setFlowDag({ running: true, text: "", error: null });
     const diffSummary = targetReview.files.map((file) => `## ${file.filename}\nStatus: ${file.status}, +${file.additions}/-${file.deletions}\n${file.patch ?? "Patch unavailable"}`).join("\n\n");
-    const prompt = `Produce a Mermaid dependency diagram for PR ${targetReview.pr.key}. Focus on the changed code and its closest neighbors:\n- show the most important changed files, functions, classes, or modules as nodes\n- draw directed edges for calls, imports, data flow, or producer/consumer relationships\n- group related nodes with subgraphs when it clarifies layout\n- keep node labels short (\`module.function\` or symbol name)\n\nReturn exactly one fenced \`\`\`mermaid block first. Use \`flowchart LR\` or \`flowchart TD\` (whichever reads better) and prefer simple ASCII labels. After the diagram, add 2-4 sentences pointing out the most important arrow or any surprising dependency a reviewer should notice.\n\nPR title: ${targetReview.pr.title}\n\n${diffSummary}`;
+    const prompt = `Create a reviewer-friendly code walk for PR ${targetReview.pr.key}. This is a separate orientation document, not a findings review. Help a reviewer understand the PR before reading the diff.
+
+Return only the final markdown document inline. Do not create files. Do not mention your process, commands, tests, or where you saved anything.
+
+Include these sections in markdown:
+1. **PR goal** — infer the user-visible or maintainer-facing goal from the title and diff.
+2. **Walk map** — include one fenced \`\`\`mermaid block using \`flowchart LR\` or \`flowchart TD\`. Make it a visual navigation map for the code walk: 4-8 numbered nodes, short labels, and edges for the main data/control flow.
+3. **Key code patterns** — include a small markdown table with at most 5 rows and columns: Pattern, Where, Why it matters. Do not paste code in this table; keep each cell to one short phrase or sentence.
+4. **Code walk** — use numbered subheadings that correspond to the Mermaid nodes. Walk through a common path through the PR step by step. Cite real file/line references and include only short fenced code snippets for the most important changed snippets.
+5. **What changed in behavior** — summarize how data, state, or API behavior differs after this PR.
+
+Keep it concrete and readable. Prefer actual identifiers from the diff over vague descriptions. Keep snippets short: only the few lines needed to explain the pattern. Avoid review findings unless they are needed to explain flow.
+
+PR title: ${targetReview.pr.title}
+
+${diffSummary}`;
     try {
       const setAnswer = (answer: string) => {
         if (activeReviewKeyRef.current !== targetReview.pr.key) return;
@@ -832,7 +847,7 @@ ${diffSummary}`;
     setCommentCollapseSignal((signal) => signal + 1);
   }
 
-  return <main className="app-shell"><header className="toolbar"><div className="toolbar-title"><strong>Pi PR Review</strong><span>{review == null ? "Paste a PR to start" : `${review.pr.key} · ${review.pr.title}`}</span></div><div className="toolbar-actions">{review != null && <><button type="button" onClick={goHome}>Home</button><button type="button" title="Pi session settings" onClick={() => { setSettingsOpen(true); void loadDiagnostics(); }}>⚙</button><button type="button" title="Pi session diagnostics" onClick={() => void showDiagnostics()}>🐞</button></>}<button type="button" title="Review memory" onClick={() => void showReviewMemory()}>🧠</button><button type="button" title="Server log" onClick={() => { setLogsOpen(true); void refreshLogs(); }}>📜</button><select aria-label="Theme" value={theme} onChange={(event) => setTheme(event.target.value as ThemeName)}><option value="github-dark">GitHub dark</option><option value="github-dimmed">GitHub dimmed</option><option value="github-light">GitHub light</option></select>{review != null && <form className="open-form" onSubmit={submit}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="OWNER/REPO#123 or GitHub PR URL" /><button disabled={busy || input.trim().length === 0}>{busy ? "Fetching…" : "Open"}</button></form>}</div></header>{error != null && <div className="error">{error}</div>}{busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, sendMessage: sendAiReviewMessage, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan, flowDag, runFlowDag, closeFlowDag: () => setFlowDag({ running: false, text: "", error: null }) }} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} />}{diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}{review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} openDiagnostics={() => { setSettingsOpen(false); void showDiagnostics(); }} close={() => setSettingsOpen(false)} />}{memoryOpen && <ReviewMemoryModal memory={reviewMemory} loading={memoryLoading} distilling={memoryDistilling} refresh={() => void loadReviewMemory()} distill={() => void distillReviewMemory()} close={() => setMemoryOpen(false)} />}{logsOpen && <LogsModal logs={logs} refreshLogs={refreshLogs} close={() => setLogsOpen(false)} />}</main>;
+  return <main className="app-shell"><header className="toolbar"><div className="toolbar-title"><strong>Pi PR Review</strong><span>{review == null ? "Paste a PR to start" : `${review.pr.key} · ${review.pr.title}`}</span></div><div className="toolbar-actions">{review != null && <><button type="button" onClick={goHome}>Home</button><button type="button" title="Pi session settings" onClick={() => { setSettingsOpen(true); void loadDiagnostics(); }}>⚙</button><button type="button" title="Pi session diagnostics" onClick={() => void showDiagnostics()}>🐞</button><button type="button" title="Code walk" onClick={() => { setFlowDagOpen(true); if (flowDag.text.trim().length === 0 && !flowDag.running) void runFlowDag(); }}>Code walk</button></>}<button type="button" title="Review memory" onClick={() => void showReviewMemory()}>🧠</button><button type="button" title="Server log" onClick={() => { setLogsOpen(true); void refreshLogs(); }}>📜</button><select aria-label="Theme" value={theme} onChange={(event) => setTheme(event.target.value as ThemeName)}><option value="github-dark">GitHub dark</option><option value="github-dimmed">GitHub dimmed</option><option value="github-light">GitHub light</option></select>{review != null && <form className="open-form" onSubmit={submit}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="OWNER/REPO#123 or GitHub PR URL" /><button disabled={busy || input.trim().length === 0}>{busy ? "Fetching…" : "Open"}</button></form>}</div></header>{error != null && <div className="error">{error}</div>}{busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, sendMessage: sendAiReviewMessage, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} />}{diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}{review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} openDiagnostics={() => { setSettingsOpen(false); void showDiagnostics(); }} close={() => setSettingsOpen(false)} />}{memoryOpen && <ReviewMemoryModal memory={reviewMemory} loading={memoryLoading} distilling={memoryDistilling} refresh={() => void loadReviewMemory()} distill={() => void distillReviewMemory()} close={() => setMemoryOpen(false)} />}{review != null && flowDagOpen && <FlowDagModal flowDag={flowDag} runFlowDag={runFlowDag} close={() => setFlowDagOpen(false)} prUrl={review.pr.url} headSha={review.pr.headSha} />}{logsOpen && <LogsModal logs={logs} refreshLogs={refreshLogs} close={() => setLogsOpen(false)} />}</main>;
 }
 
 type StartFilter = "all" | "needs-review" | "in-progress" | "done";
@@ -1298,7 +1313,7 @@ function ReviewSummary({ drafts, setDrafts, editingDraftId, setEditingDraftId, s
   return <section className="panel"><h2>Draft review</h2><select className={`review-event ${event.toLowerCase().replace("_", "-")}`} value={event} onChange={(change) => { setEvent(change.target.value as typeof event); setSubmitted(false); }}><option value="COMMENT">Not reviewed</option><option value="APPROVE">Approve</option><option value="REQUEST_CHANGES">Request changes</option></select><textarea value={body} onChange={(change) => { setBody(change.target.value); setSubmitted(false); }} placeholder="Overall review body" />{drafts.length === 0 ? <p className="muted">{showSubmitted ? "Review submitted." : "No draft comments yet."}</p> : drafts.map((draft, index) => <DraftView key={draft.id} draft={draft} index={index} invalid={invalidDraftIds[draft.id] === true} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} onJump={onJumpToDraft != null ? () => onJumpToDraft(draft) : undefined} />)}<button className={`review-submit ${event.toLowerCase().replace("_", "-")}`} disabled={submitting || !hasReviewContent} onClick={() => void handleSubmit()}>{submitting ? "Submitting…" : showSubmitted ? "Review submitted" : `Submit review (${drafts.length})`}</button></section>;
 }
 
-function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiReviewRecord, runReview, sendMessage, focusReview, focusScanHistory, focusScanId, showFocusScanRecord, runFocusReview, focusAreas, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds, viewedFocusIds, setViewedFocusIds, saveFocusScan, openFiles, setOpenFiles, flowDag, runFlowDag, closeFlowDag }: PiPanelProps & { prUrl: string; focusAreas: FocusArea[]; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"]; openFiles: Record<string, boolean>; setOpenFiles: (open: Record<string, boolean>) => void }) {
+function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiReviewRecord, runReview, sendMessage, focusReview, focusScanHistory, focusScanId, showFocusScanRecord, runFocusReview, focusAreas, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds, viewedFocusIds, setViewedFocusIds, saveFocusScan, openFiles, setOpenFiles }: PiPanelProps & { prUrl: string; focusAreas: FocusArea[]; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"]; openFiles: Record<string, boolean>; setOpenFiles: (open: Record<string, boolean>) => void }) {
   const [draftsByRecord, setDraftsByRecord] = useState<Record<string, string>>({});
   const draftKey = aiReviewId ?? "__pending__";
   const draft = draftsByRecord[draftKey] ?? "";
@@ -1309,13 +1324,19 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
   const allFocusCollapsed = focusAreaCount > 0 && focusAreas.every((area) => collapsedFocusAreaIds[area.id]);
   const hasMessages = review.messages.length > 0 || review.text.length > 0;
   const messages = review.messages.length > 0 ? review.messages : review.text.length > 0 ? [generalReviewMessage(review.text)] : [];
-  const body = messages.length > 0 ? <div className="ai-chat-messages">{messages.map((message, index) => {
+  const reviewMessages = messages.filter((message) => message.kind === "general-review");
+  const chatMessages = messages.filter((message) => message.kind !== "general-review");
+  const renderMessage = (message: AiReviewMessage, index: number) => {
     const isGeneralReview = message.kind === "general-review";
     return <details className={`ai-chat-message ${message.role}${isGeneralReview ? " general-review" : ""}`} key={index} open>
       <summary><span className="message-role">{message.title ?? (message.role === "user" ? "You" : "Pi")}</span></summary>
       <MarkdownText text={message.text} fileLinks={{ prUrl }} />
     </details>;
-  })}</div> : <p className="muted">Run review or ask Pi about this PR.</p>;
+  };
+  const body = messages.length > 0 ? <div className="ai-review-dialogue">
+    {reviewMessages.length > 0 && <div className="ai-chat-messages ai-review-response">{reviewMessages.map(renderMessage)}</div>}
+    {chatMessages.length > 0 && <div className="ai-chat-section"><div className="ai-chat-section-label">Follow-up chat</div><div className="ai-chat-messages">{chatMessages.map(renderMessage)}</div></div>}
+  </div> : <p className="muted">Run review or ask Pi about this PR.</p>;
   function submitChat() {
     if (draft.trim().length === 0 || review.running) return;
     const message = draft;
@@ -1347,7 +1368,7 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
     if (next) setCollapsedFocusAreaIds(nextCollapsedIds);
     void saveFocusScan(focusReview.text, nextViewedIds, nextCollapsedIds);
   }
-  const composer = <div className="ai-chat-composer"><textarea ref={composerRef} value={draft} onChange={(event) => setDraft(event.target.value)} onInput={(event) => autoGrowTextarea(event.currentTarget)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submitChat(); } }} placeholder="Ask Pi about this PR…" /><Button variant="muted" onClick={submitChat} disabled={review.running || draft.trim().length === 0}>{review.running ? "Sending…" : "Send"}</Button></div>;
+  const composer = <div className="ai-chat-followup"><div className="ai-chat-divider"><span>Ask a follow-up</span></div><div className="ai-chat-composer"><textarea ref={composerRef} value={draft} onChange={(event) => setDraft(event.target.value)} onInput={(event) => autoGrowTextarea(event.currentTarget)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submitChat(); } }} placeholder="Ask Pi about this PR…" /><Button variant="muted" onClick={submitChat} disabled={review.running || draft.trim().length === 0}>{review.running ? "Sending…" : "Send"}</Button></div></div>;
   const selectedAiReviewId = aiReviewId ?? "";
   const selectedFocusScanId = focusScanId ?? "";
   const latestAiReviewId = aiReviewHistory[0]?.id ?? null;
@@ -1358,6 +1379,12 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
   const viewedCount = focusAreas.filter((area) => viewedFocusIds[area.id]).length;
   const allFocusReviewed = focusAreaCount > 0 && viewedCount === focusAreaCount;
   const focusLinksMinimized = allFocusReviewed && allFocusCollapsed;
+  const focusHistoryOptions = focusScanHistory.map((record, index) => <option key={record.id} value={record.id}>{index === 0 ? "Latest · " : ""}{historyTimestamp(record)} · {focusScanSummary(record)}</option>);
+  const aiHistoryOptions = aiReviewHistory.map((record, index) => {
+    const question = firstUserQuestionText(record.messages);
+    const questionCount = chatQuestionCount(record.messages);
+    return <option key={record.id} value={record.id}>{index === 0 ? "Latest · " : ""}{historyTimestamp(record)} · {question.length > 0 ? question : "Findings only"}{questionCount > 0 ? ` (${questionCount})` : ""}</option>;
+  });
   const focusAreaLinks = focusAreaCount > 0 && <div className={`focus-area-links${focusLinksMinimized ? " minimized" : ""}`} aria-label="Focus areas">
     <div className="focus-area-links-head">
       <strong>{viewedCount}/{focusAreaCount} focus area{focusAreaCount === 1 ? "" : "s"} reviewed</strong>
@@ -1381,91 +1408,41 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
     <div className="pi-actions">
       <div className="pi-action">
         <Button className="focus-review-run" onClick={() => void runFocusReview()} disabled={focusReview.running}>{focusReview.running ? "Scanning…" : focusReview.text.length > 0 ? "Refresh focus scan" : "Focus scan"}</Button>
-        <span className="muted">Find specific lines worth deeper review. Refresh saves the new pass to history.</span>
-        {focusScanHistory.length > 0 && (
-          <div className="pi-history-list" role="list">
-            {focusScanHistory.map((record, index) => {
-              const isActive = record.id === selectedFocusScanId;
-              const isLatest = index === 0;
-              return (
-                <button
-                  type="button"
-                  key={record.id}
-                  role="listitem"
-                  className={`pi-history-card${isActive ? " active" : ""}`}
-                  aria-current={isActive ? "true" : undefined}
-                  onClick={() => showFocusScanRecord(record)}
-                >
-                  <div className="pi-history-card-head">
-                    {isLatest && <span className="pi-history-card-badge">Latest</span>}
-                    <span className="pi-history-card-time">{historyTimestamp(record)}</span>
-                  </div>
-                  <div className="pi-history-card-preview">{focusScanSummary(record)}</div>
-                </button>
-              );
-            })}
-          </div>
-        )}
+        <span className="muted">Find specific lines worth deeper review. Refresh saves each pass to quiet history.</span>
+        {focusScanHistory.length > 1 && <details className="pi-history-compact"><summary>Focus scan history ({focusScanHistory.length})</summary><div className="pi-history-picker"><select aria-label="Focus scan history" value={selectedFocusScanId} onChange={(event) => showFocusScanRecord(focusScanHistory.find((record) => record.id === event.target.value))}>{focusHistoryOptions}</select>{viewingOlderFocusScan && <Button variant="muted" className="pi-history-back" onClick={() => showFocusScanRecord(focusScanHistory[0])}>Latest</Button>}</div></details>}
       </div>
       <div className="pi-action">
         <Button onClick={() => void runReview()} disabled={review.running}>{review.running ? "Reviewing…" : hasMessages ? "Refresh findings" : "Full review"}</Button>
-        <span className="muted">Run a general code review. Refresh saves the new pass to history.</span>
-        <Button variant="muted" className="small-muted-button" onClick={() => void runFlowDag()} disabled={flowDag.running}>{flowDag.running ? "Building DAG…" : flowDag.text.trim().length > 0 ? "Refresh Flow DAG" : "Flow DAG"}</Button>
-        {aiReviewHistory.length > 0 && (
-          <div className="pi-history-list" role="list">
-            {aiReviewHistory.map((record, index) => {
-              const question = firstUserQuestionText(record.messages);
-              const questionCount = chatQuestionCount(record.messages);
-              const isActive = record.id === selectedAiReviewId;
-              const isLatest = index === 0;
-              return (
-                <button
-                  type="button"
-                  key={record.id}
-                  role="listitem"
-                  className={`pi-history-card${isActive ? " active" : ""}`}
-                  aria-current={isActive ? "true" : undefined}
-                  onClick={() => showAiReviewRecord(record)}
-                >
-                  <div className="pi-history-card-head">
-                    {isLatest && <span className="pi-history-card-badge">Latest</span>}
-                    <span className="pi-history-card-time">{historyTimestamp(record)}</span>
-                    {questionCount > 0 && (
-                      <span className="pi-history-card-count">
-                        {questionCount} {questionCount === 1 ? "question" : "questions"}
-                      </span>
-                    )}
-                  </div>
-                  <div className="pi-history-card-preview">
-                    {question.length > 0 ? question : <em className="muted">Findings only — no follow-up</em>}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        )}
+        <span className="muted">Run a general code review. Follow-up chat stays with this run.</span>
+        {aiReviewHistory.length > 1 && <details className="pi-history-compact"><summary>Review/chat history ({aiReviewHistory.length})</summary><div className="pi-history-picker"><select aria-label="Review chat history" value={selectedAiReviewId} onChange={(event) => showAiReviewRecord(aiReviewHistory.find((record) => record.id === event.target.value))}>{aiHistoryOptions}</select>{viewingOlderAiReview && <Button variant="muted" className="pi-history-back" onClick={() => showAiReviewRecord(aiReviewHistory[0])}>Latest</Button>}</div></details>}
       </div>
     </div>
-    {(flowDag.running || flowDag.text.trim().length > 0 || flowDag.error != null) && <FlowDagPanel flowDag={flowDag} closeFlowDag={closeFlowDag} prUrl={prUrl} />}
     {focusReviewHasNoFindings(focusReview.text) && <div className="focus-review-note clean" role="status"><strong>✓ Focus scan clean.</strong><span>All scanned up for this pass.</span></div>}
     {focusAreaLinks}
     {body}{composer}
   </section>;
 }
 
-function FlowDagPanel({ flowDag, closeFlowDag, prUrl }: { flowDag: FlowDag; closeFlowDag: () => void; prUrl: string }) {
-  return <section className="flow-dag-panel" aria-label="Flow DAG">
+function FlowDagModal({ flowDag, runFlowDag, close, prUrl, headSha }: { flowDag: FlowDag; runFlowDag: () => Promise<void>; close: () => void; prUrl: string; headSha: string }) {
+  return <ModalShell open onOpenChange={(open) => { if (!open) close(); }} label="Code walk" className="flow-dag-modal">
     <div className="flow-dag-panel-head">
-      <strong>Flow DAG</strong>
+      <div>
+        <h2>Code walk</h2>
+        <p className="muted">Architecture, data flow, and key snippets for this PR.</p>
+      </div>
       <div className="flow-dag-panel-actions">
-        {flowDag.running && <span className="muted spinner-label"><span className="spinner" aria-hidden="true" />Building diagram…</span>}
-        <Button variant="muted" className="small-muted-button" onClick={closeFlowDag} aria-label="Close Flow DAG">Close</Button>
+        {flowDag.running && <span className="muted spinner-label"><span className="spinner" aria-hidden="true" />Building walk…</span>}
+        <Button variant="muted" className="small-muted-button" onClick={() => void runFlowDag()} disabled={flowDag.running}>{flowDag.running ? "Refreshing…" : flowDag.text.trim().length > 0 ? "Refresh" : "Build"}</Button>
+        <Button variant="muted" className="small-muted-button" onClick={close} aria-label="Close code walk">Close</Button>
       </div>
     </div>
-    {flowDag.error != null && <p className="muted">Flow DAG failed: {flowDag.error}</p>}
-    {flowDag.text.trim().length === 0 && !flowDag.error && flowDag.running && <p className="muted">Asking Pi for a dependency diagram…</p>}
-    {flowDag.text.trim().length > 0 && <div className="flow-dag-body"><MarkdownText text={flowDag.text} fileLinks={{ prUrl }} /></div>}
-  </section>;
+    <div className="flow-dag-body review-modal-body">
+      {flowDag.error != null && <p className="muted">Code walk failed: {flowDag.error}</p>}
+      {flowDag.text.trim().length === 0 && !flowDag.error && flowDag.running && <p className="muted">Asking Pi for a guided code walk…</p>}
+      {flowDag.text.trim().length === 0 && !flowDag.error && !flowDag.running && <p className="muted">Build a code walk to orient the review.</p>}
+      {flowDag.text.trim().length > 0 && <InlineSnippetsProvider value={{ headSha, snippets: false }}><MarkdownText text={flowDag.text} fileLinks={{ prUrl }} /></InlineSnippetsProvider>}
+    </div>
+  </ModalShell>;
 }
 
 function diagnosticsText(value: unknown): string {

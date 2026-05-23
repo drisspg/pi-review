@@ -27,6 +27,7 @@ export function Mermaid({ code }: { code: string }) {
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [themeTick, setThemeTick] = useState(0);
+  const [zoom, setZoom] = useState(1);
   const themeRef = useRef<string>(document.documentElement.dataset.theme ?? "github-dark");
 
   useEffect(() => {
@@ -66,5 +67,13 @@ export function Mermaid({ code }: { code: string }) {
     </div>;
   }
   if (svg == null) return <div className="mermaid-placeholder" aria-label="Rendering diagram" />;
-  return <div className="mermaid-rendered" dangerouslySetInnerHTML={{ __html: svg }} />;
+  return <div className="mermaid-zoom-shell">
+    <div className="mermaid-zoom-controls" aria-label="Diagram zoom controls">
+      <button type="button" onClick={() => setZoom((current) => Math.max(0.5, current - 0.25))}>−</button>
+      <span>{Math.round(zoom * 100)}%</span>
+      <button type="button" onClick={() => setZoom((current) => Math.min(2.5, current + 0.25))}>+</button>
+      <button type="button" onClick={() => setZoom(1)}>Reset</button>
+    </div>
+    <div className="mermaid-rendered" style={{ ["--mermaid-zoom" as string]: zoom }} dangerouslySetInnerHTML={{ __html: svg }} />
+  </div>;
 }

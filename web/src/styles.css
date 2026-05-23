@@ -2347,6 +2347,54 @@ a { color: var(--link); text-decoration: none; }
   margin-top: 12px;
 }
 
+.ai-review-response {
+  margin-top: 12px;
+}
+
+.ai-chat-section {
+  display: grid;
+  gap: 8px;
+}
+
+.ai-chat-section .ai-chat-messages {
+  margin-top: 0;
+}
+
+.ai-chat-section-label,
+.ai-chat-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ai-chat-section-label::after,
+.ai-chat-divider::before,
+.ai-chat-divider::after {
+  content: "";
+  height: 1px;
+  background: var(--border);
+}
+
+.ai-chat-section-label::after,
+.ai-chat-divider::after {
+  flex: 1;
+}
+
+.ai-chat-divider::before {
+  width: 18px;
+}
+
+.ai-chat-followup {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
 .ai-chat-message {
   padding: 10px 12px;
   border: 1px solid var(--border);
@@ -3268,13 +3316,44 @@ a { color: var(--link); text-decoration: none; }
   overflow-x: auto;
 }
 
+.mermaid-zoom-shell {
+  display: grid;
+  gap: 8px;
+}
+
+.mermaid-zoom-controls {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.mermaid-zoom-controls button {
+  min-height: 26px;
+  padding: 2px 8px;
+  font-size: 0.76rem;
+}
+
+.mermaid-zoom-controls span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  min-width: 42px;
+  text-align: center;
+}
+
 .mermaid-rendered {
   display: flex;
   justify-content: center;
+  min-width: max-content;
+  transform: scale(var(--mermaid-zoom, 1));
+  transform-origin: top left;
 }
 
 .mermaid-rendered svg {
-  max-width: 100%;
+  max-width: none;
   height: auto;
 }
 
@@ -3288,6 +3367,130 @@ a { color: var(--link); text-decoration: none; }
   color: var(--danger, #cf222e);
   font-size: 12px;
   white-space: pre-wrap;
+}
+
+
+.markdown table {
+  width: 100%;
+  margin: 0 0 0.85rem;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+}
+
+.markdown th,
+.markdown td {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.markdown th {
+  background: var(--panel2);
+  color: var(--muted);
+  font-size: 0.74rem;
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.pi-history-compact {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.pi-history-compact summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.pi-history-compact summary:hover {
+  color: var(--text);
+}
+
+.pi-history-compact .pi-history-picker {
+  margin-top: 6px;
+}
+
+.focus-area-links {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel2);
+}
+
+.focus-area-links-head {
+  color: var(--text);
+}
+
+.focus-area-links button,
+.focus-area-link-row.viewed button,
+.focus-area-check,
+.focus-area-link-row.viewed .focus-area-check {
+  border-color: var(--border);
+  background: var(--panel);
+}
+
+.focus-area-links button:hover {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: var(--panel2);
+}
+
+.focus-area-links strong {
+  color: var(--text);
+}
+
+.focus-area-inline,
+.focus-area-collapsed {
+  border-color: var(--border);
+  background: var(--panel);
+  box-shadow: inset 3px 0 var(--border);
+}
+
+.focus-area-inline.active {
+  background: var(--panel2);
+}
+
+.focus-area-inline .thread-head strong {
+  color: var(--text);
+}
+
+.flow-dag-modal {
+  width: 98vw;
+  height: 94vh;
+  max-height: 94vh;
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: start;
+}
+
+.flow-dag-modal .flow-dag-panel-head h2 {
+  margin: 0 0 3px;
+}
+
+.flow-dag-modal .flow-dag-panel-head p {
+  margin: 0;
+}
+
+.flow-dag-body {
+  display: block;
+  min-height: 0;
+  max-height: none;
+}
+
+.flow-dag-body .markdown {
+  max-height: none;
+  overflow: visible;
+}
+
+.flow-dag-modal .flow-dag-body .markdown-mermaid-block {
+  min-height: 520px;
+  resize: vertical;
+}
+
+.flow-dag-modal .flow-dag-body .mermaid-rendered svg {
+  width: 1200px;
+  min-height: 480px;
+  max-height: none;
 }
 
 /* Flow DAG panel */

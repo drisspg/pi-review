@@ -375,6 +375,48 @@ test("persists Pi review chat across page reloads", async ({ page }) => {
   await expect(page.locator(".ai-review")).toContainText("Persisted answer");
 });
 
+test("opens a separate code walk modal from the toolbar", async ({ page }) => {
+  let prompt = "";
+  await mockAskPi(page, (body) => {
+    prompt = body.prompt ?? "";
+    return `# PR goal
+
+Orient reviewers.
+
+## Architecture map
+
+| Area | Changed code | Responsibility | Reviewer note |
+| --- | --- | --- | --- |
+| Panel | \`csrc/flash_attn/src/flash_fwd_kernel.h:1276\` | Renders Pi review UI | Keep history quiet |
+
+## Flow DAG
+
+\`\`\`mermaid
+flowchart LR
+  Toolbar --> Modal
+\`\`\`
+
+## Code walk
+
+See \`csrc/flash_attn/src/flash_fwd_kernel.h:1276\`.
+
+\`\`\`tsx
+<Button>Code walk</Button>
+\`\`\`
+
+## What changed in behavior
+
+The walk is separate from review chat.`;
+  });
+
+  await page.getByRole("button", { name: "Code walk" }).click();
+
+  const dialog = page.locator(".flow-dag-modal");
+  await expect(dialog).toContainText("Architecture map");
+  await expect(dialog.locator("table")).toContainText("Reviewer note");
+  expect(prompt).toContain("reviewer-friendly code walk");
+});
+
 test("runs the right-sidebar Pi review panel and continues the chat with Enter", async ({ page }) => {
   let openedFile: unknown = null;
   await page.route(/\/api\/file\/open$/, async (route) => {
