@@ -1272,9 +1272,12 @@ function ReviewSummary({ drafts, setDrafts, editingDraftId, setEditingDraftId, s
 }
 
 function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiReviewRecord, runReview, sendMessage, focusReview, focusScanHistory, focusScanId, showFocusScanRecord, runFocusReview, focusAreas, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds, viewedFocusIds, setViewedFocusIds, saveFocusScan, openFiles, setOpenFiles }: PiPanelProps & { prUrl: string; focusAreas: FocusArea[]; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"]; openFiles: Record<string, boolean>; setOpenFiles: (open: Record<string, boolean>) => void }) {
-  const [draft, setDraft] = useState("");
+  const [draftsByRecord, setDraftsByRecord] = useState<Record<string, string>>({});
+  const draftKey = aiReviewId ?? "__pending__";
+  const draft = draftsByRecord[draftKey] ?? "";
+  const setDraft = (text: string) => setDraftsByRecord((current) => ({ ...current, [draftKey]: text }));
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
-  useEffect(() => autoGrowTextarea(composerRef.current), [draft]);
+  useEffect(() => autoGrowTextarea(composerRef.current), [draft, draftKey]);
   const focusAreaCount = focusAreas.length;
   const allFocusCollapsed = focusAreaCount > 0 && focusAreas.every((area) => collapsedFocusAreaIds[area.id]);
   const hasMessages = review.messages.length > 0 || review.text.length > 0;
