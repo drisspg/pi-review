@@ -17,6 +17,8 @@ type MessageLike = {
   stopReason?: string;
 };
 
+type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
 type SessionRecord = {
   abort?: () => Promise<void>;
   dispose?: () => void;
@@ -31,14 +33,18 @@ type SessionRecord = {
   sessionId?: string;
   sessionName?: string;
   setModel?: (model: unknown) => Promise<void>;
-  setThinkingLevel?: (level: string) => void;
+  setThinkingLevel?: (level: ThinkingLevel) => void;
   subscribe: (listener: (event: unknown) => void) => () => void;
-  thinkingLevel?: string;
+  thinkingLevel?: ThinkingLevel;
 };
 
 const DEFAULT_PI_MODEL_PROVIDER = "openai-codex";
 const DEFAULT_PI_MODEL_ID = "gpt-5.5";
-const DEFAULT_PI_THINKING_LEVEL = "high";
+const DEFAULT_PI_THINKING_LEVEL: ThinkingLevel = "high";
+const PI_THINKING_LEVEL_BY_PURPOSE: Record<string, ThinkingLevel> = {
+  "focus-chat": "medium",
+  "inline-chat": "low",
+};
 
 const sessions = new Map<string, Promise<SessionRecord>>();
 const cwdByPr = new Map<string, string>();
@@ -75,14 +81,15 @@ async function createSession(prKey: string, purpose = "chat"): Promise<SessionRe
   const modelRegistry = ModelRegistry.create(AuthStorage.create());
   const model = modelRegistry.find(DEFAULT_PI_MODEL_PROVIDER, DEFAULT_PI_MODEL_ID);
   if (model == null) throw new Error(`Default Pi Review model not found: ${DEFAULT_PI_MODEL_PROVIDER}/${DEFAULT_PI_MODEL_ID}`);
+  const thinkingLevel = PI_THINKING_LEVEL_BY_PURPOSE[purpose] ?? DEFAULT_PI_THINKING_LEVEL;
   const { session } = await createAgentSession({
     cwd,
     model,
     modelRegistry,
     sessionManager: SessionManager.create(cwd, sessionDir),
-    thinkingLevel: DEFAULT_PI_THINKING_LEVEL,
+    thinkingLevel,
   });
-  logger.info("pi", "create session complete", { prKey, purpose, model: `${DEFAULT_PI_MODEL_PROVIDER}/${DEFAULT_PI_MODEL_ID}`, thinkingLevel: DEFAULT_PI_THINKING_LEVEL, ms: Math.round(performance.now() - startedAt) });
+  logger.info("pi", "create session complete", { prKey, purpose, model: `${DEFAULT_PI_MODEL_PROVIDER}/${DEFAULT_PI_MODEL_ID}`, thinkingLevel, ms: Math.round(performance.now() - startedAt) });
   return session as SessionRecord;
 }
 
@@ -99,6 +106,10 @@ export function prewarmPiSession(prKey: string, purposes = ["chat"]): void {
   for (const purpose of purposes) {
     void getSession(prKey, purpose).catch((error: unknown) => logger.error("pi", "prewarm failed", { prKey, purpose, error: error instanceof Error ? error.message : String(error) }));
   }
+}
+
+function isThinkingLevel(value: string): value is ThinkingLevel {
+  return ["off", "minimal", "low", "medium", "high", "xhigh"].includes(value);
 }
 
 function modelLabel(model: SessionRecord["model"]): string | null {
@@ -150,7 +161,10 @@ export async function setPiModel(prKey: string, provider: string, modelId: strin
   if (model == null) throw new Error(`Unknown model ${provider}/${modelId}`);
   if (session.setModel == null) throw new Error("Pi session does not expose model switching");
   await session.setModel(model);
-  if (thinkingLevel != null && thinkingLevel.length > 0) session.setThinkingLevel?.(thinkingLevel);
+  if (thinkingLevel != null && thinkingLevel.length > 0) {
+    if (!isThinkingLevel(thinkingLevel)) throw new Error(`Unknown thinking level ${thinkingLevel}`);
+    session.setThinkingLevel?.(thinkingLevel);
+  }
   return piDiagnostics(prKey);
 }
 
