@@ -93,9 +93,18 @@ function historyTimestamp(record: { updatedAt: string; createdAt: string }): str
   return Number.isNaN(date.getTime()) ? record.updatedAt || record.createdAt : date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
-function historyOptionLabel(record: { updatedAt: string; createdAt: string }, index: number): string {
-  const stamp = historyTimestamp(record);
-  return index === 0 ? `Latest · ${stamp}` : stamp;
+function firstUserQuestionText(messages: AiReviewMessage[] | undefined): string {
+  return messages?.find((message) => message.role === "user")?.text.trim() ?? "";
+}
+
+function chatQuestionCount(messages: AiReviewMessage[] | undefined): number {
+  return messages?.filter((message) => message.role === "user").length ?? 0;
+}
+
+function focusScanSummary(record: FocusScanRecord): string {
+  const areas = parseFocusAreas(record.answer);
+  if (areas.length > 0) return `${areas.length} focus ${areas.length === 1 ? "area" : "areas"}`;
+  return record.answer.trim().length === 0 ? "Not yet scanned" : "Clean — no focus areas";
 }
 
 function upsertHistoryRecord<T extends { id: string; updatedAt: string; createdAt: string }>(records: T[], record: T): T[] {
@@ -1343,18 +1352,67 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
       <div className="pi-action">
         <Button className="focus-review-run" onClick={() => void runFocusReview()} disabled={focusReview.running}>{focusReview.running ? "Scanning…" : focusReview.text.length > 0 ? "Refresh focus scan" : "Focus scan"}</Button>
         <span className="muted">Find specific lines worth deeper review. Refresh saves the new pass to history.</span>
-        {focusScanHistory.length > 0 && <div className="pi-history-picker">
-          <select aria-label="Focus scan history" value={selectedFocusScanId} onChange={(event) => showFocusScanRecord(focusScanHistory.find((record) => record.id === event.target.value) ?? focusScanHistory[0])}>{focusScanHistory.map((record, index) => <option key={record.id} value={record.id}>{historyOptionLabel(record, index)}</option>)}</select>
-          {viewingOlderFocusScan && <button type="button" className="pi-history-back" onClick={() => showFocusScanRecord(focusScanHistory[0])}>Back to latest</button>}
-        </div>}
+        {focusScanHistory.length > 0 && (
+          <div className="pi-history-list" role="list">
+            {focusScanHistory.map((record, index) => {
+              const isActive = record.id === selectedFocusScanId;
+              const isLatest = index === 0;
+              return (
+                <button
+                  type="button"
+                  key={record.id}
+                  role="listitem"
+                  className={`pi-history-card${isActive ? " active" : ""}`}
+                  aria-current={isActive ? "true" : undefined}
+                  onClick={() => showFocusScanRecord(record)}
+                >
+                  <div className="pi-history-card-head">
+                    {isLatest && <span className="pi-history-card-badge">Latest</span>}
+                    <span className="pi-history-card-time">{historyTimestamp(record)}</span>
+                  </div>
+                  <div className="pi-history-card-preview">{focusScanSummary(record)}</div>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
       <div className="pi-action">
         <Button onClick={() => void runReview()} disabled={review.running}>{review.running ? "Reviewing…" : hasMessages ? "Refresh findings" : "Full review"}</Button>
         <span className="muted">Run a general code review. Refresh saves the new pass to history.</span>
-        {aiReviewHistory.length > 0 && <div className="pi-history-picker">
-          <select aria-label="General review history" value={selectedAiReviewId} onChange={(event) => showAiReviewRecord(aiReviewHistory.find((record) => record.id === event.target.value) ?? aiReviewHistory[0])}>{aiReviewHistory.map((record, index) => <option key={record.id} value={record.id}>{historyOptionLabel(record, index)}</option>)}</select>
-          {viewingOlderAiReview && <button type="button" className="pi-history-back" onClick={() => showAiReviewRecord(aiReviewHistory[0])}>Back to latest</button>}
-        </div>}
+        {aiReviewHistory.length > 0 && (
+          <div className="pi-history-list" role="list">
+            {aiReviewHistory.map((record, index) => {
+              const question = firstUserQuestionText(record.messages);
+              const questionCount = chatQuestionCount(record.messages);
+              const isActive = record.id === selectedAiReviewId;
+              const isLatest = index === 0;
+              return (
+                <button
+                  type="button"
+                  key={record.id}
+                  role="listitem"
+                  className={`pi-history-card${isActive ? " active" : ""}`}
+                  aria-current={isActive ? "true" : undefined}
+                  onClick={() => showAiReviewRecord(record)}
+                >
+                  <div className="pi-history-card-head">
+                    {isLatest && <span className="pi-history-card-badge">Latest</span>}
+                    <span className="pi-history-card-time">{historyTimestamp(record)}</span>
+                    {questionCount > 0 && (
+                      <span className="pi-history-card-count">
+                        {questionCount} {questionCount === 1 ? "question" : "questions"}
+                      </span>
+                    )}
+                  </div>
+                  <div className="pi-history-card-preview">
+                    {question.length > 0 ? question : <em className="muted">Findings only — no follow-up</em>}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
     {focusReviewHasNoFindings(focusReview.text) && <div className="focus-review-note clean" role="status"><strong>✓ Focus scan clean.</strong><span>All scanned up for this pass.</span></div>}
