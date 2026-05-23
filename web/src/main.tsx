@@ -946,7 +946,8 @@ function ReviewPage(props: DiffProps & { piPanel: PiPanelProps; submitReview: (e
     }
     window.setTimeout(tryScroll, 50);
   }
-  return <div className="review-layout" style={{ gridTemplateColumns: `minmax(0, 1fr) 12px ${props.sideWidth}px` }}>
+  const gridTemplateColumns = sideMaximized ? `0 0 minmax(0, ${props.sideWidth}px)` : `minmax(0, 1fr) 12px ${props.sideWidth}px`;
+  return <div className="review-layout" style={{ gridTemplateColumns }}>
     <main className="files">
       <PrHeaderStrip pr={props.review.pr} refreshGithubActivity={props.refreshGithubActivity} refreshingActivity={props.refreshingActivity} />
       <PrSummary pr={props.review.pr} />
