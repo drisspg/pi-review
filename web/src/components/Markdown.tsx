@@ -12,15 +12,127 @@ const fileReferenceExactPattern = /^((?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+\.[A-Z
 const fileReferenceCodePattern = /^((?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+\.[A-Za-z0-9_+-]+):(\d+)(?:-(\d+))?(?:\s+[—-].*)?$/;
 const fileReferenceUrlPrefix = "pi-review-file://";
 
-type FileLinkContext = { prUrl: string };
+type FileLinkContext = { prUrl: string; headSha?: string; snippets?: boolean };
+
+export const InlineSnippetsContext = React.createContext<{ headSha: string; snippets: boolean } | null>(null);
+export const InlineSnippetsProvider = InlineSnippetsContext.Provider;
 type FileReference = { path: string; line: number; endLine?: number };
+
+const SNIPPET_CONTEXT_LINES = 2;
+const fileTextCache = new Map<string, Promise<string>>();
+
+async function loadFileText(prUrl: string, path: string, sha: string): Promise<string> {
+  const key = `${prUrl}::${sha}::${path}`;
+  const existing = fileTextCache.get(key);
+  if (existing != null) return existing;
+  const promise = api<{ text: string }>("/api/file/text", { method: "POST", body: JSON.stringify({ prUrl, path, sha }) }).then((response) => response.text).catch((err) => {
+    fileTextCache.delete(key);
+    throw err;
+  });
+  fileTextCache.set(key, promise);
+  return promise;
+}
+
+function languageFromPath(path: string): string {
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  switch (ext) {
+    case "ts":
+    case "tsx":
+    case "js":
+    case "jsx":
+    case "mjs":
+    case "cjs": return "ts";
+    case "py": return "python";
+    case "rs": return "rust";
+    case "go": return "go";
+    case "java": return "java";
+    case "kt":
+    case "kts": return "kotlin";
+    case "rb": return "ruby";
+    case "swift": return "swift";
+    case "c":
+    case "h": return "c";
+    case "cc":
+    case "cpp":
+    case "cxx":
+    case "hpp":
+    case "hh":
+    case "cuh":
+    case "cu": return "cpp";
+    case "css": return "css";
+    case "scss": return "scss";
+    case "html":
+    case "htm": return "html";
+    case "json": return "json";
+    case "yaml":
+    case "yml": return "yaml";
+    case "toml": return "toml";
+    case "sh":
+    case "bash":
+    case "zsh": return "bash";
+    case "md":
+    case "markdown": return "markdown";
+    default: return "";
+  }
+}
+
+function InlineFileSnippet({ context, reference }: { context: FileLinkContext; reference: FileReference }) {
+  const [state, setState] = React.useState<{ status: "loading" | "ready" | "error"; lines?: string[]; error?: string }>({ status: "loading" });
+  const [collapsed, setCollapsed] = React.useState(false);
+  React.useEffect(() => {
+    if (context.headSha == null) {
+      setState({ status: "error", error: "missing head SHA for snippet" });
+      return;
+    }
+    let cancelled = false;
+    setState({ status: "loading" });
+    loadFileText(context.prUrl, reference.path, context.headSha).then((text) => {
+      if (cancelled) return;
+      setState({ status: "ready", lines: text.split("\n") });
+    }).catch((err) => {
+      if (cancelled) return;
+      setState({ status: "error", error: err instanceof Error ? err.message : String(err) });
+    });
+    return () => { cancelled = true; };
+  }, [context.headSha, context.prUrl, reference.path]);
+  const start = Math.max(1, reference.line - SNIPPET_CONTEXT_LINES);
+  const endLine = reference.endLine ?? reference.line;
+  if (state.status === "loading") return <span className="file-snippet loading"><span className="file-snippet-head"><span className="file-snippet-path">{referenceLabel(reference)}</span><span className="file-snippet-status muted">loading…</span></span></span>;
+  if (state.status === "error") return <span className="file-snippet error"><span className="file-snippet-head"><span className="file-snippet-path">{referenceLabel(reference)}</span><span className="file-snippet-status muted">{state.error}</span></span></span>;
+  const lines = state.lines ?? [];
+  const stop = Math.min(lines.length, endLine + SNIPPET_CONTEXT_LINES);
+  const language = languageFromPath(reference.path);
+  const slice = lines.slice(start - 1, stop);
+  const html = highlightedHtml(slice.join("\n"), language);
+  const rowHtmls = html.split("\n");
+  return <span className={`file-snippet${collapsed ? " collapsed" : ""}`}>
+    <span className="file-snippet-head" onClick={(event) => { event.preventDefault(); setCollapsed((current) => !current); }} role="button" aria-expanded={!collapsed} title={collapsed ? "Expand" : "Collapse"}>
+      <span className="file-snippet-chevron" aria-hidden="true">{collapsed ? "›" : "⌄"}</span>
+      <span className="file-snippet-path">{referenceLabel(reference)}</span>
+    </span>
+    {!collapsed && <span className="file-snippet-body">
+      <span className="file-snippet-gutter" aria-hidden="true">{Array.from({ length: stop - start + 1 }, (_, index) => {
+        const lineNumber = start + index;
+        const inRange = lineNumber >= reference.line && lineNumber <= endLine;
+        return <span key={lineNumber} className={`file-snippet-line-number${inRange ? " highlight" : ""}`}>{lineNumber}</span>;
+      })}</span>
+      <span className="file-snippet-code">{rowHtmls.map((row, index) => {
+        const lineNumber = start + index;
+        const inRange = lineNumber >= reference.line && lineNumber <= endLine;
+        return <span key={index} className={`file-snippet-line${inRange ? " highlight" : ""}`} dangerouslySetInnerHTML={{ __html: row.length > 0 ? row : "&nbsp;" }} />;
+      })}</span>
+    </span>}
+  </span>;
+}
 
 export const CodeText = React.memo(function CodeText({ code, language, syntaxContext }: { code: string; language: string; syntaxContext?: "string" }) {
   return <code dangerouslySetInnerHTML={{ __html: highlightedHtml(code, language, syntaxContext) }} />;
 });
 
 export function MarkdownText({ text, fileLinks }: { text: string; fileLinks?: FileLinkContext }) {
-  const components = fileLinks == null ? { code: MarkdownCode, pre: MarkdownPre } : { code: (props: MarkdownCodeProps) => <MarkdownCode {...props} fileLinks={fileLinks} />, pre: MarkdownPre, a: (props: MarkdownAnchorProps) => <MarkdownAnchor {...props} fileLinks={fileLinks} /> };
+  const inlineCtx = React.useContext(InlineSnippetsContext);
+  const mergedFileLinks: FileLinkContext | undefined = fileLinks == null ? undefined : { ...fileLinks, headSha: fileLinks.headSha ?? inlineCtx?.headSha, snippets: fileLinks.snippets ?? inlineCtx?.snippets ?? false };
+  const components = mergedFileLinks == null ? { code: MarkdownCode, pre: MarkdownPre } : { code: (props: MarkdownCodeProps) => <MarkdownCode {...props} fileLinks={mergedFileLinks} />, pre: MarkdownPre, a: (props: MarkdownAnchorProps) => <MarkdownAnchor {...props} fileLinks={mergedFileLinks} /> };
   return <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm, remarkFileReferenceLinks]} components={components}>{text}</ReactMarkdown></div>;
 }
 
@@ -80,7 +192,9 @@ function FileReferenceAnchor({ context, reference, children }: { context: FileLi
     event.preventDefault();
     void openFileReference(context, reference);
   }
-  return <a className="file-reference-link" href="#" title="Open in VS Code" onMouseDown={open} onClick={open}>{children}</a>;
+  const link = <a className="file-reference-link" href="#" title="Open in VS Code" onMouseDown={open} onClick={open}>{children}</a>;
+  if (!context.snippets || context.headSha == null) return link;
+  return <span className="file-reference-with-snippet">{link}<InlineFileSnippet context={context} reference={reference} /></span>;
 }
 
 function remarkFileReferenceLinks() {

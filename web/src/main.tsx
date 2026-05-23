@@ -3,14 +3,14 @@ import { createRoot } from "react-dom/client";
 import { ChevronDownIcon, ChevronRightIcon, XIcon } from "@primer/octicons-react";
 import { api, askPi as askPiApi } from "./api";
 import { Button } from "./components/Button";
-import { CodeText, MarkdownText } from "./components/Markdown";
+import { CodeText, InlineSnippetsProvider, MarkdownText } from "./components/Markdown";
 import { ModalShell } from "./components/Modal";
 import { ExistingComments, ExistingReviewThread } from "./components/Threads";
 import { commentTarget, commentThreadDomId, draftMatchesTarget, groupReviewComments, targetKey, targetLabel, threadForTarget } from "./lib/comments";
 import { contextRowsFromText, hunkNewStart, isTargetInSelection, lastNewLine, parsePatchRows, targetFromPoint, targetFromRow } from "./lib/diff";
 import { languageForPath } from "./lib/highlight";
 import { newId, prUrlFromKey, shortSha } from "./lib/pr";
-import type { AiReview, AiReviewMessage, AiReviewRecord, DiffRow, DraftComment, DragSelection, FileReviewState, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, LogEntry, OpenResponse, PullFile, PullIssueComment, PullReviewComment, ReviewMemoryRecord, ReviewMemoryResponse, StoredPullRequest, Target, ThemeName, Thread } from "./types";
+import type { AiReview, AiReviewMessage, AiReviewRecord, DiffRow, DraftComment, DragSelection, FileReviewState, FlowDag, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, LogEntry, OpenResponse, PullFile, PullIssueComment, PullReviewComment, ReviewMemoryRecord, ReviewMemoryResponse, StoredPullRequest, Target, ThemeName, Thread } from "./types";
 import "./styles.css";
 
 type DiffViewMode = "unified" | "split";
@@ -68,6 +68,9 @@ type PiPanelProps = {
   viewedFocusIds: Record<string, boolean>;
   setViewedFocusIds: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   saveFocusScan: (answer: string, viewedIds: Record<string, boolean>, collapsedIds: Record<string, boolean>) => Promise<string | null>;
+  flowDag: FlowDag;
+  runFlowDag: () => Promise<void>;
+  closeFlowDag: () => void;
 };
 
 function focusReviewHasNoFindings(text: string): boolean {
@@ -264,6 +267,7 @@ function App() {
   const [aiReviewId, setAiReviewId] = useState<string | null>(null);
   const [focusReview, setFocusReview] = useState<FocusReview>({ expanded: false, open: false, running: false, text: "" });
   const [focusScanId, setFocusScanId] = useState<string | null>(null);
+  const [flowDag, setFlowDag] = useState<FlowDag>({ running: false, text: "", error: null });
   const [viewedFocusAreaIds, setViewedFocusAreaIds] = useState<Record<string, boolean>>({});
   const reviewCacheRef = useRef<Map<string, OpenResponse>>(new Map());
   const activeReviewKeyRef = useRef<string | null>(null);
@@ -272,7 +276,7 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [refreshingActivity, setRefreshingActivity] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [sideWidth, setSideWidth] = useState(380);
+  const [sideWidth, setSideWidth] = useState(560);
   const [error, setError] = useState<string | null>(null);
   const [diagnostics, setDiagnostics] = useState<Record<string, unknown> | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -389,6 +393,7 @@ function App() {
     setInvalidDraftIds({});
     showAiReviewRecord(data.aiReview);
     showFocusScanRecord(data.focusScan);
+    setFlowDag({ running: false, text: "", error: null });
   }
 
   async function openPr(nextInput: string) {
@@ -599,6 +604,27 @@ function App() {
     await runAiReviewFor(review, false);
   }
 
+  async function runFlowDag() {
+    if (review == null || flowDag.running) return;
+    const targetReview = review;
+    setFlowDag({ running: true, text: "", error: null });
+    const diffSummary = targetReview.files.map((file) => `## ${file.filename}\nStatus: ${file.status}, +${file.additions}/-${file.deletions}\n${file.patch ?? "Patch unavailable"}`).join("\n\n");
+    const prompt = `Produce a Mermaid dependency diagram for PR ${targetReview.pr.key}. Focus on the changed code and its closest neighbors:\n- show the most important changed files, functions, classes, or modules as nodes\n- draw directed edges for calls, imports, data flow, or producer/consumer relationships\n- group related nodes with subgraphs when it clarifies layout\n- keep node labels short (\`module.function\` or symbol name)\n\nReturn exactly one fenced \`\`\`mermaid block first. Use \`flowchart LR\` or \`flowchart TD\` (whichever reads better) and prefer simple ASCII labels. After the diagram, add 2-4 sentences pointing out the most important arrow or any surprising dependency a reviewer should notice.\n\nPR title: ${targetReview.pr.title}\n\n${diffSummary}`;
+    try {
+      const setAnswer = (answer: string) => {
+        if (activeReviewKeyRef.current !== targetReview.pr.key) return;
+        setFlowDag({ running: true, text: answer, error: null });
+      };
+      const answer = await askPiApi({ prKey: targetReview.pr.key, prompt, purpose: "flow-dag" }, setAnswer);
+      if (activeReviewKeyRef.current !== targetReview.pr.key) return;
+      setFlowDag({ running: false, text: answer, error: null });
+      await refreshLogs();
+    } catch (err) {
+      if (activeReviewKeyRef.current !== targetReview.pr.key) return;
+      setFlowDag((current) => ({ running: false, text: current.text, error: err instanceof Error ? err.message : String(err) }));
+    }
+  }
+
   async function runAiReviewFor(targetReview: OpenResponse, background: boolean) {
     setAiReview((current) => ({ ...current, open: !background || current.open, expanded: !background || current.expanded, running: true, text: background ? current.text : "", messages: background ? current.messages : [] }));
     const diffSummary = targetReview.files.map((file) => `## ${file.filename}
@@ -806,7 +832,7 @@ ${diffSummary}`;
     setCommentCollapseSignal((signal) => signal + 1);
   }
 
-  return <main className="app-shell"><header className="toolbar"><div className="toolbar-title"><strong>Pi PR Review</strong><span>{review == null ? "Paste a PR to start" : `${review.pr.key} · ${review.pr.title}`}</span></div><div className="toolbar-actions">{review != null && <><button type="button" onClick={goHome}>Home</button><button type="button" title="Pi session settings" onClick={() => { setSettingsOpen(true); void loadDiagnostics(); }}>⚙</button><button type="button" title="Pi session diagnostics" onClick={() => void showDiagnostics()}>🐞</button></>}<button type="button" title="Review memory" onClick={() => void showReviewMemory()}>🧠</button><button type="button" title="Server log" onClick={() => { setLogsOpen(true); void refreshLogs(); }}>📜</button><select aria-label="Theme" value={theme} onChange={(event) => setTheme(event.target.value as ThemeName)}><option value="github-dark">GitHub dark</option><option value="github-dimmed">GitHub dimmed</option><option value="github-light">GitHub light</option></select>{review != null && <form className="open-form" onSubmit={submit}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="OWNER/REPO#123 or GitHub PR URL" /><button disabled={busy || input.trim().length === 0}>{busy ? "Fetching…" : "Open"}</button></form>}</div></header>{error != null && <div className="error">{error}</div>}{busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, sendMessage: sendAiReviewMessage, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} />}{diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}{review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} openDiagnostics={() => { setSettingsOpen(false); void showDiagnostics(); }} close={() => setSettingsOpen(false)} />}{memoryOpen && <ReviewMemoryModal memory={reviewMemory} loading={memoryLoading} distilling={memoryDistilling} refresh={() => void loadReviewMemory()} distill={() => void distillReviewMemory()} close={() => setMemoryOpen(false)} />}{logsOpen && <LogsModal logs={logs} refreshLogs={refreshLogs} close={() => setLogsOpen(false)} />}</main>;
+  return <main className="app-shell"><header className="toolbar"><div className="toolbar-title"><strong>Pi PR Review</strong><span>{review == null ? "Paste a PR to start" : `${review.pr.key} · ${review.pr.title}`}</span></div><div className="toolbar-actions">{review != null && <><button type="button" onClick={goHome}>Home</button><button type="button" title="Pi session settings" onClick={() => { setSettingsOpen(true); void loadDiagnostics(); }}>⚙</button><button type="button" title="Pi session diagnostics" onClick={() => void showDiagnostics()}>🐞</button></>}<button type="button" title="Review memory" onClick={() => void showReviewMemory()}>🧠</button><button type="button" title="Server log" onClick={() => { setLogsOpen(true); void refreshLogs(); }}>📜</button><select aria-label="Theme" value={theme} onChange={(event) => setTheme(event.target.value as ThemeName)}><option value="github-dark">GitHub dark</option><option value="github-dimmed">GitHub dimmed</option><option value="github-light">GitHub light</option></select>{review != null && <form className="open-form" onSubmit={submit}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="OWNER/REPO#123 or GitHub PR URL" /><button disabled={busy || input.trim().length === 0}>{busy ? "Fetching…" : "Open"}</button></form>}</div></header>{error != null && <div className="error">{error}</div>}{busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, sendMessage: sendAiReviewMessage, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan, flowDag, runFlowDag, closeFlowDag: () => setFlowDag({ running: false, text: "", error: null }) }} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} />}{diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}{review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} openDiagnostics={() => { setSettingsOpen(false); void showDiagnostics(); }} close={() => setSettingsOpen(false)} />}{memoryOpen && <ReviewMemoryModal memory={reviewMemory} loading={memoryLoading} distilling={memoryDistilling} refresh={() => void loadReviewMemory()} distill={() => void distillReviewMemory()} close={() => setMemoryOpen(false)} />}{logsOpen && <LogsModal logs={logs} refreshLogs={refreshLogs} close={() => setLogsOpen(false)} />}</main>;
 }
 
 type StartFilter = "all" | "needs-review" | "in-progress" | "done";
@@ -968,7 +994,7 @@ function ReviewPage(props: DiffProps & { piPanel: PiPanelProps; submitReview: (e
       </nav>
       <div className="side-tab-panels">
         {sideTab === "review" && <ReviewSummary pr={props.review.pr} drafts={props.drafts} setDrafts={props.setDrafts} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} submitReview={props.submitReview} submitting={props.submitting} invalidDraftIds={props.invalidDraftIds} onJumpToDraft={(draft) => jumpToComment({ ...draft, hunk: "" })} />}
-        {sideTab === "pi" && <AiReviewPanel prUrl={props.review.pr.url} {...props.piPanel} focusAreas={props.focusAreas} setActiveFocusAreaId={props.setActiveFocusAreaId} collapsedFocusAreaIds={props.collapsedFocusAreaIds} setCollapsedFocusAreaIds={props.setCollapsedFocusAreaIds} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} />}
+        {sideTab === "pi" && <InlineSnippetsProvider value={{ headSha: props.review.pr.headSha, snippets: true }}><AiReviewPanel prUrl={props.review.pr.url} {...props.piPanel} focusAreas={props.focusAreas} setActiveFocusAreaId={props.setActiveFocusAreaId} collapsedFocusAreaIds={props.collapsedFocusAreaIds} setCollapsedFocusAreaIds={props.setCollapsedFocusAreaIds} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} /></InlineSnippetsProvider>}
         {sideTab === "comments" && <ExistingComments prUrl={props.review.pr.url} comments={props.review.comments} issueComments={props.review.issueComments} reviewSummaries={props.review.reviewSummaries} refreshGithubActivity={props.refreshGithubActivity} collapseSignal={props.commentCollapseSignal} commentsCollapsed={props.commentsCollapsed} toggleAllComments={props.toggleAllComments} onJumpToComment={jumpToComment} />}
       </div>
     </aside>
@@ -1272,7 +1298,7 @@ function ReviewSummary({ drafts, setDrafts, editingDraftId, setEditingDraftId, s
   return <section className="panel"><h2>Draft review</h2><select className={`review-event ${event.toLowerCase().replace("_", "-")}`} value={event} onChange={(change) => { setEvent(change.target.value as typeof event); setSubmitted(false); }}><option value="COMMENT">Not reviewed</option><option value="APPROVE">Approve</option><option value="REQUEST_CHANGES">Request changes</option></select><textarea value={body} onChange={(change) => { setBody(change.target.value); setSubmitted(false); }} placeholder="Overall review body" />{drafts.length === 0 ? <p className="muted">{showSubmitted ? "Review submitted." : "No draft comments yet."}</p> : drafts.map((draft, index) => <DraftView key={draft.id} draft={draft} index={index} invalid={invalidDraftIds[draft.id] === true} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} onJump={onJumpToDraft != null ? () => onJumpToDraft(draft) : undefined} />)}<button className={`review-submit ${event.toLowerCase().replace("_", "-")}`} disabled={submitting || !hasReviewContent} onClick={() => void handleSubmit()}>{submitting ? "Submitting…" : showSubmitted ? "Review submitted" : `Submit review (${drafts.length})`}</button></section>;
 }
 
-function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiReviewRecord, runReview, sendMessage, focusReview, focusScanHistory, focusScanId, showFocusScanRecord, runFocusReview, focusAreas, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds, viewedFocusIds, setViewedFocusIds, saveFocusScan, openFiles, setOpenFiles }: PiPanelProps & { prUrl: string; focusAreas: FocusArea[]; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"]; openFiles: Record<string, boolean>; setOpenFiles: (open: Record<string, boolean>) => void }) {
+function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiReviewRecord, runReview, sendMessage, focusReview, focusScanHistory, focusScanId, showFocusScanRecord, runFocusReview, focusAreas, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds, viewedFocusIds, setViewedFocusIds, saveFocusScan, openFiles, setOpenFiles, flowDag, runFlowDag, closeFlowDag }: PiPanelProps & { prUrl: string; focusAreas: FocusArea[]; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"]; openFiles: Record<string, boolean>; setOpenFiles: (open: Record<string, boolean>) => void }) {
   const [draftsByRecord, setDraftsByRecord] = useState<Record<string, string>>({});
   const draftKey = aiReviewId ?? "__pending__";
   const draft = draftsByRecord[draftKey] ?? "";
@@ -1384,6 +1410,7 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
       <div className="pi-action">
         <Button onClick={() => void runReview()} disabled={review.running}>{review.running ? "Reviewing…" : hasMessages ? "Refresh findings" : "Full review"}</Button>
         <span className="muted">Run a general code review. Refresh saves the new pass to history.</span>
+        <Button variant="muted" className="small-muted-button" onClick={() => void runFlowDag()} disabled={flowDag.running}>{flowDag.running ? "Building DAG…" : flowDag.text.trim().length > 0 ? "Refresh Flow DAG" : "Flow DAG"}</Button>
         {aiReviewHistory.length > 0 && (
           <div className="pi-history-list" role="list">
             {aiReviewHistory.map((record, index) => {
@@ -1419,9 +1446,25 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
         )}
       </div>
     </div>
+    {(flowDag.running || flowDag.text.trim().length > 0 || flowDag.error != null) && <FlowDagPanel flowDag={flowDag} closeFlowDag={closeFlowDag} prUrl={prUrl} />}
     {focusReviewHasNoFindings(focusReview.text) && <div className="focus-review-note clean" role="status"><strong>✓ Focus scan clean.</strong><span>All scanned up for this pass.</span></div>}
     {focusAreaLinks}
     {body}{composer}
+  </section>;
+}
+
+function FlowDagPanel({ flowDag, closeFlowDag, prUrl }: { flowDag: FlowDag; closeFlowDag: () => void; prUrl: string }) {
+  return <section className="flow-dag-panel" aria-label="Flow DAG">
+    <div className="flow-dag-panel-head">
+      <strong>Flow DAG</strong>
+      <div className="flow-dag-panel-actions">
+        {flowDag.running && <span className="muted spinner-label"><span className="spinner" aria-hidden="true" />Building diagram…</span>}
+        <Button variant="muted" className="small-muted-button" onClick={closeFlowDag} aria-label="Close Flow DAG">Close</Button>
+      </div>
+    </div>
+    {flowDag.error != null && <p className="muted">Flow DAG failed: {flowDag.error}</p>}
+    {flowDag.text.trim().length === 0 && !flowDag.error && flowDag.running && <p className="muted">Asking Pi for a dependency diagram…</p>}
+    {flowDag.text.trim().length > 0 && <div className="flow-dag-body"><MarkdownText text={flowDag.text} fileLinks={{ prUrl }} /></div>}
   </section>;
 }
 

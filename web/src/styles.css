@@ -3257,3 +3257,192 @@ a { color: var(--link); text-decoration: none; }
   .inline-thread { margin-left: 8px; }
   .inline-thread.collapsed { width: calc(100% - 16px); }
 }
+
+/* Mermaid rendering */
+.markdown-mermaid-block {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--panel2) 72%, var(--panel));
+  overflow-x: auto;
+}
+
+.mermaid-rendered {
+  display: flex;
+  justify-content: center;
+}
+
+.mermaid-rendered svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.mermaid-placeholder {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: italic;
+}
+
+.mermaid-error {
+  color: var(--danger, #cf222e);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+/* Flow DAG panel */
+.flow-dag-panel {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel2) 78%, var(--panel));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.flow-dag-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.flow-dag-panel-head strong {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.flow-dag-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.flow-dag-body .markdown-mermaid-block {
+  min-height: 360px;
+  padding: 16px;
+}
+
+.flow-dag-body .mermaid-rendered svg {
+  width: 100%;
+  min-height: 320px;
+  max-height: 70vh;
+}
+
+/* Inline file snippet (code walk) */
+.file-reference-with-snippet {
+  display: block;
+  margin: 6px 0;
+}
+
+.file-snippet {
+  display: block;
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--panel2) 72%, var(--panel));
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  overflow: hidden;
+}
+
+.file-snippet.collapsed {
+  background: transparent;
+}
+
+.file-snippet-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  background: color-mix(in srgb, var(--panel2) 88%, var(--panel));
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+}
+
+.file-snippet.collapsed .file-snippet-head {
+  border-bottom: 0;
+  background: transparent;
+}
+
+.file-snippet-chevron {
+  display: inline-block;
+  width: 10px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.file-snippet-path {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.file-snippet-status {
+  margin-left: auto;
+  font-size: 11px;
+}
+
+.file-snippet-body {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  overflow-x: auto;
+  padding: 4px 0;
+  line-height: 1.5;
+}
+
+.file-snippet-gutter {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  padding: 0 8px 0 10px;
+  color: var(--muted);
+  user-select: none;
+  border-right: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+
+.file-snippet-line-number {
+  display: block;
+  padding: 0 2px;
+}
+
+.file-snippet-line-number.highlight {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.file-snippet-code {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding-left: 8px;
+  white-space: pre;
+}
+
+.file-snippet-line {
+  display: block;
+  padding: 0 6px 0 0;
+  white-space: pre;
+}
+
+.file-snippet-line.highlight {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-left: 2px solid var(--accent);
+  margin-left: -8px;
+  padding-left: 6px;
+}
+
+.file-snippet.error {
+  border-color: var(--danger, #cf222e);
+}
+
+.file-snippet.loading .file-snippet-head {
+  cursor: default;
+}

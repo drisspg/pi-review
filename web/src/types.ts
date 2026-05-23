@@ -14,6 +14,7 @@ export type DragSelection = { start: Target; current: Target; dragging: boolean 
 export type AiReviewMessage = { role: "user" | "pi"; text: string; title?: string; kind?: "general-review" | "chat" | "flow-dag" };
 export type FocusArea = { id: string; path: string; startLine: number; endLine: number; title: string; body: string };
 export type FocusReview = { expanded: boolean; open: boolean; running: boolean; text: string };
+export type FlowDag = { running: boolean; text: string; error: string | null };
 export type FocusAreaReviewState = { viewed: boolean; collapsed: boolean; updatedAt: string };
 export type FocusScanRecord = { id: string; prKey: string; headSha: string; answer: string; areaStates: Record<string, FocusAreaReviewState>; createdAt: string; updatedAt: string };
 export type AiReviewRecord = { id: string; prKey: string; headSha: string; answer: string; messages?: AiReviewMessage[]; createdAt: string; updatedAt: string };
