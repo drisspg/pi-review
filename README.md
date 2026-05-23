@@ -1,22 +1,51 @@
 # pi-review
 
-Standalone Pi SDK-backed GitHub PR review app.
+Pi Review is a local PR review cockpit for engineers who want GitHub diffs, draft review comments, and Pi-assisted code review in one focused workspace.
 
-This project is a local web app/server that owns PR review state, renders a GitHub-style diff UI, and uses the Pi SDK for inline Ask Pi threads.
+Instead of jumping between GitHub, terminal worktrees, and separate agent chats, paste a PR URL and review from a single app: browse the diff, ask Pi about a line or the whole PR, write draft comments, and submit the review back to GitHub.
+
+![Pi Review home](docs/screenshots/home.png)
+
+## What it feels like
+
+Open a PR and Pi Review lays out the code review flow as a split workspace:
+
+- the left side is a GitHub-style diff with expandable context, viewed-file state, inline threads, and multiline draft ranges
+- the right side is the review panel for draft comments, existing GitHub activity, and Pi review sessions
+- local state remembers recent PRs, viewed files, draft work, Pi sessions, and reviewer preference memory
+
+![Review workspace](docs/screenshots/review.png)
+
+Ask Pi can work at multiple levels: an inline question on a selected line/range, a full-PR findings pass, or a focus scan that turns the review into concrete areas to inspect.
+
+![Pi side panel](docs/screenshots/pi-panel.png)
 
 ## Features
 
-- Open PRs from `https://github.com/OWNER/REPO/pull/123` or `OWNER/REPO#123`.
-- Fetch PR metadata, files, and existing review comments with `gh api`.
-- Render GitHub-style file diffs with inline threads.
-- Expand neighboring context lines above/below hunks.
-- Add, edit, remove, and bulk-submit draft review comments.
-- Support multiline draft ranges.
-- Mark files viewed; unchanged viewed files reopen collapsed.
-- Track previous PRs in local state.
-- Prepare cached PR worktrees and scope Pi SDK sessions to the PR worktree.
-- Persist/reuse Pi sessions per PR across page reloads and server restarts.
-- Render Pi responses as Markdown with syntax-highlighted code blocks.
+- Open PRs from a GitHub URL or `OWNER/REPO#123`.
+- Review GitHub-style unified or split diffs with expandable hunk context.
+- Add, edit, remove, and submit draft review comments.
+- Select multiline ranges for GitHub review comments.
+- Mark files viewed and keep recent PR review status locally.
+- Fetch existing GitHub comments and activity.
+- Ask Pi about selected lines, focus areas, or the full PR.
+- Reuse PR worktrees and Pi sessions across reloads/server restarts.
+- Store submitted review examples and distill them into a reviewer profile.
+
+## How it works
+
+```mermaid
+flowchart LR
+  Browser[React review UI] --> Server[Local Node server]
+  Server --> GH[gh api + git]
+  Server --> State[~/.pi/agent/state/pi-pr-review]
+  Server --> Worktree[Cached PR worktree]
+  Server --> Pi[Pi SDK sessions]
+  Pi --> Worktree
+  Server --> Notes[~/agent_notes review profile]
+```
+
+The app is intentionally local-first. GitHub access goes through your authenticated `gh` CLI, repositories are cached as local worktrees, and Pi sessions run against the checked-out PR code so answers can reference real files.
 
 ## Requirements
 
@@ -49,7 +78,7 @@ git clone https://github.com/drisspg/pi-review && cd pi-review && npm start
 
 `npm start` automatically runs `npm install` when dependencies are missing or stale, runs `npm run build` when the built server/web assets are missing or stale, then starts the production server.
 
-## Commands
+## Development
 
 Run dev mode with file watching:
 
@@ -59,30 +88,14 @@ npm run dev
 
 Open http://127.0.0.1:5173.
 
-Build only:
+Useful commands:
 
 ```sh
 npm run build
-```
-
-Run an already-built production server without install/build checks:
-
-```sh
 npm run start:built
-```
-
-Validation loop:
-
-```sh
-npm run validate
-```
-
-Individual checks:
-
-```sh
 npm run typecheck
-npm run build
 npm run test:e2e
+npm run validate
 ```
 
 The Playwright suite opens a real PR by default. Override it with:
@@ -102,13 +115,13 @@ State is stored under:
 Important subdirectories:
 
 ```text
-state.json                 # recent PRs and viewed file state
+state.json                 # recent PRs, viewed files, review memory
 repos/                     # cached base repos
 worktrees/                 # per-PR worktrees
 pi-sessions/               # persistent Pi SDK sessions per PR
 ```
 
-Submitted review comments are also captured as raw preference memory in `state.json` with a 10,000-review cap. Each memory record stores the submitted comments plus a bounded change-set snapshot for the commented files so later distillation can inspect the code context. Recent examples are mirrored to:
+Submitted review comments are captured as raw preference memory in `state.json` and mirrored to:
 
 ```text
 ~/agent_notes/findings/pi_review_preferences.md
@@ -120,15 +133,18 @@ Distill raw examples into an actionable reviewer profile with:
 curl -X POST http://127.0.0.1:43133/api/review-memory/distill
 ```
 
-The distilled profile is stored in `state.json` and mirrored to:
+The distilled profile is stored in `state.json`, mirrored to:
 
 ```text
 ~/agent_notes/findings/pi_review_profile.md
 ```
 
-Pi Review includes the profile plus recent examples in future review prompts. Use the 🧠 toolbar button to inspect raw examples, the current distilled profile, and the exact prompt context. The shared `/review` skill reads the same profile/examples before launching a reviewer, and the Pi `/diff-review` extension writes submitted review feedback into the same store. External tools can capture into the same store with `POST /api/review-memory/capture` using `{ prKey, headSha, event, body, comments }`.
+and included in future Pi Review prompts.
 
-## Development notes
+## Project layout
 
-- The backend lives in `src/`.
-- The React/Vite UI lives in `web/src/`.
+```text
+src/       local API server, GitHub integration, worktrees, Pi sessions, state
+web/src/   React/Vite review UI
+tests/     Playwright end-to-end tests
+```
