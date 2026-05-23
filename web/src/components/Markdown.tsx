@@ -15,8 +15,8 @@ const fileReferenceUrlPrefix = "pi-review-file://";
 type FileLinkContext = { prUrl: string };
 type FileReference = { path: string; line: number; endLine?: number };
 
-export const CodeText = React.memo(function CodeText({ code, language }: { code: string; language: string }) {
-  return <code dangerouslySetInnerHTML={{ __html: highlightedHtml(code, language) }} />;
+export const CodeText = React.memo(function CodeText({ code, language, syntaxContext }: { code: string; language: string; syntaxContext?: "string" }) {
+  return <code dangerouslySetInnerHTML={{ __html: highlightedHtml(code, language, syntaxContext) }} />;
 });
 
 export function MarkdownText({ text, fileLinks }: { text: string; fileLinks?: FileLinkContext }) {

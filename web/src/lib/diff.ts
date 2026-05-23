@@ -1,26 +1,60 @@
 import type { DiffRow, DragSelection, Target } from "../types";
 
+function diffRowWithSyntax(row: DiffRow, tripleString: string | null): DiffRow {
+  return tripleString == null ? row : { ...row, syntaxContext: "string" };
+}
+
+function nextPythonTripleString(line: string, active: string | null): string | null {
+  let index = 0;
+  let current = active;
+  for (;;) {
+    const tripleDouble = line.indexOf('"""', index);
+    const tripleSingle = line.indexOf("'''", index);
+    const nextIndex = [tripleDouble, tripleSingle].filter((value) => value >= 0).sort((left, right) => left - right)[0];
+    if (nextIndex == null) return current;
+    const token = nextIndex === tripleDouble ? '"""' : "'''";
+    if (nextIndex > 0 && line[nextIndex - 1] === "\\") {
+      index = nextIndex + token.length;
+      continue;
+    }
+    if (current == null) current = token;
+    else if (current === token) current = null;
+    index = nextIndex + token.length;
+  }
+}
+
 export function parsePatchRows(patch: string | undefined): DiffRow[] {
   if (patch == null) return [];
   const rows: DiffRow[] = [];
   let oldLine = 0;
   let newLine = 0;
   let currentHunk = "";
+  let oldTripleString: string | null = null;
+  let newTripleString: string | null = null;
   for (const line of patch.split("\n")) {
     const hunk = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
     if (hunk != null) {
       oldLine = Number.parseInt(hunk[1], 10);
       newLine = Number.parseInt(hunk[2], 10);
       currentHunk = line;
+      oldTripleString = null;
+      newTripleString = null;
       rows.push({ kind: "hunk", oldLine: null, newLine: null, text: line, hunk: currentHunk });
     } else if (line.startsWith("+")) {
-      rows.push({ kind: "added", oldLine: null, newLine, text: line, hunk: currentHunk });
+      const row = diffRowWithSyntax({ kind: "added", oldLine: null, newLine, text: line, hunk: currentHunk }, newTripleString);
+      newTripleString = nextPythonTripleString(line.slice(1), newTripleString);
+      rows.push(row);
       newLine += 1;
     } else if (line.startsWith("-")) {
-      rows.push({ kind: "removed", oldLine, newLine: null, text: line, hunk: currentHunk });
+      const row = diffRowWithSyntax({ kind: "removed", oldLine, newLine: null, text: line, hunk: currentHunk }, oldTripleString);
+      oldTripleString = nextPythonTripleString(line.slice(1), oldTripleString);
+      rows.push(row);
       oldLine += 1;
     } else if (line.startsWith(" ")) {
-      rows.push({ kind: "context", oldLine, newLine, text: line, hunk: currentHunk });
+      const row = diffRowWithSyntax({ kind: "context", oldLine, newLine, text: line, hunk: currentHunk }, oldTripleString ?? newTripleString);
+      oldTripleString = nextPythonTripleString(line.slice(1), oldTripleString);
+      newTripleString = nextPythonTripleString(line.slice(1), newTripleString);
+      rows.push(row);
       oldLine += 1;
       newLine += 1;
     } else {
@@ -34,8 +68,11 @@ export function contextRowsFromText(fileText: string | undefined, startLine: num
   if (fileText == null || endLine < startLine) return [];
   const lines = fileText.split("\n");
   const rows: DiffRow[] = [];
-  for (let line = Math.max(1, startLine); line <= Math.min(endLine, lines.length); line += 1) {
-    rows.push({ kind: "context expanded-context", oldLine: line, newLine: line, text: ` ${lines[line - 1] ?? ""}`, hunk: "" });
+  let tripleString: string | null = null;
+  for (let line = 1; line <= Math.min(endLine, lines.length); line += 1) {
+    const rowText = ` ${lines[line - 1] ?? ""}`;
+    if (line >= Math.max(1, startLine)) rows.push(diffRowWithSyntax({ kind: "context expanded-context", oldLine: line, newLine: line, text: rowText, hunk: "" }, tripleString));
+    tripleString = nextPythonTripleString(lines[line - 1] ?? "", tripleString);
   }
   return rows;
 }

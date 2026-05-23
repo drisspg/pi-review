@@ -27,15 +27,21 @@ export function languageForPath(path: string | null | undefined): string {
 const highlightedCache = new Map<string, string>();
 const maxHighlightedCacheEntries = 5000;
 
-export function highlightedHtml(code: string, language: string): string {
-  const key = `${language}\0${code}`;
+export function highlightedHtml(code: string, language: string, syntaxContext?: "string"): string {
+  const key = `${language}\0${syntaxContext ?? ""}\0${code}`;
   const cached = highlightedCache.get(key);
   if (cached != null) return cached;
-  const html = language.length > 0 && hljs.getLanguage(language) != null ? hljs.highlight(code, { language }).value : escapeHtml(code);
+  const html = syntaxContext === "string" ? highlightedStringLine(code) : language.length > 0 && hljs.getLanguage(language) != null ? hljs.highlight(code, { language }).value : escapeHtml(code);
   highlightedCache.set(key, html);
   const oldestKey = highlightedCache.keys().next().value;
   if (highlightedCache.size > maxHighlightedCacheEntries && oldestKey != null) highlightedCache.delete(oldestKey);
   return html;
+}
+
+function highlightedStringLine(code: string): string {
+  const prefix = /^[+\- ]/.test(code) ? code[0] : "";
+  const text = prefix.length > 0 ? code.slice(1) : code;
+  return `${escapeHtml(prefix)}<span class="hljs-string">${escapeHtml(text)}</span>`;
 }
 
 function escapeHtml(value: string): string {
