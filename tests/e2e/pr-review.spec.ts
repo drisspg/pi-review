@@ -383,18 +383,18 @@ test("opens a separate code walk modal from the toolbar", async ({ page }) => {
 
 Orient reviewers.
 
-## Architecture map
-
-| Area | Changed code | Responsibility | Reviewer note |
-| --- | --- | --- | --- |
-| Panel | \`csrc/flash_attn/src/flash_fwd_kernel.h:1276\` | Renders Pi review UI | Keep history quiet |
-
-## Flow DAG
+## Walk map
 
 \`\`\`mermaid
 flowchart LR
   Toolbar --> Modal
 \`\`\`
+
+## Key code patterns
+
+| Pattern | Where | Why it matters |
+| --- | --- | --- |
+| Panel modal | \`csrc/flash_attn/src/flash_fwd_kernel.h:1276\` | Keeps history quiet |
 
 ## Code walk
 
@@ -409,12 +409,17 @@ See \`csrc/flash_attn/src/flash_fwd_kernel.h:1276\`.
 The walk is separate from review chat.`;
   });
 
+  await page.setViewportSize({ width: 320, height: 667 });
   await page.getByRole("button", { name: "Code walk" }).click();
 
-  const dialog = page.locator(".flow-dag-modal");
-  await expect(dialog).toContainText("Architecture map");
-  await expect(dialog.locator("table")).toContainText("Reviewer note");
+  const dialog = page.getByRole("dialog", { name: "Code walk" });
+  await expect(dialog).toContainText("Walk map");
+  await expect(dialog.locator(".markdown-mermaid-block")).toBeVisible();
+  await expect(dialog.locator("table")).toContainText("Why it matters");
+  await expect(dialog.getByRole("button", { name: "Close" })).toBeInViewport();
+  await expect.poll(() => dialog.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
   expect(prompt).toContain("reviewer-friendly code walk");
+  expect(prompt).toContain("Walk map");
 });
 
 test("runs the right-sidebar Pi review panel and continues the chat with Enter", async ({ page }) => {

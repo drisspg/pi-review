@@ -3348,8 +3348,7 @@ a { color: var(--link); text-decoration: none; }
   display: flex;
   justify-content: center;
   min-width: max-content;
-  transform: scale(var(--mermaid-zoom, 1));
-  transform-origin: top left;
+  zoom: var(--mermaid-zoom, 1);
 }
 
 .mermaid-rendered svg {
@@ -3510,6 +3509,11 @@ a { color: var(--link); text-decoration: none; }
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
+}
+
+.flow-dag-panel-head > div {
+  min-width: 0;
 }
 
 .flow-dag-panel-head strong {
@@ -3521,19 +3525,43 @@ a { color: var(--link); text-decoration: none; }
 
 .flow-dag-panel-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 10px;
+  min-width: 0;
 }
 
-.flow-dag-body .markdown-mermaid-block {
+.flow-dag-panel-actions .spinner-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.flow-dag-panel .markdown-mermaid-block {
   min-height: 360px;
   padding: 16px;
 }
 
-.flow-dag-body .mermaid-rendered svg {
+.flow-dag-panel .mermaid-rendered svg {
   width: 100%;
   min-height: 320px;
   max-height: 70vh;
+}
+
+@media (max-width: 760px) {
+  .flow-dag-modal {
+    width: 96vw;
+    padding: 10px;
+  }
+
+  .flow-dag-modal .flow-dag-panel-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .flow-dag-modal .flow-dag-panel-actions {
+    justify-content: flex-start;
+  }
 }
 
 /* Inline file snippet (code walk) */
