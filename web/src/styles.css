@@ -3344,14 +3344,37 @@ a { color: var(--link); text-decoration: none; }
   text-align: center;
 }
 
+.mermaid-zoom-controls .mermaid-zoom-hint {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.mermaid-viewport {
+  position: relative;
+  min-height: 360px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+  cursor: grab;
+  touch-action: none;
+}
+
+.mermaid-viewport.dragging {
+  cursor: grabbing;
+}
+
 .mermaid-rendered {
-  display: flex;
-  justify-content: center;
-  min-width: max-content;
-  zoom: var(--mermaid-zoom, 1);
+  position: absolute;
+  top: 24px;
+  left: 24px;
+  transform-origin: 0 0;
+  will-change: transform;
 }
 
 .mermaid-rendered svg {
+  display: block;
   max-width: none;
   height: auto;
 }

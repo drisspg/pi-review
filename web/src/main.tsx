@@ -615,9 +615,9 @@ Return only the final markdown document inline. Do not create files. Do not ment
 
 Include these sections in markdown:
 1. **PR goal** — infer the user-visible or maintainer-facing goal from the title and diff.
-2. **Walk map** — include one fenced \`\`\`mermaid block using \`flowchart LR\` or \`flowchart TD\`. Make it a visual navigation map for the code walk: 4-8 numbered nodes, short labels, and edges for the main data/control flow.
+2. **Walk map** — include one fenced \`\`\`mermaid block using \`flowchart LR\` or \`flowchart TD\`. Make it a visual orientation diagram for the PR, not a forced straight-line walkthrough. Use whatever structure best helps a reviewer quickly grok the change: subsystem groupings, branches, fan-in/fan-out, before/after paths, state/API boundaries, or a common request/data flow. Prefer 4-10 short labeled nodes, and use subgraphs when they make the architecture clearer.
 3. **Key code patterns** — include a small markdown table with at most 5 rows and columns: Pattern, Where, Why it matters. Do not paste code in this table; keep each cell to one short phrase or sentence.
-4. **Code walk** — use numbered subheadings that correspond to the Mermaid nodes. Walk through a common path through the PR step by step. Cite real file/line references and include only short fenced code snippets for the most important changed snippets.
+4. **Code walk** — use subheadings that correspond to the major regions or nodes in the Mermaid diagram. Walk through the PR in the order that best explains the change, which may be grouped by subsystem rather than linear file order. Cite real file/line references and include only short fenced code snippets for the most important changed snippets.
 5. **What changed in behavior** — summarize how data, state, or API behavior differs after this PR.
 
 Keep it concrete and readable. Prefer actual identifiers from the diff over vague descriptions. Keep snippets short: only the few lines needed to explain the pattern. Avoid review findings unless they are needed to explain flow.
