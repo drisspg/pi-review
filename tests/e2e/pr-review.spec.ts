@@ -442,6 +442,7 @@ test("runs the right-sidebar Pi review panel and continues the chat with Enter",
 
   const dialog = page.locator(".ai-review");
   await expect(dialog).toContainText("Correctness:");
+  await expect(dialog.locator(".file-snippet")).toHaveCount(0);
   await Promise.all([
     page.waitForRequest(/\/api\/file\/open$/),
     dialog.getByRole("link", { name: "csrc/flash_attn/src/flash_fwd_kernel.h:1276" }).click(),
