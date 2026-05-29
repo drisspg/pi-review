@@ -1439,7 +1439,11 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
 }
 
 function FlowDagModal({ flowDag, runFlowDag, close, prUrl, headSha }: { flowDag: FlowDag; runFlowDag: () => Promise<void>; close: () => void; prUrl: string; headSha: string }) {
-  return <ModalShell open onOpenChange={(open) => { if (!open) close(); }} label="Code walk" className="flow-dag-modal">
+  const [expanded, setExpanded] = useState(false);
+  const [highRes, setHighRes] = useState(true);
+  const modalClassName = `flow-dag-modal${expanded ? " expanded" : ""}${highRes ? " high-res" : ""}`;
+
+  return <ModalShell open onOpenChange={(open) => { if (!open) close(); }} label="Code walk" className={modalClassName}>
     <div className="flow-dag-panel-head">
       <div>
         <h2>Code walk</h2>
@@ -1447,6 +1451,8 @@ function FlowDagModal({ flowDag, runFlowDag, close, prUrl, headSha }: { flowDag:
       </div>
       <div className="flow-dag-panel-actions">
         {flowDag.running && <span className="muted spinner-label"><span className="spinner" aria-hidden="true" />Building walk…</span>}
+        <Button variant="muted" className="small-muted-button" onClick={() => setHighRes((current) => !current)} aria-pressed={highRes}>{highRes ? "Standard DPI" : "High DPI"}</Button>
+        <Button variant="muted" className="small-muted-button" onClick={() => setExpanded((current) => !current)} aria-pressed={expanded}>{expanded ? "Compact" : "Expand"}</Button>
         <Button variant="muted" className="small-muted-button" onClick={() => void runFlowDag()} disabled={flowDag.running}>{flowDag.running ? "Refreshing…" : flowDag.text.trim().length > 0 ? "Refresh" : "Build"}</Button>
         <Button variant="muted" className="small-muted-button" onClick={close} aria-label="Close code walk">Close</Button>
       </div>

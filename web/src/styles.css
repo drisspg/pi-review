@@ -3511,6 +3511,12 @@ a { color: var(--link); text-decoration: none; }
   align-content: start;
 }
 
+.flow-dag-modal.expanded {
+  width: calc(100vw - 16px);
+  height: calc(100vh - 16px);
+  max-height: calc(100vh - 16px);
+}
+
 .flow-dag-modal .flow-dag-panel-head h2 {
   margin: 0 0 3px;
 }
@@ -3539,6 +3545,27 @@ a { color: var(--link); text-decoration: none; }
   width: 1200px;
   min-height: 480px;
   max-height: none;
+}
+
+.flow-dag-modal.high-res .flow-dag-body .markdown-mermaid-block {
+  min-height: 680px;
+}
+
+.flow-dag-modal.high-res .flow-dag-body .mermaid-viewport {
+  min-height: 640px;
+}
+
+.flow-dag-modal.high-res .flow-dag-body .mermaid-rendered svg {
+  width: 1800px;
+  min-height: 640px;
+}
+
+.flow-dag-modal.expanded.high-res .flow-dag-body .mermaid-viewport {
+  min-height: calc(100vh - 220px);
+}
+
+.flow-dag-modal.expanded.high-res .flow-dag-body .mermaid-rendered svg {
+  width: 2200px;
 }
 
 /* Flow DAG panel */
