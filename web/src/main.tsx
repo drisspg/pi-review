@@ -621,12 +621,18 @@ Return only the final markdown document inline. Do not create files. Do not ment
 
 Include these sections in markdown:
 1. **PR goal** — infer the user-visible or maintainer-facing goal from the title and diff.
-2. **Walk map** — include one fenced \`\`\`mermaid block using \`flowchart LR\` or \`flowchart TD\`. Make it a visual orientation diagram for the PR, not a forced straight-line walkthrough. Use whatever structure best helps a reviewer quickly grok the change: subsystem groupings, branches, fan-in/fan-out, before/after paths, state/API boundaries, or a common request/data flow. Prefer 4-10 short labeled nodes, and use subgraphs when they make the architecture clearer.
-3. **Key code patterns** — include a small markdown table with at most 5 rows and columns: Pattern, Where, Why it matters. Do not paste code in this table; keep each cell to one short phrase or sentence.
-4. **Code walk** — use subheadings that correspond to the major regions or nodes in the Mermaid diagram. Walk through the PR in the order that best explains the change, which may be grouped by subsystem rather than linear file order. Cite real file/line references and include only short fenced code snippets for the most important changed snippets.
-5. **What changed in behavior** — summarize how data, state, or API behavior differs after this PR.
+2. **Walk map** — include exactly one fenced \`\`\`mermaid block. Use \`flowchart LR\` by default, or \`flowchart TD\` when the change is naturally staged top-to-bottom. Make it an orientation map, not a forced file-by-file path. Pick one visual story that best explains the PR: request/data flow, state transitions, API boundary, before/after split, or subsystem fan-in/fan-out.
+   - Use the smallest number of nodes that makes the change clear; small PRs may need 4-10 nodes, but large feature PRs should use more nodes when that materially improves orientation.
+   - Use subgraphs for ownership/boundaries such as UI, server, storage, kernel, tests, or external systems.
+   - Label edges with verbs or data names when useful, but keep labels under 4 words.
+   - Keep Mermaid syntax conservative: alphanumeric node ids, quoted labels, no markdown inside labels, no raw parentheses in labels, and no lowercase \`end\` node text.
+   - If the PR is mostly local refactoring with no meaningful flow, draw a dependency/ownership map instead.
+3. **Reviewer route** — add 3-6 bullets that tell the reviewer the best order to read the diff. Each bullet should name the diagram node or edge, cite files/lines, and say what question to answer there.
+4. **Key code patterns** — include a small markdown table with at most 5 rows and columns: Pattern, Where, Why it matters. Do not paste code in this table; keep each cell to one short phrase or sentence.
+5. **Code walk** — use subheadings that correspond to the major regions or nodes in the Mermaid diagram. Walk through the PR in the order that best explains the change, which may be grouped by subsystem rather than linear file order. Cite real file/line references and include only short fenced code snippets for the most important changed snippets.
+6. **What changed in behavior** — summarize how data, state, or API behavior differs after this PR.
 
-Keep it concrete and readable. Prefer actual identifiers from the diff over vague descriptions. Keep snippets short: only the few lines needed to explain the pattern. Avoid review findings unless they are needed to explain flow.
+Keep it concrete and readable. Prefer actual identifiers from the diff over vague descriptions. Keep snippets short: only the few lines needed to explain the pattern. Avoid review findings unless they are needed to explain flow. If the diagram would be misleading, say why in one sentence before the Mermaid block and still provide the best small map you can.
 
 PR title: ${targetReview.pr.title}
 
