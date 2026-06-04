@@ -11,9 +11,10 @@ import { logger } from "./logger.js";
 import { createPiJobRunner } from "./pi-jobs.js";
 import { askPi, disposePiSession, disposePiSessions, piDiagnostics, prewarmPiSession, registerPiSessionCwd, setPiModel } from "./pi-session.js";
 import { parsePullRequestRef } from "./pr.js";
-import { githubReviewComments, reviewMemoryChangeSet, reviewMemoryComments, reviewSubmitCommentsFromPayload, reviewSubmitFailureMessage } from "./review-submit-api.js";
+import { createReviewMemoryApi, reviewSubmitMemoryRecord } from "./review-memory-api.js";
+import { githubReviewComments, reviewSubmitCommentsFromPayload, reviewSubmitFailureMessage } from "./review-submit-api.js";
 import { currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, listAiReviews, listFocusScans, listRecentPullRequests, listReviewMemoryRecords, markPullRequestReviewed, removePullRequest, reviewMemoryStats, saveAiReview, saveFocusScan, saveReviewMemory, saveReviewProfile, setFileViewed, upsertPullRequest } from "./state.js";
-import type { AiReviewMessageRecord, FocusAreaReviewState, PullRequestReviewResponse, ReviewMemoryChangeSet, StoredPullRequest } from "./types.js";
+import type { AiReviewMessageRecord, FocusAreaReviewState, PullRequestReviewResponse, StoredPullRequest } from "./types.js";
 import { cleanupPrWorktree, preparePrWorktree, worktreeDirForRef } from "./worktrees.js";
 
 const DEFAULT_PORT = 43133;
@@ -21,34 +22,11 @@ const WEB_ROOT = resolve(process.cwd(), "dist-web");
 const execFileAsync = promisify(execFile);
 
 const piJobRunner = createPiJobRunner(askPi);
+const reviewMemoryApi = createReviewMemoryApi({ askPi, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewMemory, saveReviewProfile });
 
 async function hydrateReviewResponse(data: Awaited<ReturnType<typeof fetchPullRequestReviewData>>, pr: StoredPullRequest, extra: Partial<Pick<PullRequestReviewResponse, "worktreeDir">> = {}): Promise<PullRequestReviewResponse> {
   const [focusScans, aiReviews] = await Promise.all([listFocusScans(pr.key), listAiReviews(pr.key)]);
   return { ...data, pr, focusScan: focusScans[0] ?? null, focusScans, aiReview: aiReviews[0] ?? null, aiReviews, ...extra };
-}
-
-async function distillReviewMemory(): Promise<string> {
-  const existingProfile = await currentReviewProfile();
-  const source = await currentReviewMemoryDistillationSource();
-  const prompt = `Distill Driss's code-review preferences from raw submitted review comments into an actionable reviewer profile.
-
-Return only markdown with these sections:
-# Driss review profile
-## What to flag
-## What to usually ignore
-## Severity calibration
-## Comment style
-## Review prompt rules
-
-Make the profile compact and directive. Prefer durable patterns over one-off specifics. Include actionable rules a future reviewer can follow. Do not include raw examples verbatim except short representative phrases when needed.
-
-Existing profile:
-${existingProfile?.text ?? "No existing profile."}
-
-Raw review evidence:
-${source}`;
-  const answer = await askPi("review-memory", prompt, "review-memory-distill");
-  return (await saveReviewProfile(answer)).text;
 }
 
 function sse(res: ServerResponse, event: string, data: unknown): void {
@@ -127,24 +105,21 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   }
 
   if (req.method === "GET" && url.pathname === "/api/review-memory") {
-    const limit = Number.parseInt(url.searchParams.get("limit") ?? "50", 10);
-    sendJson(res, 200, { prompt: await currentReviewMemoryPrompt(), profile: await currentReviewProfile(), records: await listReviewMemoryRecords(Number.isFinite(limit) ? Math.max(1, Math.min(200, limit)) : 50), stats: await reviewMemoryStats() });
+    sendJson(res, 200, await reviewMemoryApi.status(url.searchParams.get("limit")));
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/api/review-memory/distill") {
     logger.info("api", "review memory distillation requested");
-    sendJson(res, 200, { profile: await distillReviewMemory() });
+    sendJson(res, 200, await reviewMemoryApi.distill());
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/api/review-memory/capture") {
     const payload = recordFromBody(await readBody(req));
-    if (typeof payload.prKey !== "string" || typeof payload.headSha !== "string") throw new Error("Expected prKey and headSha");
-    if (payload.event !== "COMMENT" && payload.event !== "APPROVE" && payload.event !== "REQUEST_CHANGES") throw new Error("Expected review event");
-    const memory = await saveReviewMemory({ prKey: payload.prKey, headSha: payload.headSha, event: payload.event, body: typeof payload.body === "string" ? payload.body.trim() : "", comments: reviewMemoryComments(reviewSubmitCommentsFromPayload(payload.comments)), changeSet: typeof payload.changeSet === "object" && payload.changeSet != null && !Array.isArray(payload.changeSet) ? payload.changeSet as ReviewMemoryChangeSet : undefined });
-    logger.info("api", "review memory captured", { prKey: payload.prKey, comments: memory.comments.length, event: payload.event });
-    sendJson(res, 200, { memory });
+    const response = await reviewMemoryApi.capture(payload);
+    logger.info("api", "review memory captured", { prKey: payload.prKey, comments: response.memory.comments.length, event: payload.event });
+    sendJson(res, 200, response);
     return;
   }
 
@@ -318,9 +293,8 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       throw new Error(reviewSubmitFailureMessage(error, comments));
     }
     const prKey = prKeyForRef(ref);
-    const memoryComments = reviewMemoryComments(comments);
     const reviewData = await fetchPullRequestReviewData(ref);
-    await saveReviewMemory({ prKey, headSha: typeof payload.headSha === "string" ? payload.headSha : "", event: payload.event, body: typeof payload.body === "string" ? payload.body.trim() : "", comments: memoryComments, changeSet: reviewMemoryChangeSet(reviewData, memoryComments) });
+    await saveReviewMemory(reviewSubmitMemoryRecord(payload, reviewData, prKey));
     const reviewedPr = await markPullRequestReviewed(prKey, typeof payload.headSha === "string" ? payload.headSha : "", payload.event);
     sendJson(res, 200, { result, pr: reviewedPr });
     return;
