@@ -10,7 +10,7 @@ import { commentTarget, commentThreadDomId, draftMatchesTarget, groupReviewComme
 import { contextRowsFromText, hunkNewStart, isTargetInSelection, lastNewLine, parsePatchRows, targetFromPoint, targetFromRow } from "./lib/diff";
 import { languageForPath } from "./lib/highlight";
 import { newId, prUrlFromKey, shortSha } from "./lib/pr";
-import type { AiReview, AiReviewMessage, AiReviewRecord, DiffRow, DraftComment, DragSelection, FileReviewState, FlowDag, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, GpuWorkspace, GpuWorkspaceExecResult, LogEntry, OpenResponse, PullFile, PullIssueComment, PullReviewComment, ReviewMemoryRecord, ReviewMemoryResponse, StoredPullRequest, Target, ThemeName, Thread } from "./types";
+import type { AiReview, AiReviewMessage, AiReviewRecord, DiffRow, DraftComment, DragSelection, FileReviewState, FlowDag, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, GpuWorkspace, GpuWorkspaceContract, GpuWorkspaceExecResult, LogEntry, OpenResponse, PullFile, PullIssueComment, PullReviewComment, ReviewMemoryRecord, ReviewMemoryResponse, StoredPullRequest, Target, ThemeName, Thread } from "./types";
 import "./styles.css";
 
 type DiffViewMode = "unified" | "split";
@@ -539,8 +539,8 @@ function App() {
 
   async function askFocusArea(area: FocusArea, question: string, onDelta?: (answer: string) => void): Promise<string> {
     if (review == null) return "Open a PR before asking Pi.";
-    const prompt = `Review PR ${review.pr.key}. Focus area: ${area.path}:${area.startLine === area.endLine ? area.startLine : `${area.startLine}-${area.endLine}`}\n\nFocus finding:\n${area.body}\n\nQuestion: ${question}`;
-    const answer = await askPiApi({ prKey: review.pr.key, prompt, purpose: "focus-chat" }, onDelta);
+    const { prompt, purpose } = await buildPiPrompt({ mode: "focus-chat", prKey: review.pr.key, path: area.path, startLine: area.startLine, endLine: area.endLine, body: area.body, question });
+    const answer = await askPiApi({ prKey: review.pr.key, prompt, purpose }, onDelta);
     await refreshLogs();
     return answer;
   }
@@ -550,9 +550,9 @@ function App() {
     const question = thread.draft.trim();
     setThreads((current) => ({ ...current, [thread.key]: { ...thread, asking: true, draft: "", messages: [...thread.messages, { role: "user", text: question }, { role: "pi", text: "" }] } }));
     try {
-      const prompt = `Review PR ${review.pr.key}. File: ${thread.target.path}. Lines: ${thread.target.line == null ? "file" : thread.target.startLine != null && thread.target.startLine !== thread.target.line ? `${thread.target.startLine}-${thread.target.line}` : thread.target.line}. Side: ${thread.target.side}. Hunk: ${thread.target.hunk}\n\nQuestion: ${question}`;
+      const { prompt, purpose } = await buildPiPrompt({ mode: "inline-chat", prKey: review.pr.key, path: thread.target.path, line: thread.target.line, startLine: thread.target.startLine, side: thread.target.side, hunk: thread.target.hunk, question });
       const setAnswer = (answer: string) => setThreads((current) => ({ ...current, [thread.key]: { ...current[thread.key], messages: [...(current[thread.key]?.messages ?? []).slice(0, -1), { role: "pi", text: answer }] } }));
-      const answer = await askPiApi({ prKey: review.pr.key, prompt, purpose: "inline-chat" }, setAnswer);
+      const answer = await askPiApi({ prKey: review.pr.key, prompt, purpose }, setAnswer);
       setThreads((current) => ({ ...current, [thread.key]: { ...current[thread.key], asking: false, messages: [...(current[thread.key]?.messages ?? []).slice(0, -1), { role: "pi", text: answer }] } }));
       await refreshLogs();
     } catch (err) {
@@ -592,8 +592,8 @@ function App() {
     setExpandedNeighborRows((current) => ({ ...current, [key]: contextRowsFromText(text, startLine, endLine) }));
   }
 
-  async function loadReviewMemoryPrompt(): Promise<string> {
-    return (await api<{ prompt: string }>("/api/review-memory")).prompt;
+  async function buildPiPrompt(payload: Record<string, unknown>): Promise<{ prompt: string; purpose: string }> {
+    return await api<{ prompt: string; purpose: string }>("/api/pi/prompt", { method: "POST", body: JSON.stringify(payload) });
   }
 
   async function runAutomaticPiReviews(nextReview: OpenResponse) {
@@ -616,35 +616,13 @@ function App() {
     const targetReview = review;
     setFlowDagOpen(true);
     setFlowDag({ running: true, text: "", error: null });
-    const diffSummary = targetReview.files.map((file) => `## ${file.filename}\nStatus: ${file.status}, +${file.additions}/-${file.deletions}\n${file.patch ?? "Patch unavailable"}`).join("\n\n");
-    const prompt = `Create a reviewer-friendly code walk for PR ${targetReview.pr.key}. This is a separate orientation document, not a findings review. Help a reviewer understand the PR before reading the diff.
-
-Return only the final markdown document inline. Do not create files. Do not mention your process, commands, tests, or where you saved anything.
-
-Include these sections in markdown:
-1. **PR goal** — infer the user-visible or maintainer-facing goal from the title and diff.
-2. **Walk map** — include exactly one fenced \`\`\`mermaid block. Use \`flowchart LR\` by default, or \`flowchart TD\` when the change is naturally staged top-to-bottom. Make it an orientation map, not a forced file-by-file path. Pick one visual story that best explains the PR: request/data flow, state transitions, API boundary, before/after split, or subsystem fan-in/fan-out.
-   - Use the smallest number of nodes that makes the change clear; small PRs may need 4-10 nodes, but large feature PRs should use more nodes when that materially improves orientation.
-   - Use subgraphs for ownership/boundaries such as UI, server, storage, kernel, tests, or external systems.
-   - Label edges with verbs or data names when useful, but keep labels under 4 words.
-   - Keep Mermaid syntax conservative: alphanumeric node ids, quoted labels, no markdown inside labels, no raw parentheses in labels, and no lowercase \`end\` node text.
-   - If the PR is mostly local refactoring with no meaningful flow, draw a dependency/ownership map instead.
-3. **Reviewer route** — add 3-6 bullets that tell the reviewer the best order to read the diff. Each bullet should name the diagram node or edge, cite files/lines, and say what question to answer there.
-4. **Key code patterns** — include a small markdown table with at most 5 rows and columns: Pattern, Where, Why it matters. Do not paste code in this table; keep each cell to one short phrase or sentence.
-5. **Code walk** — use subheadings that correspond to the major regions or nodes in the Mermaid diagram. Walk through the PR in the order that best explains the change, which may be grouped by subsystem rather than linear file order. Cite real file/line references and include only short fenced code snippets for the most important changed snippets.
-6. **What changed in behavior** — summarize how data, state, or API behavior differs after this PR.
-
-Keep it concrete and readable. Prefer actual identifiers from the diff over vague descriptions. Keep snippets short: only the few lines needed to explain the pattern. Avoid review findings unless they are needed to explain flow. If the diagram would be misleading, say why in one sentence before the Mermaid block and still provide the best small map you can.
-
-PR title: ${targetReview.pr.title}
-
-${diffSummary}`;
     try {
+      const { prompt, purpose } = await buildPiPrompt({ mode: "code-walk", prKey: targetReview.pr.key, prTitle: targetReview.pr.title, files: targetReview.files });
       const setAnswer = (answer: string) => {
         if (activeReviewKeyRef.current !== targetReview.pr.key) return;
         setFlowDag({ running: true, text: answer, error: null });
       };
-      const answer = await askPiApi({ prKey: targetReview.pr.key, prompt, purpose: "flow-dag" }, setAnswer);
+      const answer = await askPiApi({ prKey: targetReview.pr.key, prompt, purpose }, setAnswer);
       if (activeReviewKeyRef.current !== targetReview.pr.key) return;
       setFlowDag({ running: false, text: answer, error: null });
       await refreshLogs();
@@ -656,27 +634,11 @@ ${diffSummary}`;
 
   async function runAiReviewFor(targetReview: OpenResponse, background: boolean) {
     setAiReview((current) => ({ ...current, open: !background || current.open, expanded: !background || current.expanded, running: true, text: background ? current.text : "", messages: background ? current.messages : [] }));
-    const diffSummary = targetReview.files.map((file) => `## ${file.filename}
-${file.patch ?? "Patch unavailable"}`).join("\n\n");
     const visibleAiReview = targetReview.pr.key === review?.pr.key ? currentGeneralReviewText(aiReview) : "";
     const previousAiReview = visibleAiReview || targetReview.aiReview?.answer.trim() || "No previous full review is stored.";
     const previousFocusAreas = targetReview.focusScan == null ? "No previous focus scan findings are stored." : focusScanHistoryPrompt(targetReview.focusScan.answer, targetReview.focusScan.areaStates);
-    const reviewMemory = await loadReviewMemoryPrompt();
-    const prompt = `Run a concise code review for ${targetReview.pr.key}. Focus on correctness, edge cases, tests, and concrete actionable findings. Avoid generic praise. Return markdown with bullets and file/line references where possible.
-
-Reviewer preference memory:
-${reviewMemory}
-
-Previous full review:
-${previousAiReview}
-
-Previous focus scan state:
-${previousFocusAreas}
-
-For reruns, do not repeat substantially identical findings from the previous full review or reviewed focus items unless the current diff materially changes the concern. Prefer genuinely new, unresolved, or still-unreviewed issues. If prior concerns now appear addressed, summarize that briefly instead of re-reporting them as findings.
-
-${diffSummary}`;
     try {
+      const { prompt } = await buildPiPrompt({ mode: "main-review", prKey: targetReview.pr.key, previousAiReview, previousFocusAreas, files: targetReview.files });
       const { job } = await api<{ job: { id: string } }>("/api/pi/review", { method: "POST", body: JSON.stringify({ prKey: targetReview.pr.key, prompt }) });
       for (;;) {
         await sleep(800);
@@ -705,13 +667,13 @@ ${diffSummary}`;
     const question = message.trim();
     setAiReview((current) => ({ ...current, open: true, expanded: true, running: true, messages: [...current.messages, { role: "user", kind: "chat", text: question }, { role: "pi", kind: "chat", text: "" }] }));
     try {
-      const previous = startingReview.messages.map((entry) => `${entry.role === "user" ? "User" : "Pi"}: ${entry.text}`).join("\n\n");
-      const prompt = `Continue discussing PR ${targetReview.pr.key}. Answer the user's latest question using the checked-out PR worktree. Be concise and cite files/lines when useful.\n\nPrevious dialogue:\n${previous || "(none)"}\n\nUser: ${question}`;
+      const previousDialogue = startingReview.messages.map((entry) => `${entry.role === "user" ? "User" : "Pi"}: ${entry.text}`).join("\n\n");
+      const { prompt, purpose } = await buildPiPrompt({ mode: "ai-chat", prKey: targetReview.pr.key, previousDialogue: previousDialogue || "(none)", question });
       const setAnswer = (answer: string) => {
         if (activeReviewKeyRef.current !== targetReview.pr.key) return;
         setAiReview((current) => ({ ...current, open: true, expanded: true, text: answer, messages: [...current.messages.slice(0, -1), { role: "pi", kind: "chat", text: answer }] }));
       };
-      const answer = await askPiApi({ prKey: targetReview.pr.key, prompt, purpose: "chat" }, setAnswer);
+      const answer = await askPiApi({ prKey: targetReview.pr.key, prompt, purpose }, setAnswer);
       const nextMessages: AiReviewMessage[] = [...startingReview.messages, { role: "user", kind: "chat", text: question }, { role: "pi", kind: "chat", text: answer }];
       if (activeReviewKeyRef.current === targetReview.pr.key) setAiReview((current) => ({ ...current, open: true, expanded: true, running: false, text: answer, messages: nextMessages }));
       void saveAiReviewFor(targetReview, currentGeneralReviewText({ ...startingReview, text: answer, messages: nextMessages }) || answer, nextMessages, aiReviewId);
@@ -734,32 +696,10 @@ ${diffSummary}`;
       setActiveFocusAreaId(null);
       setCollapsedFocusAreaIds({});
     }
-    const diffSummary = targetReview.files.map((file) => `## ${file.filename}
-Status: ${file.status}, +${file.additions}/-${file.deletions}
-${file.patch ?? "Patch unavailable"}`).join("\n\n");
     const previousScan = targetReview.focusScan;
     const previousFocusAreas = previousScan == null ? "No previous focus scan findings are stored." : focusScanHistoryPrompt(previousScan.answer, previousScan.areaStates);
-    const reviewMemory = await loadReviewMemoryPrompt();
-    const prompt = `You are a second, independent PR-review pass for ${targetReview.pr.key}. Look specifically for areas worth deeper human review, not a normal exhaustive review. Prioritize:
-- code that feels inconsistent with nearby codebase patterns or API conventions
-- surprising behavior, hidden assumptions, edge cases, or subtle tradeoffs
-- tests, migrations, performance, concurrency, or compatibility risks that deserve investigation
-- places where the implementation may be valid but reviewers should explicitly decide if the tradeoff is acceptable
-
-Reviewer preference memory:
-${reviewMemory}
-
-Previous focus scan state:
-${previousFocusAreas}
-
-If a finding is substantially the same as a previous reviewed finding, do not return it again unless the current diff materially changes the concern. If it is substantially the same as a previous unreviewed finding, keep it and use the closest current location. Prefer surfacing genuinely new or still-unreviewed findings over re-listing already-reviewed ones.
-
-Return markdown with a "Focus areas" list. Start each item with a clickable-style location in this exact format: \`path:startLine-endLine — short title\` or \`path:line — short title\`. Then include why it is weird or worth investigation and a concrete reviewer question. Avoid generic praise and avoid blocking language unless there is strong evidence.
-
-PR title: ${targetReview.pr.title}
-
-${diffSummary}`;
     try {
+      const { prompt } = await buildPiPrompt({ mode: "focus-review", prKey: targetReview.pr.key, prTitle: targetReview.pr.title, previousFocusAreas, files: targetReview.files });
       const { job } = await api<{ job: { id: string } }>("/api/pi/focus-review", { method: "POST", body: JSON.stringify({ prKey: targetReview.pr.key, prompt }) });
       for (;;) {
         await sleep(800);
@@ -1441,8 +1381,8 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
 }
 
 function GpuWorkspaceModal({ review, close, refreshLogs }: { review: OpenResponse; close: () => void; refreshLogs: () => Promise<void> }) {
-  const gpuTypes = ["b200", "b200-mig-1g", "b200-mig-2g", "b200-mig-3g", "h100", "h100-mig-1g", "h100-mig-2g", "h100-mig-3g", "h200", "a100", "t4", "l4"];
-  const [gpuType, setGpuType] = useState("b200");
+  const [contract, setContract] = useState<GpuWorkspaceContract | null>(null);
+  const [gpuType, setGpuType] = useState("");
   const [creating, setCreating] = useState(false);
   const [workspace, setWorkspace] = useState<GpuWorkspace | null>(null);
   const [execCommand, setExecCommand] = useState("nvidia-smi -L");
@@ -1450,19 +1390,23 @@ function GpuWorkspaceModal({ review, close, refreshLogs }: { review: OpenRespons
   const [executing, setExecuting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const supported = review.pr.key.toLowerCase().startsWith("github.com/pytorch/pytorch#");
+  const supported = contract != null && review.pr.key.toLowerCase().startsWith(contract.supportedPrKeyPrefix.toLowerCase());
+  const supportedRepositoryLabel = contract?.supportedRepository.replace(/^github\.com\//, "") ?? "supported repository";
 
   useEffect(() => {
-    if (!supported) return;
-    void api<{ workspace: GpuWorkspace | null }>("/api/gpu/workspaces/status", { method: "POST", body: JSON.stringify({ prKey: review.pr.key }) }).then((data) => setWorkspace(data.workspace)).catch(() => undefined);
-  }, [review.pr.key, supported]);
+    void api<{ workspace: GpuWorkspace | null; contract: GpuWorkspaceContract }>("/api/gpu/workspaces/status", { method: "POST", body: JSON.stringify({ prKey: review.pr.key }) }).then((data) => {
+      setContract(data.contract);
+      setGpuType((current) => current || data.contract.defaults.gpuType);
+      setWorkspace(data.workspace);
+    }).catch(() => undefined);
+  }, [review.pr.key]);
 
   async function createWorkspace() {
-    if (!supported || workspace != null) return;
+    if (!supported || workspace != null || contract == null || gpuType.trim().length === 0) return;
     setCreating(true);
     setError(null);
     try {
-      const data = await api<{ workspace: GpuWorkspace }>("/api/gpu/workspaces", { method: "POST", body: JSON.stringify({ prUrl: review.pr.url, gpuType, gpuCount: 1, ttlHours: 0.25 }) });
+      const data = await api<{ workspace: GpuWorkspace }>("/api/gpu/workspaces", { method: "POST", body: JSON.stringify({ prUrl: review.pr.url, gpuType, gpuCount: contract.defaults.gpuCount, ttlHours: contract.defaults.ttlHours }) });
       setWorkspace(data.workspace);
       setExecResult(null);
       await refreshLogs();
@@ -1526,7 +1470,7 @@ function GpuWorkspaceModal({ review, close, refreshLogs }: { review: OpenRespons
     <header className="pi-modal-head">
       <div>
         <h2>GPU workspace</h2>
-        <p className="muted">Fast PyTorch scratch box for {review.pr.key}. MVP uses one GPU, no persistent disk, and a 15 minute TTL.</p>
+        <p className="muted">Fast PyTorch scratch box for {review.pr.key}. {contract == null ? "Loading workspace contract…" : `MVP uses ${contract.defaults.gpuCount} GPU, ${contract.defaults.persistentDisk ? "persistent disk" : "no persistent disk"}, and a ${Math.round(contract.defaults.ttlHours * 60)} minute TTL.`}</p>
       </div>
       <div className="pi-modal-head-actions">
         <button type="button" className="pi-icon-button" onClick={() => void requestClose()} disabled={deleting} aria-label="Close GPU workspace">✕</button>
@@ -1535,11 +1479,11 @@ function GpuWorkspaceModal({ review, close, refreshLogs }: { review: OpenRespons
     <div className="pi-modal-body gpu-workspace-body">
       <PiCard title="Allocate fast workspace">
         <div className="gpu-workspace-form">
-          <label>Hardware<select value={gpuType} onChange={(event) => setGpuType(event.target.value)}>{gpuTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
-          <div className="gpu-workspace-defaults"><span>1 GPU</span><span>no persistent disk</span><span>15m TTL</span><span>no auto-connect</span></div>
-          <Button onClick={() => void createWorkspace()} disabled={creating || workspace != null || !supported}>{creating ? "Allocating…" : workspace != null ? "Workspace open" : "Open GPU workspace"}</Button>
+          <label>Hardware<select value={gpuType} onChange={(event) => setGpuType(event.target.value)}>{(contract?.gpuTypes ?? []).map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
+          <div className="gpu-workspace-defaults"><span>{contract?.defaults.gpuCount ?? "—"} GPU</span><span>{contract == null ? "—" : contract.defaults.persistentDisk ? "persistent disk" : "no persistent disk"}</span><span>{contract == null ? "—" : `${Math.round(contract.defaults.ttlHours * 60)}m TTL`}</span><span>{contract == null ? "—" : contract.defaults.autoConnect ? "auto-connect" : "no auto-connect"}</span></div>
+          <Button onClick={() => void createWorkspace()} disabled={creating || workspace != null || !supported || gpuType.trim().length === 0}>{creating ? "Allocating…" : workspace != null ? "Workspace open" : "Open GPU workspace"}</Button>
         </div>
-        <p className="muted">{supported ? "Use this when you want Pi or a local agent to write a repro, run it on specific hardware, then attach if needed. The reservation stays on the warm-pool path; PR checkout is a follow-up command." : "This first MVP only supports pytorch/pytorch PR checkouts. The flow is intentionally narrow so repo setup can become a later profile layer."}</p>
+        <p className="muted">{supported ? "Use this when you want Pi or a local agent to write a repro, run it on specific hardware, then attach if needed. The reservation stays on the warm-pool path; PR checkout is a follow-up command." : contract == null ? "Loading GPU workspace support contract…" : `This first MVP only supports ${supportedRepositoryLabel} PR checkouts. The flow is intentionally narrow so repo setup can become a later profile layer.`}</p>
       </PiCard>
       {error != null && <p className="error">{error}</p>}
       {workspace != null && <PiCard title="Workspace ready" count={workspace.id ?? workspace.gpuType}>

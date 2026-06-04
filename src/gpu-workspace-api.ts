@@ -1,4 +1,4 @@
-import { defaultGpuWorkspaceStore, type GpuWorkspaceStore } from "./gpu-workspace.js";
+import { DEFAULT_GPU_WORKSPACE_GPU_COUNT, DEFAULT_GPU_WORKSPACE_GPU_TYPE, DEFAULT_GPU_WORKSPACE_TTL_HOURS, SUPPORTED_GPU_WORKSPACE_REPO, SUPPORTED_GPU_WORKSPACE_TYPES, defaultGpuWorkspaceStore, type GpuWorkspaceStore } from "./gpu-workspace.js";
 import { prKey, parsePullRequestRef } from "./pr.js";
 
 export function prKeyFromGpuWorkspacePayload(payload: Record<string, unknown>): string {
@@ -7,8 +7,23 @@ export function prKeyFromGpuWorkspacePayload(payload: Record<string, unknown>): 
   throw new Error("Expected prKey or prUrl");
 }
 
+export function gpuWorkspaceContract() {
+  return {
+    defaults: {
+      autoConnect: false,
+      gpuCount: DEFAULT_GPU_WORKSPACE_GPU_COUNT,
+      gpuType: DEFAULT_GPU_WORKSPACE_GPU_TYPE,
+      persistentDisk: false,
+      ttlHours: DEFAULT_GPU_WORKSPACE_TTL_HOURS,
+    },
+    gpuTypes: SUPPORTED_GPU_WORKSPACE_TYPES,
+    supportedPrKeyPrefix: `${SUPPORTED_GPU_WORKSPACE_REPO}#`,
+    supportedRepository: SUPPORTED_GPU_WORKSPACE_REPO,
+  };
+}
+
 export async function gpuWorkspaceStatusResponse(payload: Record<string, unknown>, store: GpuWorkspaceStore = defaultGpuWorkspaceStore): Promise<Record<string, unknown>> {
-  return { workspace: store.gpuWorkspaceForPr(prKeyFromGpuWorkspacePayload(payload)) };
+  return { workspace: store.gpuWorkspaceForPr(prKeyFromGpuWorkspacePayload(payload)), contract: gpuWorkspaceContract() };
 }
 
 export async function gpuWorkspaceCreateResponse(payload: Record<string, unknown>, store: GpuWorkspaceStore = defaultGpuWorkspaceStore): Promise<Record<string, unknown>> {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { gpuWorkspaceCreateResponse, gpuWorkspaceDeleteResponse, gpuWorkspaceExecResponse, gpuWorkspaceStatusResponse } from "../../src/gpu-workspace-api.js";
+import { gpuWorkspaceContract, gpuWorkspaceCreateResponse, gpuWorkspaceDeleteResponse, gpuWorkspaceExecResponse, gpuWorkspaceStatusResponse } from "../../src/gpu-workspace-api.js";
 import type { GpuWorkspace, GpuWorkspaceStore } from "../../src/gpu-workspace.js";
 
 const workspace: GpuWorkspace = {
@@ -58,7 +58,7 @@ function fakeStore(): { store: GpuWorkspaceStore; calls: string[] } {
 test("GPU API status resolves workspace by PR key", async () => {
   const { store, calls } = fakeStore();
 
-  assert.deepEqual(await gpuWorkspaceStatusResponse({ prKey: "github.com/pytorch/pytorch#185924" }, store), { workspace });
+  assert.deepEqual(await gpuWorkspaceStatusResponse({ prKey: "github.com/pytorch/pytorch#185924" }, store), { workspace, contract: gpuWorkspaceContract() });
   assert.deepEqual(calls, ["status:github.com/pytorch/pytorch#185924"]);
 });
 
