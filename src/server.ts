@@ -10,6 +10,7 @@ import { gpuWorkspaceCreateResponse, gpuWorkspaceDeleteResponse, gpuWorkspaceExe
 import { addIssueComment, editIssueComment, editReviewComment, editReviewSummary, fetchFileText, fetchPullRequestReviewData, replyToReviewComment, submitPullRequestReview } from "./github.js";
 import { inputFromBody, prKeyForRef, readBody, recordFromBody, refFromBody, sendJson } from "./http.js";
 import { logger } from "./logger.js";
+import { createPiApi } from "./pi-api.js";
 import { createPiJobRunner } from "./pi-jobs.js";
 import { askPi, disposePiSession, disposePiSessions, piDiagnostics, prewarmPiSession, registerPiSessionCwd, setPiModel } from "./pi-session.js";
 import { createPrApi, defaultPrApiDeps } from "./pr-api.js";
@@ -28,6 +29,7 @@ const commentApi = createCommentApi(defaultCommentApiDeps({ addIssueComment, edi
 const fileApi = createFileApi(defaultFileApiDeps(fetchFileText, setFileViewed, async (url) => {
   await execFileAsync("open", [url]);
 }));
+const piApi = createPiApi({ askPi, piDiagnostics, piJobRunner, setPiModel });
 const prApi = createPrApi(defaultPrApiDeps({ cleanupPrWorktree, disposePiSession, fetchPullRequestReviewData, listAiReviews, listFocusScans, preparePrWorktree, prewarmPiSession, registerPiSessionCwd, removePullRequest, upsertPullRequest }));
 const reviewMemoryApi = createReviewMemoryApi({ askPi, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewMemory, saveReviewProfile });
 const savedAnalysisApi = createSavedAnalysisApi({ saveAiReview, saveFocusScan });
@@ -166,36 +168,28 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   }
 
   if (req.method === "POST" && url.pathname === "/api/ask") {
-    const payload = recordFromBody(await readBody(req));
-    if (typeof payload.prKey !== "string" || typeof payload.prompt !== "string") throw new Error("Expected prKey and prompt");
-    sendJson(res, 200, { answer: await askPi(payload.prKey, payload.prompt, typeof payload.purpose === "string" ? payload.purpose : undefined) });
+    sendJson(res, 200, await piApi.ask(recordFromBody(await readBody(req))));
     return;
   }
 
   if (req.method === "POST" && (url.pathname === "/api/pi/review/status" || url.pathname === "/api/pi/focus-review/status")) {
-    const payload = recordFromBody(await readBody(req));
-    if (typeof payload.jobId !== "string") throw new Error("Expected jobId");
-    const job = piJobRunner.getJob(payload.jobId);
-    if (job == null) throw new Error(`Unknown review job ${payload.jobId}`);
-    sendJson(res, 200, { job });
+    sendJson(res, 200, await piApi.jobStatus(recordFromBody(await readBody(req))));
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/api/pi/review") {
     const payload = recordFromBody(await readBody(req));
-    if (typeof payload.prKey !== "string" || typeof payload.prompt !== "string") throw new Error("Expected prKey and prompt");
-    const job = piJobRunner.startJob(payload.prKey, payload.prompt, "main-review");
-    logger.info("api", "main review job started", { prKey: payload.prKey, jobId: job.id });
-    sendJson(res, 202, { job });
+    const response = await piApi.startReviewJob(payload, "main-review");
+    logger.info("api", "main review job started", { prKey: payload.prKey, jobId: response.job.id });
+    sendJson(res, 202, response);
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/api/pi/focus-review") {
     const payload = recordFromBody(await readBody(req));
-    if (typeof payload.prKey !== "string" || typeof payload.prompt !== "string") throw new Error("Expected prKey and prompt");
-    const job = piJobRunner.startJob(payload.prKey, payload.prompt, "focus-review");
-    logger.info("api", "focus review job started", { prKey: payload.prKey, jobId: job.id });
-    sendJson(res, 202, { job });
+    const response = await piApi.startReviewJob(payload, "focus-review");
+    logger.info("api", "focus review job started", { prKey: payload.prKey, jobId: response.job.id });
+    sendJson(res, 202, response);
     return;
   }
 
@@ -210,16 +204,12 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   }
 
   if (req.method === "POST" && url.pathname === "/api/pi/diagnostics") {
-    const payload = recordFromBody(await readBody(req));
-    if (typeof payload.prKey !== "string") throw new Error("Expected prKey");
-    sendJson(res, 200, { diagnostics: await piDiagnostics(payload.prKey) });
+    sendJson(res, 200, await piApi.diagnostics(recordFromBody(await readBody(req))));
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/api/pi/model") {
-    const payload = recordFromBody(await readBody(req));
-    if (typeof payload.prKey !== "string" || typeof payload.provider !== "string" || typeof payload.modelId !== "string") throw new Error("Expected prKey, provider, and modelId");
-    sendJson(res, 200, { diagnostics: await setPiModel(payload.prKey, payload.provider, payload.modelId, typeof payload.thinkingLevel === "string" ? payload.thinkingLevel : undefined) });
+    sendJson(res, 200, await piApi.setModel(recordFromBody(await readBody(req))));
     return;
   }
 
