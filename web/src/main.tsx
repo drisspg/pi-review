@@ -10,7 +10,7 @@ import { commentTarget, commentThreadDomId, draftMatchesTarget, groupReviewComme
 import { contextRowsFromText, hunkNewStart, isTargetInSelection, lastNewLine, parsePatchRows, targetFromPoint, targetFromRow } from "./lib/diff";
 import { languageForPath } from "./lib/highlight";
 import { newId, prUrlFromKey, shortSha } from "./lib/pr";
-import type { AiReview, AiReviewMessage, AiReviewRecord, DiffRow, DraftComment, DragSelection, FileReviewState, FlowDag, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, LogEntry, OpenResponse, PullFile, PullIssueComment, PullReviewComment, ReviewMemoryRecord, ReviewMemoryResponse, StoredPullRequest, Target, ThemeName, Thread } from "./types";
+import type { AiReview, AiReviewMessage, AiReviewRecord, DiffRow, DraftComment, DragSelection, FileReviewState, FlowDag, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, GpuWorkspace, GpuWorkspaceExecResult, LogEntry, OpenResponse, PullFile, PullIssueComment, PullReviewComment, ReviewMemoryRecord, ReviewMemoryResponse, StoredPullRequest, Target, ThemeName, Thread } from "./types";
 import "./styles.css";
 
 type DiffViewMode = "unified" | "split";
@@ -292,6 +292,7 @@ function App() {
   const [commentCollapseSignal, setCommentCollapseSignal] = useState(0);
   const [commentsCollapsed, setCommentsCollapsed] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
+  const [gpuWorkspaceOpen, setGpuWorkspaceOpen] = useState(false);
 
   async function refreshHistory() { setPrs((await api<{ prs: StoredPullRequest[] }>("/api/prs")).prs); }
   async function refreshLogs() { setLogs((await api<{ logs: LogEntry[] }>("/api/logs")).logs.slice(-40).reverse()); }
@@ -399,6 +400,7 @@ function App() {
     showFocusScanRecord(data.focusScan);
     setFlowDag({ running: false, text: "", error: null });
     setFlowDagOpen(false);
+    setGpuWorkspaceOpen(false);
   }
 
   async function openPr(nextInput: string) {
@@ -859,7 +861,7 @@ ${diffSummary}`;
     setCommentCollapseSignal((signal) => signal + 1);
   }
 
-  return <main className="app-shell"><header className="toolbar"><div className="toolbar-title"><strong>Pi PR Review</strong><span>{review == null ? "Paste a PR to start" : `${review.pr.key} · ${review.pr.title}`}</span></div><div className="toolbar-actions">{review != null && <><button type="button" onClick={goHome}>Home</button><button type="button" title="Pi session settings" onClick={() => { setSettingsOpen(true); void loadDiagnostics(); }}>⚙</button><button type="button" title="Pi session diagnostics" onClick={() => void showDiagnostics()}>🐞</button><button type="button" title="Code walk" onClick={() => { setFlowDagOpen(true); if (flowDag.text.trim().length === 0 && !flowDag.running) void runFlowDag(); }}>{flowDag.running ? "Code walk…" : "Code walk"}</button></>}<button type="button" title="Review memory" onClick={() => void showReviewMemory()}>🧠</button><button type="button" title="Server log" onClick={() => { setLogsOpen(true); void refreshLogs(); }}>📜</button><select aria-label="Theme" value={theme} onChange={(event) => setTheme(event.target.value as ThemeName)}>{themes.map((item) => <option key={item.name} value={item.name}>{item.label}</option>)}</select>{review != null && <form className="open-form" onSubmit={submit}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="OWNER/REPO#123 or GitHub PR URL" /><button disabled={busy || input.trim().length === 0}>{busy ? "Fetching…" : "Open"}</button></form>}</div></header>{error != null && <div className="error">{error}</div>}{busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, sendMessage: sendAiReviewMessage, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} theme={theme} setTheme={setTheme} />}{diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}{review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} openDiagnostics={() => { setSettingsOpen(false); void showDiagnostics(); }} close={() => setSettingsOpen(false)} />}{memoryOpen && <ReviewMemoryModal memory={reviewMemory} loading={memoryLoading} distilling={memoryDistilling} refresh={() => void loadReviewMemory()} distill={() => void distillReviewMemory()} close={() => setMemoryOpen(false)} />}{review != null && flowDagOpen && <FlowDagModal flowDag={flowDag} runFlowDag={runFlowDag} close={() => setFlowDagOpen(false)} prUrl={review.pr.url} headSha={review.pr.headSha} />}{logsOpen && <LogsModal logs={logs} refreshLogs={refreshLogs} close={() => setLogsOpen(false)} />}</main>;
+  return <main className="app-shell"><header className="toolbar"><div className="toolbar-title"><strong>Pi PR Review</strong><span>{review == null ? "Paste a PR to start" : `${review.pr.key} · ${review.pr.title}`}</span></div><div className="toolbar-actions">{review != null && <><button type="button" onClick={goHome}>Home</button><button type="button" title="Pi session settings" onClick={() => { setSettingsOpen(true); void loadDiagnostics(); }}>⚙</button><button type="button" title="Pi session diagnostics" onClick={() => void showDiagnostics()}>🐞</button><button type="button" title="Open GPU workspace" onClick={() => setGpuWorkspaceOpen(true)}>GPU</button><button type="button" title="Code walk" onClick={() => { setFlowDagOpen(true); if (flowDag.text.trim().length === 0 && !flowDag.running) void runFlowDag(); }}>{flowDag.running ? "Code walk…" : "Code walk"}</button></>}<button type="button" title="Review memory" onClick={() => void showReviewMemory()}>🧠</button><button type="button" title="Server log" onClick={() => { setLogsOpen(true); void refreshLogs(); }}>📜</button><select aria-label="Theme" value={theme} onChange={(event) => setTheme(event.target.value as ThemeName)}>{themes.map((item) => <option key={item.name} value={item.name}>{item.label}</option>)}</select>{review != null && <form className="open-form" onSubmit={submit}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="OWNER/REPO#123 or GitHub PR URL" /><button disabled={busy || input.trim().length === 0}>{busy ? "Fetching…" : "Open"}</button></form>}</div></header>{error != null && <div className="error">{error}</div>}{busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, sendMessage: sendAiReviewMessage, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} theme={theme} setTheme={setTheme} />}{diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}{review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} openDiagnostics={() => { setSettingsOpen(false); void showDiagnostics(); }} close={() => setSettingsOpen(false)} />}{memoryOpen && <ReviewMemoryModal memory={reviewMemory} loading={memoryLoading} distilling={memoryDistilling} refresh={() => void loadReviewMemory()} distill={() => void distillReviewMemory()} close={() => setMemoryOpen(false)} />}{review != null && gpuWorkspaceOpen && <GpuWorkspaceModal review={review} close={() => setGpuWorkspaceOpen(false)} refreshLogs={refreshLogs} />}{review != null && flowDagOpen && <FlowDagModal flowDag={flowDag} runFlowDag={runFlowDag} close={() => setFlowDagOpen(false)} prUrl={review.pr.url} headSha={review.pr.headSha} />}{logsOpen && <LogsModal logs={logs} refreshLogs={refreshLogs} close={() => setLogsOpen(false)} />}</main>;
 }
 
 type StartFilter = "all" | "needs-review" | "in-progress" | "done";
@@ -1436,6 +1438,128 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
     {focusAreaLinks}
     {body}{composer}
   </section>;
+}
+
+function GpuWorkspaceModal({ review, close, refreshLogs }: { review: OpenResponse; close: () => void; refreshLogs: () => Promise<void> }) {
+  const gpuTypes = ["b200", "b200-mig-1g", "b200-mig-2g", "b200-mig-3g", "h100", "h100-mig-1g", "h100-mig-2g", "h100-mig-3g", "h200", "a100", "t4", "l4"];
+  const [gpuType, setGpuType] = useState("b200");
+  const [creating, setCreating] = useState(false);
+  const [workspace, setWorkspace] = useState<GpuWorkspace | null>(null);
+  const [execCommand, setExecCommand] = useState("nvidia-smi -L");
+  const [execResult, setExecResult] = useState<GpuWorkspaceExecResult | null>(null);
+  const [executing, setExecuting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const supported = review.pr.key.toLowerCase().startsWith("github.com/pytorch/pytorch#");
+
+  async function createWorkspace() {
+    if (!supported || workspace != null) return;
+    setCreating(true);
+    setError(null);
+    try {
+      const data = await api<{ workspace: GpuWorkspace }>("/api/gpu/workspaces", { method: "POST", body: JSON.stringify({ prUrl: review.pr.url, gpuType, gpuCount: 1, ttlHours: 0.25 }) });
+      setWorkspace(data.workspace);
+      setExecResult(null);
+      await refreshLogs();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function runWorkspaceCommand() {
+    if (workspace?.id == null || execCommand.trim().length === 0) return;
+    setExecuting(true);
+    setError(null);
+    try {
+      const { result } = await api<{ result: GpuWorkspaceExecResult }>("/api/gpu/workspaces/exec", { method: "POST", body: JSON.stringify({ id: workspace.id, command: execCommand.trim() }) });
+      setExecResult(result);
+      await refreshLogs();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setExecuting(false);
+    }
+  }
+
+  async function deleteWorkspace(): Promise<boolean> {
+    if (workspace?.id == null) {
+      setWorkspace(null);
+      setExecResult(null);
+      return true;
+    }
+    setDeleting(true);
+    setError(null);
+    try {
+      await api("/api/gpu/workspaces/delete", { method: "POST", body: JSON.stringify({ id: workspace.id }) });
+      setWorkspace(null);
+      setExecResult(null);
+      await refreshLogs();
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      return false;
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function requestClose() {
+    if (workspace == null) {
+      close();
+      return;
+    }
+    if (await deleteWorkspace()) close();
+  }
+
+  async function copy(text: string | null) {
+    if (text != null) await navigator.clipboard.writeText(text);
+  }
+
+  return <ModalShell open onOpenChange={(open) => { if (!open) void requestClose(); }} label="GPU workspace" className="pi-modal gpu-workspace-modal">
+    <header className="pi-modal-head">
+      <div>
+        <h2>GPU workspace</h2>
+        <p className="muted">Fast PyTorch scratch box for {review.pr.key}. MVP uses one GPU, no persistent disk, and a 15 minute TTL.</p>
+      </div>
+      <div className="pi-modal-head-actions">
+        <button type="button" className="pi-icon-button" onClick={() => void requestClose()} disabled={deleting} aria-label="Close GPU workspace">✕</button>
+      </div>
+    </header>
+    <div className="pi-modal-body gpu-workspace-body">
+      <PiCard title="Allocate fast workspace">
+        <div className="gpu-workspace-form">
+          <label>Hardware<select value={gpuType} onChange={(event) => setGpuType(event.target.value)}>{gpuTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
+          <div className="gpu-workspace-defaults"><span>1 GPU</span><span>no persistent disk</span><span>15m TTL</span><span>no auto-connect</span></div>
+          <Button onClick={() => void createWorkspace()} disabled={creating || workspace != null || !supported}>{creating ? "Allocating…" : workspace != null ? "Workspace open" : "Open GPU workspace"}</Button>
+        </div>
+        <p className="muted">{supported ? "Use this when you want Pi or a local agent to write a repro, run it on specific hardware, then attach if needed. The reservation stays on the warm-pool path; PR checkout is a follow-up command." : "This first MVP only supports pytorch/pytorch PR checkouts. The flow is intentionally narrow so repo setup can become a later profile layer."}</p>
+      </PiCard>
+      {error != null && <p className="error">{error}</p>}
+      {workspace != null && <PiCard title="Workspace ready" count={workspace.id ?? workspace.gpuType}>
+        <div className="gpu-workspace-ready-actions"><Button variant="muted" className="small-muted-button" onClick={() => void deleteWorkspace()} disabled={deleting}>{deleting ? "Deleting…" : "Delete workspace"}</Button></div>
+        <dl className="pi-kv">
+          <dt>Workspace</dt><dd><code>{workspace.uri ?? "ID not detected from gpu-dev output"}</code></dd>
+          <dt>Attach</dt><dd>{workspace.attachCommand == null ? "Run gpu-dev list/show to find the reservation." : <><code>{workspace.attachCommand}</code><button type="button" className="small-muted-button" onClick={() => void copy(workspace.attachCommand)}>Copy</button></>}</dd>
+          <dt>Inspect</dt><dd>{workspace.showCommand == null ? "—" : <><code>{workspace.showCommand}</code><button type="button" className="small-muted-button" onClick={() => void copy(workspace.showCommand)}>Copy</button></>}</dd>
+          <dt>SSH host</dt><dd>{workspace.sshHost ?? "—"}</dd>
+          <dt>Setup</dt><dd><code>{workspace.setupCommand}</code><button type="button" className="small-muted-button" onClick={() => void copy(workspace.setupCommand)}>Copy</button></dd>
+          <dt>Profile</dt><dd>{workspace.setupProfile}</dd>
+          <dt>Ref</dt><dd>{workspace.prRef}</dd>
+          <dt>GPU</dt><dd>{workspace.gpuCount}× {workspace.gpuType}</dd>
+          <dt>TTL</dt><dd>{Math.round(workspace.ttlHours * 60)} minutes</dd>
+        </dl>
+        <div className="gpu-workspace-exec">
+          <label>Run command<textarea value={execCommand} onChange={(event) => setExecCommand(event.target.value)} /></label>
+          <Button onClick={() => void runWorkspaceCommand()} disabled={executing || workspace.id == null || execCommand.trim().length === 0}>{executing ? "Running…" : "Run on workspace"}</Button>
+        </div>
+        {execResult != null && <details className="gpu-workspace-output" open><summary>Command result · exit {execResult.exitCode ?? execResult.signal ?? "unknown"}</summary><pre>{[execResult.stdout, execResult.stderr].filter((text) => text.trim().length > 0).join("\n") || "No output"}</pre></details>}
+        <details className="gpu-workspace-output"><summary>Setup script</summary><pre>{workspace.setupScript}</pre></details>
+        <details className="gpu-workspace-output"><summary>gpu-dev output</summary><pre>{[workspace.stdout, workspace.stderr].filter((text) => text.trim().length > 0).join("\n") || workspace.command}</pre></details>
+      </PiCard>}
+    </div>
+  </ModalShell>;
 }
 
 function FlowDagModal({ flowDag, runFlowDag, close, prUrl, headSha }: { flowDag: FlowDag; runFlowDag: () => Promise<void>; close: () => void; prUrl: string; headSha: string }) {

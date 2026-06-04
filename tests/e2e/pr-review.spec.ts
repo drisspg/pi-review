@@ -73,6 +73,16 @@ test("opens a PR and renders GitHub-style file diffs", async ({ page }) => {
   await expect(page.locator(".diff-row.added").first()).toBeVisible();
 });
 
+test("shows GPU workspace MVP constraints for unsupported repos", async ({ page }) => {
+  await page.getByRole("button", { name: "GPU" }).click();
+  const dialog = page.getByRole("dialog", { name: "GPU workspace" });
+  await expect(dialog.getByText("1 GPU", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("no persistent disk", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("15m TTL", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Open GPU workspace" })).toBeDisabled();
+  await expect(dialog.getByText("only supports pytorch/pytorch PR checkouts")).toBeVisible();
+});
+
 test("expands neighboring context lines", async ({ page }) => {
   await openFirstFile(page);
   const firstFile = page.locator(".file").first();

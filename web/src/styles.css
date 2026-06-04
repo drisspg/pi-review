@@ -2626,6 +2626,7 @@ a { color: var(--link); text-decoration: none; }
 .pi-settings-modal { width: min(1080px, 96vw); }
 .pi-diagnostics-modal { width: min(1200px, 96vw); }
 .review-memory-modal { width: min(1280px, 96vw); }
+.gpu-workspace-modal { width: min(900px, 96vw); }
 
 .pi-modal-head {
   display: flex;
@@ -3183,6 +3184,68 @@ a { color: var(--link); text-decoration: none; }
   overflow-wrap: anywhere;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
+}
+
+.gpu-workspace-body { max-height: calc(90vh - 130px); }
+
+.gpu-workspace-form {
+  display: grid;
+  gap: 10px;
+  margin: 6px 0;
+  max-width: 520px;
+}
+
+.gpu-workspace-form label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.gpu-workspace-defaults {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.gpu-workspace-defaults span {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel2);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.gpu-workspace-ready-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin: 4px 0 8px;
+}
+
+.gpu-workspace-exec {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.gpu-workspace-exec label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.gpu-workspace-exec textarea {
+  min-height: 72px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.gpu-workspace-output pre {
+  white-space: pre-wrap;
+  max-height: 240px;
+  overflow: auto;
 }
 
 .pi-session-list { display: grid; gap: 8px; margin: 6px 0; }

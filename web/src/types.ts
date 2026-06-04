@@ -28,3 +28,5 @@ export type ReviewMemoryResponse = { prompt: string; profile: ReviewMemoryProfil
 export type AiReview = { expanded: boolean; open: boolean; running: boolean; text: string; messages: AiReviewMessage[] };
 export type ThemeName = "github-dark" | "github-light" | "github-dimmed";
 export type OpenResponse = { pr: StoredPullRequest; files: PullFile[]; comments: PullReviewComment[]; issueComments: PullIssueComment[]; reviewSummaries: PullRequestReviewSummary[]; fileReviews: FileReviewState[]; focusScan: FocusScanRecord | null; focusScans: FocusScanRecord[]; aiReview: AiReviewRecord | null; aiReviews: AiReviewRecord[] };
+export type GpuWorkspace = { id: string | null; uri: string | null; prRef: string; gpuType: string; gpuCount: number; ttlHours: number; command: string; attachCommand: string | null; showCommand: string | null; sshHost: string | null; setupProfile: string; setupCommand: string; setupScript: string; stdout: string; stderr: string; createdAt: string };
+export type GpuWorkspaceExecResult = { id: string; command: string; sshHost: string; stdout: string; stderr: string; exitCode: number | null; signal: string | null };
