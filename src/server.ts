@@ -11,8 +11,9 @@ import { inputFromBody, prKeyForRef, readBody, recordFromBody, refFromBody, send
 import { logger } from "./logger.js";
 import { askPi, disposePiSession, disposePiSessions, piDiagnostics, prewarmPiSession, registerPiSessionCwd, setPiModel } from "./pi-session.js";
 import { parsePullRequestRef } from "./pr.js";
+import { githubReviewComments, reviewMemoryChangeSet, reviewMemoryComments, reviewSubmitCommentsFromPayload, reviewSubmitFailureMessage } from "./review-submit-api.js";
 import { currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, listAiReviews, listFocusScans, listRecentPullRequests, listReviewMemoryRecords, markPullRequestReviewed, removePullRequest, reviewMemoryStats, saveAiReview, saveFocusScan, saveReviewMemory, saveReviewProfile, setFileViewed, upsertPullRequest } from "./state.js";
-import type { AiReviewMessageRecord, FocusAreaReviewState, PullFile, PullRequestReviewResponse, ReviewMemoryChangeSet, ReviewMemoryComment, StoredPullRequest } from "./types.js";
+import type { AiReviewMessageRecord, FocusAreaReviewState, PullRequestReviewResponse, ReviewMemoryChangeSet, StoredPullRequest } from "./types.js";
 import { cleanupPrWorktree, preparePrWorktree, worktreeDirForRef } from "./worktrees.js";
 
 const DEFAULT_PORT = 43133;
@@ -29,86 +30,11 @@ type PiReviewJob = {
   finishedAt?: string;
 };
 
-type ReviewSubmitComment = {
-  draft_id?: unknown;
-  path?: unknown;
-  line?: unknown;
-  start_line?: unknown;
-  side?: unknown;
-  start_side?: unknown;
-  body?: unknown;
-};
-
 const piReviewJobs = new Map<string, PiReviewJob>();
-
-function reviewSubmitCommentsFromPayload(comments: unknown): ReviewSubmitComment[] {
-  return Array.isArray(comments) ? comments.filter((comment): comment is ReviewSubmitComment => typeof comment === "object" && comment != null) : [];
-}
-
-function githubReviewComments(comments: ReviewSubmitComment[]): Array<Record<string, unknown>> {
-  return comments.map(({ path, line, start_line, side, start_side, body }) => ({
-    path,
-    line,
-    side,
-    body,
-    ...(typeof start_line === "number" && start_line !== line ? { start_line, start_side } : {}),
-  }));
-}
-
-function reviewMemoryComments(comments: ReviewSubmitComment[]): ReviewMemoryComment[] {
-  return comments.flatMap(reviewMemoryCommentFromPayload).filter((comment) => comment.body.length > 0);
-}
-
-function reviewMemoryFiles(files: PullFile[], comments: ReviewMemoryComment[]): ReviewMemoryChangeSet["files"] {
-  const commentedPaths = new Set(comments.map((comment) => comment.path));
-  return files.filter((file) => commentedPaths.size === 0 || commentedPaths.has(file.filename)).map((file) => ({
-    path: file.filename,
-    status: file.status,
-    additions: file.additions,
-    deletions: file.deletions,
-    patch: file.patch,
-  }));
-}
-
-function reviewMemoryChangeSet(data: Awaited<ReturnType<typeof fetchPullRequestReviewData>>, comments: ReviewMemoryComment[]): ReviewMemoryChangeSet {
-  return {
-    title: data.raw.title,
-    url: data.raw.html_url,
-    source: `${data.raw.base.repo.full_name}#${data.raw.number}`,
-    files: reviewMemoryFiles(data.files, comments),
-  };
-}
 
 async function hydrateReviewResponse(data: Awaited<ReturnType<typeof fetchPullRequestReviewData>>, pr: StoredPullRequest, extra: Partial<Pick<PullRequestReviewResponse, "worktreeDir">> = {}): Promise<PullRequestReviewResponse> {
   const [focusScans, aiReviews] = await Promise.all([listFocusScans(pr.key), listAiReviews(pr.key)]);
   return { ...data, pr, focusScan: focusScans[0] ?? null, focusScans, aiReview: aiReviews[0] ?? null, aiReviews, ...extra };
-}
-
-function reviewMemoryCommentFromPayload(comment: ReviewSubmitComment): ReviewMemoryComment[] {
-  if (typeof comment.path !== "string" || typeof comment.body !== "string") return [];
-  const side: ReviewMemoryComment["side"] | null = comment.side === "RIGHT" || comment.side === "LEFT" ? comment.side : null;
-  if (side == null) return [];
-  return [{
-    path: comment.path,
-    line: typeof comment.line === "number" ? comment.line : null,
-    startLine: typeof comment.start_line === "number" ? comment.start_line : null,
-    side,
-    body: comment.body.trim(),
-  }];
-}
-
-function reviewSubmitDiagnostics(comments: ReviewSubmitComment[]): string {
-  if (comments.length === 0) return "No inline comments were included in the failed review payload.";
-  const rows = comments.map((comment, index) => {
-    const draftId = typeof comment.draft_id === "string" ? ` draft=${comment.draft_id}` : "";
-    const path = typeof comment.path === "string" ? comment.path : "<missing path>";
-    const line = typeof comment.line === "number" ? comment.line : "<missing line>";
-    const startLine = typeof comment.start_line === "number" && comment.start_line !== comment.line ? `${comment.start_line}-` : "";
-    const side = typeof comment.side === "string" ? comment.side : "<missing side>";
-    const body = typeof comment.body === "string" ? comment.body.replace(/\s+/g, " ").trim().slice(0, 120) : "<missing body>";
-    return `${index + 1}.${draftId} ${path}:${startLine}${line} ${side} — ${body}`;
-  });
-  return `Inline comments in the failed review payload:\n${rows.join("\n")}`;
 }
 
 function startPiReviewJob(prKey: string, prompt: string, sessionKind?: string): PiReviewJob {
@@ -410,8 +336,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     try {
       result = await submitPullRequestReview(ref, { event: payload.event, body: payload.body, comments: githubReviewComments(comments) });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`${message}\n\n${reviewSubmitDiagnostics(comments)}\n\nIf GitHub returned HTTP 422, delete or recreate the listed draft whose path/line is stale, then retry.`);
+      throw new Error(reviewSubmitFailureMessage(error, comments));
     }
     const prKey = prKeyForRef(ref);
     const memoryComments = reviewMemoryComments(comments);
