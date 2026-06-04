@@ -1,12 +1,13 @@
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { extname, join, normalize, resolve, sep } from "node:path";
+import { extname, join, normalize, resolve } from "node:path";
 import { promisify } from "node:util";
 
+import { createFileApi, defaultFileApiDeps } from "./file-api.js";
 import { gpuWorkspaceCreateResponse, gpuWorkspaceDeleteResponse, gpuWorkspaceExecResponse, gpuWorkspaceStatusResponse } from "./gpu-workspace-api.js";
 import { addIssueComment, editIssueComment, editReviewComment, editReviewSummary, fetchFileText, fetchPullRequestReviewData, replyToReviewComment, submitPullRequestReview } from "./github.js";
-import { inputFromBody, prKeyForRef, readBody, recordFromBody, refFromBody, sendJson, viewedPayloadFromBody } from "./http.js";
+import { inputFromBody, prKeyForRef, readBody, recordFromBody, refFromBody, sendJson } from "./http.js";
 import { logger } from "./logger.js";
 import { createPiJobRunner } from "./pi-jobs.js";
 import { askPi, disposePiSession, disposePiSessions, piDiagnostics, prewarmPiSession, registerPiSessionCwd, setPiModel } from "./pi-session.js";
@@ -15,13 +16,16 @@ import { createReviewMemoryApi, reviewSubmitMemoryRecord } from "./review-memory
 import { githubReviewComments, reviewSubmitCommentsFromPayload, reviewSubmitFailureMessage } from "./review-submit-api.js";
 import { currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, listAiReviews, listFocusScans, listRecentPullRequests, listReviewMemoryRecords, markPullRequestReviewed, removePullRequest, reviewMemoryStats, saveAiReview, saveFocusScan, saveReviewMemory, saveReviewProfile, setFileViewed, upsertPullRequest } from "./state.js";
 import type { AiReviewMessageRecord, FocusAreaReviewState, PullRequestReviewResponse, StoredPullRequest } from "./types.js";
-import { cleanupPrWorktree, preparePrWorktree, worktreeDirForRef } from "./worktrees.js";
+import { cleanupPrWorktree, preparePrWorktree } from "./worktrees.js";
 
 const DEFAULT_PORT = 43133;
 const WEB_ROOT = resolve(process.cwd(), "dist-web");
 const execFileAsync = promisify(execFile);
 
 const piJobRunner = createPiJobRunner(askPi);
+const fileApi = createFileApi(defaultFileApiDeps(fetchFileText, setFileViewed, async (url) => {
+  await execFileAsync("open", [url]);
+}));
 const reviewMemoryApi = createReviewMemoryApi({ askPi, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewMemory, saveReviewProfile });
 
 async function hydrateReviewResponse(data: Awaited<ReturnType<typeof fetchPullRequestReviewData>>, pr: StoredPullRequest, extra: Partial<Pick<PullRequestReviewResponse, "worktreeDir">> = {}): Promise<PullRequestReviewResponse> {
@@ -69,16 +73,6 @@ async function sendStatic(res: ServerResponse, pathname: string, head = false): 
   const data = await readFile(finalPath);
   res.writeHead(200, { "content-type": contentTypes[extname(finalPath)] ?? "application/octet-stream" });
   res.end(head ? undefined : data);
-}
-
-async function openInEditor(prUrl: string, path: string, line?: number): Promise<string> {
-  const worktreeDir = worktreeDirForRef(parsePullRequestRef(prUrl));
-  const filePath = resolve(worktreeDir, path);
-  if (filePath !== worktreeDir && !filePath.startsWith(`${worktreeDir}${sep}`)) throw new Error("File path escapes PR worktree");
-  const target = `${filePath}:${line ?? 1}:1`;
-  const url = `vscode://file${encodeURI(target)}`;
-  await execFileAsync("open", [url]);
-  return target;
 }
 
 async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -155,24 +149,19 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   }
 
   if (req.method === "POST" && url.pathname === "/api/file/viewed") {
-    const payload = viewedPayloadFromBody(await readBody(req));
+    const payload = recordFromBody(await readBody(req));
     logger.info("api", "set file viewed", payload);
-    sendJson(res, 200, { fileReview: await setFileViewed({ ...payload, updatedAt: new Date().toISOString() }) });
+    sendJson(res, 200, await fileApi.viewed(payload));
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/api/file/text") {
-    const payload = recordFromBody(await readBody(req));
-    const ref = refFromBody(payload);
-    if (typeof payload.path !== "string" || typeof payload.sha !== "string") throw new Error("Expected path and sha");
-    sendJson(res, 200, { text: await fetchFileText(ref, payload.path, payload.sha) });
+    sendJson(res, 200, await fileApi.text(recordFromBody(await readBody(req))));
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/api/file/open") {
-    const payload = recordFromBody(await readBody(req));
-    if (typeof payload.prUrl !== "string" || typeof payload.path !== "string") throw new Error("Expected prUrl and path");
-    sendJson(res, 200, { target: await openInEditor(payload.prUrl, payload.path, typeof payload.line === "number" ? payload.line : undefined) });
+    sendJson(res, 200, await fileApi.open(recordFromBody(await readBody(req))));
     return;
   }
 
