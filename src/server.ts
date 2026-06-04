@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { extname, join, normalize, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 
-import { createOrReuseGpuWorkspace, deleteGpuWorkspace, execGpuWorkspace, unregisterGpuWorkspace } from "./gpu-workspace.js";
+import { gpuWorkspaceCreateResponse, gpuWorkspaceDeleteResponse, gpuWorkspaceExecResponse, gpuWorkspaceStatusResponse } from "./gpu-workspace-api.js";
 import { addIssueComment, editIssueComment, editReviewComment, editReviewSummary, fetchFileText, fetchPullRequestReviewData, replyToReviewComment, submitPullRequestReview } from "./github.js";
 import { inputFromBody, prKeyForRef, readBody, recordFromBody, refFromBody, sendJson, viewedPayloadFromBody } from "./http.js";
 import { logger } from "./logger.js";
@@ -365,35 +365,38 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     return;
   }
 
+  if (req.method === "POST" && url.pathname === "/api/gpu/workspaces/status") {
+    sendJson(res, 200, await gpuWorkspaceStatusResponse(recordFromBody(await readBody(req))));
+    return;
+  }
+
   if (req.method === "POST" && url.pathname === "/api/gpu/workspaces") {
     const payload = recordFromBody(await readBody(req));
-    if (typeof payload.prUrl !== "string" || typeof payload.gpuType !== "string") throw new Error("Expected prUrl and gpuType");
-    const ref = parsePullRequestRef(payload.prUrl);
-    logger.info("api", "gpu workspace requested", { ref, gpuType: payload.gpuType });
-    const { workspace, reused } = await createOrReuseGpuWorkspace(prKeyForRef(ref), { ref, gpuType: payload.gpuType, gpuCount: typeof payload.gpuCount === "number" ? payload.gpuCount : undefined, ttlHours: typeof payload.ttlHours === "number" ? payload.ttlHours : undefined, includeSubmodules: payload.includeSubmodules === true });
-    logger.info("api", "gpu workspace ready", { ref, gpuType: workspace.gpuType, id: workspace.id, uri: workspace.uri, reused });
-    sendJson(res, 200, { workspace });
+    logger.info("api", "gpu workspace requested", { prUrl: payload.prUrl, gpuType: payload.gpuType });
+    const response = await gpuWorkspaceCreateResponse(payload);
+    const workspace = response.workspace as { gpuType?: unknown; id?: unknown; uri?: unknown } | undefined;
+    logger.info("api", "gpu workspace ready", { gpuType: workspace?.gpuType, id: workspace?.id, uri: workspace?.uri, reused: response.reused });
+    sendJson(res, 200, response);
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/api/gpu/workspaces/delete") {
     const payload = recordFromBody(await readBody(req));
-    if (typeof payload.id !== "string" || payload.id.trim().length === 0) throw new Error("Expected workspace id");
     logger.info("api", "gpu workspace delete requested", { id: payload.id });
-    const result = await deleteGpuWorkspace(payload.id.trim());
-    if (typeof payload.prKey === "string") unregisterGpuWorkspace(payload.prKey, payload.id.trim());
-    logger.info("api", "gpu workspace deleted", { id: result.id });
-    sendJson(res, 200, { result });
+    const response = await gpuWorkspaceDeleteResponse(payload);
+    const result = response.result as { id?: unknown } | undefined;
+    logger.info("api", "gpu workspace deleted", { id: result?.id });
+    sendJson(res, 200, response);
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/api/gpu/workspaces/exec") {
     const payload = recordFromBody(await readBody(req));
-    if (typeof payload.id !== "string" || payload.id.trim().length === 0 || typeof payload.command !== "string" || payload.command.trim().length === 0) throw new Error("Expected workspace id and command");
     logger.info("api", "gpu workspace exec requested", { id: payload.id, command: payload.command });
-    const result = await execGpuWorkspace(payload.id.trim(), payload.command, typeof payload.timeoutMs === "number" ? payload.timeoutMs : undefined);
-    logger.info("api", "gpu workspace exec complete", { id: result.id, exitCode: result.exitCode, signal: result.signal });
-    sendJson(res, 200, { result });
+    const response = await gpuWorkspaceExecResponse(payload);
+    const result = response.result as { id?: unknown; exitCode?: unknown; signal?: unknown } | undefined;
+    logger.info("api", "gpu workspace exec complete", { id: result?.id, exitCode: result?.exitCode, signal: result?.signal });
+    sendJson(res, 200, response);
     return;
   }
 

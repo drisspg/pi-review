@@ -160,30 +160,30 @@ export function createGpuWorkspaceStore(runtime: GpuWorkspaceRuntime = defaultRu
   return { gpuWorkspaceForPr, unregisterGpuWorkspace, createOrReuseGpuWorkspace, createGpuWorkspace, deleteGpuWorkspace, execGpuWorkspace };
 }
 
-const defaultStore = createGpuWorkspaceStore();
+export const defaultGpuWorkspaceStore = createGpuWorkspaceStore();
 
 export function gpuWorkspaceForPr(prKey: string): GpuWorkspace | null {
-  return defaultStore.gpuWorkspaceForPr(prKey);
+  return defaultGpuWorkspaceStore.gpuWorkspaceForPr(prKey);
 }
 
 export function unregisterGpuWorkspace(prKey: string, id?: string): boolean {
-  return defaultStore.unregisterGpuWorkspace(prKey, id);
+  return defaultGpuWorkspaceStore.unregisterGpuWorkspace(prKey, id);
 }
 
 export async function createOrReuseGpuWorkspace(prKey: string, request: GpuWorkspaceRequest): Promise<{ workspace: GpuWorkspace; reused: boolean }> {
-  return defaultStore.createOrReuseGpuWorkspace(prKey, request);
+  return defaultGpuWorkspaceStore.createOrReuseGpuWorkspace(prKey, request);
 }
 
 export async function deleteGpuWorkspace(id: string): Promise<{ id: string; stdout: string; stderr: string }> {
-  return defaultStore.deleteGpuWorkspace(id);
+  return defaultGpuWorkspaceStore.deleteGpuWorkspace(id);
 }
 
 export async function execGpuWorkspace(id: string, command: string, timeoutMs = DEFAULT_EXEC_TIMEOUT_MS): Promise<GpuWorkspaceExecResult> {
-  return defaultStore.execGpuWorkspace(id, command, timeoutMs);
+  return defaultGpuWorkspaceStore.execGpuWorkspace(id, command, timeoutMs);
 }
 
 export async function createGpuWorkspace(request: GpuWorkspaceRequest): Promise<GpuWorkspace> {
-  return defaultStore.createGpuWorkspace(request);
+  return defaultGpuWorkspaceStore.createGpuWorkspace(request);
 }
 
 function isPyTorchRef(ref: PullRequestRef): boolean {

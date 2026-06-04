@@ -1452,6 +1452,11 @@ function GpuWorkspaceModal({ review, close, refreshLogs }: { review: OpenRespons
   const [error, setError] = useState<string | null>(null);
   const supported = review.pr.key.toLowerCase().startsWith("github.com/pytorch/pytorch#");
 
+  useEffect(() => {
+    if (!supported) return;
+    void api<{ workspace: GpuWorkspace | null }>("/api/gpu/workspaces/status", { method: "POST", body: JSON.stringify({ prKey: review.pr.key }) }).then((data) => setWorkspace(data.workspace)).catch(() => undefined);
+  }, [review.pr.key, supported]);
+
   async function createWorkspace() {
     if (!supported || workspace != null) return;
     setCreating(true);
