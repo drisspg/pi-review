@@ -8,14 +8,14 @@ import { createCommentApi, defaultCommentApiDeps } from "./comment-api.js";
 import { createFileApi, defaultFileApiDeps } from "./file-api.js";
 import { gpuWorkspaceCreateResponse, gpuWorkspaceDeleteResponse, gpuWorkspaceExecResponse, gpuWorkspaceStatusResponse } from "./gpu-workspace-api.js";
 import { addIssueComment, editIssueComment, editReviewComment, editReviewSummary, fetchFileText, fetchPullRequestReviewData, replyToReviewComment, submitPullRequestReview } from "./github.js";
-import { inputFromBody, prKeyForRef, readBody, recordFromBody, refFromBody, sendJson } from "./http.js";
+import { inputFromBody, readBody, recordFromBody, sendJson } from "./http.js";
 import { logger } from "./logger.js";
 import { createPiApi } from "./pi-api.js";
 import { createPiJobRunner } from "./pi-jobs.js";
 import { askPi, disposePiSession, disposePiSessions, piDiagnostics, prewarmPiSession, registerPiSessionCwd, setPiModel } from "./pi-session.js";
 import { createPrApi, defaultPrApiDeps } from "./pr-api.js";
-import { createReviewMemoryApi, reviewSubmitMemoryRecord } from "./review-memory-api.js";
-import { githubReviewComments, reviewSubmitCommentsFromPayload, reviewSubmitFailureMessage } from "./review-submit-api.js";
+import { createReviewMemoryApi } from "./review-memory-api.js";
+import { createReviewSubmitRouteApi, defaultReviewSubmitRouteApiDeps } from "./review-submit-route-api.js";
 import { createSavedAnalysisApi } from "./saved-analysis-api.js";
 import { currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, listAiReviews, listFocusScans, listRecentPullRequests, listReviewMemoryRecords, markPullRequestReviewed, removePullRequest, reviewMemoryStats, saveAiReview, saveFocusScan, saveReviewMemory, saveReviewProfile, setFileViewed, upsertPullRequest } from "./state.js";
 import { cleanupPrWorktree, preparePrWorktree } from "./worktrees.js";
@@ -32,6 +32,7 @@ const fileApi = createFileApi(defaultFileApiDeps(fetchFileText, setFileViewed, a
 const piApi = createPiApi({ askPi, piDiagnostics, piJobRunner, setPiModel });
 const prApi = createPrApi(defaultPrApiDeps({ cleanupPrWorktree, disposePiSession, fetchPullRequestReviewData, listAiReviews, listFocusScans, preparePrWorktree, prewarmPiSession, registerPiSessionCwd, removePullRequest, upsertPullRequest }));
 const reviewMemoryApi = createReviewMemoryApi({ askPi, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewMemory, saveReviewProfile });
+const reviewSubmitRouteApi = createReviewSubmitRouteApi(defaultReviewSubmitRouteApiDeps({ fetchPullRequestReviewData, markPullRequestReviewed, saveReviewMemory, submitPullRequestReview }));
 const savedAnalysisApi = createSavedAnalysisApi({ saveAiReview, saveFocusScan });
 
 function sse(res: ServerResponse, event: string, data: unknown): void {
@@ -250,21 +251,8 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
 
   if (req.method === "POST" && url.pathname === "/api/review/submit") {
     const payload = recordFromBody(await readBody(req));
-    const ref = refFromBody(payload);
-    if (payload.event !== "COMMENT" && payload.event !== "APPROVE" && payload.event !== "REQUEST_CHANGES") throw new Error("Expected review event");
-    const comments = reviewSubmitCommentsFromPayload(payload.comments);
-    logger.info("api", "submit review requested", { ref, comments: comments.length, event: payload.event });
-    let result: unknown;
-    try {
-      result = await submitPullRequestReview(ref, { event: payload.event, body: payload.body, comments: githubReviewComments(comments) });
-    } catch (error) {
-      throw new Error(reviewSubmitFailureMessage(error, comments));
-    }
-    const prKey = prKeyForRef(ref);
-    const reviewData = await fetchPullRequestReviewData(ref);
-    await saveReviewMemory(reviewSubmitMemoryRecord(payload, reviewData, prKey));
-    const reviewedPr = await markPullRequestReviewed(prKey, typeof payload.headSha === "string" ? payload.headSha : "", payload.event);
-    sendJson(res, 200, { result, pr: reviewedPr });
+    logger.info("api", "submit review requested", { prUrl: payload.prUrl, comments: Array.isArray(payload.comments) ? payload.comments.length : 0, event: payload.event });
+    sendJson(res, 200, await reviewSubmitRouteApi.submit(payload));
     return;
   }
 
