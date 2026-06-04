@@ -55,6 +55,10 @@ function fakeStore(): { store: GpuWorkspaceStore; calls: string[] } {
   };
 }
 
+test("GPU API contract defaults to a MIG workspace", () => {
+  assert.equal(gpuWorkspaceContract().defaults.gpuType, "b200-mig-1g");
+});
+
 test("GPU API status resolves workspace by PR key", async () => {
   const { store, calls } = fakeStore();
 

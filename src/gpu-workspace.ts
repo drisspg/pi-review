@@ -6,7 +6,7 @@ import type { PullRequestRef } from "./types.js";
 const execFileAsync = promisify(execFile);
 export const DEFAULT_GPU_WORKSPACE_TTL_HOURS = 0.25;
 export const DEFAULT_GPU_WORKSPACE_GPU_COUNT = 1;
-export const DEFAULT_GPU_WORKSPACE_GPU_TYPE = "b200";
+export const DEFAULT_GPU_WORKSPACE_GPU_TYPE = "b200-mig-1g";
 export const SUPPORTED_GPU_WORKSPACE_REPO = "github.com/pytorch/pytorch";
 export const SUPPORTED_GPU_WORKSPACE_TYPES = ["b300", "b200", "b200-mig-1g", "b200-mig-2g", "b200-mig-3g", "h200", "h100", "h100-mig-1g", "h100-mig-2g", "h100-mig-3g", "a100", "rtxpro6000", "a10g", "t4", "l4", "t4-small"];
 const DEFAULT_EXEC_TIMEOUT_MS = 300_000;
