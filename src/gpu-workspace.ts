@@ -10,8 +10,20 @@ const DEFAULT_EXEC_TIMEOUT_MS = 300_000;
 const MAX_EXEC_TIMEOUT_MS = 1_800_000;
 const MAX_EXEC_OUTPUT_BYTES = 4 * 1024 * 1024;
 const SUPPORTED_GPU_TYPES = new Set(["b300", "b200", "b200-mig-1g", "b200-mig-2g", "b200-mig-3g", "h200", "h100", "h100-mig-1g", "h100-mig-2g", "h100-mig-3g", "a100", "rtxpro6000", "a10g", "t4", "l4", "t4-small"]);
-const workspaceByPr = new Map<string, GpuWorkspace>();
-const pendingWorkspaceByPr = new Map<string, Promise<GpuWorkspace>>();
+
+type ExecFileOptions = { timeout: number; maxBuffer: number };
+
+type SpawnResult = {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+};
+
+export type GpuWorkspaceRuntime = {
+  execFile: (command: string, args: string[], options: ExecFileOptions) => Promise<{ stdout: string; stderr: string }>;
+  spawn: (command: string, args: string[], timeoutMs: number) => Promise<SpawnResult>;
+};
 
 export type GpuWorkspaceRequest = {
   ref: PullRequestRef;
@@ -50,79 +62,128 @@ export type GpuWorkspaceExecResult = {
   signal: NodeJS.Signals | null;
 };
 
+export type GpuWorkspaceStore = {
+  gpuWorkspaceForPr: (prKey: string) => GpuWorkspace | null;
+  unregisterGpuWorkspace: (prKey: string, id?: string) => boolean;
+  createOrReuseGpuWorkspace: (prKey: string, request: GpuWorkspaceRequest) => Promise<{ workspace: GpuWorkspace; reused: boolean }>;
+  createGpuWorkspace: (request: GpuWorkspaceRequest) => Promise<GpuWorkspace>;
+  deleteGpuWorkspace: (id: string) => Promise<{ id: string; stdout: string; stderr: string }>;
+  execGpuWorkspace: (id: string, command: string, timeoutMs?: number) => Promise<GpuWorkspaceExecResult>;
+};
+
+const defaultRuntime: GpuWorkspaceRuntime = {
+  async execFile(command, args, options) {
+    const { stdout, stderr } = await execFileAsync(command, args, options);
+    return { stdout, stderr };
+  },
+  spawn: spawnResult,
+};
+
+export function createGpuWorkspaceStore(runtime: GpuWorkspaceRuntime = defaultRuntime): GpuWorkspaceStore {
+  const workspaceByPr = new Map<string, GpuWorkspace>();
+  const pendingWorkspaceByPr = new Map<string, Promise<GpuWorkspace>>();
+
+  async function deleteGpuWorkspace(id: string): Promise<{ id: string; stdout: string; stderr: string }> {
+    const { stdout, stderr } = await runtime.execFile("gpu-dev", ["cancel", id], { timeout: 120_000, maxBuffer: 4 * 1024 * 1024 });
+    return { id, stdout, stderr };
+  }
+
+  async function execGpuWorkspace(id: string, command: string, timeoutMs = DEFAULT_EXEC_TIMEOUT_MS): Promise<GpuWorkspaceExecResult> {
+    const sshHost = await sshHostForWorkspace(runtime, id);
+    return { id, command, sshHost, ...await runtime.spawn("ssh", ["-o", "BatchMode=yes", "-o", "ConnectTimeout=20", sshHost, command], clampExecTimeout(timeoutMs)) };
+  }
+
+  async function createGpuWorkspace({ ref, gpuType, gpuCount = DEFAULT_GPU_COUNT, ttlHours = DEFAULT_TTL_HOURS, includeSubmodules = false }: GpuWorkspaceRequest): Promise<GpuWorkspace> {
+    if (!isPyTorchRef(ref)) throw new Error("GPU workspace MVP only supports pytorch/pytorch PRs for now.");
+    if (!SUPPORTED_GPU_TYPES.has(gpuType)) throw new Error(`Unsupported GPU type: ${gpuType}`);
+    if (gpuCount !== 1) throw new Error("GPU workspace MVP only supports one GPU for now.");
+    if (!Number.isFinite(ttlHours) || ttlHours <= 0 || ttlHours > 24) throw new Error("TTL must be between 0 and 24 hours.");
+
+    const setup = setupForRef(ref, includeSubmodules);
+    const args = [
+      "reserve",
+      "--gpu-type", gpuType,
+      "--gpus", String(gpuCount),
+      "--hours", String(ttlHours),
+      "--name", `pi-review-${ref.owner}-${ref.repo}-${ref.number}`,
+      "--no-persist",
+      "--no-connect",
+      "--no-interactive",
+    ];
+    const { stdout, stderr } = await runtime.execFile("gpu-dev", args, { timeout: 180_000, maxBuffer: 8 * 1024 * 1024 });
+    const id = reservationIdFromOutput(`${stdout}\n${stderr}`);
+    const sshHost = sshHostFromOutput(`${stdout}\n${stderr}`);
+    return {
+      id,
+      uri: id == null ? null : `gpu-dev://ws/${id}`,
+      prRef: setup.ref,
+      gpuType,
+      gpuCount,
+      ttlHours,
+      command: shellCommand(["gpu-dev", ...args]),
+      attachCommand: id == null ? null : `gpu-dev connect ${id}`,
+      showCommand: id == null ? null : `gpu-dev show ${id}`,
+      sshHost,
+      setupProfile: setup.profile,
+      setupCommand: setup.command,
+      setupScript: setup.script,
+      stdout,
+      stderr,
+      createdAt: new Date().toISOString(),
+    };
+  }
+
+  async function createOrReuseGpuWorkspace(prKey: string, request: GpuWorkspaceRequest): Promise<{ workspace: GpuWorkspace; reused: boolean }> {
+    const existing = workspaceByPr.get(prKey);
+    if (existing != null) return { workspace: existing, reused: true };
+    const pending = pendingWorkspaceByPr.get(prKey);
+    if (pending != null) return { workspace: await pending, reused: true };
+    const created = createGpuWorkspace(request).then((workspace) => {
+      workspaceByPr.set(prKey, workspace);
+      return workspace;
+    }).finally(() => pendingWorkspaceByPr.delete(prKey));
+    pendingWorkspaceByPr.set(prKey, created);
+    return { workspace: await created, reused: false };
+  }
+
+  function gpuWorkspaceForPr(prKey: string): GpuWorkspace | null {
+    return workspaceByPr.get(prKey) ?? null;
+  }
+
+  function unregisterGpuWorkspace(prKey: string, id?: string): boolean {
+    const existing = workspaceByPr.get(prKey);
+    if (id != null && existing?.id !== id) return false;
+    workspaceByPr.delete(prKey);
+    return existing != null;
+  }
+
+  return { gpuWorkspaceForPr, unregisterGpuWorkspace, createOrReuseGpuWorkspace, createGpuWorkspace, deleteGpuWorkspace, execGpuWorkspace };
+}
+
+const defaultStore = createGpuWorkspaceStore();
+
 export function gpuWorkspaceForPr(prKey: string): GpuWorkspace | null {
-  return workspaceByPr.get(prKey) ?? null;
+  return defaultStore.gpuWorkspaceForPr(prKey);
 }
 
 export function unregisterGpuWorkspace(prKey: string, id?: string): boolean {
-  const existing = workspaceByPr.get(prKey);
-  if (id != null && existing?.id !== id) return false;
-  workspaceByPr.delete(prKey);
-  return existing != null;
+  return defaultStore.unregisterGpuWorkspace(prKey, id);
 }
 
 export async function createOrReuseGpuWorkspace(prKey: string, request: GpuWorkspaceRequest): Promise<{ workspace: GpuWorkspace; reused: boolean }> {
-  const existing = workspaceByPr.get(prKey);
-  if (existing != null) return { workspace: existing, reused: true };
-  const pending = pendingWorkspaceByPr.get(prKey);
-  if (pending != null) return { workspace: await pending, reused: true };
-  const created = createGpuWorkspace(request).then((workspace) => {
-    workspaceByPr.set(prKey, workspace);
-    return workspace;
-  }).finally(() => pendingWorkspaceByPr.delete(prKey));
-  pendingWorkspaceByPr.set(prKey, created);
-  return { workspace: await created, reused: false };
+  return defaultStore.createOrReuseGpuWorkspace(prKey, request);
 }
 
 export async function deleteGpuWorkspace(id: string): Promise<{ id: string; stdout: string; stderr: string }> {
-  const { stdout, stderr } = await execFileAsync("gpu-dev", ["cancel", id], { timeout: 120_000, maxBuffer: 4 * 1024 * 1024 });
-  return { id, stdout, stderr };
+  return defaultStore.deleteGpuWorkspace(id);
 }
 
 export async function execGpuWorkspace(id: string, command: string, timeoutMs = DEFAULT_EXEC_TIMEOUT_MS): Promise<GpuWorkspaceExecResult> {
-  const sshHost = await sshHostForWorkspace(id);
-  const result = await spawnResult("ssh", ["-o", "BatchMode=yes", "-o", "ConnectTimeout=20", sshHost, command], clampExecTimeout(timeoutMs));
-  return { id, command, sshHost, ...result };
+  return defaultStore.execGpuWorkspace(id, command, timeoutMs);
 }
 
-export async function createGpuWorkspace({ ref, gpuType, gpuCount = DEFAULT_GPU_COUNT, ttlHours = DEFAULT_TTL_HOURS, includeSubmodules = false }: GpuWorkspaceRequest): Promise<GpuWorkspace> {
-  if (!isPyTorchRef(ref)) throw new Error("GPU workspace MVP only supports pytorch/pytorch PRs for now.");
-  if (!SUPPORTED_GPU_TYPES.has(gpuType)) throw new Error(`Unsupported GPU type: ${gpuType}`);
-  if (gpuCount !== 1) throw new Error("GPU workspace MVP only supports one GPU for now.");
-  if (!Number.isFinite(ttlHours) || ttlHours <= 0 || ttlHours > 24) throw new Error("TTL must be between 0 and 24 hours.");
-
-  const setup = setupForRef(ref, includeSubmodules);
-  const args = [
-    "reserve",
-    "--gpu-type", gpuType,
-    "--gpus", String(gpuCount),
-    "--hours", String(ttlHours),
-    "--name", `pi-review-${ref.owner}-${ref.repo}-${ref.number}`,
-    "--no-persist",
-    "--no-connect",
-    "--no-interactive",
-  ];
-  const { stdout, stderr } = await execFileAsync("gpu-dev", args, { timeout: 180_000, maxBuffer: 8 * 1024 * 1024 });
-  const id = reservationIdFromOutput(`${stdout}\n${stderr}`);
-  const sshHost = sshHostFromOutput(`${stdout}\n${stderr}`);
-  return {
-    id,
-    uri: id == null ? null : `gpu-dev://ws/${id}`,
-    prRef: setup.ref,
-    gpuType,
-    gpuCount,
-    ttlHours,
-    command: shellCommand(["gpu-dev", ...args]),
-    attachCommand: id == null ? null : `gpu-dev connect ${id}`,
-    showCommand: id == null ? null : `gpu-dev show ${id}`,
-    sshHost,
-    setupProfile: setup.profile,
-    setupCommand: setup.command,
-    setupScript: setup.script,
-    stdout,
-    stderr,
-    createdAt: new Date().toISOString(),
-  };
+export async function createGpuWorkspace(request: GpuWorkspaceRequest): Promise<GpuWorkspace> {
+  return defaultStore.createGpuWorkspace(request);
 }
 
 function isPyTorchRef(ref: PullRequestRef): boolean {
@@ -150,8 +211,8 @@ ${submoduleScript}`,
   };
 }
 
-async function sshHostForWorkspace(id: string): Promise<string> {
-  const { stdout, stderr } = await execFileAsync("gpu-dev", ["show", id], { timeout: 60_000, maxBuffer: 4 * 1024 * 1024 });
+async function sshHostForWorkspace(runtime: GpuWorkspaceRuntime, id: string): Promise<string> {
+  const { stdout, stderr } = await runtime.execFile("gpu-dev", ["show", id], { timeout: 60_000, maxBuffer: 4 * 1024 * 1024 });
   const sshHost = sshHostFromOutput(`${stdout}\n${stderr}`);
   if (sshHost == null) throw new Error(`Could not find SSH host for workspace ${id}`);
   return sshHost;
@@ -166,7 +227,7 @@ function sshHostFromOutput(output: string): string | null {
   return output.match(/SSH Command:\s*ssh\s+([^\s]+)/)?.[1] ?? null;
 }
 
-function spawnResult(command: string, args: string[], timeoutMs: number): Promise<{ stdout: string; stderr: string; exitCode: number | null; signal: NodeJS.Signals | null }> {
+function spawnResult(command: string, args: string[], timeoutMs: number): Promise<SpawnResult> {
   return new Promise((resolveSpawn) => {
     const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
     const killTimer = setTimeout(() => {
