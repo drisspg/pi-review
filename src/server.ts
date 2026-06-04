@@ -15,8 +15,8 @@ import { askPi, disposePiSession, disposePiSessions, piDiagnostics, prewarmPiSes
 import { createPrApi, defaultPrApiDeps } from "./pr-api.js";
 import { createReviewMemoryApi, reviewSubmitMemoryRecord } from "./review-memory-api.js";
 import { githubReviewComments, reviewSubmitCommentsFromPayload, reviewSubmitFailureMessage } from "./review-submit-api.js";
+import { createSavedAnalysisApi } from "./saved-analysis-api.js";
 import { currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, listAiReviews, listFocusScans, listRecentPullRequests, listReviewMemoryRecords, markPullRequestReviewed, removePullRequest, reviewMemoryStats, saveAiReview, saveFocusScan, saveReviewMemory, saveReviewProfile, setFileViewed, upsertPullRequest } from "./state.js";
-import type { AiReviewMessageRecord, FocusAreaReviewState } from "./types.js";
 import { cleanupPrWorktree, preparePrWorktree } from "./worktrees.js";
 
 const DEFAULT_PORT = 43133;
@@ -30,6 +30,7 @@ const fileApi = createFileApi(defaultFileApiDeps(fetchFileText, setFileViewed, a
 }));
 const prApi = createPrApi(defaultPrApiDeps({ cleanupPrWorktree, disposePiSession, fetchPullRequestReviewData, listAiReviews, listFocusScans, preparePrWorktree, prewarmPiSession, registerPiSessionCwd, removePullRequest, upsertPullRequest }));
 const reviewMemoryApi = createReviewMemoryApi({ askPi, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewMemory, saveReviewProfile });
+const savedAnalysisApi = createSavedAnalysisApi({ saveAiReview, saveFocusScan });
 
 function sse(res: ServerResponse, event: string, data: unknown): void {
   res.write(`event: ${event}\n`);
@@ -199,16 +200,12 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   }
 
   if (req.method === "POST" && url.pathname === "/api/focus-scan/save") {
-    const payload = recordFromBody(await readBody(req));
-    if (typeof payload.prKey !== "string" || typeof payload.headSha !== "string" || typeof payload.answer !== "string" || typeof payload.areaStates !== "object" || payload.areaStates == null || Array.isArray(payload.areaStates)) throw new Error("Expected focus scan payload");
-    sendJson(res, 200, { scan: await saveFocusScan({ id: typeof payload.id === "string" ? payload.id : undefined, prKey: payload.prKey, headSha: payload.headSha, answer: payload.answer, areaStates: payload.areaStates as Record<string, FocusAreaReviewState> }) });
+    sendJson(res, 200, await savedAnalysisApi.saveFocusScan(recordFromBody(await readBody(req))));
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/api/ai-review/save") {
-    const payload = recordFromBody(await readBody(req));
-    if (typeof payload.prKey !== "string" || typeof payload.headSha !== "string" || typeof payload.answer !== "string") throw new Error("Expected AI review payload");
-    sendJson(res, 200, { review: await saveAiReview({ id: typeof payload.id === "string" ? payload.id : undefined, prKey: payload.prKey, headSha: payload.headSha, answer: payload.answer, messages: Array.isArray(payload.messages) ? payload.messages as AiReviewMessageRecord[] : undefined }) });
+    sendJson(res, 200, await savedAnalysisApi.saveAiReview(recordFromBody(await readBody(req))));
     return;
   }
 
