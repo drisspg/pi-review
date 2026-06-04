@@ -11,11 +11,11 @@ import { inputFromBody, prKeyForRef, readBody, recordFromBody, refFromBody, send
 import { logger } from "./logger.js";
 import { createPiJobRunner } from "./pi-jobs.js";
 import { askPi, disposePiSession, disposePiSessions, piDiagnostics, prewarmPiSession, registerPiSessionCwd, setPiModel } from "./pi-session.js";
-import { parsePullRequestRef } from "./pr.js";
+import { createPrApi, defaultPrApiDeps } from "./pr-api.js";
 import { createReviewMemoryApi, reviewSubmitMemoryRecord } from "./review-memory-api.js";
 import { githubReviewComments, reviewSubmitCommentsFromPayload, reviewSubmitFailureMessage } from "./review-submit-api.js";
 import { currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, listAiReviews, listFocusScans, listRecentPullRequests, listReviewMemoryRecords, markPullRequestReviewed, removePullRequest, reviewMemoryStats, saveAiReview, saveFocusScan, saveReviewMemory, saveReviewProfile, setFileViewed, upsertPullRequest } from "./state.js";
-import type { AiReviewMessageRecord, FocusAreaReviewState, PullRequestReviewResponse, StoredPullRequest } from "./types.js";
+import type { AiReviewMessageRecord, FocusAreaReviewState } from "./types.js";
 import { cleanupPrWorktree, preparePrWorktree } from "./worktrees.js";
 
 const DEFAULT_PORT = 43133;
@@ -26,12 +26,8 @@ const piJobRunner = createPiJobRunner(askPi);
 const fileApi = createFileApi(defaultFileApiDeps(fetchFileText, setFileViewed, async (url) => {
   await execFileAsync("open", [url]);
 }));
+const prApi = createPrApi(defaultPrApiDeps({ cleanupPrWorktree, disposePiSession, fetchPullRequestReviewData, listAiReviews, listFocusScans, preparePrWorktree, prewarmPiSession, registerPiSessionCwd, removePullRequest, upsertPullRequest }));
 const reviewMemoryApi = createReviewMemoryApi({ askPi, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewMemory, saveReviewProfile });
-
-async function hydrateReviewResponse(data: Awaited<ReturnType<typeof fetchPullRequestReviewData>>, pr: StoredPullRequest, extra: Partial<Pick<PullRequestReviewResponse, "worktreeDir">> = {}): Promise<PullRequestReviewResponse> {
-  const [focusScans, aiReviews] = await Promise.all([listFocusScans(pr.key), listAiReviews(pr.key)]);
-  return { ...data, pr, focusScan: focusScans[0] ?? null, focusScans, aiReview: aiReviews[0] ?? null, aiReviews, ...extra };
-}
 
 function sse(res: ServerResponse, event: string, data: unknown): void {
   res.write(`event: ${event}\n`);
@@ -120,31 +116,25 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (req.method === "POST" && url.pathname === "/api/pr/parse") {
     const input = inputFromBody(await readBody(req));
     logger.info("api", "parse PR input", { input });
-    sendJson(res, 200, { ref: parsePullRequestRef(input) });
+    sendJson(res, 200, prApi.parse(input));
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/api/pr/cleanup") {
     const input = inputFromBody(await readBody(req));
     logger.info("api", "cleanup PR requested", { input });
-    const ref = parsePullRequestRef(input);
-    const prKey = prKeyForRef(ref);
-    await disposePiSession(prKey);
-    const worktreeDir = await cleanupPrWorktree(ref);
-    await removePullRequest(prKey);
-    logger.info("api", "cleanup PR complete", { prKey, worktreeDir });
-    sendJson(res, 200, { ok: true, prKey, worktreeDir });
+    const response = await prApi.cleanup(input);
+    logger.info("api", "cleanup PR complete", { prKey: response.prKey, worktreeDir: response.worktreeDir });
+    sendJson(res, 200, response);
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/api/pr/activity") {
     const input = inputFromBody(await readBody(req));
     logger.info("api", "refresh PR activity requested", { input });
-    const ref = parsePullRequestRef(input);
-    const data = await fetchPullRequestReviewData(ref);
-    const pr = await upsertPullRequest(data.pr);
-    logger.info("api", "refresh PR activity complete", { key: pr.key, existingCommentCount: pr.existingCommentCount });
-    sendJson(res, 200, await hydrateReviewResponse(data, pr));
+    const response = await prApi.activity(input);
+    logger.info("api", "refresh PR activity complete", { key: response.pr.key, existingCommentCount: response.pr.existingCommentCount });
+    sendJson(res, 200, response);
     return;
   }
 
@@ -323,14 +313,9 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (req.method === "POST" && url.pathname === "/api/pr/open") {
     const input = inputFromBody(await readBody(req));
     logger.info("api", "open PR requested", { input });
-    const ref = parsePullRequestRef(input);
-    const data = await fetchPullRequestReviewData(ref);
-    const pr = await upsertPullRequest(data.pr);
-    const worktreeDir = await preparePrWorktree(ref, data.raw.base.repo.clone_url, data.pr.headSha);
-    await registerPiSessionCwd(pr.key, worktreeDir);
-    prewarmPiSession(pr.key, ["chat", "inline-chat", "focus-chat"]);
-    logger.info("api", "open PR complete", { key: pr.key, filesChanged: pr.filesChanged, existingCommentCount: pr.existingCommentCount, worktreeDir });
-    sendJson(res, 200, await hydrateReviewResponse(data, pr, { worktreeDir }));
+    const response = await prApi.open(input);
+    logger.info("api", "open PR complete", { key: response.pr.key, filesChanged: response.pr.filesChanged, existingCommentCount: response.pr.existingCommentCount, worktreeDir: response.worktreeDir });
+    sendJson(res, 200, response);
     return;
   }
 
