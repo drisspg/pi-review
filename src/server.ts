@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { extname, join, normalize, resolve } from "node:path";
 import { promisify } from "node:util";
 
+import { createCommentApi, defaultCommentApiDeps } from "./comment-api.js";
 import { createFileApi, defaultFileApiDeps } from "./file-api.js";
 import { gpuWorkspaceCreateResponse, gpuWorkspaceDeleteResponse, gpuWorkspaceExecResponse, gpuWorkspaceStatusResponse } from "./gpu-workspace-api.js";
 import { addIssueComment, editIssueComment, editReviewComment, editReviewSummary, fetchFileText, fetchPullRequestReviewData, replyToReviewComment, submitPullRequestReview } from "./github.js";
@@ -23,6 +24,7 @@ const WEB_ROOT = resolve(process.cwd(), "dist-web");
 const execFileAsync = promisify(execFile);
 
 const piJobRunner = createPiJobRunner(askPi);
+const commentApi = createCommentApi(defaultCommentApiDeps({ addIssueComment, editIssueComment, editReviewComment, editReviewSummary, replyToReviewComment }));
 const fileApi = createFileApi(defaultFileApiDeps(fetchFileText, setFileViewed, async (url) => {
   await execFileAsync("open", [url]);
 }));
@@ -280,33 +282,12 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   }
 
   if (req.method === "POST" && url.pathname === "/api/comment/reply") {
-    const payload = recordFromBody(await readBody(req));
-    const ref = refFromBody(payload);
-    if (typeof payload.body !== "string" || payload.body.trim().length === 0) throw new Error("Expected non-empty body");
-    if (payload.kind === "issue") {
-      sendJson(res, 200, { result: await addIssueComment(ref, payload.body.trim()) });
-      return;
-    }
-    if (typeof payload.commentId !== "number") throw new Error("Expected commentId");
-    sendJson(res, 200, { result: await replyToReviewComment(ref, payload.commentId, payload.body.trim()) });
+    sendJson(res, 200, await commentApi.reply(recordFromBody(await readBody(req))));
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/api/comment/edit") {
-    const payload = recordFromBody(await readBody(req));
-    const ref = refFromBody(payload);
-    if (typeof payload.commentId !== "number") throw new Error("Expected commentId");
-    if (typeof payload.body !== "string" || payload.body.trim().length === 0) throw new Error("Expected non-empty body");
-    if (payload.kind === "issue") {
-      sendJson(res, 200, { result: await editIssueComment(ref, payload.commentId, payload.body.trim()) });
-      return;
-    }
-    if (payload.kind === "review-summary") {
-      sendJson(res, 200, { result: await editReviewSummary(ref, payload.commentId, payload.body.trim()) });
-      return;
-    }
-    if (payload.kind !== "review") throw new Error("Expected comment kind");
-    sendJson(res, 200, { result: await editReviewComment(ref, payload.commentId, payload.body.trim()) });
+    sendJson(res, 200, await commentApi.edit(recordFromBody(await readBody(req))));
     return;
   }
 
