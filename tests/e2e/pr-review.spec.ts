@@ -80,6 +80,8 @@ test("shows GPU workspace MVP constraints for unsupported repos", async ({ page 
   await expect(dialog.getByText("no persistent disk", { exact: true })).toBeVisible();
   await expect(dialog.getByText("15m TTL", { exact: true })).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Open GPU workspace" })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "Ask workspace agent" })).toBeDisabled();
+  await expect(dialog.getByText("Dedicated Pi thread with the shared gpu_workspace tool")).toBeVisible();
   await expect(dialog.getByText("only supports pytorch/pytorch PR checkouts")).toBeVisible();
 });
 

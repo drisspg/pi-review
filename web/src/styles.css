@@ -3248,6 +3248,32 @@ a { color: var(--link); text-decoration: none; }
   overflow: auto;
 }
 
+.gpu-workspace-agent {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.gpu-workspace-agent label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.gpu-workspace-agent textarea {
+  min-height: 92px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.gpu-workspace-agent-answer {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--panel2);
+}
+
 .pi-session-list { display: grid; gap: 8px; margin: 6px 0; }
 
 .pi-session {

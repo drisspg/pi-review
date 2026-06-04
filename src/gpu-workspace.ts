@@ -10,6 +10,8 @@ const DEFAULT_EXEC_TIMEOUT_MS = 300_000;
 const MAX_EXEC_TIMEOUT_MS = 1_800_000;
 const MAX_EXEC_OUTPUT_BYTES = 4 * 1024 * 1024;
 const SUPPORTED_GPU_TYPES = new Set(["b300", "b200", "b200-mig-1g", "b200-mig-2g", "b200-mig-3g", "h200", "h100", "h100-mig-1g", "h100-mig-2g", "h100-mig-3g", "a100", "rtxpro6000", "a10g", "t4", "l4", "t4-small"]);
+const workspaceByPr = new Map<string, GpuWorkspace>();
+const pendingWorkspaceByPr = new Map<string, Promise<GpuWorkspace>>();
 
 export type GpuWorkspaceRequest = {
   ref: PullRequestRef;
@@ -47,6 +49,30 @@ export type GpuWorkspaceExecResult = {
   exitCode: number | null;
   signal: NodeJS.Signals | null;
 };
+
+export function gpuWorkspaceForPr(prKey: string): GpuWorkspace | null {
+  return workspaceByPr.get(prKey) ?? null;
+}
+
+export function unregisterGpuWorkspace(prKey: string, id?: string): boolean {
+  const existing = workspaceByPr.get(prKey);
+  if (id != null && existing?.id !== id) return false;
+  workspaceByPr.delete(prKey);
+  return existing != null;
+}
+
+export async function createOrReuseGpuWorkspace(prKey: string, request: GpuWorkspaceRequest): Promise<{ workspace: GpuWorkspace; reused: boolean }> {
+  const existing = workspaceByPr.get(prKey);
+  if (existing != null) return { workspace: existing, reused: true };
+  const pending = pendingWorkspaceByPr.get(prKey);
+  if (pending != null) return { workspace: await pending, reused: true };
+  const created = createGpuWorkspace(request).then((workspace) => {
+    workspaceByPr.set(prKey, workspace);
+    return workspace;
+  }).finally(() => pendingWorkspaceByPr.delete(prKey));
+  pendingWorkspaceByPr.set(prKey, created);
+  return { workspace: await created, reused: false };
+}
 
 export async function deleteGpuWorkspace(id: string): Promise<{ id: string; stdout: string; stderr: string }> {
   const { stdout, stderr } = await execFileAsync("gpu-dev", ["cancel", id], { timeout: 120_000, maxBuffer: 4 * 1024 * 1024 });

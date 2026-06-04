@@ -1492,7 +1492,7 @@ function GpuWorkspaceModal({ review, close, refreshLogs }: { review: OpenRespons
     setDeleting(true);
     setError(null);
     try {
-      await api("/api/gpu/workspaces/delete", { method: "POST", body: JSON.stringify({ id: workspace.id }) });
+      await api("/api/gpu/workspaces/delete", { method: "POST", body: JSON.stringify({ id: workspace.id, prKey: review.pr.key }) });
       setWorkspace(null);
       setExecResult(null);
       await refreshLogs();
@@ -1558,8 +1558,40 @@ function GpuWorkspaceModal({ review, close, refreshLogs }: { review: OpenRespons
         <details className="gpu-workspace-output"><summary>Setup script</summary><pre>{workspace.setupScript}</pre></details>
         <details className="gpu-workspace-output"><summary>gpu-dev output</summary><pre>{[workspace.stdout, workspace.stderr].filter((text) => text.trim().length > 0).join("\n") || workspace.command}</pre></details>
       </PiCard>}
+      <GpuWorkspaceAgentPanel review={review} supported={supported} />
     </div>
   </ModalShell>;
+}
+
+function GpuWorkspaceAgentPanel({ review, supported }: { review: OpenResponse; supported: boolean }) {
+  const [prompt, setPrompt] = useState("Allocate a GPU workspace if needed, run nvidia-smi -L, and summarize the result.");
+  const [answer, setAnswer] = useState("");
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function askGpuAgent() {
+    if (!supported || prompt.trim().length === 0) return;
+    setRunning(true);
+    setError(null);
+    setAnswer("");
+    try {
+      await askPiApi({ prKey: review.pr.key, purpose: "gpu-workspace", prompt: prompt.trim() }, setAnswer);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return <PiCard title="Workspace agent">
+    <p className="muted">Dedicated Pi thread with the shared gpu_workspace tool. It can allocate, inspect, delete, and run commands without queueing behind the main review chat.</p>
+    <div className="gpu-workspace-agent">
+      <label>Ask workspace agent<textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} /></label>
+      <Button onClick={() => void askGpuAgent()} disabled={!supported || running || prompt.trim().length === 0}>{running ? "Asking…" : "Ask workspace agent"}</Button>
+    </div>
+    {error != null && <p className="error">{error}</p>}
+    {answer.trim().length > 0 && <div className="gpu-workspace-agent-answer"><MarkdownText text={answer} /></div>}
+  </PiCard>;
 }
 
 function FlowDagModal({ flowDag, runFlowDag, close, prUrl, headSha }: { flowDag: FlowDag; runFlowDag: () => Promise<void>; close: () => void; prUrl: string; headSha: string }) {

@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { extname, join, normalize, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 
-import { createGpuWorkspace, deleteGpuWorkspace, execGpuWorkspace } from "./gpu-workspace.js";
+import { createOrReuseGpuWorkspace, deleteGpuWorkspace, execGpuWorkspace, unregisterGpuWorkspace } from "./gpu-workspace.js";
 import { addIssueComment, editIssueComment, editReviewComment, editReviewSummary, fetchFileText, fetchPullRequestReviewData, replyToReviewComment, submitPullRequestReview } from "./github.js";
 import { inputFromBody, prKeyForRef, readBody, recordFromBody, refFromBody, sendJson, viewedPayloadFromBody } from "./http.js";
 import { logger } from "./logger.js";
@@ -370,8 +370,8 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (typeof payload.prUrl !== "string" || typeof payload.gpuType !== "string") throw new Error("Expected prUrl and gpuType");
     const ref = parsePullRequestRef(payload.prUrl);
     logger.info("api", "gpu workspace requested", { ref, gpuType: payload.gpuType });
-    const workspace = await createGpuWorkspace({ ref, gpuType: payload.gpuType, gpuCount: typeof payload.gpuCount === "number" ? payload.gpuCount : undefined, ttlHours: typeof payload.ttlHours === "number" ? payload.ttlHours : undefined, includeSubmodules: payload.includeSubmodules === true });
-    logger.info("api", "gpu workspace created", { ref, gpuType: workspace.gpuType, id: workspace.id, uri: workspace.uri });
+    const { workspace, reused } = await createOrReuseGpuWorkspace(prKeyForRef(ref), { ref, gpuType: payload.gpuType, gpuCount: typeof payload.gpuCount === "number" ? payload.gpuCount : undefined, ttlHours: typeof payload.ttlHours === "number" ? payload.ttlHours : undefined, includeSubmodules: payload.includeSubmodules === true });
+    logger.info("api", "gpu workspace ready", { ref, gpuType: workspace.gpuType, id: workspace.id, uri: workspace.uri, reused });
     sendJson(res, 200, { workspace });
     return;
   }
@@ -381,6 +381,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (typeof payload.id !== "string" || payload.id.trim().length === 0) throw new Error("Expected workspace id");
     logger.info("api", "gpu workspace delete requested", { id: payload.id });
     const result = await deleteGpuWorkspace(payload.id.trim());
+    if (typeof payload.prKey === "string") unregisterGpuWorkspace(payload.prKey, payload.id.trim());
     logger.info("api", "gpu workspace deleted", { id: result.id });
     sendJson(res, 200, { result });
     return;
