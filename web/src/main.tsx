@@ -15,6 +15,30 @@ import "./styles.css";
 
 type DiffViewMode = "unified" | "split";
 
+type OpenPrOptions = {
+  syncLocation?: boolean;
+};
+
+const homeHash = "#/";
+
+function reviewHash(input: string): string {
+  return `#/review?pr=${encodeURIComponent(input)}`;
+}
+
+function reviewInputFromHash(): string | null {
+  const hash = window.location.hash || homeHash;
+  if (!hash.startsWith("#/review")) return null;
+  return new URLSearchParams(hash.slice(hash.indexOf("?") + 1)).get("pr");
+}
+
+function navigateHash(hash: string): void {
+  if (window.location.hash !== hash) window.location.hash = hash;
+}
+
+function isPlainLeftClick(event: React.MouseEvent): boolean {
+  return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+}
+
 const themes: Array<{ name: ThemeName; label: string; shortLabel: string }> = [
   { name: "github-dark", label: "GitHub dark", shortLabel: "Dark" },
   { name: "github-dimmed", label: "GitHub dimmed", shortLabel: "Dimmed" },
@@ -275,6 +299,7 @@ function App() {
   const [viewedFocusAreaIds, setViewedFocusAreaIds] = useState<Record<string, boolean>>({});
   const reviewCacheRef = useRef<Map<string, OpenResponse>>(new Map());
   const activeReviewKeyRef = useRef<string | null>(null);
+  const pendingOpenInputRef = useRef<string | null>(null);
   const [activeFocusAreaId, setActiveFocusAreaId] = useState<string | null>(null);
   const [collapsedFocusAreaIds, setCollapsedFocusAreaIds] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
@@ -298,6 +323,20 @@ function App() {
   async function refreshLogs() { setLogs((await api<{ logs: LogEntry[] }>("/api/logs")).logs.slice(-40).reverse()); }
 
   useEffect(() => { refreshHistory().catch((err: unknown) => setError(err instanceof Error ? err.message : String(err))); refreshLogs().catch(() => undefined); }, []);
+
+  useEffect(() => {
+    function openRoute() {
+      const routedInput = reviewInputFromHash();
+      if (routedInput == null) {
+        goHome();
+        return;
+      }
+      void openPr(routedInput, { syncLocation: false });
+    }
+    openRoute();
+    window.addEventListener("hashchange", openRoute);
+    return () => window.removeEventListener("hashchange", openRoute);
+  }, []);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -403,7 +442,9 @@ function App() {
     setGpuWorkspaceOpen(false);
   }
 
-  async function openPr(nextInput: string) {
+  async function openPr(nextInput: string, options: OpenPrOptions = {}) {
+    if (pendingOpenInputRef.current === nextInput) return;
+    if (options.syncLocation !== false) navigateHash(reviewHash(nextInput));
     setError(null);
     const cached = reviewCacheRef.current.get(nextInput);
     if (cached != null) {
@@ -411,16 +452,19 @@ function App() {
       void refreshLogs();
       return;
     }
+    pendingOpenInputRef.current = nextInput;
     setBusy(true);
     try {
       const data = await api<OpenResponse>("/api/pr/open", { method: "POST", body: JSON.stringify({ input: nextInput }) });
       cacheReview(data);
       showReview(data);
+      if (options.syncLocation !== false) navigateHash(reviewHash(data.pr.url));
       void runAutomaticPiReviews(data);
       await Promise.all([refreshHistory(), refreshLogs()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
+      if (pendingOpenInputRef.current === nextInput) pendingOpenInputRef.current = null;
       setBusy(false);
     }
   }
@@ -781,6 +825,7 @@ function App() {
   }
 
   function goHome() {
+    navigateHash(homeHash);
     activeReviewKeyRef.current = null;
     setReview(null);
     setError(null);
@@ -801,7 +846,7 @@ function App() {
     setCommentCollapseSignal((signal) => signal + 1);
   }
 
-  return <main className="app-shell"><header className="toolbar"><div className="toolbar-title"><strong>Pi PR Review</strong><span>{review == null ? "Paste a PR to start" : `${review.pr.key} · ${review.pr.title}`}</span></div><div className="toolbar-actions">{review != null && <><button type="button" onClick={goHome}>Home</button><button type="button" title="Pi session settings" onClick={() => { setSettingsOpen(true); void loadDiagnostics(); }}>⚙</button><button type="button" title="Pi session diagnostics" onClick={() => void showDiagnostics()}>🐞</button><button type="button" title="Open GPU workspace" onClick={() => setGpuWorkspaceOpen(true)}>GPU</button><button type="button" title="Code walk" onClick={() => { setFlowDagOpen(true); if (flowDag.text.trim().length === 0 && !flowDag.running) void runFlowDag(); }}>{flowDag.running ? "Code walk…" : "Code walk"}</button></>}<button type="button" title="Review memory" onClick={() => void showReviewMemory()}>🧠</button><button type="button" title="Server log" onClick={() => { setLogsOpen(true); void refreshLogs(); }}>📜</button><select aria-label="Theme" value={theme} onChange={(event) => setTheme(event.target.value as ThemeName)}>{themes.map((item) => <option key={item.name} value={item.name}>{item.label}</option>)}</select>{review != null && <form className="open-form" onSubmit={submit}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="OWNER/REPO#123 or GitHub PR URL" /><button disabled={busy || input.trim().length === 0}>{busy ? "Fetching…" : "Open"}</button></form>}</div></header>{error != null && <div className="error">{error}</div>}{busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, sendMessage: sendAiReviewMessage, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} theme={theme} setTheme={setTheme} />}{diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}{review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} openDiagnostics={() => { setSettingsOpen(false); void showDiagnostics(); }} close={() => setSettingsOpen(false)} />}{memoryOpen && <ReviewMemoryModal memory={reviewMemory} loading={memoryLoading} distilling={memoryDistilling} refresh={() => void loadReviewMemory()} distill={() => void distillReviewMemory()} close={() => setMemoryOpen(false)} />}{review != null && gpuWorkspaceOpen && <GpuWorkspaceModal review={review} close={() => setGpuWorkspaceOpen(false)} refreshLogs={refreshLogs} />}{review != null && flowDagOpen && <FlowDagModal flowDag={flowDag} runFlowDag={runFlowDag} close={() => setFlowDagOpen(false)} prUrl={review.pr.url} headSha={review.pr.headSha} />}{logsOpen && <LogsModal logs={logs} refreshLogs={refreshLogs} close={() => setLogsOpen(false)} />}</main>;
+  return <main className="app-shell"><header className="toolbar"><div className="toolbar-title"><strong>Pi PR Review</strong><span>{review == null ? "Paste a PR to start" : `${review.pr.key} · ${review.pr.title}`}</span></div><div className="toolbar-actions">{review != null && <><a className="toolbar-link" href={homeHash} onClick={(event) => { if (!isPlainLeftClick(event)) return; event.preventDefault(); goHome(); }}>Home</a><button type="button" title="Pi session settings" onClick={() => { setSettingsOpen(true); void loadDiagnostics(); }}>⚙</button><button type="button" title="Pi session diagnostics" onClick={() => void showDiagnostics()}>🐞</button><button type="button" title="Open GPU workspace" onClick={() => setGpuWorkspaceOpen(true)}>GPU</button><button type="button" title="Code walk" onClick={() => { setFlowDagOpen(true); if (flowDag.text.trim().length === 0 && !flowDag.running) void runFlowDag(); }}>{flowDag.running ? "Code walk…" : "Code walk"}</button></>}<button type="button" title="Review memory" onClick={() => void showReviewMemory()}>🧠</button><button type="button" title="Server log" onClick={() => { setLogsOpen(true); void refreshLogs(); }}>📜</button><select aria-label="Theme" value={theme} onChange={(event) => setTheme(event.target.value as ThemeName)}>{themes.map((item) => <option key={item.name} value={item.name}>{item.label}</option>)}</select>{review != null && <form className="open-form" onSubmit={submit}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="OWNER/REPO#123 or GitHub PR URL" /><button disabled={busy || input.trim().length === 0}>{busy ? "Fetching…" : "Open"}</button></form>}</div></header>{error != null && <div className="error">{error}</div>}{busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, sendMessage: sendAiReviewMessage, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} theme={theme} setTheme={setTheme} />}{diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}{review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} openDiagnostics={() => { setSettingsOpen(false); void showDiagnostics(); }} close={() => setSettingsOpen(false)} />}{memoryOpen && <ReviewMemoryModal memory={reviewMemory} loading={memoryLoading} distilling={memoryDistilling} refresh={() => void loadReviewMemory()} distill={() => void distillReviewMemory()} close={() => setMemoryOpen(false)} />}{review != null && gpuWorkspaceOpen && <GpuWorkspaceModal review={review} close={() => setGpuWorkspaceOpen(false)} refreshLogs={refreshLogs} />}{review != null && flowDagOpen && <FlowDagModal flowDag={flowDag} runFlowDag={runFlowDag} close={() => setFlowDagOpen(false)} prUrl={review.pr.url} headSha={review.pr.headSha} />}{logsOpen && <LogsModal logs={logs} refreshLogs={refreshLogs} close={() => setLogsOpen(false)} />}</main>;
 }
 
 type StartFilter = "all" | "needs-review" | "in-progress" | "done";
@@ -860,7 +905,7 @@ function groupPrsByStatus(prs: StoredPullRequest[]): { needsReview: StoredPullRe
 function PrCard({ pr, openPr, cleanupPr }: { pr: StoredPullRequest; openPr: (input: string) => Promise<void>; cleanupPr: (pr: StoredPullRequest) => Promise<void> }) {
   const status = reviewStatus(pr);
   return <article className={`pr-card status-${status.tone}`}>
-    <button className="pr-card-body" onClick={() => void openPr(pr.url)}>
+    <a className="pr-card-body" href={reviewHash(pr.url)} onClick={(event) => { if (!isPlainLeftClick(event)) return; event.preventDefault(); void openPr(pr.url); }}>
       <div className="pr-card-head">
         <strong className="pr-card-title">{pr.title}</strong>
         <span className={`review-status ${status.tone}`}>{status.label}</span>
@@ -872,7 +917,7 @@ function PrCard({ pr, openPr, cleanupPr }: { pr: StoredPullRequest; openPr: (inp
         <span>head {shortSha(pr.headSha)}</span>
         <span>{relativeTime(pr.lastOpenedAt)}</span>
       </div>
-    </button>
+    </a>
     <button className="trash-button" title="Remove saved PR and cleanup worktree" onClick={() => void cleanupPr(pr)}>🗑</button>
   </article>;
 }

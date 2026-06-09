@@ -243,17 +243,33 @@ a { color: var(--link); text-decoration: none; }
 
 .toolbar-actions > button,
 .toolbar-actions > select,
-.toolbar-actions > .open-form {
+.toolbar-actions > .open-form,
+.toolbar-actions > .toolbar-link {
   width: auto;
   flex: 0 0 auto;
 }
 
 .toolbar-actions > button,
 .toolbar-actions > select,
+.toolbar-actions > .toolbar-link,
 .open-form input,
 .open-form button {
   height: 32px;
   box-sizing: border-box;
+}
+
+.toolbar-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.38rem 0.62rem;
+  color: var(--text);
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.toolbar-link:hover {
+  border-color: var(--muted);
 }
 
 .open-form {
@@ -1963,6 +1979,7 @@ a { color: var(--link); text-decoration: none; }
   display: grid;
   gap: 6px;
   padding: 12px 14px;
+  color: inherit;
   text-align: left;
   background: transparent;
   border: none;

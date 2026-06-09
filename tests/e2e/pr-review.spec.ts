@@ -43,7 +43,7 @@ test("removes a previous PR from local history", async ({ page }) => {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true }) });
   });
 
-  await page.getByRole("button", { name: "Home" }).click();
+  await page.getByRole("link", { name: "Home" }).click();
   const firstRow = page.locator(".pr-card").first();
   const key = await firstRow.locator(".pr-card-key").textContent();
   await firstRow.getByTitle("Remove saved PR and cleanup worktree").click();
@@ -57,13 +57,24 @@ test("reopens a previously loaded PR from the client cache", async ({ page }) =>
     await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "cache miss" }) });
   });
 
-  await page.getByRole("button", { name: "Home" }).click();
+  await page.getByRole("link", { name: "Home" }).click();
   await page.locator(".pr-card").first().locator(".pr-card-body").click();
 
   await expect(page.locator(".review-layout")).toBeVisible();
   await expect(page.getByText("github.com/Dao-AILab/flash-attention#2542").first()).toBeVisible();
   await page.waitForTimeout(250);
   expect(openRequests).toBe(0);
+});
+
+test("opens a previous PR from its review link in a separate page", async ({ page, context }) => {
+  await page.getByRole("link", { name: "Home" }).click();
+  const href = await page.locator(".pr-card").first().locator(".pr-card-body").getAttribute("href");
+  expect(href).toContain("#/review?pr=");
+
+  const reviewPage = await context.newPage();
+  await reviewPage.goto(new URL(href!, page.url()).toString());
+  await expect(reviewPage.locator(".review-layout")).toBeVisible({ timeout: 60_000 });
+  await expect(reviewPage.getByText("github.com/Dao-AILab/flash-attention#2542").first()).toBeVisible();
 });
 
 test("opens a PR and renders GitHub-style file diffs", async ({ page }) => {
