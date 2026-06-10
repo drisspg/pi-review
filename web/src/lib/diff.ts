@@ -1,5 +1,10 @@
 import type { DiffRow, DragSelection, Target } from "../types";
 
+export type PatchSetSection = {
+  title: string;
+  rows: DiffRow[];
+};
+
 function diffRowWithSyntax(row: DiffRow, tripleString: string | null): DiffRow {
   return tripleString == null ? row : { ...row, syntaxContext: "string" };
 }
@@ -62,6 +67,48 @@ export function parsePatchRows(patch: string | undefined): DiffRow[] {
     }
   }
   return rows;
+}
+
+export function parsePatchSetSections(patch: string | undefined): PatchSetSection[] {
+  const contentRows = parsePatchRows(patch).filter((row) => row.newLine != null && ["added", "context"].includes(row.kind));
+  const sections: PatchSetSection[] = [];
+  let current: PatchSetSection | null = null;
+  let currentHunk = "";
+  let sawInnerDiff = false;
+
+  for (const row of contentRows) {
+    const text = row.text.slice(1);
+    const diffTitle = patchSetDiffTitle(text);
+    if (diffTitle != null) {
+      current = { title: diffTitle, rows: [] };
+      sections.push(current);
+      currentHunk = "";
+      sawInnerDiff = true;
+    } else if (current == null) {
+      current = { title: "Patch overview", rows: [] };
+      sections.push(current);
+    }
+
+    const hunk = text.match(/^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/);
+    if (hunk != null) currentHunk = text;
+    current.rows.push({ ...row, kind: patchSetRowKind(text), oldLine: null, text, hunk: currentHunk });
+  }
+
+  return sawInnerDiff ? sections : [];
+}
+
+function patchSetDiffTitle(text: string): string | null {
+  const match = text.match(/^diff --git a\/(.+?) b\/(.+)$/);
+  return match == null ? null : match[2];
+}
+
+function patchSetRowKind(text: string): string {
+  if (text.match(/^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/) != null) return "hunk patchset-hunk";
+  if (text.startsWith("--- ") || text.startsWith("+++ ")) return "meta patchset-meta";
+  if (text.startsWith("+")) return "added";
+  if (text.startsWith("-")) return "removed";
+  if (text.startsWith(" ")) return "context";
+  return "meta patchset-meta";
 }
 
 export function contextRowsFromText(fileText: string | undefined, startLine: number, endLine: number): DiffRow[] {

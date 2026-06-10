@@ -886,6 +886,40 @@ a { color: var(--link); text-decoration: none; }
 }
 .hunk { color: var(--link); --diff-row-bg: var(--panel2); }
 .meta { color: var(--muted); }
+.patchset-renderer {
+  display: grid;
+  gap: 10px;
+  padding: 8px 0;
+}
+.patchset-section {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--panel);
+}
+.patchset-section-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.78rem;
+  font-weight: 700;
+  background: var(--panel2);
+}
+.patchset-section-title span {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-weight: 500;
+}
+.diff-row.patchset-meta {
+  background: color-mix(in srgb, var(--panel2) 68%, transparent);
+}
+.diff-row.patchset-hunk {
+  box-shadow: inset 2px 0 color-mix(in srgb, var(--link) 45%, transparent);
+}
 .diff-row.focus-highlight { background: color-mix(in srgb, var(--attention) 18%, var(--diff-row-bg)); box-shadow: inset 2px 0 color-mix(in srgb, var(--attention) 55%, transparent); }
 .diff-row.focus-highlight-active { background: color-mix(in srgb, var(--attention) 32%, var(--diff-row-bg)); box-shadow: inset 3px 0 var(--attention); }
 .diff-row.in-thread-range { background: color-mix(in srgb, var(--accent) 18%, var(--diff-row-bg)); box-shadow: inset 2px 0 color-mix(in srgb, var(--accent) 55%, transparent); }
