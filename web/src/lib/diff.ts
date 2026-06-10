@@ -1,6 +1,7 @@
 import type { DiffRow, DragSelection, Target } from "../types";
 
 export type PatchSetSection = {
+  path: string;
   title: string;
   rows: DiffRow[];
 };
@@ -80,12 +81,12 @@ export function parsePatchSetSections(patch: string | undefined): PatchSetSectio
     const text = row.text.slice(1);
     const diffTitle = patchSetDiffTitle(text);
     if (diffTitle != null) {
-      current = { title: diffTitle, rows: [] };
+      current = { path: diffTitle, title: diffTitle, rows: [] };
       sections.push(current);
       currentHunk = "";
       sawInnerDiff = true;
     } else if (current == null) {
-      current = { title: "Patch overview", rows: [] };
+      current = { path: "", title: "Patch overview", rows: [] };
       sections.push(current);
     }
 

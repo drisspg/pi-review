@@ -18,7 +18,7 @@ test("patchset parser unwraps added patch files into inner sections", () => {
 + context
 +diff --git a/bar.py b/bar.py`);
 
-  assert.deepEqual(sections.map((section) => section.title), ["Patch overview", "foo.py", "bar.py"]);
+  assert.deepEqual(sections.map((section) => [section.path, section.title]), [["", "Patch overview"], ["foo.py", "foo.py"], ["bar.py", "bar.py"]]);
   assert.deepEqual(sections[1].rows.map((row) => [row.newLine, row.kind, row.text]), [
     [3, "meta patchset-meta", "diff --git a/foo.py b/foo.py"],
     [4, "meta patchset-meta", "new file mode 100644"],
