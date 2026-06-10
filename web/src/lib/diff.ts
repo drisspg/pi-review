@@ -75,6 +75,8 @@ export function parsePatchSetSections(patch: string | undefined): PatchSetSectio
   const sections: PatchSetSection[] = [];
   let current: PatchSetSection | null = null;
   let currentHunk = "";
+  let innerOldLine: number | null = null;
+  let innerNewLine: number | null = null;
   let sawInnerDiff = false;
 
   for (const row of contentRows) {
@@ -90,12 +92,27 @@ export function parsePatchSetSections(patch: string | undefined): PatchSetSectio
       sections.push(current);
     }
 
-    const hunk = text.match(/^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/);
-    if (hunk != null) currentHunk = text;
-    current.rows.push({ ...row, kind: patchSetRowKind(text), oldLine: null, text, hunk: currentHunk });
+    const hunk = text.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if (hunk != null) {
+      currentHunk = text;
+      innerOldLine = Number.parseInt(hunk[1], 10);
+      innerNewLine = Number.parseInt(hunk[2], 10);
+    }
+    const displayLine = patchSetDisplayLine(text, innerOldLine, innerNewLine);
+    current.rows.push({ ...row, kind: patchSetRowKind(text), oldLine: displayLine.oldLine, newLine: displayLine.newLine, text, hunk: currentHunk, targetLine: row.newLine, targetSide: "RIGHT" });
+    if (displayLine.consumesOld) innerOldLine = (innerOldLine ?? 0) + 1;
+    if (displayLine.consumesNew) innerNewLine = (innerNewLine ?? 0) + 1;
   }
 
   return sawInnerDiff ? sections : [];
+}
+
+function patchSetDisplayLine(text: string, oldLine: number | null, newLine: number | null): { oldLine: number | null; newLine: number | null; consumesOld: boolean; consumesNew: boolean } {
+  if (text.match(/^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/) != null) return { oldLine: null, newLine: null, consumesOld: false, consumesNew: false };
+  if (text.startsWith("+") && !text.startsWith("+++ ")) return { oldLine: null, newLine, consumesOld: false, consumesNew: true };
+  if (text.startsWith("-") && !text.startsWith("--- ")) return { oldLine, newLine: null, consumesOld: true, consumesNew: false };
+  if (text.startsWith(" ")) return { oldLine, newLine, consumesOld: true, consumesNew: true };
+  return { oldLine: null, newLine: null, consumesOld: false, consumesNew: false };
 }
 
 function patchSetDiffTitle(text: string): string | null {
