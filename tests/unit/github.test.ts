@@ -8,7 +8,7 @@ const ref: PullRequestRef = { host: "github.com", owner: "pytorch", repo: "pytor
 
 type ExecCall = { command: string; args: string[] };
 
-function fakeRuntime(options: { failMutations?: boolean } = {}) {
+function fakeRuntime(options: { failMutations?: boolean; gitattributes?: string } = {}) {
   const execCalls: ExecCall[] = [];
   const writes: Array<{ path: string; data: string }> = [];
   const removals: string[] = [];
@@ -25,10 +25,11 @@ function fakeRuntime(options: { failMutations?: boolean } = {}) {
           return { stdout: JSON.stringify({ ok: true }), stderr: "" };
         }
         if (args[0] === "api" && key === "/repos/pytorch/pytorch/pulls/185924") return { stdout: JSON.stringify({ number: 185924, title: "PR title", html_url: "https://github.com/pytorch/pytorch/pull/185924", state: "open", body: null, user: { login: "alice" }, base: { ref: "main", sha: "base", repo: { full_name: "pytorch/pytorch", clone_url: "git", html_url: "repo" } }, head: { ref: "branch", sha: "head", repo: null } }), stderr: "" };
-        if (args[0] === "api" && key === "/repos/pytorch/pytorch/pulls/185924/files") return { stdout: JSON.stringify([{ filename: "torch/a.py", status: "modified", additions: 1, deletions: 2, changes: 3, patch: "@@" }]), stderr: "" };
+        if (args[0] === "api" && key === "/repos/pytorch/pytorch/pulls/185924/files") return { stdout: JSON.stringify([{ filename: "torch/a.py", status: "modified", additions: 1, deletions: 2, changes: 3, patch: "@@" }, { filename: "generated/model.py", status: "modified", additions: 10, deletions: 0, changes: 10, patch: "@@" }]), stderr: "" };
         if (args[0] === "api" && key === "/repos/pytorch/pytorch/pulls/185924/comments") return { stdout: JSON.stringify([{ id: 123, path: "torch/a.py", line: 7, side: "RIGHT", body: "note", html_url: "comment" }]), stderr: "" };
         if (args[0] === "api" && key === "/repos/pytorch/pytorch/issues/185924/comments") return { stdout: JSON.stringify([{ id: 456, body: "issue", html_url: "issue" }]), stderr: "" };
         if (args[0] === "api" && key === "/repos/pytorch/pytorch/pulls/185924/reviews") return { stdout: JSON.stringify([{ id: 789, body: "summary", html_url: "review", state: "COMMENTED" }, { id: 790, body: "   ", html_url: "empty", state: "COMMENTED" }]), stderr: "" };
+        if (args[0] === "api" && key === "/repos/pytorch/pytorch/contents/.gitattributes?ref=head") return { stdout: options.gitattributes ?? "", stderr: "" };
         if (args[0] === "api" && key === "graphql" && args.some((arg) => String(arg).includes("reviewThreads"))) return { stdout: JSON.stringify({ data: { repository: { pullRequest: { reviewThreads: { nodes: [{ id: "thread-1", isResolved: true, comments: { nodes: [{ databaseId: 123 }] } }] } } } } }), stderr: "" };
         if (args[0] === "api" && key === "graphql") return { stdout: JSON.stringify({ data: { repository: { pullRequest: { reviewDecision: "REVIEW_REQUIRED" } } } }), stderr: "" };
         if (args[0] === "api" && key === "/repos/pytorch/pytorch/contents/torch/a.py?ref=head") return { stdout: "line\r\n", stderr: "" };
@@ -65,6 +66,16 @@ test("GitHub client fetches and combines PR review data", async () => {
   assert.equal(data.reviewSummaries.length, 1);
   assert.equal(data.fileReviews[0]?.viewed, false);
   assert.equal(data.fileReviews[0]?.updatedAt, "2026-06-04T00:00:00.000Z");
+});
+
+test("GitHub client marks files flagged linguist-generated", async () => {
+  const { runtime } = fakeRuntime({ gitattributes: "generated/** linguist-generated=true\n" });
+
+  const data = await createGitHubClient(runtime).fetchPullRequestReviewData(ref);
+
+  assert.deepEqual(data.files.map((file) => [file.filename, file.generated ?? false]), [["torch/a.py", false], ["generated/model.py", true]]);
+  assert.deepEqual(data.fileReviews.map((review) => review.path), ["torch/a.py", "generated/model.py"]);
+  assert.equal(data.pr.filesChanged, 2);
 });
 
 test("GitHub client fetchFileText uses raw content header and normalizes newlines", async () => {

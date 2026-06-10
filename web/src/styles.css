@@ -677,6 +677,17 @@ a { color: var(--link); text-decoration: none; }
   font-size: 0.72rem;
 }
 
+.generated-badge,
+.file-summary .generated-badge {
+  flex-shrink: 0;
+  padding: 0.05rem 0.35rem;
+  border: 1px solid color-mix(in srgb, var(--muted) 45%, var(--border));
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.68rem;
+  line-height: 1.25;
+}
+
 .floating-submit {
   position: fixed;
   bottom: 20px;
@@ -1583,6 +1594,13 @@ a { color: var(--link); text-decoration: none; }
   padding: 0.35rem;
   text-align: center;
   font-size: 0.8rem;
+}
+
+button.fold.neighbor {
+  min-height: 22px;
+  padding: 0.08rem 0.35rem;
+  font-size: 0.72rem;
+  line-height: 1.15;
 }
 
 .meta {

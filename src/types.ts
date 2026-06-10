@@ -35,6 +35,7 @@ export type PullFile = {
   deletions: number;
   changes: number;
   patch?: string;
+  generated?: boolean;
 };
 
 export type PullReviewComment = {
