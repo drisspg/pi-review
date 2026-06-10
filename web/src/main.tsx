@@ -1280,7 +1280,7 @@ function DiffRowView({ row, target, languagePath, threads, setThreads, toggleThr
   const selecting = isTargetInSelection(target, dragSelection);
   const inThreadRange = target != null && target.line != null && Object.values(threads).some((t) => !t.collapsed && t.target.path === target.path && t.target.startLine != null && t.target.line != null && target.line! >= t.target.startLine && target.line! <= t.target.line);
   const rowFocusAreas = target == null ? [] : focusAreas.filter((area) => target.side === "RIGHT" && area.path === target.path && target.line === area.startLine);
-  const language = languageForPath(languagePath ?? target?.path);
+  const language = rowHasKind(row, "hunk") || rowHasKind(row, "meta") ? "" : languageForPath(languagePath ?? target?.path);
   const hasThreadPill = thread != null || inlineCommentThreads.length + inlineDrafts.length + rowFocusAreas.length > 0;
   const threadPill = hasThreadPill ? <span className="pill">{(thread == null ? 0 : 1) + inlineCommentThreads.length + inlineDrafts.length + rowFocusAreas.length}</span> : null;
   const unifiedCells = <><span className="num">{row.oldLine ?? ""}</span><span className="num">{row.newLine ?? ""}</span><CodeText code={row.text} language={language} syntaxContext={row.syntaxContext} />{threadPill}</>;

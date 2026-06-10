@@ -32,6 +32,39 @@ test("patchset parser unwraps added patch files into inner sections", () => {
   ]);
 });
 
+test("patchset parser resets displayed line numbers for later inner hunks", () => {
+  const sections = parsePatchSetSections(`@@ -0,0 +1,12 @@
++diff --git a/foo.py b/foo.py
++--- a/foo.py
+++++ b/foo.py
++@@ -77,6 +99,8 @@ def first():
++ keep_old_and_new()
+++added_one()
+++added_two()
++ keep_after_adds()
++@@ -165,10 +190,41 @@ class Later:
++ context_before()
++-removed_old()
+++added_new()
++ context_after()`);
+
+  assert.deepEqual(sections[0].rows.map((row) => [row.oldLine, row.newLine, row.kind, row.text]), [
+    [null, null, "meta patchset-meta", "diff --git a/foo.py b/foo.py"],
+    [null, null, "meta patchset-meta", "--- a/foo.py"],
+    [null, null, "meta patchset-meta", "+++ b/foo.py"],
+    [null, null, "hunk patchset-hunk", "@@ -77,6 +99,8 @@ def first():"],
+    [77, 99, "context", " keep_old_and_new()"],
+    [null, 100, "added", "+added_one()"],
+    [null, 101, "added", "+added_two()"],
+    [78, 102, "context", " keep_after_adds()"],
+    [null, null, "hunk patchset-hunk", "@@ -165,10 +190,41 @@ class Later:"],
+    [165, 190, "context", " context_before()"],
+    [166, null, "removed", "-removed_old()"],
+    [null, 191, "added", "+added_new()"],
+    [167, 192, "context", " context_after()"],
+  ]);
+});
+
 test("patchset parser ignores ordinary patches", () => {
   assert.deepEqual(parsePatchSetSections(`@@ -1 +1 @@
 -old
