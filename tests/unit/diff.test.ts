@@ -32,6 +32,23 @@ test("patchset parser unwraps added patch files into inner sections", () => {
   ]);
 });
 
+test("patchset parser recomputes syntax context inside nested diffs", () => {
+  const sections = parsePatchSetSections(`@@ -0,0 +1,9 @@
++"""
++outer patch overview text
++diff --git a/foo.py b/foo.py
++--- a/foo.py
+++++ b/foo.py
++@@ -1,3 +1,5 @@
+++if value is None:
+++    return []
++ """inner docstring line`);
+
+  assert.equal(sections[0].rows.find((row) => row.text.includes("if value"))?.syntaxContext, undefined);
+  assert.equal(sections[0].rows.find((row) => row.text.includes("return []"))?.syntaxContext, undefined);
+  assert.equal(sections[0].rows.find((row) => row.text.includes("inner docstring"))?.syntaxContext, undefined);
+});
+
 test("patchset parser resets displayed line numbers for later inner hunks", () => {
   const sections = parsePatchSetSections(`@@ -0,0 +1,12 @@
 +diff --git a/foo.py b/foo.py

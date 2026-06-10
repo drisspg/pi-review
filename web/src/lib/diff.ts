@@ -77,6 +77,8 @@ export function parsePatchSetSections(patch: string | undefined): PatchSetSectio
   let currentHunk = "";
   let innerOldLine: number | null = null;
   let innerNewLine: number | null = null;
+  let innerOldTripleString: string | null = null;
+  let innerNewTripleString: string | null = null;
   let sawInnerDiff = false;
 
   for (const row of contentRows) {
@@ -86,6 +88,8 @@ export function parsePatchSetSections(patch: string | undefined): PatchSetSectio
       current = { path: diffTitle, title: diffTitle, rows: [] };
       sections.push(current);
       currentHunk = "";
+      innerOldTripleString = null;
+      innerNewTripleString = null;
       sawInnerDiff = true;
     } else if (current == null) {
       current = { path: "", title: "Patch overview", rows: [] };
@@ -97,14 +101,30 @@ export function parsePatchSetSections(patch: string | undefined): PatchSetSectio
       currentHunk = text;
       innerOldLine = Number.parseInt(hunk[1], 10);
       innerNewLine = Number.parseInt(hunk[2], 10);
+      innerOldTripleString = null;
+      innerNewTripleString = null;
     }
     const displayLine = patchSetDisplayLine(text, innerOldLine, innerNewLine);
-    current.rows.push({ ...row, kind: patchSetRowKind(text), oldLine: displayLine.oldLine, newLine: displayLine.newLine, text, hunk: currentHunk, targetLine: row.newLine, targetSide: "RIGHT" });
+    const syntaxContext = patchSetSyntaxContext(text, innerOldTripleString, innerNewTripleString);
+    current.rows.push({ ...row, kind: patchSetRowKind(text), oldLine: displayLine.oldLine, newLine: displayLine.newLine, text, hunk: currentHunk, syntaxContext, targetLine: row.newLine, targetSide: "RIGHT" });
     if (displayLine.consumesOld) innerOldLine = (innerOldLine ?? 0) + 1;
     if (displayLine.consumesNew) innerNewLine = (innerNewLine ?? 0) + 1;
+    if (text.startsWith("+") && !text.startsWith("+++ ")) innerNewTripleString = nextPythonTripleString(text.slice(1), innerNewTripleString);
+    else if (text.startsWith("-") && !text.startsWith("--- ")) innerOldTripleString = nextPythonTripleString(text.slice(1), innerOldTripleString);
+    else if (text.startsWith(" ")) {
+      innerOldTripleString = nextPythonTripleString(text.slice(1), innerOldTripleString);
+      innerNewTripleString = nextPythonTripleString(text.slice(1), innerNewTripleString);
+    }
   }
 
   return sawInnerDiff ? sections : [];
+}
+
+function patchSetSyntaxContext(text: string, oldTripleString: string | null, newTripleString: string | null): "string" | undefined {
+  if (text.startsWith("+") && !text.startsWith("+++ ")) return newTripleString == null ? undefined : "string";
+  if (text.startsWith("-") && !text.startsWith("--- ")) return oldTripleString == null ? undefined : "string";
+  if (text.startsWith(" ")) return oldTripleString == null && newTripleString == null ? undefined : "string";
+  return undefined;
 }
 
 function patchSetDisplayLine(text: string, oldLine: number | null, newLine: number | null): { oldLine: number | null; newLine: number | null; consumesOld: boolean; consumesNew: boolean } {
