@@ -1397,13 +1397,15 @@ a { color: var(--link); text-decoration: none; }
   background: var(--panel);
 }
 
-.github-comment-timeline {
+.github-comment-timeline,
+.local-comment-timeline {
   display: grid;
   gap: 0;
   padding: 12px 12px 8px;
 }
 
-.github-comment {
+.github-comment,
+.local-comment {
   position: relative;
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr);
@@ -1411,7 +1413,11 @@ a { color: var(--link); text-decoration: none; }
   padding-bottom: 12px;
 }
 
-.github-comment:not(:last-child)::before {
+.local-comment.user { --commenter: var(--accent); }
+.local-comment.pi { --commenter: var(--thread-accent); }
+
+.github-comment:not(:last-child)::before,
+.local-comment:not(:last-child)::before {
   content: "";
   position: absolute;
   left: 15px;
@@ -1482,6 +1488,14 @@ a { color: var(--link); text-decoration: none; }
 
 .github-comment-body .markdown {
   padding: 10px;
+}
+
+.local-thread > .local-comment-timeline {
+  padding-bottom: 0;
+}
+
+.local-comment .github-comment-header {
+  min-height: 32px;
 }
 
 .thread-reply {
