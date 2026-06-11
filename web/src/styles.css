@@ -718,7 +718,7 @@ a { color: var(--link); text-decoration: none; }
 
 .files {
   display: grid;
-  gap: 12px;
+  gap: 20px;
   min-width: 0;
   padding-right: 10px;
 }
@@ -729,6 +729,7 @@ a { color: var(--link); text-decoration: none; }
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--panel);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.12);
 }
 
 .file-summary {
@@ -741,7 +742,7 @@ a { color: var(--link); text-decoration: none; }
   align-items: stretch;
   justify-content: space-between;
   gap: 8px;
-  background: color-mix(in srgb, var(--panel2) 78%, var(--panel));
+  background: var(--panel2);
   border-bottom: 1px solid var(--border);
   padding: 0 8px 0 0;
   backdrop-filter: blur(8px);
@@ -1830,11 +1831,11 @@ a { color: var(--link); text-decoration: none; }
   width: 100%;
   min-height: 28px;
   border: 0;
-  border-top: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
-  border-bottom: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
   border-radius: 0;
-  background: color-mix(in srgb, var(--accent) 11%, transparent);
-  color: var(--link);
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel2));
+  color: var(--muted);
   padding: 4px 10px;
   text-align: center;
   font-size: 0.74rem;
@@ -1842,7 +1843,8 @@ a { color: var(--link); text-decoration: none; }
 }
 
 button.fold:hover {
-  background: color-mix(in srgb, var(--accent) 17%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel2));
+  color: var(--link);
 }
 
 .meta {
