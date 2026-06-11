@@ -990,6 +990,7 @@ function diagnosticsAgentActivity(session: Record<string, unknown>, fallback: Pi
     startedAt: typeof state.startedAt === "string" ? state.startedAt : fallback?.startedAt,
     lastActivityAt: typeof state.lastActivityAt === "string" ? state.lastActivityAt : fallback?.lastActivityAt,
     error: typeof state.error === "string" ? state.error : fallback?.error,
+    detail: typeof state.detail === "string" ? state.detail : fallback?.detail,
   };
 }
 
@@ -1479,7 +1480,8 @@ function AgentActivityLine({ activity }: { activity: PiAgentActivity | null | un
     return () => window.clearInterval(interval);
   }, [activity?.status, activity?.startedAt, activity?.lastActivityAt]);
   const liveActivity = activity == null ? null : { ...activity, elapsedMs: activity.startedAt == null ? activity.elapsedMs : Date.now() - Date.parse(activity.startedAt), idleMs: activity.lastActivityAt == null || activity.idleMs == null ? activity.idleMs : Date.now() - Date.parse(activity.lastActivityAt) };
-  return <span className={`agent-activity ${agentActivityTone(liveActivity)}`} role="status"><span className="agent-activity-pulse" aria-hidden="true" />{agentActivityText(liveActivity)}</span>;
+  const detail = liveActivity?.detail;
+  return <span className={`agent-activity ${agentActivityTone(liveActivity)}`} role="status"><span className="agent-activity-line"><span className="agent-activity-pulse" aria-hidden="true" />{agentActivityText(liveActivity)}</span>{detail != null && detail.length > 0 && <span className="agent-activity-detail" title={detail}>{detail}</span>}</span>;
 }
 
 function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiReviewRecord, runReview, sendMessage, focusReview, focusScanHistory, focusScanId, showFocusScanRecord, runFocusReview, focusAreas, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds, viewedFocusIds, setViewedFocusIds, saveFocusScan, openFiles, setOpenFiles }: PiPanelProps & { prUrl: string; focusAreas: FocusArea[]; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"]; openFiles: Record<string, boolean>; setOpenFiles: (open: Record<string, boolean>) => void }) {

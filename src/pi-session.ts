@@ -52,7 +52,7 @@ const sessions = new Map<string, Promise<SessionRecord>>();
 const cwdByPr = new Map<string, string>();
 const lastPromptByPr = new Map<string, { chars: number; preview: string; startedAt: string }>();
 const promptQueueByPr = new Map<string, Promise<void>>();
-type PromptState = { status: "queued" | "running" | "complete" | "failed"; purpose: string; chars: number; queuedAt: string; startedAt?: string; finishedAt?: string; answerChars?: number; error?: string; lastActivityAt?: string };
+type PromptState = { status: "queued" | "running" | "complete" | "failed"; purpose: string; chars: number; queuedAt: string; startedAt?: string; finishedAt?: string; answerChars?: number; error?: string; lastActivityAt?: string; detail?: string };
 
 export type PiActivity = {
   purpose: string;
@@ -68,6 +68,7 @@ export type PiActivity = {
   startedAt?: string;
   lastActivityAt?: string;
   error?: string;
+  detail?: string;
 };
 
 const promptStateByPr = new Map<string, PromptState>();
@@ -179,6 +180,7 @@ export async function piActivity(prKey: string, purpose = "chat"): Promise<PiAct
     startedAt,
     lastActivityAt,
     error: state?.error,
+    detail: state?.status === "running" ? state?.detail : undefined,
   };
 }
 
@@ -267,6 +269,35 @@ function textDeltaFromEvent(event: unknown): string {
   return update.assistantMessageEvent.delta ?? update.assistantMessageEvent.text ?? "";
 }
 
+function compactLine(text: string, maxChars = 80): string {
+  const compact = text.replace(/\s+/g, " ").trim();
+  return compact.length > maxChars ? `${compact.slice(0, Math.max(0, maxChars - 1))}…` : compact;
+}
+
+function summarizeToolArgs(name: string, args: unknown): string {
+  if (args == null || typeof args !== "object") return name;
+  const values = args as Record<string, unknown>;
+  for (const key of ["command", "path", "file_path", "pattern", "query", "url", "prompt"] as const) {
+    if (typeof values[key] === "string" && values[key].trim().length > 0) return `${name}: ${compactLine(values[key] as string)}`;
+  }
+  return name;
+}
+
+export function toolCallDetailFromEvent(event: unknown): string | null {
+  const message = messageFromEvent(event);
+  if (typeof message !== "object" || message == null) return null;
+  const { content, role } = message as MessageLike;
+  if (role != null && role !== "assistant") return null;
+  if (!Array.isArray(content)) return null;
+  let detail: string | null = null;
+  for (const part of content) {
+    if (typeof part !== "object" || part == null) continue;
+    const item = part as { type?: string; name?: string; arguments?: unknown };
+    if (item.type === "toolCall" && typeof item.name === "string") detail = summarizeToolArgs(item.name, item.arguments);
+  }
+  return detail;
+}
+
 function textFromMessage(message: unknown): string {
   if (typeof message !== "object" || message == null) return "";
   const { content, role } = message as MessageLike;
@@ -302,8 +333,9 @@ async function runPiPrompt(prKey: string, prompt: string, purpose = "chat", onDe
   let latestAssistantError: string | null = null;
   const unsubscribe = session.subscribe((event) => {
     const now = new Date().toISOString();
+    const toolDetail = toolCallDetailFromEvent(event);
     const previousState = promptStateByPr.get(sessionKey);
-    if (previousState != null) promptStateByPr.set(sessionKey, { ...previousState, lastActivityAt: now });
+    if (previousState != null) promptStateByPr.set(sessionKey, { ...previousState, lastActivityAt: now, ...(toolDetail != null ? { detail: toolDetail } : {}) });
     const message = messageFromEvent(event);
     const assistantText = textFromMessage(message);
     if (assistantText.trim().length > 0) latestAssistantText = assistantText;
