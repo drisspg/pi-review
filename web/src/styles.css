@@ -134,6 +134,18 @@ button {
 button:hover { border-color: var(--muted); }
 button:disabled { cursor: not-allowed; opacity: 0.55; }
 
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+.diff-row:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .spinner-label {
   display: inline-flex;
   gap: 7px;
@@ -322,13 +334,6 @@ a { color: var(--link); text-decoration: none; }
   border-radius: 8px;
   padding: 10px;
   white-space: pre-wrap;
-}
-
-.start-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
-  gap: 10px;
-  align-items: start;
 }
 
 .panel {
@@ -698,8 +703,7 @@ a { color: var(--link); text-decoration: none; }
   font-size: 0.72rem;
 }
 
-.generated-badge,
-.file-summary .generated-badge {
+.generated-badge {
   flex-shrink: 0;
   padding: 0.05rem 0.35rem;
   border: 1px solid color-mix(in srgb, var(--muted) 45%, var(--border));
@@ -1866,19 +1870,26 @@ button.fold.neighbor:hover {
   padding: 0.12rem 0.45rem;
 }
 
-.meta .review-status.success {
+.review-status {
+  font-weight: 600;
+}
+
+.review-status.success {
   border-color: color-mix(in srgb, var(--success) 45%, var(--border));
   color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
 }
 
-.meta .review-status.pending {
+.review-status.pending {
   border-color: color-mix(in srgb, var(--attention) 45%, var(--border));
   color: var(--attention);
+  background: color-mix(in srgb, var(--attention) 12%, transparent);
 }
 
-.meta .review-status.danger {
+.review-status.danger {
   border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
-  color: var(--danger-text);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
 }
 
 .panel select {
@@ -2302,21 +2313,6 @@ button.fold.neighbor:hover {
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 0.05rem 0.5rem;
-}
-
-.pr-card .review-status.success {
-  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
-  color: var(--success);
-}
-
-.pr-card .review-status.pending {
-  border-color: color-mix(in srgb, var(--attention) 45%, var(--border));
-  color: var(--attention);
-}
-
-.pr-card .review-status.danger {
-  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
-  color: var(--danger-text);
 }
 
 .pr-card .trash-button {
@@ -2784,10 +2780,16 @@ button.fold.neighbor:hover {
 }
 
 .ai-chat-composer textarea {
-  min-height: 92px;
-  max-height: 34vh;
-  resize: vertical;
-  overflow: auto;
+  min-height: 36px;
+  resize: none;
+  overflow: hidden;
+}
+
+.panel textarea.review-body {
+  min-height: 0;
+  height: auto;
+  resize: none;
+  overflow: hidden;
 }
 
 .ai-review-dialogue {
@@ -3730,7 +3732,7 @@ button.fold.neighbor:hover {
   .toolbar { grid-template-columns: 1fr; }
   .toolbar-title { display: grid; gap: 2px; }
   .toolbar-actions { justify-content: flex-start; overflow-x: auto; }
-  .review-layout, .start-grid { grid-template-columns: 1fr !important; }
+  .review-layout { grid-template-columns: 1fr !important; }
   .resize-handle { display: none; }
   .side { position: static; max-height: none; }
 }
