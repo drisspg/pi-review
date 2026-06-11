@@ -2819,7 +2819,9 @@ button.fold:hover {
   z-index: 51;
   width: min(1100px, 96vw);
   max-height: 90vh;
-  display: grid;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   gap: 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -2909,6 +2911,7 @@ button.fold:hover {
 .gpu-workspace-modal { width: min(900px, 96vw); }
 
 .pi-modal-head {
+  flex: 0 0 auto;
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
@@ -2937,6 +2940,7 @@ button.fold:hover {
 }
 
 .pi-modal-summary {
+  flex: 0 0 auto;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 10px;
@@ -2982,14 +2986,16 @@ button.fold:hover {
 }
 
 .pi-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
   display: grid;
   gap: 14px;
   padding: 14px 20px;
   overflow: auto;
-  max-height: calc(90vh - 220px);
 }
 
 .memory-tabs {
+  flex: 0 0 auto;
   display: flex;
   gap: 8px;
   padding: 10px 20px 0;
@@ -3008,10 +3014,6 @@ button.fold:hover {
   color: var(--text);
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, var(--panel));
-}
-
-.review-memory-body {
-  max-height: calc(90vh - 260px);
 }
 
 .review-memory-summary strong {
@@ -3329,6 +3331,7 @@ button.fold:hover {
 }
 
 .pi-modal-foot {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3473,7 +3476,6 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
   font-size: 12px;
 }
 
-.gpu-workspace-body { max-height: calc(90vh - 130px); }
 
 .gpu-workspace-form {
   display: grid;
@@ -3694,7 +3696,7 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
 .logs summary { cursor: pointer; color: var(--muted); }
 .log { border-top: 1px solid var(--border); padding: 8px 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.74rem; }
 .logs-modal { width: min(1100px, 96vw); }
-.logs-modal-body { max-height: 70vh; overflow: auto; padding: 12px 20px 16px; }
+.logs-modal-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 12px 20px 16px; }
 .log span, .log code { color: var(--muted); overflow-wrap: anywhere; }
 .log p { margin: 0.2rem 0; }
 .log.error { color: var(--danger-text); }
@@ -3895,8 +3897,6 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
   width: 98vw;
   height: 94vh;
   max-height: 94vh;
-  grid-template-rows: auto minmax(0, 1fr);
-  align-content: start;
 }
 
 .flow-dag-modal.expanded {
@@ -3906,6 +3906,7 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
 }
 
 .flow-dag-body {
+  flex: 1 1 auto;
   display: block;
   min-height: 0;
   max-height: none;
