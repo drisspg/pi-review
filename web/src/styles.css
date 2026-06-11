@@ -20,7 +20,7 @@
   --borderColor-default: var(--border);
   --bgColor-default: var(--panel);
   --bgColor-muted: var(--panel2);
-  --bgColor-success-muted: rgba(46, 160, 67, 0.10);
+  --bgColor-success-muted: rgba(46, 160, 67, 0.15);
   --bgColor-danger-muted: rgba(248, 81, 73, 0.10);
   --add: var(--bgColor-success-muted);
   --del: var(--bgColor-danger-muted);
@@ -748,6 +748,7 @@ a { color: var(--link); text-decoration: none; }
   top: 0;
   z-index: 20;
   width: 100%;
+  min-height: 40px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -793,6 +794,15 @@ a { color: var(--link); text-decoration: none; }
 .file-summary span, .meta, .file-actions {
   color: var(--muted);
   font-size: 0.82rem;
+}
+
+.file-change-summary {
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.file-status-summary {
+  flex-shrink: 0;
 }
 
 .file-summary .stat-add {
@@ -882,6 +892,7 @@ a { color: var(--link); text-decoration: none; }
   grid-template-columns: 20px minmax(0, max-content);
   min-width: max-content;
   padding-right: 10px;
+  background: var(--diff-row-bg);
 }
 
 .diff-marker {
@@ -938,6 +949,11 @@ a { color: var(--link); text-decoration: none; }
 .diff-row.removed:hover, .diff-row.removed.selected {
   --diff-row-bg: color-mix(in srgb, var(--danger) 18%, var(--panel));
   --diff-num-bg: color-mix(in srgb, var(--danger) 25%, var(--panel));
+}
+.diff-row.hunk .code-cell,
+.diff-row.hunk .num {
+  min-height: 28px;
+  align-items: center;
 }
 .diff-row.added .diff-marker { color: var(--success); }
 .diff-row.removed .diff-marker { color: var(--danger); }
@@ -1750,10 +1766,10 @@ a { color: var(--link); text-decoration: none; }
   display: block;
   width: 100%;
   border: 0;
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
+  border-top: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
   border-radius: 0;
-  background: var(--panel2);
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
   color: var(--link);
   padding: 0.35rem;
   text-align: center;
@@ -1761,10 +1777,14 @@ a { color: var(--link); text-decoration: none; }
 }
 
 button.fold.neighbor {
-  min-height: 22px;
-  padding: 0.08rem 0.35rem;
+  min-height: 28px;
+  padding: 4px 10px;
   font-size: 0.72rem;
   line-height: 1.15;
+}
+
+button.fold.neighbor:hover {
+  background: color-mix(in srgb, var(--accent) 17%, transparent);
 }
 
 .meta {
