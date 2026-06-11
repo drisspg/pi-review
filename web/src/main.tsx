@@ -1684,9 +1684,6 @@ function GpuWorkspaceModal({ review, close, refreshLogs }: { review: OpenRespons
         <h2>GPU workspace</h2>
         <p className="muted">Fast PyTorch scratch box for {review.pr.key}. {contract == null ? "Loading workspace contract…" : `MVP uses ${contract.defaults.gpuCount} GPU, ${contract.defaults.persistentDisk ? "persistent disk" : "no persistent disk"}, and a ${Math.round(contract.defaults.ttlHours * 60)} minute TTL.`}</p>
       </div>
-      <div className="pi-modal-head-actions">
-        <button type="button" className="pi-icon-button" onClick={() => void requestClose()} disabled={deleting} aria-label="Close GPU workspace">✕</button>
-      </div>
     </header>
     <div className="pi-modal-body gpu-workspace-body">
       <PiCard title="Allocate fast workspace">
@@ -1758,23 +1755,22 @@ function GpuWorkspaceAgentPanel({ review, supported }: { review: OpenResponse; s
 function FlowDagModal({ flowDag, runFlowDag, close, prUrl, headSha }: { flowDag: FlowDag; runFlowDag: () => Promise<void>; close: () => void; prUrl: string; headSha: string }) {
   const [expanded, setExpanded] = useState(false);
   const [highRes, setHighRes] = useState(true);
-  const modalClassName = `flow-dag-modal${expanded ? " expanded" : ""}${highRes ? " high-res" : ""}`;
+  const modalClassName = `pi-modal flow-dag-modal${expanded ? " expanded" : ""}${highRes ? " high-res" : ""}`;
 
   return <ModalShell open onOpenChange={(open) => { if (!open) close(); }} label="Code walk" className={modalClassName}>
-    <div className="flow-dag-panel-head">
+    <header className="pi-modal-head">
       <div>
         <h2>Code walk</h2>
         <p className="muted">Architecture, data flow, and key snippets for this PR.</p>
       </div>
-      <div className="flow-dag-panel-actions">
+      <div className="pi-modal-head-actions">
         {flowDag.running && <span className="muted spinner-label"><span className="spinner" aria-hidden="true" />Building walk…</span>}
         <Button variant="muted" className="small-muted-button" onClick={() => setHighRes((current) => !current)} aria-pressed={highRes}>{highRes ? "Standard DPI" : "High DPI"}</Button>
         <Button variant="muted" className="small-muted-button" onClick={() => setExpanded((current) => !current)} aria-pressed={expanded}>{expanded ? "Compact" : "Expand"}</Button>
         <Button variant="muted" className="small-muted-button" onClick={() => void runFlowDag()} disabled={flowDag.running}>{flowDag.running ? "Refreshing…" : flowDag.text.trim().length > 0 ? "Refresh" : "Build"}</Button>
-        <Button variant="muted" className="small-muted-button" onClick={close} aria-label="Close code walk">Close</Button>
       </div>
-    </div>
-    <div className="flow-dag-body review-modal-body">
+    </header>
+    <div className="flow-dag-body">
       {flowDag.error != null && <p className="muted">Code walk failed: {flowDag.error}</p>}
       {flowDag.text.trim().length === 0 && !flowDag.error && flowDag.running && <p className="muted">Asking Pi for a guided code walk…</p>}
       {flowDag.text.trim().length === 0 && !flowDag.error && !flowDag.running && <p className="muted">Build a code walk to orient the review.</p>}
@@ -1883,8 +1879,7 @@ function DiagnosticsModal({ diagnostics, aiReview, focusReview, focusAreaCount, 
         <p className="muted">Read-only snapshot of this PR's Pi sessions</p>
       </div>
       <div className="pi-modal-head-actions">
-        <button type="button" onClick={() => void handleRefresh()} disabled={refreshing}>{refreshing ? "Refreshing…" : "Refresh"}</button>
-        <button type="button" className="pi-icon-button" onClick={close} aria-label="Close diagnostics">✕</button>
+        <Button variant="muted" onClick={() => void handleRefresh()} disabled={refreshing}>{refreshing ? "Refreshing…" : "Refresh"}</Button>
       </div>
     </header>
     <div className="pi-modal-summary">
@@ -1981,9 +1976,6 @@ function PiSettingsModal({ prKey, diagnostics, setDiagnostics, openDiagnostics, 
       <div>
         <h2>Pi settings</h2>
         <p className="muted">Applies to this PR session</p>
-      </div>
-      <div className="pi-modal-head-actions">
-        <button type="button" className="pi-icon-button" onClick={close} aria-label="Close settings">✕</button>
       </div>
     </header>
 
@@ -2102,9 +2094,8 @@ function ReviewMemoryModal({ memory, loading, distilling, refresh, distill, clos
         <p className="muted">Raw review feedback becomes examples; distillation turns it into prompt rules.</p>
       </div>
       <div className="pi-modal-head-actions">
-        <button type="button" onClick={refresh} disabled={loading || distilling}>{loading ? "Refreshing…" : "Refresh"}</button>
+        <Button variant="muted" onClick={refresh} disabled={loading || distilling}>{loading ? "Refreshing…" : "Refresh"}</Button>
         <button type="button" className="pi-primary" onClick={distill} disabled={loading || distilling || (memory?.stats.recordCount ?? 0) === 0}>{distilling ? "Distilling…" : "Distill profile"}</button>
-        <button type="button" className="pi-icon-button" onClick={close} aria-label="Close review memory">✕</button>
       </div>
     </header>
     {memory == null ? <div className="pi-modal-body"><p className="muted">{loading ? "Loading review memory…" : "No review memory loaded yet."}</p></div> : <>
@@ -2147,8 +2138,11 @@ function ReviewMemoryModal({ memory, loading, distilling, refresh, distill, clos
 }
 
 function LogsModal({ logs, refreshLogs, close }: { logs: LogEntry[]; refreshLogs: () => Promise<void>; close: () => void }) {
-  return <ModalShell open onOpenChange={(open) => { if (!open) close(); }} label="Server log">
-    <div className="thread-head"><h2>Server log</h2><div className="actions"><button onClick={() => void refreshLogs()}>Refresh</button><button onClick={close}>Close</button></div></div>
+  return <ModalShell open onOpenChange={(open) => { if (!open) close(); }} label="Server log" className="pi-modal logs-modal">
+    <header className="pi-modal-head">
+      <div><h2>Server log</h2></div>
+      <div className="pi-modal-head-actions"><Button variant="muted" onClick={() => void refreshLogs()}>Refresh</Button></div>
+    </header>
     <div className="logs-modal-body">{logs.length === 0 ? <p className="muted">No log entries yet.</p> : <LogRows logs={logs} />}</div>
   </ModalShell>;
 }

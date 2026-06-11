@@ -2821,6 +2821,20 @@ button.fold.neighbor:hover {
   box-shadow: 0 20px 80px rgba(0, 0, 0, 0.4);
 }
 
+.modal-close-button {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  color: var(--muted);
+}
+
+.modal-close-button:hover {
+  color: var(--text);
+  background: var(--panel2);
+  border-color: var(--border);
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;
@@ -2958,6 +2972,7 @@ button.fold.neighbor:hover {
   justify-content: space-between;
   gap: 12px;
   padding: 16px 20px 12px;
+  padding-right: 48px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -2975,23 +2990,6 @@ button.fold.neighbor:hover {
   display: flex;
   align-items: center;
   gap: 6px;
-}
-
-.pi-icon-button {
-  min-height: 28px;
-  padding: 0 8px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--muted);
-  border-radius: 6px;
-  font-size: 14px;
-  line-height: 1;
-}
-
-.pi-icon-button:hover {
-  border-color: var(--border);
-  color: var(--text);
-  background: var(--panel2);
 }
 
 .pi-modal-summary {
@@ -3722,7 +3720,8 @@ button.fold.neighbor:hover {
 .logs { max-height: 320px; overflow: auto; }
 .logs summary { cursor: pointer; color: var(--muted); }
 .log { border-top: 1px solid var(--border); padding: 8px 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.74rem; }
-.logs-modal-body { max-height: 70vh; overflow: auto; padding-top: 4px; }
+.logs-modal { width: min(1100px, 96vw); }
+.logs-modal-body { max-height: 70vh; overflow: auto; padding: 12px 20px 16px; }
 .log span, .log code { color: var(--muted); overflow-wrap: anywhere; }
 .log p { margin: 0.2rem 0; }
 .log.error { color: var(--danger-text); }
@@ -3930,18 +3929,12 @@ button.fold.neighbor:hover {
   max-height: calc(100vh - 16px);
 }
 
-.flow-dag-modal .flow-dag-panel-head h2 {
-  margin: 0 0 3px;
-}
-
-.flow-dag-modal .flow-dag-panel-head p {
-  margin: 0;
-}
-
 .flow-dag-body {
   display: block;
   min-height: 0;
   max-height: none;
+  overflow: auto;
+  padding: 12px 20px 16px;
 }
 
 .flow-dag-body .markdown {
@@ -3993,63 +3986,9 @@ button.fold.neighbor:hover {
   gap: 10px;
 }
 
-.flow-dag-panel-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-width: 0;
-}
-
-.flow-dag-panel-head > div {
-  min-width: 0;
-}
-
-.flow-dag-panel-head strong {
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-}
-
-.flow-dag-panel-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-  min-width: 0;
-}
-
-.flow-dag-panel-actions .spinner-label {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.flow-dag-panel .markdown-mermaid-block {
-  min-height: 360px;
-  padding: 16px;
-}
-
-.flow-dag-panel .mermaid-rendered svg {
-  width: 100%;
-  min-height: 320px;
-  max-height: 70vh;
-}
-
 @media (max-width: 760px) {
   .flow-dag-modal {
     width: 96vw;
-    padding: 10px;
-  }
-
-  .flow-dag-modal .flow-dag-panel-head {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .flow-dag-modal .flow-dag-panel-actions {
-    justify-content: flex-start;
   }
 }
 
