@@ -78,7 +78,7 @@ npm run validate
 
 Per-test cost drops from ~7s to ~2.5s; full `pr-review` suite drops from ~1m49s to ~1m13s. After editing `web/src/`, the next fast-mode run rebuilds via `vite build` (~0.8s) automatically; after editing `src/server.ts`, restart `npm run test:server`.
 
-Two tests are known fixture-drift failures unrelated to fast mode (`opens a PR and renders GitHub-style file diffs` and `minimizes focus area links after all are reviewed`) — verify on `HEAD` before treating them as regressions.
+The full `pr-review` e2e suite passes on `HEAD` (25/25). The earlier fixture-drift/stale-selector failures were repaired by making the tests source rows via `openFileWithAddedRows`, assert `>=` file counts, target `.local-comment-timeline` for line-thread messages, and rely on hash-restore after reload. If a pr-review test fails, treat it as a real regression and verify on a clean `HEAD` before assuming it is pre-existing.
 
 ## UX review checklist
 
