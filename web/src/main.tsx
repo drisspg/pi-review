@@ -596,16 +596,16 @@ function App() {
   async function askThread(thread: Thread) {
     if (review == null || thread.draft.trim().length === 0) return;
     const question = thread.draft.trim();
-    setThreads((current) => ({ ...current, [thread.key]: { ...thread, asking: true, draft: "", messages: [...thread.messages, { role: "user", text: question }, { role: "pi", text: "" }] } }));
+    setThreads((current) => ({ ...current, [thread.key]: { ...thread, asking: true, activity: runningAgentActivity("inline-chat"), draft: "", messages: [...thread.messages, { role: "user", text: question }, { role: "pi", text: "" }] } }));
     try {
       const { prompt, purpose } = await buildPiPrompt({ mode: "inline-chat", prKey: review.pr.key, path: thread.target.path, line: thread.target.line, startLine: thread.target.startLine, side: thread.target.side, hunk: thread.target.hunk, question });
-      const setAnswer = (answer: string) => setThreads((current) => ({ ...current, [thread.key]: { ...current[thread.key], messages: [...(current[thread.key]?.messages ?? []).slice(0, -1), { role: "pi", text: answer }] } }));
+      const setAnswer = (answer: string) => setThreads((current) => ({ ...current, [thread.key]: { ...current[thread.key], activity: streamingAgentActivity(current[thread.key]?.activity, answer), messages: [...(current[thread.key]?.messages ?? []).slice(0, -1), { role: "pi", text: answer }] } }));
       const answer = await askPiApi({ prKey: review.pr.key, prompt, purpose }, setAnswer);
-      setThreads((current) => ({ ...current, [thread.key]: { ...current[thread.key], asking: false, messages: [...(current[thread.key]?.messages ?? []).slice(0, -1), { role: "pi", text: answer }] } }));
+      setThreads((current) => ({ ...current, [thread.key]: { ...current[thread.key], asking: false, activity: null, messages: [...(current[thread.key]?.messages ?? []).slice(0, -1), { role: "pi", text: answer }] } }));
       await refreshLogs();
     } catch (err) {
       const text = `Ask Pi failed: ${err instanceof Error ? err.message : String(err)}`;
-      setThreads((current) => ({ ...current, [thread.key]: { ...current[thread.key], asking: false, messages: [...(current[thread.key]?.messages ?? []).slice(0, -1), { role: "pi", text }] } }));
+      setThreads((current) => ({ ...current, [thread.key]: { ...current[thread.key], asking: false, activity: null, messages: [...(current[thread.key]?.messages ?? []).slice(0, -1), { role: "pi", text }] } }));
     }
   }
 
@@ -930,6 +930,16 @@ function PrCard({ pr, openPr, cleanupPr }: { pr: StoredPullRequest; openPr: (inp
     </a>
     <button className="trash-button" title="Remove saved PR and cleanup worktree" onClick={() => void cleanupPr(pr)}>🗑</button>
   </article>;
+}
+
+function runningAgentActivity(purpose: string, label = "starting agent"): PiAgentActivity {
+  const now = new Date().toISOString();
+  return { purpose, status: "running", label, elapsedMs: 0, idleMs: 0, chars: 0, answerChars: 0, activeTools: [], isStreaming: null, queued: false, startedAt: now, lastActivityAt: now };
+}
+
+function streamingAgentActivity(current: PiAgentActivity | null | undefined, answer: string): PiAgentActivity {
+  const now = new Date().toISOString();
+  return { ...(current ?? runningAgentActivity("chat")), status: "running", label: answer.length > 0 ? "streaming response" : "thinking", answerChars: answer.length, lastActivityAt: now };
 }
 
 function compactDuration(ms: number | null | undefined): string {
@@ -1336,6 +1346,7 @@ function FocusAreaInline({ prUrl, area, active, setActiveFocusAreaId, collapsedF
   const collapsed = collapsedFocusAreaIds[area.id] ?? false;
   const [draft, setDraft] = useState("");
   const [asking, setAsking] = useState(false);
+  const [activity, setActivity] = useState<PiAgentActivity | null>(null);
   const [messages, setMessages] = useState<Array<{ role: "user" | "pi"; text: string }>>([]);
   void setActiveFocusAreaId;
   function saveDraftComment() {
@@ -1349,24 +1360,29 @@ function FocusAreaInline({ prUrl, area, active, setActiveFocusAreaId, collapsedF
     if (question.length === 0 || asking) return;
     setDraft("");
     setAsking(true);
+    setActivity(runningAgentActivity("focus-chat"));
     setMessages((current) => [...current, { role: "user", text: question }, { role: "pi", text: "" }]);
     try {
-      const setAnswer = (answer: string) => setMessages((current) => [...current.slice(0, -1), { role: "pi", text: answer }]);
+      const setAnswer = (answer: string) => {
+        setActivity((current) => streamingAgentActivity(current, answer));
+        setMessages((current) => [...current.slice(0, -1), { role: "pi", text: answer }]);
+      };
       const answer = await askFocusArea(area, question, setAnswer);
       setMessages((current) => [...current.slice(0, -1), { role: "pi", text: answer }]);
     } catch (err) {
       setMessages((current) => [...current.slice(0, -1), { role: "pi", text: `Ask Pi failed: ${err instanceof Error ? err.message : String(err)}` }]);
     } finally {
       setAsking(false);
+      setActivity(null);
     }
   }
   if (collapsed) return <div id={`focus-area-${area.id}`} className="inline-thread review-thread focus-area-inline focus-area-minimized focus-area-collapsed minimized" onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: false }))}><div className="thread-head"><div className="thread-title"><Button variant="icon" aria-label="Expand focus area" onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: false }))}><ChevronRightIcon size={16} /></Button><div><strong>Focus area</strong><span>{area.title}</span></div></div></div></div>;
-  return <div id={`focus-area-${area.id}`} className={`inline-thread review-thread focus-area-inline${active ? " active" : ""}`}><div className="thread-head"><div><strong>Focus area</strong><span>{area.path}:{area.startLine === area.endLine ? area.startLine : `${area.startLine}-${area.endLine}`}</span></div><div className="actions"><Button variant="icon" aria-label="Collapse focus area" onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: true }))}><ChevronDownIcon size={16} /></Button></div></div><div className="thread-messages"><div className="thread-note pi"><div className="message-role">Pi focus</div><MarkdownText text={area.body} fileLinks={{ prUrl }} /></div>{messages.map((message, index) => <div className={`thread-note ${message.role}`} key={index}><div className="message-role">{message.role === "user" ? "You" : "Pi"}</div><MarkdownText text={message.text} fileLinks={{ prUrl }} /></div>)}</div><div className="composer"><textarea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey) { event.preventDefault(); void ask(); } }} placeholder="Ask Pi or write a draft comment about this focus area" /><div className="actions"><button onClick={saveDraftComment} disabled={draft.trim().length === 0}>Add draft comment</button><button onClick={() => void ask()} disabled={asking || draft.trim().length === 0}>{asking ? <span className="spinner-label"><span className="spinner" aria-hidden="true" />Asking</span> : "Ask Pi"}</button></div></div></div>;
+  return <div id={`focus-area-${area.id}`} className={`inline-thread review-thread focus-area-inline${active ? " active" : ""}`}><div className="thread-head"><div><strong>Focus area</strong><span>{area.path}:{area.startLine === area.endLine ? area.startLine : `${area.startLine}-${area.endLine}`}</span></div><div className="actions"><Button variant="icon" aria-label="Collapse focus area" onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: true }))}><ChevronDownIcon size={16} /></Button></div></div><div className="thread-messages"><div className="thread-note pi"><div className="message-role">Pi focus</div><MarkdownText text={area.body} fileLinks={{ prUrl }} /></div>{messages.map((message, index) => <div className={`thread-note ${message.role}`} key={index}><div className="message-role">{message.role === "user" ? "You" : "Pi"}</div><MarkdownText text={message.text} fileLinks={{ prUrl }} /></div>)}</div><div className="composer"><textarea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey) { event.preventDefault(); void ask(); } }} placeholder="Ask Pi or write a draft comment about this focus area" />{asking && <AgentActivityLine activity={activity} />}<div className="actions"><button onClick={saveDraftComment} disabled={draft.trim().length === 0}>Add draft comment</button><button onClick={() => void ask()} disabled={asking || draft.trim().length === 0}>{asking ? "Asking" : "Ask Pi"}</button></div></div></div>;
 }
 
 function ThreadBox({ prUrl, thread, setThread, closeThread, addDraft, askThread }: { prUrl: string; thread: Thread; setThread: (thread: Thread) => void; closeThread: () => void; addDraft: () => void; askThread: (thread: Thread) => Promise<void> }) {
   if (thread.collapsed) return <button className="inline-thread collapsed" onClick={() => setThread({ ...thread, collapsed: false })}><ChevronRightIcon size={14} /> Thread on {thread.target.line == null ? "file" : targetLabel(thread.target)}</button>;
-  return <div className="inline-thread review-thread" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeThread(); } }}><div className="thread-head"><div><strong>Line thread</strong><span>{targetLabel(thread.target)}</span></div><div className="actions">{(thread.draft.trim().length > 0 || thread.messages.length > 0) && <Button variant="icon" aria-label="Collapse thread" onClick={() => setThread({ ...thread, collapsed: true })}><ChevronDownIcon size={16} /></Button>}<Button variant="icon" className="close-thread-button" aria-label="Close thread" onClick={closeThread}><XIcon size={16} /></Button></div></div>{thread.messages.length > 0 && <div className="thread-messages">{thread.messages.map((message, index) => <div className={`thread-note ${message.role}`} key={index}><div className="message-role">{message.role === "user" ? "You" : "Pi"}</div><MarkdownText text={message.text} fileLinks={{ prUrl }} /></div>)}</div>}<div className="composer"><textarea value={thread.draft} onChange={(event) => setThread({ ...thread, draft: event.target.value })} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey && thread.draft.trim().length > 0 && !thread.asking) { event.preventDefault(); void askThread(thread); } }} placeholder="Write a draft comment or ask Pi about this line" /><div className="actions"><button onClick={addDraft} disabled={thread.draft.trim().length === 0}>Add draft comment</button><button onClick={() => void askThread(thread)} disabled={thread.asking || thread.draft.trim().length === 0}>{thread.asking ? <span className="spinner-label"><span className="spinner" aria-hidden="true" />Asking</span> : "Ask Pi"}</button></div></div></div>;
+  return <div className="inline-thread review-thread" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeThread(); } }}><div className="thread-head"><div><strong>Line thread</strong><span>{targetLabel(thread.target)}</span></div><div className="actions">{(thread.draft.trim().length > 0 || thread.messages.length > 0) && <Button variant="icon" aria-label="Collapse thread" onClick={() => setThread({ ...thread, collapsed: true })}><ChevronDownIcon size={16} /></Button>}<Button variant="icon" className="close-thread-button" aria-label="Close thread" onClick={closeThread}><XIcon size={16} /></Button></div></div>{thread.messages.length > 0 && <div className="thread-messages">{thread.messages.map((message, index) => <div className={`thread-note ${message.role}`} key={index}><div className="message-role">{message.role === "user" ? "You" : "Pi"}</div><MarkdownText text={message.text} fileLinks={{ prUrl }} /></div>)}</div>}<div className="composer"><textarea value={thread.draft} onChange={(event) => setThread({ ...thread, draft: event.target.value })} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey && thread.draft.trim().length > 0 && !thread.asking) { event.preventDefault(); void askThread(thread); } }} placeholder="Write a draft comment or ask Pi about this line" />{thread.asking && <AgentActivityLine activity={thread.activity} />}<div className="actions"><button onClick={addDraft} disabled={thread.draft.trim().length === 0}>Add draft comment</button><button onClick={() => void askThread(thread)} disabled={thread.asking || thread.draft.trim().length === 0}>{thread.asking ? "Asking" : "Ask Pi"}</button></div></div></div>;
 }
 
 function reviewStatus(pr: StoredPullRequest): { label: string; tone: string } {
@@ -1397,7 +1413,14 @@ function ReviewSummary({ drafts, setDrafts, editingDraftId, setEditingDraftId, s
 }
 
 function AgentActivityLine({ activity }: { activity: PiAgentActivity | null | undefined }) {
-  return <span className={`agent-activity ${agentActivityTone(activity)}`} role="status"><span className="agent-activity-pulse" aria-hidden="true" />{agentActivityText(activity)}</span>;
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (activity?.status !== "running" && activity?.status !== "queued") return;
+    const interval = window.setInterval(() => setTick((tick) => tick + 1), 1000);
+    return () => window.clearInterval(interval);
+  }, [activity?.status, activity?.startedAt, activity?.lastActivityAt]);
+  const liveActivity = activity == null ? null : { ...activity, elapsedMs: activity.startedAt == null ? activity.elapsedMs : Date.now() - Date.parse(activity.startedAt), idleMs: activity.lastActivityAt == null || activity.idleMs == null ? activity.idleMs : Date.now() - Date.parse(activity.lastActivityAt) };
+  return <span className={`agent-activity ${agentActivityTone(liveActivity)}`} role="status"><span className="agent-activity-pulse" aria-hidden="true" />{agentActivityText(liveActivity)}</span>;
 }
 
 function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiReviewRecord, runReview, sendMessage, focusReview, focusScanHistory, focusScanId, showFocusScanRecord, runFocusReview, focusAreas, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds, viewedFocusIds, setViewedFocusIds, saveFocusScan, openFiles, setOpenFiles }: PiPanelProps & { prUrl: string; focusAreas: FocusArea[]; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"]; openFiles: Record<string, boolean>; setOpenFiles: (open: Record<string, boolean>) => void }) {

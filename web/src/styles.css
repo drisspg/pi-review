@@ -730,7 +730,7 @@ a { color: var(--link); text-decoration: none; }
 
 .files {
   display: grid;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
   padding-right: 10px;
 }
@@ -738,6 +738,9 @@ a { color: var(--link); text-decoration: none; }
 .file {
   padding: 0;
   overflow: clip;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
 }
 
 .file-summary {
@@ -749,15 +752,15 @@ a { color: var(--link); text-decoration: none; }
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  background: color-mix(in srgb, var(--panel) 94%, var(--bg));
+  background: color-mix(in srgb, var(--panel2) 78%, var(--panel));
   border-bottom: 1px solid var(--border);
-  padding: 0 12px 0 0;
+  padding: 0 10px 0 0;
   backdrop-filter: blur(8px);
 }
 
 .file-summary-left {
   display: flex;
-  gap: 8px;
+  gap: 9px;
   align-items: center;
   min-width: 0;
   flex: 1;
@@ -765,7 +768,7 @@ a { color: var(--link); text-decoration: none; }
   background: none;
   border: none;
   border-radius: 0;
-  padding: 10px 12px;
+  padding: 9px 12px;
   cursor: pointer;
   color: inherit;
   font: inherit;
@@ -783,6 +786,7 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .file-summary strong {
+  color: var(--text);
   overflow-wrap: anywhere;
 }
 
@@ -839,7 +843,7 @@ a { color: var(--link); text-decoration: none; }
 .ok { color: var(--success); }
 
 .patch {
-  border-top: 1px solid var(--border);
+  border-top: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
   line-height: 20px;
@@ -848,8 +852,8 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .diff-row {
-  --diff-row-bg: var(--panel);
-  --diff-num-bg: var(--panel2);
+  --diff-row-bg: transparent;
+  --diff-num-bg: transparent;
   --diff-num-color: var(--muted);
   display: grid;
   grid-template-columns: 50px 50px minmax(0, 1fr) auto;
@@ -901,7 +905,10 @@ a { color: var(--link); text-decoration: none; }
 .hljs-operator, .hljs-punctuation { color: var(--text); }
 
 .diff-row:not(.hunk):not(.meta) { cursor: pointer; }
-.diff-row:hover, .diff-row.selected { --diff-row-bg: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
+.diff-row:hover, .diff-row.selected {
+  --diff-row-bg: color-mix(in srgb, var(--accent) 7%, transparent);
+  --diff-num-bg: color-mix(in srgb, var(--accent) 8%, transparent);
+}
 .num {
   padding: 0 8px;
   color: var(--diff-num-color);
@@ -909,6 +916,10 @@ a { color: var(--link); text-decoration: none; }
   user-select: none;
   background: var(--diff-num-bg);
   border-right: 1px solid var(--border);
+}
+.diff-row.context {
+  --diff-row-bg: transparent;
+  --diff-num-bg: transparent;
 }
 .diff-row.added {
   --diff-row-bg: var(--add);
