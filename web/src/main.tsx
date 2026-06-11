@@ -64,7 +64,7 @@ type DiffProps = {
   editingDraftId: string | null;
   setEditingDraftId: (id: string | null) => void;
   askThread: (thread: Thread) => Promise<void>;
-  askFocusArea: (area: FocusArea, question: string, onDelta?: (answer: string) => void) => Promise<string>;
+  askFocusArea: (area: FocusArea, question: string, onDelta?: (answer: string) => void, onActivity?: (activity: PiAgentActivity | null) => void) => Promise<string>;
   sideWidth: number;
   setSideWidth: (width: number) => void;
   dragSelection: DragSelection | null;
@@ -585,25 +585,58 @@ function App() {
     toggleThread(target, extend);
   }
 
-  async function askFocusArea(area: FocusArea, question: string, onDelta?: (answer: string) => void): Promise<string> {
+  async function loadPiAgentActivity(purpose: string, fallback: PiAgentActivity | null): Promise<PiAgentActivity | null> {
+    if (review == null) return fallback;
+    const data = await api<{ diagnostics: { sessions?: unknown[] } }>("/api/pi/diagnostics", { method: "POST", body: JSON.stringify({ prKey: review.pr.key }) });
+    const session = data.diagnostics.sessions?.find((item): item is Record<string, unknown> => typeof item === "object" && item != null && (item as Record<string, unknown>).purpose === purpose);
+    return session == null ? fallback : diagnosticsAgentActivity(session, fallback);
+  }
+
+  async function askFocusArea(area: FocusArea, question: string, onDelta?: (answer: string) => void, onActivity?: (activity: PiAgentActivity | null) => void): Promise<string> {
     if (review == null) return "Open a PR before asking Pi.";
     const { prompt, purpose } = await buildPiPrompt({ mode: "focus-chat", prKey: review.pr.key, path: area.path, startLine: area.startLine, endLine: area.endLine, body: area.body, question });
-    const answer = await askPiApi({ prKey: review.pr.key, prompt, purpose }, onDelta);
-    await refreshLogs();
-    return answer;
+    let cancelled = false;
+    const pollActivity = async () => {
+      while (!cancelled) {
+        await sleep(1000);
+        if (cancelled) return;
+        onActivity?.(await loadPiAgentActivity(purpose, null));
+      }
+    };
+    void pollActivity();
+    try {
+      return await askPiApi({ prKey: review.pr.key, prompt, purpose }, onDelta);
+    } finally {
+      cancelled = true;
+      await refreshLogs();
+    }
   }
 
   async function askThread(thread: Thread) {
     if (review == null || thread.draft.trim().length === 0) return;
     const question = thread.draft.trim();
     setThreads((current) => ({ ...current, [thread.key]: { ...thread, asking: true, activity: runningAgentActivity("inline-chat"), draft: "", messages: [...thread.messages, { role: "user", text: question }, { role: "pi", text: "" }] } }));
+    let cancelActivityPolling = () => undefined;
     try {
       const { prompt, purpose } = await buildPiPrompt({ mode: "inline-chat", prKey: review.pr.key, path: thread.target.path, line: thread.target.line, startLine: thread.target.startLine, side: thread.target.side, hunk: thread.target.hunk, question });
+      let cancelled = false;
+      cancelActivityPolling = () => { cancelled = true; };
+      const pollActivity = async () => {
+        while (!cancelled) {
+          await sleep(1000);
+          if (cancelled) return;
+          const activity = await loadPiAgentActivity(purpose, null);
+          setThreads((current) => ({ ...current, [thread.key]: { ...current[thread.key], activity: activity ?? current[thread.key]?.activity ?? null } }));
+        }
+      };
+      void pollActivity();
       const setAnswer = (answer: string) => setThreads((current) => ({ ...current, [thread.key]: { ...current[thread.key], activity: streamingAgentActivity(current[thread.key]?.activity, answer), messages: [...(current[thread.key]?.messages ?? []).slice(0, -1), { role: "pi", text: answer }] } }));
       const answer = await askPiApi({ prKey: review.pr.key, prompt, purpose }, setAnswer);
+      cancelActivityPolling();
       setThreads((current) => ({ ...current, [thread.key]: { ...current[thread.key], asking: false, activity: null, messages: [...(current[thread.key]?.messages ?? []).slice(0, -1), { role: "pi", text: answer }] } }));
       await refreshLogs();
     } catch (err) {
+      cancelActivityPolling();
       const text = `Ask Pi failed: ${err instanceof Error ? err.message : String(err)}`;
       setThreads((current) => ({ ...current, [thread.key]: { ...current[thread.key], asking: false, activity: null, messages: [...(current[thread.key]?.messages ?? []).slice(0, -1), { role: "pi", text }] } }));
     }
@@ -940,6 +973,29 @@ function runningAgentActivity(purpose: string, label = "starting agent"): PiAgen
 function streamingAgentActivity(current: PiAgentActivity | null | undefined, answer: string): PiAgentActivity {
   const now = new Date().toISOString();
   return { ...(current ?? runningAgentActivity("chat")), status: "running", label: answer.length > 0 ? "streaming response" : "thinking", answerChars: answer.length, lastActivityAt: now };
+}
+
+function diagnosticsAgentActivity(session: Record<string, unknown>, fallback: PiAgentActivity | null): PiAgentActivity | null {
+  const state = session.promptState as Record<string, unknown> | null | undefined;
+  if (state == null) return fallback;
+  const activeTools = Array.isArray(session.activeTools) ? session.activeTools.filter((tool): tool is string => typeof tool === "string") : [];
+  const status = typeof state.status === "string" ? state.status as PiAgentActivity["status"] : "running";
+  const label = activeTools.length > 0 ? `using ${activeTools.join(", ")}` : status === "queued" ? "queued" : session.isStreaming === true ? "streaming response" : "thinking";
+  return {
+    purpose: typeof session.purpose === "string" ? session.purpose : fallback?.purpose ?? "chat",
+    status,
+    label,
+    elapsedMs: typeof state.elapsedMs === "number" ? state.elapsedMs : fallback?.elapsedMs ?? 0,
+    idleMs: typeof state.lastActivityAt === "string" ? Date.now() - Date.parse(state.lastActivityAt) : fallback?.idleMs ?? 0,
+    chars: typeof state.chars === "number" ? state.chars : fallback?.chars ?? 0,
+    answerChars: typeof state.answerChars === "number" ? state.answerChars : fallback?.answerChars ?? 0,
+    activeTools,
+    isStreaming: typeof session.isStreaming === "boolean" ? session.isStreaming : fallback?.isStreaming ?? null,
+    queued: session.queued === true || status === "queued",
+    startedAt: typeof state.startedAt === "string" ? state.startedAt : fallback?.startedAt,
+    lastActivityAt: typeof state.lastActivityAt === "string" ? state.lastActivityAt : fallback?.lastActivityAt,
+    error: typeof state.error === "string" ? state.error : fallback?.error,
+  };
 }
 
 function compactDuration(ms: number | null | undefined): string {
@@ -1371,7 +1427,7 @@ function FocusAreaInline({ prUrl, area, active, setActiveFocusAreaId, collapsedF
         setActivity((current) => streamingAgentActivity(current, answer));
         setMessages((current) => [...current.slice(0, -1), { role: "pi", text: answer }]);
       };
-      const answer = await askFocusArea(area, question, setAnswer);
+      const answer = await askFocusArea(area, question, setAnswer, setActivity);
       setMessages((current) => [...current.slice(0, -1), { role: "pi", text: answer }]);
     } catch (err) {
       setMessages((current) => [...current.slice(0, -1), { role: "pi", text: `Ask Pi failed: ${err instanceof Error ? err.message : String(err)}` }]);

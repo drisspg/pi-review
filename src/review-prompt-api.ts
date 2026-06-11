@@ -204,7 +204,7 @@ function inlineChatPrompt(payload: Record<string, unknown>): ReviewPromptRespons
   const question = requiredString(payload, "question");
   return {
     purpose: "inline-chat",
-    prompt: `Review PR ${prKey}. File: ${path}. Lines: ${rangeText(payload)}. Side: ${side}. Hunk: ${hunk}\n\nQuestion: ${question}`,
+    prompt: `Review PR ${prKey}. File: ${path}. Lines: ${rangeText(payload)}. Side: ${side}. Hunk: ${hunk}\n\nAnswer from the visible hunk first and keep it concise. Use tools only if the question cannot be answered from the hunk or asks for broader context.\n\nQuestion: ${question}`,
   };
 }
 
