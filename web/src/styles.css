@@ -1018,8 +1018,8 @@ a { color: var(--link); text-decoration: none; }
 .diff-row.patchset-hunk {
   box-shadow: inset 2px 0 color-mix(in srgb, var(--link) 45%, transparent);
 }
-.diff-row.focus-highlight { background: color-mix(in srgb, var(--attention) 18%, var(--diff-row-bg)); box-shadow: inset 2px 0 color-mix(in srgb, var(--attention) 55%, transparent); }
-.diff-row.focus-highlight-active { background: color-mix(in srgb, var(--attention) 32%, var(--diff-row-bg)); box-shadow: inset 3px 0 var(--attention); }
+.diff-row.focus-highlight { background: color-mix(in srgb, var(--thread-accent) 14%, var(--diff-row-bg)); box-shadow: inset 2px 0 color-mix(in srgb, var(--thread-accent) 55%, transparent); }
+.diff-row.focus-highlight-active { background: color-mix(in srgb, var(--thread-accent) 26%, var(--diff-row-bg)); box-shadow: inset 3px 0 var(--thread-accent); }
 .diff-row.in-thread-range { background: color-mix(in srgb, var(--accent) 18%, var(--diff-row-bg)); box-shadow: inset 2px 0 color-mix(in srgb, var(--accent) 55%, transparent); }
 .diff-row.range-selecting { background: color-mix(in srgb, var(--accent) 22%, var(--diff-row-bg)); }
 
@@ -1203,9 +1203,9 @@ a { color: var(--link); text-decoration: none; }
   max-width: 280px;
   margin: 4px 16px 4px auto;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--attention) 32%, var(--border));
-  background: color-mix(in srgb, var(--attention) 10%, var(--panel));
-  box-shadow: inset 3px 0 var(--attention);
+  border: 1px solid color-mix(in srgb, var(--thread-accent) 30%, var(--border));
+  background: var(--panel);
+  box-shadow: inset 3px 0 color-mix(in srgb, var(--thread-accent) 60%, var(--border));
 }
 
 .inline-thread.focus-area-minimized .thread-head {
@@ -2550,7 +2550,7 @@ button.fold:hover {
 
 .focus-review-note {
   margin: 8px 0 0;
-  color: var(--attention);
+  color: var(--muted);
   font-size: 0.82rem;
 }
 
@@ -2579,15 +2579,15 @@ button.fold:hover {
   align-items: center;
   justify-content: space-between;
   font-size: 0.82rem;
-  color: var(--attention);
+  color: var(--text);
 }
 
 .focus-area-links button {
   display: grid;
   gap: 2px;
   padding: 7px 9px;
-  border-color: color-mix(in srgb, var(--attention) 32%, var(--border));
-  background: color-mix(in srgb, var(--attention) 7%, var(--panel2));
+  border-color: var(--border);
+  background: var(--panel);
   text-align: left;
   flex: 1;
   min-width: 0;
@@ -2618,10 +2618,10 @@ button.fold:hover {
   align-items: center;
   justify-content: center;
   padding: 0 8px;
-  border: 1px solid color-mix(in srgb, var(--attention) 32%, var(--border));
+  border: 1px solid var(--border);
   border-right: none;
   border-radius: 6px 0 0 6px;
-  background: color-mix(in srgb, var(--attention) 4%, var(--panel2));
+  background: var(--panel);
   cursor: pointer;
 }
 
@@ -2640,13 +2640,13 @@ button.fold:hover {
 }
 
 .focus-area-links button:hover {
-  border-color: var(--attention);
-  background: color-mix(in srgb, var(--attention) 12%, var(--panel2));
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: var(--panel2);
 }
 
 .focus-area-links strong {
   overflow: hidden;
-  color: var(--attention);
+  color: var(--text);
   font-size: 0.8rem;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2660,25 +2660,9 @@ button.fold:hover {
   white-space: nowrap;
 }
 
-.focus-area-inline {
-  scroll-margin-block: 120px;
-  border-color: color-mix(in srgb, var(--attention) 45%, var(--border));
-  background: color-mix(in srgb, var(--attention) 8%, var(--panel));
-  box-shadow: inset 3px 0 var(--attention);
-}
-
-.focus-area-inline.active {
-  background: color-mix(in srgb, var(--attention) 14%, var(--panel));
-}
-
+.focus-area-inline,
 .focus-area-collapsed {
   scroll-margin-block: 120px;
-  border-color: color-mix(in srgb, var(--attention) 45%, var(--border));
-  box-shadow: inset 3px 0 var(--attention);
-}
-
-.focus-area-inline .thread-head strong {
-  color: var(--attention);
 }
 
 .focus-area-list {
@@ -3880,32 +3864,11 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
   background: var(--panel2);
 }
 
-.focus-area-links-head {
-  color: var(--text);
-}
-
-.focus-area-links button,
-.focus-area-link-row.viewed button,
-.focus-area-check,
-.focus-area-link-row.viewed .focus-area-check {
-  border-color: var(--border);
-  background: var(--panel);
-}
-
-.focus-area-links button:hover {
-  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
-  background: var(--panel2);
-}
-
-.focus-area-links strong {
-  color: var(--text);
-}
-
 .focus-area-inline,
 .focus-area-collapsed {
-  border-color: var(--border);
+  border-color: color-mix(in srgb, var(--thread-accent) 30%, var(--border));
   background: var(--panel);
-  box-shadow: inset 3px 0 var(--border);
+  box-shadow: inset 3px 0 color-mix(in srgb, var(--thread-accent) 60%, var(--border));
 }
 
 .focus-area-inline.active {
