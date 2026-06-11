@@ -291,6 +291,22 @@ a { color: var(--link); text-decoration: none; }
   box-sizing: border-box;
 }
 
+.toolbar-icon {
+  width: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.toolbar-codewalk {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .toolbar-link {
   display: inline-flex;
   align-items: center;
@@ -2735,6 +2751,11 @@ button.fold:hover {
 .ai-chat-message.user {
   background: color-mix(in srgb, var(--accent) 7%, var(--panel));
   border-left-color: color-mix(in srgb, var(--accent) 65%, var(--border));
+}
+
+.ai-chat-message.pi,
+.ai-chat-message.assistant {
+  border-left-color: color-mix(in srgb, var(--thread-accent) 60%, var(--border));
 }
 
 .ai-chat-message.general-review {
