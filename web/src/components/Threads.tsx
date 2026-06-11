@@ -3,6 +3,7 @@ import { ChevronDownIcon, ChevronRightIcon, LinkExternalIcon } from "@primer/oct
 
 import { api } from "../api";
 import { Button } from "./Button";
+import { autoGrowTextarea } from "../lib/dom";
 import { commentTarget, commentThreadDomId, groupReviewComments, targetLabel } from "../lib/comments";
 import type { PullIssueComment, PullRequestReviewSummary, PullReviewComment } from "../types";
 import { MarkdownText } from "./Markdown";
@@ -81,7 +82,7 @@ function GitHubCommentView({ comment, commentKind, prUrl, refreshGithubActivity 
       setSubmitting(false);
     }
   }
-  return <div className="github-comment" style={{ "--commenter": commenterColor(login) } as React.CSSProperties}><div className="avatar" aria-hidden="true">{avatarLabel(login)}</div><div className="github-comment-body"><div className="github-comment-header"><strong>@{login}</strong><Button variant="muted" className="small-muted-button" onClick={() => { setBody(comment.body); setEditing(!editing); }}>{editing ? "Cancel" : "Edit"}</Button></div>{editing ? <div className="thread-reply github-comment-edit"><textarea value={body} onChange={(event) => setBody(event.target.value)} aria-label="Edit comment" /><Button variant="muted" onClick={() => void saveEdit()} disabled={submitting || body.trim().length === 0}>{submitting ? "Saving…" : "Save"}</Button></div> : <MarkdownText text={body} />}</div></div>;
+  return <div className="github-comment" style={{ "--commenter": commenterColor(login) } as React.CSSProperties}><div className="avatar" aria-hidden="true">{avatarLabel(login)}</div><div className="github-comment-body"><div className="github-comment-header"><strong>@{login}</strong><Button variant="muted" className="small-muted-button" onClick={() => { setBody(comment.body); setEditing(!editing); }}>{editing ? "Cancel" : "Edit"}</Button></div>{editing ? <div className="thread-reply github-comment-edit"><textarea rows={1} value={body} onChange={(event) => setBody(event.target.value)} onInput={(event) => autoGrowTextarea(event.currentTarget)} aria-label="Edit comment" /><Button variant="muted" onClick={() => void saveEdit()} disabled={submitting || body.trim().length === 0}>{submitting ? "Saving…" : "Save"}</Button></div> : <MarkdownText text={body} />}</div></div>;
 }
 
 function GitHubThreadCard({ id, className = "comment", title, subtitle, status, href, comments, commentKind, prUrl, refreshGithubActivity, reply, collapseSignal = 0, collapseComments = true, onJump }: { id?: string; className?: string; title: string; subtitle: string; status?: string | null; href: string; comments: Array<PullReviewComment | PullIssueComment | PullRequestReviewSummary>; commentKind: "issue" | "review" | "review-summary"; prUrl: string; refreshGithubActivity: () => Promise<void>; reply?: React.ReactNode; collapseSignal?: number; collapseComments?: boolean; onJump?: () => void }) {
@@ -119,7 +120,7 @@ function ThreadReplyBox({ prUrl, kind, commentId, refreshGithubActivity }: { prU
       setSubmitting(false);
     }
   }
-  return <div className="thread-reply thread-reply-box"><textarea value={body} onChange={(event) => setBody(event.target.value)} placeholder="Reply…" aria-label="Reply to thread" /><Button variant="muted" onClick={() => void submitReply()} disabled={submitting || body.trim().length === 0}>{submitting ? "Replying…" : "Reply"}</Button></div>;
+  return <div className="thread-reply thread-reply-box"><textarea rows={1} value={body} onChange={(event) => setBody(event.target.value)} onInput={(event) => autoGrowTextarea(event.currentTarget)} placeholder="Reply…" aria-label="Reply to thread" /><Button variant="muted" onClick={() => void submitReply()} disabled={submitting || body.trim().length === 0}>{submitting ? "Replying…" : "Reply"}</Button></div>;
 }
 
 export function ExistingComments({ prUrl, comments, issueComments, reviewSummaries, refreshGithubActivity, collapseSignal, commentsCollapsed, toggleAllComments, onJumpToComment }: { prUrl: string; comments: PullReviewComment[]; issueComments: PullIssueComment[]; reviewSummaries: PullRequestReviewSummary[]; refreshGithubActivity: () => Promise<void>; collapseSignal: number; commentsCollapsed: boolean; toggleAllComments: () => void; onJumpToComment?: (target: ReturnType<typeof commentTarget>) => void }) {

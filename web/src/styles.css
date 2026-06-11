@@ -308,7 +308,7 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .open-form button,
-.composer .actions button:first-child,
+.composer .actions button.composer-primary,
 .panel > button:last-child:not(.review-submit) {
   background: var(--accent);
   border-color: var(--accent);
@@ -1062,25 +1062,37 @@ a { color: var(--link); text-decoration: none; }
 .inline-thread.collapsed {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   width: fit-content;
-  max-width: 280px;
-  margin: 0.15rem 16px 0.15rem auto;
-  padding: 0.15rem 0.55rem;
+  max-width: 320px;
+  margin: 4px 16px 4px auto;
+  padding: 3px 10px;
   text-align: left;
   color: var(--muted);
-  font-size: 0.78rem;
-  background: transparent;
-  border-color: color-mix(in srgb, var(--thread-accent) 25%, var(--border));
-  border-style: dashed;
+  font-size: 0.76rem;
+  background: color-mix(in srgb, var(--thread-accent) 6%, var(--panel));
+  border-color: color-mix(in srgb, var(--thread-accent) 30%, var(--border));
+  border-radius: 999px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+.inline-thread.collapsed > svg {
+  flex-shrink: 0;
+  color: color-mix(in srgb, var(--thread-accent) 55%, var(--muted));
+}
+
+.collapsed-pill-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
 .inline-thread.collapsed:hover {
-  background: var(--thread-bg);
-  border-style: solid;
+  background: color-mix(in srgb, var(--thread-accent) 14%, var(--panel));
+  border-color: color-mix(in srgb, var(--thread-accent) 45%, var(--border));
   color: var(--text);
 }
 
@@ -1155,12 +1167,11 @@ a { color: var(--link); text-decoration: none; }
   right: 16px;
   top: 0;
   min-height: 0;
-  padding: 1px 6px;
+  padding: 2px 8px;
   background: color-mix(in srgb, var(--thread-accent) 18%, var(--panel));
   border: 1px solid color-mix(in srgb, var(--thread-accent) 32%, var(--border));
   border-top: none;
   border-radius: 0 0 6px 6px;
-  width: 96px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
 }
 
@@ -1478,12 +1489,18 @@ a { color: var(--link); text-decoration: none; }
   align-items: center;
   gap: 6px;
   justify-content: space-between;
-  padding: 7px 10px;
+  min-height: 32px;
+  padding: 4px 10px;
   border-bottom: 1px solid var(--border);
   border-radius: 6px 6px 0 0;
   background: var(--panel2);
   color: var(--muted);
   font-size: 0.8rem;
+}
+
+.github-comment-header strong {
+  color: var(--text);
+  font-weight: 600;
 }
 
 .github-comment-body .markdown {
@@ -1492,6 +1509,49 @@ a { color: var(--link); text-decoration: none; }
 
 .local-thread > .local-comment-timeline {
   padding-bottom: 0;
+}
+
+.local-thread {
+  margin-left: 64px;
+}
+
+.local-thread > .thread-head {
+  padding: 5px 10px;
+}
+
+.local-thread .thread-head .thread-title {
+  flex-wrap: nowrap;
+  gap: 6px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.local-thread .thread-head .thread-title strong {
+  flex-shrink: 0;
+  font-size: 0.82rem;
+}
+
+.local-thread .thread-head .thread-title span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-thread > .composer {
+  margin: 0;
+  padding: 8px 10px;
+}
+
+.local-thread .composer textarea,
+.focus-area-inline .composer textarea {
+  min-height: 34px;
+}
+
+.local-thread .composer .actions button,
+.focus-area-inline .composer .actions button {
+  min-height: 28px;
+  padding: 0 0.7rem;
+  font-size: 0.82rem;
 }
 
 .local-comment .github-comment-header {
@@ -1511,10 +1571,6 @@ a { color: var(--link); text-decoration: none; }
 
 .github-comment-edit {
   padding: 10px;
-}
-
-.thread-reply textarea {
-  min-height: 64px;
 }
 
 .side .thread-reply {
@@ -1572,13 +1628,15 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .thread-reply textarea {
-  min-height: 38px;
-  padding: 8px 10px;
-  resize: vertical;
+  min-height: 34px;
+  height: auto;
+  padding: 6px 8px;
+  resize: none;
+  overflow: hidden;
 }
 
 .thread-reply button {
-  min-height: 38px;
+  min-height: 34px;
 }
 
 .thread-head > div:not(.thread-title):not(.actions) {
@@ -1726,18 +1784,21 @@ a { color: var(--link); text-decoration: none; }
 
 .composer {
   display: grid;
-  gap: 10px;
-  padding: 10px;
+  gap: 8px;
+  padding: 8px;
   border-top: 1px solid var(--border);
   background: color-mix(in srgb, var(--panel2) 72%, var(--panel));
   border-radius: 0 0 6px 6px;
 }
 
 .composer textarea {
-  min-height: 112px;
+  min-height: 0;
+  height: auto;
+  padding: 6px 8px;
   background: var(--panel);
   border-color: color-mix(in srgb, var(--accent) 22%, var(--border));
   line-height: 1.45;
+  overflow: hidden;
 }
 
 .composer textarea:focus {
@@ -1749,19 +1810,11 @@ a { color: var(--link); text-decoration: none; }
   justify-content: flex-end;
 }
 
-
-.thread-head, .actions {
+.actions {
   display: flex;
   justify-content: space-between;
   gap: 8px;
   align-items: center;
-}
-
-.thread-head {
-  flex-wrap: wrap;
-}
-
-.actions {
   flex-wrap: nowrap;
   flex-shrink: 0;
 }
@@ -1877,7 +1930,7 @@ button.fold.neighbor:hover {
 
 .draft-card {
   border: 1px solid color-mix(in srgb, var(--thread-accent) 30%, var(--border));
-  border-radius: 8px;
+  border-radius: 6px;
   background: color-mix(in srgb, var(--thread-accent) 5%, var(--panel2));
   padding: 8px 10px;
   display: grid;
