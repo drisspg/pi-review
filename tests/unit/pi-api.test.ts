@@ -4,7 +4,7 @@ import test from "node:test";
 import { createPiApi } from "../../src/pi-api.js";
 import type { PiJob, PiJobRunner } from "../../src/pi-jobs.js";
 
-const runningJob: PiJob = { id: "job-1", prKey: "pr", status: "running", startedAt: "now" };
+const runningJob: PiJob = { id: "job-1", prKey: "pr", purpose: "main-review", status: "running", startedAt: "now" };
 
 function fakeDeps() {
   const calls: string[] = [];
@@ -24,6 +24,10 @@ function fakeDeps() {
       async askPi(prKey: string, prompt: string, purpose?: string) {
         calls.push(`ask:${prKey}:${prompt}:${purpose}`);
         return "answer";
+      },
+      async piActivity(prKey: string, purpose?: string) {
+        calls.push(`activity:${prKey}:${purpose}`);
+        return { purpose: purpose ?? "chat", status: "running" as const, label: "thinking", elapsedMs: 1200, idleMs: 200, chars: 10, answerChars: 0, activeTools: [], isStreaming: false, queued: false };
       },
       async piDiagnostics(prKey: string) {
         calls.push(`diagnostics:${prKey}`);
@@ -50,8 +54,8 @@ test("Pi API starts and reads review jobs", async () => {
   const api = createPiApi(deps);
 
   assert.deepEqual(await api.startReviewJob({ prKey: "pr", prompt: "prompt" }, "main-review"), { job: runningJob });
-  assert.deepEqual(await api.jobStatus({ jobId: "job-1" }), { job: runningJob });
-  assert.deepEqual(calls, ["start:pr:prompt:main-review", "get:job-1"]);
+  assert.deepEqual(await api.jobStatus({ jobId: "job-1" }), { job: { ...runningJob, activity: { purpose: "main-review", status: "running", label: "thinking", elapsedMs: 1200, idleMs: 200, chars: 10, answerChars: 0, activeTools: [], isStreaming: false, queued: false } } });
+  assert.deepEqual(calls, ["start:pr:prompt:main-review", "get:job-1", "activity:pr:main-review"]);
 });
 
 test("Pi API diagnostics and model routes delegate with validation", async () => {

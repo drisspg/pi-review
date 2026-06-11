@@ -2257,6 +2257,42 @@ button.fold.neighbor {
   line-height: 1.35;
 }
 
+.agent-activity {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-activity-pulse {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 36%, transparent);
+  animation: agent-activity-pulse 1.3s ease-out infinite;
+}
+
+.agent-activity.quiet .agent-activity-pulse {
+  background: var(--attention);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--attention) 36%, transparent);
+}
+
+.agent-activity.stale .agent-activity-pulse {
+  background: var(--danger);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 36%, transparent);
+}
+
+@keyframes agent-activity-pulse {
+  70% { box-shadow: 0 0 0 6px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
 .pi-history-list {
   display: grid;
   gap: 6px;

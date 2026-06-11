@@ -12,7 +12,7 @@ import { addIssueComment, editIssueComment, editReviewComment, editReviewSummary
 import { logger } from "./logger.js";
 import { createPiApi } from "./pi-api.js";
 import { createPiJobRunner } from "./pi-jobs.js";
-import { askPi, disposePiSession, disposePiSessions, piDiagnostics, prewarmPiSession, registerPiSessionCwd, setPiModel } from "./pi-session.js";
+import { askPi, disposePiSession, disposePiSessions, piActivity, piDiagnostics, prewarmPiSession, registerPiSessionCwd, setPiModel } from "./pi-session.js";
 import { createPrApi, defaultPrApiDeps } from "./pr-api.js";
 import { createReviewMemoryApi } from "./review-memory-api.js";
 import { createReviewPromptApi } from "./review-prompt-api.js";
@@ -33,7 +33,7 @@ const commentApi = createCommentApi(defaultCommentApiDeps({ addIssueComment, edi
 const fileApi = createFileApi(defaultFileApiDeps(fetchFileText, setFileViewed, async (url) => {
   await execFileAsync("open", [url]);
 }));
-const piApi = createPiApi({ askPi, piDiagnostics, piJobRunner, setPiModel });
+const piApi = createPiApi({ askPi, piActivity, piDiagnostics, piJobRunner, setPiModel });
 const prApi = createPrApi(defaultPrApiDeps({ cleanupPrWorktree, disposePiSession, fetchPullRequestReviewData, listAiReviews, listFocusScans, preparePrWorktree, prewarmPiSession, registerPiSessionCwd, removePullRequest, upsertPullRequest }));
 const reviewMemoryApi = createReviewMemoryApi({ askPi, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewMemory, saveReviewProfile });
 const reviewPromptApi = createReviewPromptApi({ currentReviewMemoryPrompt });

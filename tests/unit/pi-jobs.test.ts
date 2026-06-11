@@ -16,11 +16,11 @@ test("Pi job runner starts running jobs and records successful completion", asyn
   }, { newId: () => "job-1", now: () => "2026-06-04T00:00:00.000Z" });
 
   const job = runner.startJob("github.com/pytorch/pytorch#1", "review this", "main-review");
-  assert.deepEqual(job, { id: "job-1", prKey: "github.com/pytorch/pytorch#1", status: "running", startedAt: "2026-06-04T00:00:00.000Z" });
+  assert.deepEqual(job, { id: "job-1", prKey: "github.com/pytorch/pytorch#1", purpose: "main-review", status: "running", startedAt: "2026-06-04T00:00:00.000Z" });
   assert.deepEqual(calls, [["github.com/pytorch/pytorch#1", "review this", "main-review"]]);
 
   await flushMicrotasks();
-  assert.deepEqual(runner.getJob("job-1"), { id: "job-1", prKey: "github.com/pytorch/pytorch#1", status: "complete", answer: "done", startedAt: "2026-06-04T00:00:00.000Z", finishedAt: "2026-06-04T00:00:00.000Z" });
+  assert.deepEqual(runner.getJob("job-1"), { id: "job-1", prKey: "github.com/pytorch/pytorch#1", purpose: "main-review", status: "complete", answer: "done", startedAt: "2026-06-04T00:00:00.000Z", finishedAt: "2026-06-04T00:00:00.000Z" });
 });
 
 test("Pi job runner records failures without throwing from start", async () => {
@@ -32,7 +32,7 @@ test("Pi job runner records failures without throwing from start", async () => {
   assert.equal(job.status, "running");
 
   await flushMicrotasks();
-  assert.deepEqual(runner.getJob("job-2"), { id: "job-2", prKey: "github.com/pytorch/pytorch#1", status: "failed", error: "model failed", startedAt: "2026-06-04T00:00:00.000Z", finishedAt: "2026-06-04T00:00:00.000Z" });
+  assert.deepEqual(runner.getJob("job-2"), { id: "job-2", prKey: "github.com/pytorch/pytorch#1", purpose: "focus-review", status: "failed", error: "model failed", startedAt: "2026-06-04T00:00:00.000Z", finishedAt: "2026-06-04T00:00:00.000Z" });
 });
 
 test("Pi job runner returns null for unknown jobs", () => {

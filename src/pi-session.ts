@@ -52,7 +52,25 @@ const sessions = new Map<string, Promise<SessionRecord>>();
 const cwdByPr = new Map<string, string>();
 const lastPromptByPr = new Map<string, { chars: number; preview: string; startedAt: string }>();
 const promptQueueByPr = new Map<string, Promise<void>>();
-const promptStateByPr = new Map<string, { status: "queued" | "running" | "complete" | "failed"; purpose: string; chars: number; queuedAt: string; startedAt?: string; finishedAt?: string; answerChars?: number; error?: string }>();
+type PromptState = { status: "queued" | "running" | "complete" | "failed"; purpose: string; chars: number; queuedAt: string; startedAt?: string; finishedAt?: string; answerChars?: number; error?: string; lastActivityAt?: string };
+
+export type PiActivity = {
+  purpose: string;
+  status: "queued" | "running" | "complete" | "failed" | "idle";
+  label: string;
+  elapsedMs: number;
+  idleMs: number | null;
+  chars: number;
+  answerChars: number;
+  activeTools: string[];
+  isStreaming: boolean | null;
+  queued: boolean;
+  startedAt?: string;
+  lastActivityAt?: string;
+  error?: string;
+};
+
+const promptStateByPr = new Map<string, PromptState>();
 
 function safe(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "unknown";
@@ -119,6 +137,49 @@ function modelLabel(model: SessionRecord["model"]): string | null {
   if (model == null) return null;
   if (model.provider != null && model.id != null) return `${model.provider}/${model.id}`;
   return model.id ?? ([model.provider, model.name].filter(Boolean).join("/") || null);
+}
+
+function elapsedMsSince(iso: string | undefined, now = Date.now()): number {
+  if (iso == null) return 0;
+  const then = Date.parse(iso);
+  return Number.isFinite(then) ? Math.max(0, now - then) : 0;
+}
+
+function activityLabel(state: PromptState | null, activeTools: string[], isStreaming: boolean | null): string {
+  if (state == null) return "idle";
+  if (state.status === "queued") return "queued";
+  if (state.status === "failed") return "failed";
+  if (state.status === "complete") return "complete";
+  if (activeTools.length > 0) return `using ${activeTools.join(", ")}`;
+  if (isStreaming === true) return "streaming response";
+  return "thinking";
+}
+
+export async function piActivity(prKey: string, purpose = "chat"): Promise<PiActivity> {
+  const key = sessionKeyForPr(prKey, purpose);
+  const state = promptStateByPr.get(key) ?? null;
+  const sessionPromise = sessions.get(key);
+  const settled = sessionPromise == null ? { status: "missing" as const } : await Promise.race([sessionPromise.then((value) => ({ status: "ready" as const, value })), new Promise<{ status: "creating" }>((resolveCreating) => setTimeout(() => resolveCreating({ status: "creating" }), 0))]);
+  const activeTools = settled.status === "ready" ? settled.value.getActiveToolNames?.() ?? [] : [];
+  const isStreaming = settled.status === "ready" ? settled.value.isStreaming ?? null : null;
+  const now = Date.now();
+  const startedAt = state?.startedAt ?? state?.queuedAt;
+  const lastActivityAt = state?.lastActivityAt ?? startedAt;
+  return {
+    purpose,
+    status: state?.status ?? "idle",
+    label: activityLabel(state, activeTools, isStreaming),
+    elapsedMs: elapsedMsSince(startedAt, now),
+    idleMs: state?.status === "running" || state?.status === "queued" ? elapsedMsSince(lastActivityAt, now) : null,
+    chars: state?.chars ?? 0,
+    answerChars: state?.answerChars ?? 0,
+    activeTools,
+    isStreaming,
+    queued: promptQueueByPr.has(key) || state?.status === "queued",
+    startedAt,
+    lastActivityAt,
+    error: state?.error,
+  };
 }
 
 export async function piDiagnostics(prKey: string): Promise<Record<string, unknown>> {
@@ -240,6 +301,9 @@ async function runPiPrompt(prKey: string, prompt: string, purpose = "chat", onDe
   let latestAssistantText = "";
   let latestAssistantError: string | null = null;
   const unsubscribe = session.subscribe((event) => {
+    const now = new Date().toISOString();
+    const previousState = promptStateByPr.get(sessionKey);
+    if (previousState != null) promptStateByPr.set(sessionKey, { ...previousState, lastActivityAt: now });
     const message = messageFromEvent(event);
     const assistantText = textFromMessage(message);
     if (assistantText.trim().length > 0) latestAssistantText = assistantText;
@@ -247,6 +311,8 @@ async function runPiPrompt(prKey: string, prompt: string, purpose = "chat", onDe
     const delta = textDeltaFromEvent(event);
     if (delta.length === 0) return;
     answer += delta;
+    const state = promptStateByPr.get(sessionKey);
+    if (state != null) promptStateByPr.set(sessionKey, { ...state, answerChars: answer.length, lastActivityAt: now });
     onDelta?.(delta);
   });
   lastPromptByPr.set(sessionKey, { chars: prompt.length, preview: prompt.slice(0, 1600), startedAt: new Date().toISOString() });
@@ -268,14 +334,16 @@ async function runPiPrompt(prKey: string, prompt: string, purpose = "chat", onDe
 export async function askPi(prKey: string, prompt: string, purpose = "chat", onDelta?: (delta: string) => void): Promise<string> {
   const sessionKey = sessionKeyForPr(prKey, purpose);
   const previous = promptQueueByPr.get(sessionKey) ?? Promise.resolve();
-  promptStateByPr.set(sessionKey, { status: "queued", purpose, chars: prompt.length, queuedAt: new Date().toISOString() });
+  const queuedAt = new Date().toISOString();
+  promptStateByPr.set(sessionKey, { status: "queued", purpose, chars: prompt.length, queuedAt, lastActivityAt: queuedAt });
   let releaseQueue: () => void = () => undefined;
   const queued = previous.catch(() => undefined).then(() => new Promise<void>((resolveQueue) => {
     releaseQueue = resolveQueue;
   }));
   promptQueueByPr.set(sessionKey, queued);
   await previous.catch(() => undefined);
-  promptStateByPr.set(sessionKey, { status: "running", purpose, chars: prompt.length, queuedAt: promptStateByPr.get(sessionKey)?.queuedAt ?? new Date().toISOString(), startedAt: new Date().toISOString() });
+  const startedAt = new Date().toISOString();
+  promptStateByPr.set(sessionKey, { status: "running", purpose, chars: prompt.length, queuedAt: promptStateByPr.get(sessionKey)?.queuedAt ?? startedAt, startedAt, lastActivityAt: startedAt });
   try {
     const answer = await runPiPrompt(prKey, prompt, purpose, onDelta);
     promptStateByPr.set(sessionKey, { ...promptStateByPr.get(sessionKey)!, status: "complete", finishedAt: new Date().toISOString(), answerChars: answer.length });

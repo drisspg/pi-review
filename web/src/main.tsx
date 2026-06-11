@@ -10,7 +10,7 @@ import { commentTarget, commentThreadDomId, draftMatchesTarget, groupReviewComme
 import { contextRowsFromText, hunkNewStart, isTargetInSelection, lastNewLine, parsePatchRows, parsePatchSetSections, targetFromPoint, targetFromRow } from "./lib/diff";
 import { languageForPath } from "./lib/highlight";
 import { newId, prUrlFromKey, shortSha } from "./lib/pr";
-import type { AiReview, AiReviewMessage, AiReviewRecord, DiffRow, DraftComment, DragSelection, FileReviewState, FlowDag, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, GpuWorkspace, GpuWorkspaceContract, GpuWorkspaceExecResult, LogEntry, OpenResponse, PullFile, PullIssueComment, PullReviewComment, ReviewMemoryRecord, ReviewMemoryResponse, StoredPullRequest, Target, ThemeName, Thread } from "./types";
+import type { AiReview, AiReviewMessage, AiReviewRecord, DiffRow, DraftComment, DragSelection, FileReviewState, FlowDag, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, GpuWorkspace, GpuWorkspaceContract, GpuWorkspaceExecResult, LogEntry, OpenResponse, PiAgentActivity, PullFile, PullIssueComment, PullReviewComment, ReviewMemoryRecord, ReviewMemoryResponse, StoredPullRequest, Target, ThemeName, Thread } from "./types";
 import "./styles.css";
 
 type DiffViewMode = "unified" | "split";
@@ -681,7 +681,7 @@ function App() {
   }
 
   async function runAiReviewFor(targetReview: OpenResponse, background: boolean) {
-    setAiReview((current) => ({ ...current, open: !background || current.open, expanded: !background || current.expanded, running: true, text: background ? current.text : "", messages: background ? current.messages : [] }));
+    setAiReview((current) => ({ ...current, open: !background || current.open, expanded: !background || current.expanded, running: true, text: background ? current.text : "", messages: background ? current.messages : [], activity: null }));
     const visibleAiReview = targetReview.pr.key === review?.pr.key ? currentGeneralReviewText(aiReview) : "";
     const previousAiReview = visibleAiReview || targetReview.aiReview?.answer.trim() || "No previous full review is stored.";
     const previousFocusAreas = targetReview.focusScan == null ? "No previous focus scan findings are stored." : focusScanHistoryPrompt(targetReview.focusScan.answer, targetReview.focusScan.areaStates);
@@ -690,21 +690,24 @@ function App() {
       const { job } = await api<{ job: { id: string } }>("/api/pi/review", { method: "POST", body: JSON.stringify({ prKey: targetReview.pr.key, prompt }) });
       for (;;) {
         await sleep(800);
-        const { job: status } = await api<{ job: { status: "running" | "complete" | "failed"; answer?: string; error?: string } }>("/api/pi/review/status", { method: "POST", body: JSON.stringify({ jobId: job.id }) });
-        if (status.status === "running") continue;
+        const { job: status } = await api<{ job: { status: "running" | "complete" | "failed"; answer?: string; error?: string; activity?: PiAgentActivity } }>("/api/pi/review/status", { method: "POST", body: JSON.stringify({ jobId: job.id }) });
+        if (status.status === "running") {
+          if (activeReviewKeyRef.current === targetReview.pr.key) setAiReview((current) => ({ ...current, activity: status.activity ?? current.activity ?? null }));
+          continue;
+        }
         if (activeReviewKeyRef.current !== targetReview.pr.key) return;
         if (status.status === "failed") throw new Error(status.error ?? "AI review failed");
         if (status.status !== "complete") throw new Error("AI review returned an unknown job status");
         const answer = status.answer ?? "AI review completed without output.";
         const nextMessages: AiReviewMessage[] = [generalReviewMessage(answer)];
-        setAiReview((current) => ({ ...current, open: !background || current.open, expanded: !background || current.expanded, running: false, text: answer, messages: nextMessages }));
+        setAiReview((current) => ({ ...current, open: !background || current.open, expanded: !background || current.expanded, running: false, text: answer, messages: nextMessages, activity: null }));
         void saveAiReviewFor(targetReview, answer, nextMessages, null);
         break;
       }
     } catch (err) {
       if (activeReviewKeyRef.current !== targetReview.pr.key) return;
       const text = `AI review failed: ${err instanceof Error ? err.message : String(err)}`;
-      setAiReview((current) => ({ ...current, open: !background || current.open, expanded: !background || current.expanded, running: false, text, messages: [...current.messages, { role: "pi", kind: "chat", text, title: "Review failed" }] }));
+      setAiReview((current) => ({ ...current, open: !background || current.open, expanded: !background || current.expanded, running: false, text, messages: [...current.messages, { role: "pi", kind: "chat", text, title: "Review failed" }], activity: null }));
     }
   }
 
@@ -738,7 +741,7 @@ function App() {
   }
 
   async function runFocusReviewFor(targetReview: OpenResponse, background: boolean) {
-    setFocusReview((current) => ({ ...current, open: !background || current.open, running: true, text: background ? current.text : "" }));
+    setFocusReview((current) => ({ ...current, open: !background || current.open, running: true, text: background ? current.text : "", activity: null }));
     if (!background) {
       setViewedFocusAreaIds({});
       setActiveFocusAreaId(null);
@@ -751,8 +754,11 @@ function App() {
       const { job } = await api<{ job: { id: string } }>("/api/pi/focus-review", { method: "POST", body: JSON.stringify({ prKey: targetReview.pr.key, prompt }) });
       for (;;) {
         await sleep(800);
-        const { job: status } = await api<{ job: { status: "running" | "complete" | "failed"; answer?: string; error?: string } }>("/api/pi/focus-review/status", { method: "POST", body: JSON.stringify({ jobId: job.id }) });
-        if (status.status === "running") continue;
+        const { job: status } = await api<{ job: { status: "running" | "complete" | "failed"; answer?: string; error?: string; activity?: PiAgentActivity } }>("/api/pi/focus-review/status", { method: "POST", body: JSON.stringify({ jobId: job.id }) });
+        if (status.status === "running") {
+          if (activeReviewKeyRef.current === targetReview.pr.key) setFocusReview((current) => ({ ...current, activity: status.activity ?? current.activity ?? null }));
+          continue;
+        }
         if (activeReviewKeyRef.current !== targetReview.pr.key) return;
         if (status.status === "failed") throw new Error(status.error ?? "Focus review failed");
         if (status.status !== "complete") throw new Error("Focus review returned an unknown job status");
@@ -761,7 +767,7 @@ function App() {
         const inheritedStates = statesFromFocusAreas(focusAreas, viewedFocusAreaIds, collapsedFocusAreaIds);
         const nextViewedIds = idsFromFocusStates(nextAreas, inheritedStates, "viewed");
         const nextCollapsedIds = idsFromFocusStates(nextAreas, inheritedStates, "collapsed");
-        setFocusReview((current) => ({ ...current, open: !background || current.open, running: false, text: answer }));
+        setFocusReview((current) => ({ ...current, open: !background || current.open, running: false, text: answer, activity: null }));
         setViewedFocusAreaIds(nextViewedIds);
         setCollapsedFocusAreaIds(nextCollapsedIds);
         setActiveFocusAreaId(nextAreas[0]?.id ?? null);
@@ -771,7 +777,7 @@ function App() {
     } catch (err) {
       if (activeReviewKeyRef.current !== targetReview.pr.key) return;
       const text = `Focus review failed: ${err instanceof Error ? err.message : String(err)}`;
-      setFocusReview((current) => ({ ...current, open: !background || current.open, running: false, text }));
+      setFocusReview((current) => ({ ...current, open: !background || current.open, running: false, text, activity: null }));
     }
   }
 
@@ -924,6 +930,32 @@ function PrCard({ pr, openPr, cleanupPr }: { pr: StoredPullRequest; openPr: (inp
     </a>
     <button className="trash-button" title="Remove saved PR and cleanup worktree" onClick={() => void cleanupPr(pr)}>🗑</button>
   </article>;
+}
+
+function compactDuration(ms: number | null | undefined): string {
+  if (ms == null || !Number.isFinite(ms)) return "—";
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  if (minutes < 60) return remainder === 0 ? `${minutes}m` : `${minutes}m ${remainder}s`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m`;
+}
+
+function agentActivityTone(activity: PiAgentActivity | null | undefined): "working" | "quiet" | "stale" {
+  const idleMs = activity?.idleMs ?? 0;
+  if (idleMs > 120_000) return "stale";
+  if (idleMs > 45_000) return "quiet";
+  return "working";
+}
+
+function agentActivityText(activity: PiAgentActivity | null | undefined): string {
+  if (activity == null) return "Starting agent…";
+  const parts = [activity.label, `${compactDuration(activity.elapsedMs)} elapsed`];
+  if (activity.idleMs != null) parts.push(`${compactDuration(activity.idleMs)} quiet`);
+  if (activity.answerChars > 0) parts.push(`${activity.answerChars.toLocaleString()} chars`);
+  return parts.join(" · ");
 }
 
 function relativeTime(iso: string | null | undefined): string {
@@ -1364,6 +1396,10 @@ function ReviewSummary({ drafts, setDrafts, editingDraftId, setEditingDraftId, s
   return <section className="panel"><h2>Draft review</h2><select className={`review-event ${event.toLowerCase().replace("_", "-")}`} value={event} onChange={(change) => { setEvent(change.target.value as typeof event); setSubmitted(false); }}><option value="COMMENT">Not reviewed</option><option value="APPROVE">Approve</option><option value="REQUEST_CHANGES">Request changes</option></select><textarea value={body} onChange={(change) => { setBody(change.target.value); setSubmitted(false); }} placeholder="Overall review body" />{drafts.length === 0 ? <p className="muted">{showSubmitted ? "Review submitted." : "No draft comments yet."}</p> : drafts.map((draft, index) => <DraftView key={draft.id} draft={draft} index={index} invalid={invalidDraftIds[draft.id] === true} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} onJump={onJumpToDraft != null ? () => onJumpToDraft(draft) : undefined} />)}<button className={`review-submit ${event.toLowerCase().replace("_", "-")}`} disabled={submitting || !hasReviewContent} onClick={() => void handleSubmit()}>{submitting ? "Submitting…" : showSubmitted ? "Review submitted" : `Submit review (${drafts.length})`}</button></section>;
 }
 
+function AgentActivityLine({ activity }: { activity: PiAgentActivity | null | undefined }) {
+  return <span className={`agent-activity ${agentActivityTone(activity)}`} role="status"><span className="agent-activity-pulse" aria-hidden="true" />{agentActivityText(activity)}</span>;
+}
+
 function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiReviewRecord, runReview, sendMessage, focusReview, focusScanHistory, focusScanId, showFocusScanRecord, runFocusReview, focusAreas, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds, viewedFocusIds, setViewedFocusIds, saveFocusScan, openFiles, setOpenFiles }: PiPanelProps & { prUrl: string; focusAreas: FocusArea[]; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"]; openFiles: Record<string, boolean>; setOpenFiles: (open: Record<string, boolean>) => void }) {
   const [draftsByRecord, setDraftsByRecord] = useState<Record<string, string>>({});
   const draftKey = aiReviewId ?? "__pending__";
@@ -1459,12 +1495,12 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
     <div className="pi-actions">
       <div className="pi-action">
         <Button className="focus-review-run" onClick={() => void runFocusReview()} disabled={focusReview.running}>{focusReview.running ? "Scanning…" : focusReview.text.length > 0 ? "Refresh focus scan" : "Focus scan"}</Button>
-        <span className="muted">Find specific lines worth deeper review. Refresh saves each pass to quiet history.</span>
+        {focusReview.running ? <AgentActivityLine activity={focusReview.activity} /> : <span className="muted">Find specific lines worth deeper review. Refresh saves each pass to quiet history.</span>}
         {focusScanHistory.length > 1 && <details className="pi-history-compact"><summary>Focus scan history ({focusScanHistory.length})</summary><div className="pi-history-picker"><select aria-label="Focus scan history" value={selectedFocusScanId} onChange={(event) => showFocusScanRecord(focusScanHistory.find((record) => record.id === event.target.value))}>{focusHistoryOptions}</select>{viewingOlderFocusScan && <Button variant="muted" className="pi-history-back" onClick={() => showFocusScanRecord(focusScanHistory[0])}>Latest</Button>}</div></details>}
       </div>
       <div className="pi-action">
         <Button onClick={() => void runReview()} disabled={review.running}>{review.running ? "Reviewing…" : hasMessages ? "Refresh findings" : "Full review"}</Button>
-        <span className="muted">Run a general code review. Follow-up chat stays with this run.</span>
+        {review.running ? <AgentActivityLine activity={review.activity} /> : <span className="muted">Run a general code review. Follow-up chat stays with this run.</span>}
         {aiReviewHistory.length > 1 && <details className="pi-history-compact"><summary>Review/chat history ({aiReviewHistory.length})</summary><div className="pi-history-picker"><select aria-label="Review chat history" value={selectedAiReviewId} onChange={(event) => showAiReviewRecord(aiReviewHistory.find((record) => record.id === event.target.value))}>{aiHistoryOptions}</select>{viewingOlderAiReview && <Button variant="muted" className="pi-history-back" onClick={() => showAiReviewRecord(aiReviewHistory[0])}>Latest</Button>}</div></details>}
       </div>
     </div>

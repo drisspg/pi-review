@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 export type PiJob = {
   id: string;
   prKey: string;
+  purpose?: string;
   status: "running" | "complete" | "failed";
   answer?: string;
   error?: string;
@@ -23,7 +24,7 @@ export function createPiJobRunner(askPi: AskPiForJob, options: { newId?: () => s
   const now = options.now ?? (() => new Date().toISOString());
 
   function startJob(prKey: string, prompt: string, purpose?: string): PiJob {
-    const job: PiJob = { id: newId(), prKey, status: "running", startedAt: now() };
+    const job: PiJob = { id: newId(), prKey, purpose, status: "running", startedAt: now() };
     jobs.set(job.id, job);
     void askPi(prKey, prompt, purpose).then((answer) => {
       jobs.set(job.id, { ...job, status: "complete", answer, finishedAt: now() });

@@ -1,7 +1,9 @@
 import type { PiJob, PiJobRunner } from "./pi-jobs.js";
+import type { PiActivity } from "./pi-session.js";
 
 export type PiApiDeps = {
   askPi: (prKey: string, prompt: string, purpose?: string) => Promise<string>;
+  piActivity: (prKey: string, purpose?: string) => Promise<PiActivity>;
   piDiagnostics: (prKey: string) => Promise<unknown>;
   piJobRunner: PiJobRunner;
   setPiModel: (prKey: string, provider: string, modelId: string, thinkingLevel?: string) => Promise<unknown>;
@@ -9,7 +11,7 @@ export type PiApiDeps = {
 
 export type PiApi = {
   ask: (payload: Record<string, unknown>) => Promise<{ answer: string }>;
-  jobStatus: (payload: Record<string, unknown>) => Promise<{ job: PiJob }>;
+  jobStatus: (payload: Record<string, unknown>) => Promise<{ job: PiJob & { activity?: PiActivity } }>;
   startReviewJob: (payload: Record<string, unknown>, purpose: "main-review" | "focus-review") => Promise<{ job: PiJob }>;
   diagnostics: (payload: Record<string, unknown>) => Promise<{ diagnostics: unknown }>;
   setModel: (payload: Record<string, unknown>) => Promise<{ diagnostics: unknown }>;
@@ -26,11 +28,12 @@ export function createPiApi(deps: PiApiDeps): PiApi {
     return { answer: await deps.askPi(request.prKey, request.prompt, request.purpose) };
   }
 
-  async function jobStatus(payload: Record<string, unknown>): Promise<{ job: PiJob }> {
+  async function jobStatus(payload: Record<string, unknown>): Promise<{ job: PiJob & { activity?: PiActivity } }> {
     if (typeof payload.jobId !== "string") throw new Error("Expected jobId");
     const job = deps.piJobRunner.getJob(payload.jobId);
     if (job == null) throw new Error(`Unknown review job ${payload.jobId}`);
-    return { job };
+    if (job.status !== "running") return { job };
+    return { job: { ...job, activity: await deps.piActivity(job.prKey, job.purpose) } };
   }
 
   async function startReviewJob(payload: Record<string, unknown>, purpose: "main-review" | "focus-review"): Promise<{ job: PiJob }> {
