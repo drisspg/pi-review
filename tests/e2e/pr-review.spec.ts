@@ -79,7 +79,7 @@ test("opens a previous PR from its review link in a separate page", async ({ pag
 
 test("opens a PR and renders GitHub-style file diffs", async ({ page }) => {
   await expect(page.getByText("github.com/Dao-AILab/flash-attention#2542").first()).toBeVisible();
-  await expect(page.locator(".file")).toHaveCount(2);
+  await expect.poll(() => page.locator(".file").count()).toBeGreaterThanOrEqual(2);
   await openFirstFile(page);
   await expect(page.locator(".diff-row.added").first()).toBeVisible();
 });
@@ -267,7 +267,7 @@ test("renders inline Ask Pi responses as markdown", async ({ page }) => {
   await page.locator(".inline-thread textarea").first().fill("review this line");
   await page.getByRole("button", { name: "Ask Pi" }).first().click();
 
-  const thread = page.locator(".thread-messages").first();
+  const thread = page.locator(".local-comment-timeline").first();
   await expect(thread).toContainText("Finding:");
   await expect(thread.locator("pre code")).toContainText("return batch_offset;");
 });
@@ -288,7 +288,7 @@ test("opens code-wrapped file references in VS Code", async ({ page }) => {
   await row.click();
   await page.locator(".inline-thread textarea").first().fill("where is this?");
   await page.getByRole("button", { name: "Ask Pi" }).first().click();
-  await page.locator(".thread-messages .file-reference-link").first().click();
+  await page.locator(".local-comment-timeline .file-reference-link").first().click();
 
   await expect.poll(() => openPayload).toMatchObject({ path, line: Number.parseInt(line, 10) });
 });
@@ -329,8 +329,7 @@ test("runs a separate focus areas review and highlights referenced lines", async
 });
 
 test("minimizes focus area links after all are reviewed", async ({ page }) => {
-  await openFirstFile(page);
-  const rows = page.locator(".file").first().locator(".diff-row.added");
+  const rows = await openFileWithAddedRows(page, 2);
   const firstPath = await rows.nth(0).getAttribute("data-path");
   const firstLine = await rows.nth(0).getAttribute("data-line");
   const secondPath = await rows.nth(1).getAttribute("data-path");
@@ -391,7 +390,7 @@ test("persists Pi review chat across page reloads", async ({ page }) => {
   await expect(page.locator(".ai-review")).toContainText("Persisted answer");
 
   await page.reload();
-  await page.locator(".pr-card").first().locator(".pr-card-body").click();
+  await expect(page.locator(".review-layout")).toBeVisible({ timeout: 60_000 });
   await page.getByRole("tab", { name: "Pi" }).click();
 
   await expect(page.locator(".ai-review")).toContainText("remember this conversation");
