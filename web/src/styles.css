@@ -15,8 +15,15 @@
   --thread-bg: rgba(163, 113, 247, 0.12);
   --thread-bg-strong: rgba(163, 113, 247, 0.18);
   --link: #79c0ff;
-  --add: rgba(46, 160, 67, 0.10);
-  --del: rgba(248, 81, 73, 0.10);
+  --fgColor-default: var(--text);
+  --fgColor-muted: var(--muted);
+  --borderColor-default: var(--border);
+  --bgColor-default: var(--panel);
+  --bgColor-muted: var(--panel2);
+  --bgColor-success-muted: rgba(46, 160, 67, 0.10);
+  --bgColor-danger-muted: rgba(248, 81, 73, 0.10);
+  --add: var(--bgColor-success-muted);
+  --del: var(--bgColor-danger-muted);
   --code-bg: #090c10;
   --syntax-keyword: #ff7b72;
   --syntax-title: #d2a8ff;
@@ -45,8 +52,15 @@
   --thread-bg: rgba(130, 80, 223, 0.09);
   --thread-bg-strong: rgba(130, 80, 223, 0.14);
   --link: #0969da;
-  --add: #dafbe1;
-  --del: #ffebe9;
+  --fgColor-default: var(--text);
+  --fgColor-muted: var(--muted);
+  --borderColor-default: var(--border);
+  --bgColor-default: var(--panel);
+  --bgColor-muted: var(--panel2);
+  --bgColor-success-muted: #dafbe1;
+  --bgColor-danger-muted: #ffebe9;
+  --add: var(--bgColor-success-muted);
+  --del: var(--bgColor-danger-muted);
   --code-bg: #f6f8fa;
   --syntax-keyword: #cf222e;
   --syntax-title: #8250df;
@@ -74,8 +88,15 @@
   --thread-bg: rgba(152, 110, 226, 0.13);
   --thread-bg-strong: rgba(152, 110, 226, 0.2);
   --link: #539bf5;
-  --add: rgba(70, 149, 74, 0.11);
-  --del: rgba(229, 83, 75, 0.10);
+  --fgColor-default: var(--text);
+  --fgColor-muted: var(--muted);
+  --borderColor-default: var(--border);
+  --bgColor-default: var(--panel);
+  --bgColor-muted: var(--panel2);
+  --bgColor-success-muted: rgba(70, 149, 74, 0.11);
+  --bgColor-danger-muted: rgba(229, 83, 75, 0.10);
+  --add: var(--bgColor-success-muted);
+  --del: var(--bgColor-danger-muted);
   --code-bg: #1c2128;
   --syntax-keyword: #f47067;
   --syntax-title: #dcbdfb;
@@ -821,23 +842,24 @@ a { color: var(--link); text-decoration: none; }
   border-top: 1px solid var(--border);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
-  line-height: 1.45;
+  line-height: 20px;
   overflow: auto;
+  background: var(--panel);
 }
 
 .diff-row {
-  --diff-row-bg: transparent;
+  --diff-row-bg: var(--panel);
+  --diff-num-bg: var(--panel2);
+  --diff-num-color: var(--muted);
   display: grid;
-  grid-template-columns: 48px 48px minmax(0, 1fr) auto;
-  gap: 8px;
-  padding: 0 8px;
+  grid-template-columns: 50px 50px minmax(0, 1fr) auto;
+  min-height: 20px;
   white-space: pre;
-  min-height: 1.45rem;
   background: var(--diff-row-bg);
 }
 
 .diff-row.split {
-  grid-template-columns: 48px minmax(0, 1fr) 48px minmax(0, 1fr) auto;
+  grid-template-columns: 50px minmax(0, 1fr) 50px minmax(0, 1fr) auto;
 }
 
 .diff-row.split .split-code {
@@ -847,8 +869,21 @@ a { color: var(--link); text-decoration: none; }
 
 .diff-row.split .old-code,
 .diff-row.split .new-code {
-  border-left: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+
+.code-cell,
+.split-code-cell {
+  display: grid;
+  grid-template-columns: 20px minmax(0, max-content);
+  min-width: max-content;
+  padding-right: 10px;
+}
+
+.diff-marker {
+  color: var(--muted);
+  text-align: center;
+  user-select: none;
 }
 
 .diff-row code {
@@ -866,26 +901,43 @@ a { color: var(--link); text-decoration: none; }
 .hljs-operator, .hljs-punctuation { color: var(--text); }
 
 .diff-row:not(.hunk):not(.meta) { cursor: pointer; }
-.diff-row:hover, .diff-row.selected { background: color-mix(in srgb, var(--text) 9%, var(--diff-row-bg)); }
-.num { color: #6e7681; text-align: right; user-select: none; }
+.diff-row:hover, .diff-row.selected { --diff-row-bg: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
+.num {
+  padding: 0 8px;
+  color: var(--diff-num-color);
+  text-align: right;
+  user-select: none;
+  background: var(--diff-num-bg);
+  border-right: 1px solid var(--border);
+}
 .diff-row.added {
   --diff-row-bg: var(--add);
-  box-shadow: inset 2px 0 color-mix(in srgb, var(--success) 55%, transparent);
+  --diff-num-bg: color-mix(in srgb, var(--success) 18%, var(--panel));
+  --diff-num-color: color-mix(in srgb, var(--success) 48%, var(--muted));
 }
 .diff-row.removed {
   --diff-row-bg: var(--del);
-  box-shadow: inset 2px 0 color-mix(in srgb, var(--danger) 55%, transparent);
+  --diff-num-bg: color-mix(in srgb, var(--danger) 18%, var(--panel));
+  --diff-num-color: color-mix(in srgb, var(--danger) 48%, var(--muted));
 }
-.diff-row.added:hover, .diff-row.added.selected { background: color-mix(in srgb, var(--success) 20%, var(--bg)); }
-.diff-row.removed:hover, .diff-row.removed.selected { background: color-mix(in srgb, var(--danger) 20%, var(--bg)); }
-.diff-row.added .num {
-  color: color-mix(in srgb, var(--success) 32%, var(--muted));
+.diff-row.added:hover, .diff-row.added.selected {
+  --diff-row-bg: color-mix(in srgb, var(--success) 18%, var(--panel));
+  --diff-num-bg: color-mix(in srgb, var(--success) 25%, var(--panel));
 }
-.diff-row.removed .num {
-  color: color-mix(in srgb, var(--danger) 32%, var(--muted));
+.diff-row.removed:hover, .diff-row.removed.selected {
+  --diff-row-bg: color-mix(in srgb, var(--danger) 18%, var(--panel));
+  --diff-num-bg: color-mix(in srgb, var(--danger) 25%, var(--panel));
 }
-.hunk { color: var(--link); --diff-row-bg: var(--panel2); }
+.diff-row.added .diff-marker { color: var(--success); }
+.diff-row.removed .diff-marker { color: var(--danger); }
+.hunk {
+  --diff-row-bg: color-mix(in srgb, var(--accent) 10%, var(--panel2));
+  --diff-num-bg: color-mix(in srgb, var(--accent) 16%, var(--panel2));
+  color: var(--link);
+}
 .meta { color: var(--muted); }
+.meta .code-cell,
+.hunk .code-cell { grid-template-columns: 20px minmax(0, max-content); }
 .patchset-renderer {
   display: grid;
   gap: 10px;
@@ -951,7 +1003,7 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .inline-thread {
-  margin: 0.35rem 16px 0.55rem 112px;
+  margin: 8px 16px 10px 108px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--panel);
@@ -965,7 +1017,6 @@ a { color: var(--link); text-decoration: none; }
 .inline-thread.existing,
 .inline-thread.draft,
 .review-thread {
-  border-left: 0;
   background: var(--panel);
 }
 
@@ -976,9 +1027,9 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .inline-thread.existing.github-thread {
-  border-color: color-mix(in srgb, var(--thread-accent) 38%, var(--border));
-  background: linear-gradient(90deg, var(--thread-bg-strong) 0, var(--panel) 180px);
-  box-shadow: inset 3px 0 var(--thread-accent);
+  border-color: color-mix(in srgb, var(--thread-accent) 36%, var(--border));
+  background: var(--panel);
+  box-shadow: inset 4px 0 var(--thread-accent);
 }
 
 .inline-thread.collapsed {
@@ -1020,18 +1071,22 @@ a { color: var(--link); text-decoration: none; }
 
 .inline-thread > strong,
 .thread-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--panel2);
 }
 
 .inline-thread.existing.github-thread > .thread-head {
-  border-bottom-color: color-mix(in srgb, var(--thread-accent) 28%, var(--border));
-  background: linear-gradient(90deg, var(--thread-bg-strong) 0, var(--panel2) 190px);
+  border-bottom-color: color-mix(in srgb, var(--thread-accent) 24%, var(--border));
+  background: color-mix(in srgb, var(--thread-accent) 7%, var(--panel2));
 }
 
 .inline-thread.existing.github-thread .thread-title strong {
-  color: color-mix(in srgb, var(--thread-accent) 58%, var(--text));
+  color: color-mix(in srgb, var(--thread-accent) 48%, var(--text));
 }
 
 .inline-thread > .markdown,
@@ -1141,6 +1196,10 @@ a { color: var(--link); text-decoration: none; }
   min-height: 24px;
 }
 
+.github-thread .thread-head {
+  flex-wrap: nowrap;
+}
+
 .github-thread .thread-head h2 {
   margin: 0;
 }
@@ -1150,6 +1209,7 @@ a { color: var(--link); text-decoration: none; }
   gap: 8px;
   align-items: center;
   min-width: 0;
+  flex: 1;
 }
 
 .thread-title > div {
@@ -1158,6 +1218,24 @@ a { color: var(--link); text-decoration: none; }
   align-items: baseline;
   flex-wrap: wrap;
   min-width: 0;
+}
+
+.github-thread .thread-title > div {
+  flex-wrap: nowrap;
+}
+
+.github-thread .thread-title strong,
+.github-thread .thread-title span {
+  white-space: nowrap;
+}
+
+.github-thread .thread-title > div > span:not(.thread-status) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.github-thread .thread-status {
+  flex-shrink: 0;
 }
 
 .thread-title-link {
@@ -1295,7 +1373,7 @@ a { color: var(--link); text-decoration: none; }
 .github-comment-timeline {
   display: grid;
   gap: 0;
-  padding: 12px;
+  padding: 12px 12px 8px;
 }
 
 .github-comment {
@@ -1303,7 +1381,7 @@ a { color: var(--link); text-decoration: none; }
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr);
   gap: 10px;
-  padding-bottom: 14px;
+  padding-bottom: 12px;
 }
 
 .github-comment:not(:last-child)::before {
@@ -1316,17 +1394,6 @@ a { color: var(--link); text-decoration: none; }
   background: var(--border);
 }
 
-.github-comment::after {
-  content: "";
-  position: absolute;
-  left: 31px;
-  top: 6px;
-  bottom: 14px;
-  width: 2px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--commenter) 42%, transparent);
-}
-
 .avatar {
   position: relative;
   z-index: 1;
@@ -1334,26 +1401,54 @@ a { color: var(--link); text-decoration: none; }
   place-items: center;
   width: 32px;
   height: 32px;
-  border: 1px solid color-mix(in srgb, var(--commenter) 45%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--commenter) 30%, var(--border));
   border-radius: 50%;
-  background: color-mix(in srgb, var(--commenter) 14%, var(--panel2));
-  color: color-mix(in srgb, var(--commenter) 65%, var(--text));
+  background: color-mix(in srgb, var(--commenter) 12%, var(--panel2));
+  color: color-mix(in srgb, var(--commenter) 60%, var(--text));
   font-size: 0.78rem;
   font-weight: 700;
 }
 
 .github-comment-body {
+  position: relative;
   min-width: 0;
-  border: 1px solid color-mix(in srgb, var(--commenter) 18%, var(--border));
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--commenter) 5%, var(--panel)) 0, var(--panel) 120px);
-  overflow: hidden;
+  background: var(--panel);
+  overflow: visible;
+}
+
+.github-comment-body::before,
+.github-comment-body::after {
+  content: "";
+  position: absolute;
+  top: 10px;
+  right: 100%;
+  width: 0;
+  height: 0;
+  border-style: solid;
+}
+
+.github-comment-body::before {
+  border-width: 8px 8px 8px 0;
+  border-color: transparent var(--border) transparent transparent;
+}
+
+.github-comment-body::after {
+  top: 11px;
+  border-width: 7px 7px 7px 0;
+  border-color: transparent var(--panel2) transparent transparent;
 }
 
 .github-comment-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: space-between;
   padding: 7px 10px;
-  border-bottom: 1px solid color-mix(in srgb, var(--commenter) 16%, var(--border));
-  background: linear-gradient(90deg, color-mix(in srgb, var(--commenter) 8%, var(--panel2)) 0, var(--panel2) 160px);
+  border-bottom: 1px solid var(--border);
+  border-radius: 6px 6px 0 0;
+  background: var(--panel2);
   color: var(--muted);
   font-size: 0.8rem;
 }
@@ -1445,10 +1540,17 @@ a { color: var(--link); text-decoration: none; }
   min-height: 38px;
 }
 
-.thread-head > div:not(.thread-title) {
+.thread-head > div:not(.thread-title):not(.actions) {
   display: grid;
   gap: 2px;
   min-width: 0;
+}
+
+.thread-head > .actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .thread-head span {
