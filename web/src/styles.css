@@ -718,7 +718,7 @@ a { color: var(--link); text-decoration: none; }
 
 .files {
   display: grid;
-  gap: 20px;
+  gap: 28px;
   min-width: 0;
   padding-right: 10px;
 }
@@ -1845,6 +1845,41 @@ a { color: var(--link); text-decoration: none; }
 button.fold:hover {
   background: color-mix(in srgb, var(--accent) 12%, var(--panel2));
   color: var(--link);
+}
+
+.expand-row {
+  display: grid;
+  grid-template-columns: calc(var(--diff-gutter, 50px) * 2) minmax(0, 1fr);
+  align-items: stretch;
+  width: 100%;
+  min-height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.expand-gutter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: color-mix(in srgb, var(--accent) 75%, var(--muted));
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel2));
+  border-right: 1px solid var(--border);
+}
+
+.expand-hint {
+  background: color-mix(in srgb, var(--accent) 5%, var(--panel2));
+}
+
+.expand-row:hover .expand-gutter {
+  color: #fff;
+  background: var(--accent);
+}
+
+.expand-row:hover .expand-hint {
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel2));
 }
 
 .meta {

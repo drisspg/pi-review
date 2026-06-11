@@ -100,7 +100,7 @@ test("expands neighboring context lines", async ({ page }) => {
   await openFirstFile(page);
   const firstFile = page.locator(".file").first();
   const before = await firstFile.locator(".diff-row").count();
-  await firstFile.getByRole("button", { name: "Expand above" }).first().click();
+  await firstFile.getByRole("button", { name: "Expand lines above" }).first().click();
   await expect.poll(() => firstFile.locator(".diff-row").count()).toBeGreaterThan(before);
 });
 
