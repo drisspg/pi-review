@@ -2797,6 +2797,20 @@ button.fold:hover {
   gap: 8px;
 }
 
+.ai-chat-section-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ai-chat-section-head .ai-chat-section-label {
+  flex: 1;
+}
+
+.ai-chat-section-head button {
+  flex: 0 0 auto;
+}
+
 .ai-chat-section .ai-chat-messages {
   margin-top: 0;
 }
