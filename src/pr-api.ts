@@ -57,7 +57,7 @@ export function createPrApi(deps: PrApiDeps): PrApi {
     const pr = await deps.upsertPullRequest(data.pr);
     const worktreeDir = await deps.preparePrWorktree(ref, data.raw.base.repo.clone_url, data.pr.headSha);
     await deps.registerPiSessionCwd(pr.key, worktreeDir);
-    deps.prewarmPiSession(pr.key, ["chat", "inline-chat", "focus-chat"]);
+    deps.prewarmPiSession(pr.key, ["main-review", "focus-review", "chat", "inline-chat", "focus-chat"]);
     return hydrateReviewResponse(data, pr, { worktreeDir });
   }
 

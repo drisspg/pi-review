@@ -43,10 +43,10 @@ const DEFAULT_PI_MODEL_PROVIDER = "openai-codex";
 const DEFAULT_PI_MODEL_ID = "gpt-5.5";
 const DEFAULT_PI_THINKING_LEVEL: ThinkingLevel = "high";
 const PI_THINKING_LEVEL_BY_PURPOSE: Record<string, ThinkingLevel> = {
-  "focus-chat": "low",
+  "focus-chat": "medium",
   "inline-chat": "low",
   "gpu-workspace": "medium",
-  "chat": "low",
+  "chat": "medium",
   "main-review": "medium",
 };
 
@@ -107,13 +107,20 @@ export async function registerPiSessionCwd(prKey: string, cwd: string): Promise<
   }
 }
 
+let sharedModelRegistry: ReturnType<typeof ModelRegistry.create> | null = null;
+
+function getModelRegistry(): ReturnType<typeof ModelRegistry.create> {
+  sharedModelRegistry ??= ModelRegistry.create(AuthStorage.create());
+  return sharedModelRegistry;
+}
+
 async function createSession(prKey: string, purpose = "chat"): Promise<SessionRecord> {
   const cwd = cwdByPr.get(prKey) ?? process.cwd();
   const sessionDir = sessionDirForPr(prKey, purpose);
   await mkdir(sessionDir, { recursive: true });
   const startedAt = performance.now();
   logger.info("pi", "create session", { prKey, purpose, cwd, sessionDir });
-  const modelRegistry = ModelRegistry.create(AuthStorage.create());
+  const modelRegistry = getModelRegistry();
   const model = modelRegistry.find(DEFAULT_PI_MODEL_PROVIDER, DEFAULT_PI_MODEL_ID);
   if (model == null) throw new Error(`Default Pi Review model not found: ${DEFAULT_PI_MODEL_PROVIDER}/${DEFAULT_PI_MODEL_ID}`);
   const thinkingLevel = PI_THINKING_LEVEL_BY_PURPOSE[purpose] ?? DEFAULT_PI_THINKING_LEVEL;
@@ -237,14 +244,16 @@ export async function piDiagnostics(prKey: string): Promise<Record<string, unkno
 }
 
 export async function setPiModel(prKey: string, provider: string, modelId: string, thinkingLevel?: string): Promise<Record<string, unknown>> {
-  const session = await getSession(prKey);
-  const model = session.modelRegistry?.find?.(provider, modelId);
+  const model = getModelRegistry().find(provider, modelId);
   if (model == null) throw new Error(`Unknown model ${provider}/${modelId}`);
-  if (session.setModel == null) throw new Error("Pi session does not expose model switching");
-  await session.setModel(model);
-  if (thinkingLevel != null && thinkingLevel.length > 0) {
-    if (!isThinkingLevel(thinkingLevel)) throw new Error(`Unknown thinking level ${thinkingLevel}`);
-    session.setThinkingLevel?.(thinkingLevel);
+  if (thinkingLevel != null && thinkingLevel.length > 0 && !isThinkingLevel(thinkingLevel)) throw new Error(`Unknown thinking level ${thinkingLevel}`);
+  const prefix = `${safe(prKey)}--`;
+  const prSessions = await Promise.all([...sessions.entries()].filter(([key]) => key.startsWith(prefix)).map(([, value]) => value));
+  if (prSessions.length === 0) prSessions.push(await getSession(prKey));
+  for (const session of prSessions) {
+    if (session.setModel == null) throw new Error("Pi session does not expose model switching");
+    await session.setModel(model);
+    if (thinkingLevel != null && thinkingLevel.length > 0) session.setThinkingLevel?.(thinkingLevel as ThinkingLevel);
   }
   return piDiagnostics(prKey);
 }

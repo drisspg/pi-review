@@ -128,7 +128,7 @@ test("PR API open prepares worktree, registers Pi cwd, prewarms sessions, and hy
     "upsert:github.com/pytorch/pytorch#1",
     "prepare:1:git@github.com:pytorch/pytorch.git:head",
     "cwd:github.com/pytorch/pytorch#1:/tmp/worktree",
-    "prewarm:github.com/pytorch/pytorch#1:chat,inline-chat,focus-chat",
+    "prewarm:github.com/pytorch/pytorch#1:main-review,focus-review,chat,inline-chat,focus-chat",
     "focus:github.com/pytorch/pytorch#1",
     "ai:github.com/pytorch/pytorch#1",
   ]);
