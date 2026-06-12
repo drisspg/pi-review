@@ -46,6 +46,20 @@ const PI_THINKING_LEVEL_BY_PURPOSE: Record<string, ThinkingLevel> = {
   "focus-chat": "medium",
   "inline-chat": "low",
   "gpu-workspace": "medium",
+  "chat": "medium",
+  "main-review": "medium",
+};
+
+const REVIEW_TOOLS = ["read", "grep", "find", "bash"];
+const CHAT_TOOLS = ["read", "grep", "find", "bash"];
+const INLINE_TOOLS = ["read", "grep", "find"];
+
+const PI_TOOLS_BY_PURPOSE: Record<string, string[]> = {
+  "main-review": REVIEW_TOOLS,
+  "focus-review": REVIEW_TOOLS,
+  "chat": CHAT_TOOLS,
+  "focus-chat": CHAT_TOOLS,
+  "inline-chat": INLINE_TOOLS,
 };
 
 const sessions = new Map<string, Promise<SessionRecord>>();
@@ -103,13 +117,14 @@ async function createSession(prKey: string, purpose = "chat"): Promise<SessionRe
   const model = modelRegistry.find(DEFAULT_PI_MODEL_PROVIDER, DEFAULT_PI_MODEL_ID);
   if (model == null) throw new Error(`Default Pi Review model not found: ${DEFAULT_PI_MODEL_PROVIDER}/${DEFAULT_PI_MODEL_ID}`);
   const thinkingLevel = PI_THINKING_LEVEL_BY_PURPOSE[purpose] ?? DEFAULT_PI_THINKING_LEVEL;
+  const scopedTools = PI_TOOLS_BY_PURPOSE[purpose];
   const { session } = await createAgentSession({
     cwd,
     model,
     modelRegistry,
     sessionManager: SessionManager.create(cwd, sessionDir),
     thinkingLevel,
-    customTools: [createGpuWorkspaceTool(prKey)],
+    ...(scopedTools == null ? { customTools: [createGpuWorkspaceTool(prKey)] } : { tools: scopedTools }),
   });
   logger.info("pi", "create session complete", { prKey, purpose, model: `${DEFAULT_PI_MODEL_PROVIDER}/${DEFAULT_PI_MODEL_ID}`, thinkingLevel, ms: Math.round(performance.now() - startedAt) });
   return session as SessionRecord;
