@@ -256,6 +256,24 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 }
 
+async function loadPiAgentActivityForPr(prKey: string, purpose: string, fallback: PiAgentActivity | null): Promise<PiAgentActivity | null> {
+  const data = await api<{ diagnostics: { sessions?: unknown[] } }>("/api/pi/diagnostics", { method: "POST", body: JSON.stringify({ prKey }) });
+  const session = data.diagnostics.sessions?.find((item): item is Record<string, unknown> => typeof item === "object" && item != null && (item as Record<string, unknown>).purpose === purpose);
+  return session == null ? fallback : diagnosticsAgentActivity(session, fallback);
+}
+
+function startPiAgentActivityPolling(prKey: string, purpose: string, onActivity: (activity: PiAgentActivity | null) => void, fallback: PiAgentActivity | null = runningAgentActivity(purpose)): () => void {
+  let cancelled = false;
+  const pollActivity = async () => {
+    while (!cancelled) {
+      await sleep(1000);
+      if (!cancelled) onActivity(await loadPiAgentActivityForPr(prKey, purpose, fallback));
+    }
+  };
+  void pollActivity();
+  return () => { cancelled = true; };
+}
+
 function highlightFocusAreas(areas: FocusArea[], activeId: string | null, collapsedIds: Record<string, boolean>): void {
   document.querySelectorAll(".diff-row.focus-highlight, .diff-row.focus-highlight-active").forEach((row) => row.classList.remove("focus-highlight", "focus-highlight-active"));
   for (const area of areas.filter((candidate) => !collapsedIds[candidate.id])) {
@@ -584,10 +602,7 @@ function App() {
   }
 
   async function loadPiAgentActivity(purpose: string, fallback: PiAgentActivity | null): Promise<PiAgentActivity | null> {
-    if (review == null) return fallback;
-    const data = await api<{ diagnostics: { sessions?: unknown[] } }>("/api/pi/diagnostics", { method: "POST", body: JSON.stringify({ prKey: review.pr.key }) });
-    const session = data.diagnostics.sessions?.find((item): item is Record<string, unknown> => typeof item === "object" && item != null && (item as Record<string, unknown>).purpose === purpose);
-    return session == null ? fallback : diagnosticsAgentActivity(session, fallback);
+    return review == null ? fallback : loadPiAgentActivityForPr(review.pr.key, purpose, fallback);
   }
 
   async function askFocusArea(area: FocusArea, question: string, onDelta?: (answer: string) => void, onActivity?: (activity: PiAgentActivity | null) => void): Promise<string> {
@@ -693,21 +708,28 @@ function App() {
   async function runFlowDag() {
     if (review == null || flowDag.running) return;
     const targetReview = review;
+    const initialActivity = runningAgentActivity("flow-dag");
+    let cancelActivityPolling: () => void = () => undefined;
     setFlowDagOpen(true);
-    setFlowDag({ running: true, text: "", error: null });
+    setFlowDag({ running: true, text: "", error: null, activity: initialActivity });
     try {
       const { prompt, purpose } = await buildPiPrompt({ mode: "code-walk", prKey: targetReview.pr.key, prTitle: targetReview.pr.title, files: targetReview.files });
+      cancelActivityPolling = startPiAgentActivityPolling(targetReview.pr.key, purpose, (activity) => {
+        if (activeReviewKeyRef.current === targetReview.pr.key) setFlowDag((current) => ({ ...current, activity: activity ?? current.activity ?? null }));
+      }, initialActivity);
       const setAnswer = (answer: string) => {
         if (activeReviewKeyRef.current !== targetReview.pr.key) return;
-        setFlowDag({ running: true, text: answer, error: null });
+        setFlowDag((current) => ({ running: true, text: answer, error: null, activity: streamingAgentActivity(current.activity, answer) }));
       };
       const answer = await askPiApi({ prKey: targetReview.pr.key, prompt, purpose }, setAnswer);
+      cancelActivityPolling();
       if (activeReviewKeyRef.current !== targetReview.pr.key) return;
-      setFlowDag({ running: false, text: answer, error: null });
+      setFlowDag({ running: false, text: answer, error: null, activity: null });
       await refreshLogs();
     } catch (err) {
+      cancelActivityPolling();
       if (activeReviewKeyRef.current !== targetReview.pr.key) return;
-      setFlowDag((current) => ({ running: false, text: current.text, error: err instanceof Error ? err.message : String(err) }));
+      setFlowDag((current) => ({ running: false, text: current.text, error: err instanceof Error ? err.message : String(err), activity: null }));
     }
   }
 
@@ -747,23 +769,30 @@ function App() {
     const targetReview = review;
     const startingReview = aiReview;
     const question = message.trim();
+    const initialActivity = runningAgentActivity("chat");
+    let cancelActivityPolling: () => void = () => undefined;
     setAiChatSending(true);
-    setAiReview((current) => ({ ...current, open: true, expanded: true, messages: [...current.messages, { role: "user", kind: "chat", text: question }, { role: "pi", kind: "chat", text: "" }] }));
+    setAiReview((current) => ({ ...current, open: true, expanded: true, activity: initialActivity, messages: [...current.messages, { role: "user", kind: "chat", text: question }, { role: "pi", kind: "chat", text: "" }] }));
     try {
       const previousDialogue = startingReview.messages.filter((entry) => entry.kind !== "general-review").map((entry) => `${entry.role === "user" ? "User" : "Pi"}: ${entry.text}`).join("\n\n");
       const { prompt, purpose } = await buildPiPrompt({ mode: "ai-chat", prKey: targetReview.pr.key, previousDialogue: previousDialogue || "(none)", question });
+      cancelActivityPolling = startPiAgentActivityPolling(targetReview.pr.key, purpose, (activity) => {
+        if (activeReviewKeyRef.current === targetReview.pr.key) setAiReview((current) => ({ ...current, activity: activity ?? current.activity ?? null }));
+      }, initialActivity);
       const setAnswer = (answer: string) => {
         if (activeReviewKeyRef.current !== targetReview.pr.key) return;
-        setAiReview((current) => ({ ...current, open: true, expanded: true, messages: [...current.messages.slice(0, -1), { role: "pi", kind: "chat", text: answer }] }));
+        setAiReview((current) => ({ ...current, open: true, expanded: true, activity: streamingAgentActivity(current.activity, answer), messages: [...current.messages.slice(0, -1), { role: "pi", kind: "chat", text: answer }] }));
       };
       const answer = await askPiApi({ prKey: targetReview.pr.key, prompt, purpose }, setAnswer);
+      cancelActivityPolling();
       const nextMessages: AiReviewMessage[] = [...startingReview.messages, { role: "user", kind: "chat", text: question }, { role: "pi", kind: "chat", text: answer }];
-      if (activeReviewKeyRef.current === targetReview.pr.key) setAiReview((current) => ({ ...current, open: true, expanded: true, messages: nextMessages }));
+      if (activeReviewKeyRef.current === targetReview.pr.key) setAiReview((current) => ({ ...current, open: true, expanded: true, activity: null, messages: nextMessages }));
       void saveAiReviewFor(targetReview, currentGeneralReviewText({ ...startingReview, text: answer, messages: nextMessages }) || answer, nextMessages, aiReviewId);
     } catch (err) {
+      cancelActivityPolling();
       if (activeReviewKeyRef.current !== targetReview.pr.key) return;
       const text = `Ask Pi failed: ${err instanceof Error ? err.message : String(err)}`;
-      setAiReview((current) => ({ ...current, open: true, expanded: true, messages: [...current.messages.slice(0, -1), { role: "pi", kind: "chat", text }] }));
+      setAiReview((current) => ({ ...current, open: true, expanded: true, activity: null, messages: [...current.messages.slice(0, -1), { role: "pi", kind: "chat", text }] }));
     } finally {
       if (activeReviewKeyRef.current === targetReview.pr.key) setAiChatSending(false);
     }
@@ -1539,7 +1568,7 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
     if (next) setCollapsedFocusAreaIds(nextCollapsedIds);
     void saveFocusScan(focusReview.text, nextViewedIds, nextCollapsedIds);
   }
-  const composer = <div className="ai-chat-followup"><div className="ai-chat-divider"><span>Ask Pi about this PR</span></div><div className="ai-chat-composer"><textarea ref={composerRef} value={draft} onChange={(event) => setDraft(event.target.value)} onInput={(event) => autoGrowTextarea(event.currentTarget)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submitChat(); } }} placeholder="Ask Pi about this PR…" /><Button variant="muted" onClick={submitChat} disabled={chatSending || draft.trim().length === 0}>{chatSending ? "Sending…" : "Send"}</Button></div></div>;
+  const composer = <div className="ai-chat-followup"><div className="ai-chat-divider"><span>Ask Pi about this PR</span></div><div className="ai-chat-composer"><textarea ref={composerRef} value={draft} onChange={(event) => setDraft(event.target.value)} onInput={(event) => autoGrowTextarea(event.currentTarget)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submitChat(); } }} placeholder="Ask Pi about this PR…" /><Button variant="muted" onClick={submitChat} disabled={chatSending || draft.trim().length === 0}>{chatSending ? "Sending…" : "Send"}</Button></div>{chatSending && <AgentActivityLine activity={review.activity} />}</div>;
   const selectedAiReviewId = aiReviewId ?? "";
   const selectedFocusScanId = focusScanId ?? "";
   const latestAiReviewId = aiReviewHistory[0]?.id ?? null;
@@ -1726,19 +1755,28 @@ function GpuWorkspaceModal({ review, close, refreshLogs }: { review: OpenRespons
 function GpuWorkspaceAgentPanel({ review, supported }: { review: OpenResponse; supported: boolean }) {
   const [prompt, setPrompt] = useState("Allocate a GPU workspace if needed, run nvidia-smi -L, and summarize the result.");
   const [answer, setAnswer] = useState("");
+  const [activity, setActivity] = useState<PiAgentActivity | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function askGpuAgent() {
     if (!supported || prompt.trim().length === 0) return;
+    const initialActivity = runningAgentActivity("gpu-workspace");
+    const cancelActivityPolling = startPiAgentActivityPolling(review.pr.key, "gpu-workspace", setActivity, initialActivity);
     setRunning(true);
+    setActivity(initialActivity);
     setError(null);
     setAnswer("");
     try {
-      await askPiApi({ prKey: review.pr.key, purpose: "gpu-workspace", prompt: prompt.trim() }, setAnswer);
+      await askPiApi({ prKey: review.pr.key, purpose: "gpu-workspace", prompt: prompt.trim() }, (text) => {
+        setActivity((current) => streamingAgentActivity(current, text));
+        setAnswer(text);
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
+      cancelActivityPolling();
+      setActivity(null);
       setRunning(false);
     }
   }
@@ -1749,6 +1787,7 @@ function GpuWorkspaceAgentPanel({ review, supported }: { review: OpenResponse; s
       <label>Ask workspace agent<textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} /></label>
       <Button onClick={() => void askGpuAgent()} disabled={!supported || running || prompt.trim().length === 0}>{running ? "Asking…" : "Ask workspace agent"}</Button>
     </div>
+    {running && <AgentActivityLine activity={activity} />}
     {error != null && <p className="error">{error}</p>}
     {answer.trim().length > 0 && <div className="gpu-workspace-agent-answer"><MarkdownText text={answer} /></div>}
   </PiCard>;
@@ -1766,7 +1805,7 @@ function FlowDagModal({ flowDag, runFlowDag, close, prUrl, headSha }: { flowDag:
         <p className="muted">Architecture, data flow, and key snippets for this PR.</p>
       </div>
       <div className="pi-modal-head-actions">
-        {flowDag.running && <span className="muted spinner-label"><span className="spinner" aria-hidden="true" />Building walk…</span>}
+        {flowDag.running && <AgentActivityLine activity={flowDag.activity} />}
         <Button variant="muted" className="small-muted-button" onClick={() => setHighRes((current) => !current)} aria-pressed={highRes}>{highRes ? "Standard DPI" : "High DPI"}</Button>
         <Button variant="muted" className="small-muted-button" onClick={() => setExpanded((current) => !current)} aria-pressed={expanded}>{expanded ? "Compact" : "Expand"}</Button>
         <Button variant="muted" className="small-muted-button" onClick={() => void runFlowDag()} disabled={flowDag.running}>{flowDag.running ? "Refreshing…" : flowDag.text.trim().length > 0 ? "Refresh" : "Build"}</Button>

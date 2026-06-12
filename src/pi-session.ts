@@ -43,11 +43,15 @@ const DEFAULT_PI_MODEL_PROVIDER = "openai-codex";
 const DEFAULT_PI_MODEL_ID = "gpt-5.5";
 const DEFAULT_PI_THINKING_LEVEL: ThinkingLevel = "high";
 const PI_THINKING_LEVEL_BY_PURPOSE: Record<string, ThinkingLevel> = {
-  "focus-chat": "medium",
-  "inline-chat": "low",
-  "gpu-workspace": "medium",
   "chat": "medium",
+  "flow-dag": "medium",
+  "focus-chat": "medium",
+  "focus-review": "medium",
+  "gpu-workspace": "medium",
+  "inline-chat": "low",
   "main-review": "medium",
+  "review-memory-distill": "low",
+  "test-pr": "medium",
 };
 
 const REVIEW_TOOLS = ["read", "grep", "find", "bash"];
@@ -55,11 +59,14 @@ const CHAT_TOOLS = ["read", "grep", "find", "bash"];
 const INLINE_TOOLS = ["read", "grep", "find"];
 
 const PI_TOOLS_BY_PURPOSE: Record<string, string[]> = {
-  "main-review": REVIEW_TOOLS,
-  "focus-review": REVIEW_TOOLS,
   "chat": CHAT_TOOLS,
+  "flow-dag": REVIEW_TOOLS,
   "focus-chat": CHAT_TOOLS,
+  "focus-review": REVIEW_TOOLS,
   "inline-chat": INLINE_TOOLS,
+  "main-review": REVIEW_TOOLS,
+  "review-memory-distill": CHAT_TOOLS,
+  "test-pr": REVIEW_TOOLS,
 };
 
 const sessions = new Map<string, Promise<SessionRecord>>();
