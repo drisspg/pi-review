@@ -10,7 +10,7 @@ import { commentTarget, commentThreadDomId, draftMatchesTarget, groupReviewComme
 import { contextRowsFromText, hunkNewStart, isTargetInSelection, lastNewLine, parsePatchRows, parsePatchSetSections, targetFromPoint, targetFromRow } from "./lib/diff";
 import { autoGrowTextarea } from "./lib/dom";
 import { languageForPath } from "./lib/highlight";
-import { newId, prUrlFromKey, shortSha } from "./lib/pr";
+import { newId, prUrlFromKey, relativeTime, shortSha } from "./lib/pr";
 import type { AiReview, AiReviewMessage, AiReviewRecord, DiffRow, DraftComment, DragSelection, FileReviewState, FlowDag, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, GpuWorkspace, GpuWorkspaceContract, GpuWorkspaceExecResult, LogEntry, OpenResponse, PiAgentActivity, PullFile, PullIssueComment, PullReviewComment, ReviewMemoryRecord, ReviewMemoryResponse, StoredPullRequest, Target, ThemeName, Thread, ThreadMessage } from "./types";
 import "./styles.css";
 
@@ -1020,21 +1020,6 @@ function agentActivityText(activity: PiAgentActivity | null | undefined): string
   return parts.join(" · ");
 }
 
-function relativeTime(iso: string | null | undefined): string {
-  if (iso == null) return "—";
-  const then = new Date(iso).getTime();
-  if (!Number.isFinite(then)) return "—";
-  const diff = Date.now() - then;
-  const minute = 60_000;
-  const hour = 60 * minute;
-  const day = 24 * hour;
-  if (diff < minute) return "just now";
-  if (diff < hour) return `${Math.round(diff / minute)}m ago`;
-  if (diff < day) return `${Math.round(diff / hour)}h ago`;
-  if (diff < 7 * day) return `${Math.round(diff / day)}d ago`;
-  return new Date(iso).toLocaleDateString();
-}
-
 function maxSidePanelWidth(): number {
   return typeof window === "undefined" ? 900 : Math.max(380, window.innerWidth - 96);
 }
@@ -1392,7 +1377,8 @@ function DiffRowView({ row, target, languagePath, threads, setThreads, toggleThr
   const hasThreadPill = thread != null || inlineCommentThreads.length + inlineDrafts.length + rowFocusAreas.length > 0;
   const threadPill = hasThreadPill ? <span className="pill">{(thread == null ? 0 : 1) + inlineCommentThreads.length + inlineDrafts.length + rowFocusAreas.length}</span> : null;
   const codeText = diffCodeText(row);
-  const codeCell = (className = "code-cell") => <span className={className}><span className="diff-marker">{diffMarker(row)}</span><CodeText code={codeText} language={language} syntaxContext={row.syntaxContext} /></span>;
+  const showMarker = !(rowHasKind(row, "hunk") || rowHasKind(row, "meta"));
+  const codeCell = (className = "code-cell") => <span className={className}>{showMarker && <span className="diff-marker">{diffMarker(row)}</span>}<CodeText code={codeText} language={language} syntaxContext={row.syntaxContext} /></span>;
   const unifiedCells = <><span className="num old-num">{row.oldLine ?? ""}</span><span className="num new-num">{row.newLine ?? ""}</span>{codeCell()}{threadPill}</>;
   const splitCells = <><span className="num old-num">{row.oldLine ?? ""}</span><div className="split-code old-code">{row.newLine == null || rowHasKind(row, "context") || rowHasKind(row, "hunk") || rowHasKind(row, "meta") ? codeCell("code-cell split-code-cell") : null}</div><span className="num new-num">{row.newLine ?? ""}</span><div className="split-code new-code">{row.oldLine == null || rowHasKind(row, "context") || rowHasKind(row, "hunk") || rowHasKind(row, "meta") ? codeCell("code-cell split-code-cell") : null}</div>{threadPill}</>;
   return <><div className={`diff-row ${diffViewMode} ${row.kind} ${thread != null && !thread.collapsed ? "selected" : ""} ${selecting ? "range-selecting" : ""} ${inThreadRange ? "in-thread-range" : ""}`} data-path={target?.path} data-line={target?.line ?? undefined} data-side={target?.side} data-hunk={target?.hunk} onMouseDown={(event) => { if (target != null && event.button === 0) { event.preventDefault(); beginDrag(target); } }} onMouseEnter={() => { if (target != null && dragSelection != null) updateDrag(target); }} onMouseUp={() => { if (target != null) finishDrag(target); }} onClick={(event) => { if (target != null) handleRowClick(target, event.shiftKey); }}>{diffViewMode === "split" ? splitCells : unifiedCells}</div>{inlineCommentThreads.map((commentThread) => <ExistingReviewThread key={commentThread.map((comment) => comment.id).join(":")} comments={commentThread} prUrl={prUrl} refreshGithubActivity={refreshGithubActivity} collapseSignal={collapseSignal} collapseComments={commentsCollapsed} />)}{rowFocusAreas.map((area) => <FocusAreaInline key={area.id} prUrl={prUrl} area={area} active={area.id === activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} askFocusArea={askFocusArea} addDraft={(body) => setDrafts([...drafts, { id: newId(), path: area.path, line: area.endLine, startLine: area.startLine, side: "RIGHT", body }])} />)}{inlineDrafts.map((draft) => <div className="inline-thread draft" key={draft.id}><DraftView draft={draft} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} /></div>)}{thread != null && <ThreadBox prUrl={prUrl} thread={thread} setThread={(updatedThread) => setThreads((current) => { const next = { ...current }; delete next[thread.key]; next[updatedThread.key] = updatedThread; return next; })} closeThread={() => setThreads((current) => { const next = { ...current }; delete next[thread.key]; return next; })} addDraft={() => { if (thread.draft.trim().length > 0) setDrafts([...drafts, { id: newId(), path: thread.target.path, line: thread.target.line, startLine: thread.target.startLine, side: thread.target.side, body: thread.draft.trim() }]); setThreads((current) => { const next = { ...current }; if (thread.messages.length === 0) delete next[thread.key]; else next[thread.key] = { ...thread, draft: "", collapsed: true }; return next; }); }} askThread={askThread} />}</>;

@@ -5,7 +5,7 @@
   --panel2: #0d1117;
   --border: #30363d;
   --muted: #8b949e;
-  --text: #c9d1d9;
+  --text: #e6edf3;
   --accent: #2f81f7;
   --danger: #f85149;
   --danger-text: #ffd1d1;
@@ -21,10 +21,10 @@
   --bgColor-default: var(--panel);
   --bgColor-muted: var(--panel2);
   --bgColor-success-muted: rgba(46, 160, 67, 0.15);
-  --bgColor-danger-muted: rgba(248, 81, 73, 0.10);
+  --bgColor-danger-muted: rgba(248, 81, 73, 0.15);
   --add: var(--bgColor-success-muted);
   --del: var(--bgColor-danger-muted);
-  --code-bg: #090c10;
+  --code-bg: #161b22;
   --syntax-keyword: #ff7b72;
   --syntax-title: #d2a8ff;
   --syntax-string: #a5d6ff;
@@ -32,7 +32,10 @@
   --syntax-comment: #8fb6c9;
   --syntax-variable: #ffa657;
   --syntax-meta: #79c0ff;
-  font-family: ui-sans-serif, system-ui, sans-serif;
+  --radius: 6px;
+  --font-system: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-system);
 }
 
 :root[data-theme="github-light"] {
@@ -93,8 +96,8 @@
   --borderColor-default: var(--border);
   --bgColor-default: var(--panel);
   --bgColor-muted: var(--panel2);
-  --bgColor-success-muted: rgba(70, 149, 74, 0.11);
-  --bgColor-danger-muted: rgba(229, 83, 75, 0.10);
+  --bgColor-success-muted: rgba(70, 149, 74, 0.18);
+  --bgColor-danger-muted: rgba(229, 83, 75, 0.16);
   --add: var(--bgColor-success-muted);
   --del: var(--bgColor-danger-muted);
   --code-bg: #1c2128;
@@ -114,6 +117,34 @@ body {
   background: var(--bg);
   color: var(--text);
   font-size: 14px;
+  line-height: 1.5;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: var(--radius);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 button, input, textarea, select {
@@ -199,7 +230,7 @@ a { color: var(--link); text-decoration: none; }
 .toolbar, .panel, .file {
   border: 1px solid var(--border);
   background: var(--panel);
-  border-radius: 8px;
+  border-radius: var(--radius);
 }
 
 .comment-tools {
@@ -347,7 +378,7 @@ a { color: var(--link); text-decoration: none; }
   border: 1px solid var(--danger);
   color: var(--danger-text);
   background: rgba(248, 81, 73, 0.1);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 10px;
   white-space: pre-wrap;
 }
@@ -535,7 +566,7 @@ a { color: var(--link); text-decoration: none; }
   justify-content: space-between;
   padding: 10px 14px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--panel);
 }
 
@@ -588,7 +619,7 @@ a { color: var(--link); text-decoration: none; }
 
 .pr-summary {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
 }
 
 .pr-summary .thread-head {
@@ -609,7 +640,7 @@ a { color: var(--link); text-decoration: none; }
 
 .file-navigator {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--panel);
   overflow: hidden;
 }
@@ -892,7 +923,7 @@ a { color: var(--link); text-decoration: none; }
 .code-cell,
 .split-code-cell {
   display: grid;
-  grid-template-columns: 20px minmax(0, max-content);
+  grid-template-columns: 12px minmax(0, max-content);
   min-width: max-content;
   padding-right: 10px;
   background: var(--diff-row-bg);
@@ -929,6 +960,10 @@ a { color: var(--link); text-decoration: none; }
   text-align: right;
   user-select: none;
   background: var(--diff-num-bg);
+  font-variant-numeric: tabular-nums;
+}
+
+.new-num {
   border-right: 1px solid var(--border);
 }
 .diff-row.context {
@@ -961,13 +996,13 @@ a { color: var(--link); text-decoration: none; }
 .diff-row.added .diff-marker { color: var(--success); }
 .diff-row.removed .diff-marker { color: var(--danger); }
 .hunk {
-  --diff-row-bg: color-mix(in srgb, var(--accent) 10%, var(--panel2));
-  --diff-num-bg: color-mix(in srgb, var(--accent) 16%, var(--panel2));
-  color: var(--link);
+  --diff-row-bg: color-mix(in srgb, var(--accent) 8%, var(--panel2));
+  --diff-num-bg: color-mix(in srgb, var(--accent) 8%, var(--panel2));
+  color: var(--muted);
 }
 .meta { color: var(--muted); }
 .meta .code-cell,
-.hunk .code-cell { grid-template-columns: 20px minmax(0, max-content); }
+.hunk .code-cell { grid-template-columns: minmax(0, max-content); padding-left: 10px; }
 .patchset-renderer {
   display: grid;
   gap: 10px;
@@ -975,7 +1010,7 @@ a { color: var(--link); text-decoration: none; }
 }
 .patchset-section {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   overflow: hidden;
   background: var(--panel);
 }
@@ -1379,7 +1414,7 @@ a { color: var(--link); text-decoration: none; }
   min-width: 180px;
   padding: 4px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--panel);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
@@ -1498,6 +1533,22 @@ a { color: var(--link); text-decoration: none; }
 .github-comment-header strong {
   color: var(--text);
   font-weight: 600;
+}
+
+.github-comment-meta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.comment-time {
+  color: var(--muted);
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .github-comment-body .markdown {
@@ -2463,7 +2514,7 @@ button.fold:hover {
   gap: 5px;
   padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--panel2);
   text-align: left;
   cursor: pointer;
@@ -2596,7 +2647,7 @@ button.fold:hover {
   gap: 2px;
   padding: 8px 10px;
   border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border));
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: color-mix(in srgb, var(--success) 10%, var(--panel));
   color: var(--success);
 }
@@ -2714,7 +2765,7 @@ button.fold:hover {
   width: 100%;
   padding: 8px 10px;
   border: 1px solid color-mix(in srgb, var(--attention) 28%, var(--border));
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: color-mix(in srgb, var(--attention) 7%, var(--panel));
   color: var(--text);
   text-align: left;
@@ -2789,7 +2840,7 @@ button.fold:hover {
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-left: 3px solid color-mix(in srgb, var(--muted) 35%, var(--border));
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--panel);
 }
 
@@ -3073,7 +3124,7 @@ button.fold:hover {
 .memory-distillation-map,
 .memory-record {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--panel2);
   padding: 12px;
 }
@@ -3201,7 +3252,7 @@ button.fold:hover {
   display: grid;
   gap: 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 12px;
   background: var(--panel2);
 }
@@ -3284,7 +3335,7 @@ button.fold:hover {
   overflow: auto;
   padding: 4px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--panel2);
 }
 
@@ -3345,7 +3396,7 @@ button.fold:hover {
   display: grid;
   gap: 4px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--panel2);
   padding: 4px;
 }
@@ -3398,7 +3449,7 @@ button.fold:hover {
 
 .pi-card {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--panel2);
   overflow: hidden;
 }
@@ -3897,7 +3948,7 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
 .focus-area-links {
   padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--panel2);
 }
 
@@ -3979,7 +4030,7 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
   margin: 0 0 14px;
   padding: 12px 14px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: color-mix(in srgb, var(--panel2) 78%, var(--panel));
   display: flex;
   flex-direction: column;
