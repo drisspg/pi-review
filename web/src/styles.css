@@ -950,6 +950,7 @@ a { color: var(--link); text-decoration: none; }
 .hljs-operator, .hljs-punctuation { color: var(--text); }
 
 .diff-row:not(.hunk):not(.meta) { cursor: pointer; }
+.diff-row:not(.hunk):not(.meta) code { cursor: text; }
 .diff-row:hover, .diff-row.selected {
   --diff-row-bg: color-mix(in srgb, var(--accent) 7%, transparent);
   --diff-num-bg: color-mix(in srgb, var(--accent) 8%, transparent);

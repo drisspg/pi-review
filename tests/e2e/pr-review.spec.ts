@@ -260,7 +260,11 @@ test("shows readable Pi diagnostics", async ({ page }) => {
 });
 
 test("renders inline Ask Pi responses as markdown", async ({ page }) => {
-  await mockAskPi(page, () => "**Finding:** check `batch_offset`.\n\n```cpp\nreturn batch_offset;\n```");
+  let prompt = "";
+  await mockAskPi(page, (body) => {
+    prompt = body.prompt ?? "";
+    return "**Finding:** check `batch_offset`.\n\n```cpp\nreturn batch_offset;\n```";
+  });
 
   await openFirstFile(page);
   await page.locator(".file").first().locator(".diff-row.added").first().click();
@@ -270,6 +274,25 @@ test("renders inline Ask Pi responses as markdown", async ({ page }) => {
   const thread = page.locator(".local-comment-timeline").first();
   await expect(thread).toContainText("Finding:");
   await expect(thread.locator("pre code")).toContainText("return batch_offset;");
+  expect(prompt).toContain("Visible diff hunk:\n@@");
+  expect(prompt).toContain("review this line");
+});
+
+test("selects diff code text without opening a thread", async ({ page }) => {
+  await openFirstFile(page);
+  const code = page.locator(".file").first().locator(".diff-row.added code").first();
+  await expect(code).toBeVisible();
+  const box = await code.boundingBox();
+  if (box == null) throw new Error("Missing diff code bounds");
+
+  const y = box.y + box.height / 2;
+  await page.mouse.move(box.x + 2, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + Math.max(8, Math.min(box.width - 2, 120)), y, { steps: 6 });
+  await page.mouse.up();
+
+  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? "")).not.toEqual("");
+  await expect(page.locator(".inline-thread")).toHaveCount(0);
 });
 
 test("opens code-wrapped file references in VS Code", async ({ page }) => {

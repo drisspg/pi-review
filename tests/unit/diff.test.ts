@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parsePatchSetSections } from "../../web/src/lib/diff.js";
+import { parsePatchRows, parsePatchSetSections } from "../../web/src/lib/diff.js";
 
 test("patchset parser unwraps added patch files into inner sections", () => {
   const sections = parsePatchSetSections(`@@ -0,0 +1,12 @@
@@ -80,6 +80,19 @@ test("patchset parser resets displayed line numbers for later inner hunks", () =
     [null, 191, "added", "+added_new()"],
     [167, 192, "context", " context_after()"],
   ]);
+});
+
+test("patch rows keep the full hunk for inline prompts", () => {
+  const rows = parsePatchRows(`@@ -1,3 +1,3 @@
+ context
+-old
++new
+@@ -9 +9 @@
+-other
++next`);
+
+  assert.equal(rows.find((row) => row.text === "+new")?.hunk, "@@ -1,3 +1,3 @@\n context\n-old\n+new");
+  assert.equal(rows.find((row) => row.text === "+next")?.hunk, "@@ -9 +9 @@\n-other\n+next");
 });
 
 test("patchset parser ignores ordinary patches", () => {

@@ -202,9 +202,20 @@ function inlineChatPrompt(payload: Record<string, unknown>): ReviewPromptRespons
   const side = requiredString(payload, "side");
   const hunk = requiredString(payload, "hunk");
   const question = requiredString(payload, "question");
+  const previousDialogue = optionalString(payload, "previousDialogue", "(none)");
   return {
     purpose: "inline-chat",
-    prompt: `Review PR ${prKey}. File: ${path}. Lines: ${rangeText(payload)}. Side: ${side}. Hunk: ${hunk}\n\nAnswer from the visible hunk first and keep it concise. Use tools only if the question cannot be answered from the hunk or asks for broader context.\n\nQuestion: ${question}`,
+    prompt: `Review PR ${prKey}. File: ${path}. Lines: ${rangeText(payload)}. Side: ${side}.
+
+Visible diff hunk:
+${hunk}
+
+Previous dialogue:
+${previousDialogue}
+
+Answer from the visible diff hunk first and keep it concise. The hunk includes removed (-), added (+), and context lines. Use tools only if the question cannot be answered from the hunk or asks for broader context.
+
+Question: ${question}`,
   };
 }
 

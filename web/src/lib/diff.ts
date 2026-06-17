@@ -29,6 +29,23 @@ function nextPythonTripleString(line: string, active: string | null): string | n
   }
 }
 
+function rowHasKind(row: DiffRow, kind: string): boolean {
+  return row.kind.split(" ").includes(kind);
+}
+
+function rowsWithFullHunks(rows: DiffRow[]): DiffRow[] {
+  const nextRows = [...rows];
+  for (let index = 0; index < nextRows.length; index += 1) {
+    if (!rowHasKind(nextRows[index], "hunk")) continue;
+    const nextHunkOffset = nextRows.slice(index + 1).findIndex((row) => rowHasKind(row, "hunk"));
+    const blockEnd = nextHunkOffset === -1 ? nextRows.length : index + 1 + nextHunkOffset;
+    const hunk = nextRows.slice(index, blockEnd).map((row) => row.text).join("\n");
+    for (let rowIndex = index; rowIndex < blockEnd; rowIndex += 1) nextRows[rowIndex] = { ...nextRows[rowIndex], hunk };
+    index = blockEnd - 1;
+  }
+  return nextRows;
+}
+
 export function parsePatchRows(patch: string | undefined): DiffRow[] {
   if (patch == null) return [];
   const rows: DiffRow[] = [];
@@ -67,7 +84,7 @@ export function parsePatchRows(patch: string | undefined): DiffRow[] {
       rows.push({ kind: "meta", oldLine: null, newLine: null, text: line, hunk: currentHunk });
     }
   }
-  return rows;
+  return rowsWithFullHunks(rows);
 }
 
 export function parsePatchSetSections(patch: string | undefined): PatchSetSection[] {
@@ -117,7 +134,7 @@ export function parsePatchSetSections(patch: string | undefined): PatchSetSectio
     }
   }
 
-  return sawInnerDiff ? sections : [];
+  return sawInnerDiff ? sections.map((section) => ({ ...section, rows: rowsWithFullHunks(section.rows) })) : [];
 }
 
 function patchSetSyntaxContext(text: string, oldTripleString: string | null, newTripleString: string | null): "string" | undefined {
