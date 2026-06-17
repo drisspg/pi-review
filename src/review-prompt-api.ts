@@ -207,13 +207,13 @@ function inlineChatPrompt(payload: Record<string, unknown>): ReviewPromptRespons
     purpose: "inline-chat",
     prompt: `Review PR ${prKey}. File: ${path}. Lines: ${rangeText(payload)}. Side: ${side}.
 
-Visible diff hunk:
+Diff hunk context:
 ${hunk}
 
 Previous dialogue:
 ${previousDialogue}
 
-Answer from the visible diff hunk first and keep it concise. The hunk includes removed (-), added (+), and context lines. Use tools only if the question cannot be answered from the hunk or asks for broader context.
+Use the diff hunk as context for the question and keep the answer concise. The hunk includes removed (-), added (+), and unchanged context lines. Do not start with a formulaic preface like "From the hunk". Use tools only if the question cannot be answered from the hunk or asks for broader context.
 
 Question: ${question}`,
   };

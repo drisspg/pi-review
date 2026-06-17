@@ -131,7 +131,7 @@ test("copies all draft comments with diff context", async ({ page, context }) =>
   const text = await page.evaluate(() => navigator.clipboard.readText());
   expect(text).toContain("# PR review draft context");
   expect(text).toContain("send this to another agent");
-  expect(text).toContain("Visible diff hunk:\n```diff\n@@");
+  expect(text).toContain("Diff hunk context:\n```diff\n@@");
 });
 
 test("clears empty line threads when clicking elsewhere", async ({ page }) => {
@@ -289,7 +289,7 @@ test("renders inline Ask Pi responses as markdown", async ({ page }) => {
   const thread = page.locator(".local-comment-timeline").first();
   await expect(thread).toContainText("Finding:");
   await expect(thread.locator("pre code")).toContainText("return batch_offset;");
-  expect(prompt).toContain("Visible diff hunk:\n@@");
+  expect(prompt).toContain("Diff hunk context:\n@@");
   expect(prompt).toContain("review this line");
 });
 

@@ -185,7 +185,7 @@ Side: ${draft.side}
 Comment:
 ${draft.body}
 
-Visible diff hunk:
+Diff hunk context:
 \`\`\`diff
 ${draftDiffHunk(files, draft)}
 \`\`\``);
