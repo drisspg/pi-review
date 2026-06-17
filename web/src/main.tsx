@@ -144,6 +144,64 @@ function threadDialogue(messages: ThreadMessage[]): string {
   return messages.map((message) => `${message.role === "user" ? "User" : "Pi"}: ${message.text}`).join("\n\n");
 }
 
+function writeClipboardFallback(text: string): void {
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.append(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
+}
+
+async function writeClipboard(text: string): Promise<void> {
+  if (navigator.clipboard != null) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      writeClipboardFallback(text);
+      return;
+    }
+  }
+  writeClipboardFallback(text);
+}
+
+function draftDiffHunk(files: PullFile[], draft: DraftComment): string {
+  const file = files.find((candidate) => candidate.filename === draft.path);
+  if (file?.patch == null) return "Patch unavailable.";
+  const lineForSide = (row: DiffRow) => draft.side === "RIGHT" ? row.newLine : row.oldLine;
+  return parsePatchRows(file.patch).find((row) => draft.line != null && lineForSide(row) === draft.line)?.hunk ?? "Patch hunk unavailable for this draft anchor.";
+}
+
+function reviewDraftContext(pr: StoredPullRequest, files: PullFile[], body: string, drafts: DraftComment[]): string {
+  const overallBody = body.trim().length > 0 ? body.trim() : "(none)";
+  const draftBlocks = drafts.map((draft, index) => `## Draft comment ${index + 1}
+
+Location: ${draftLocation(draft)}
+Side: ${draft.side}
+
+Comment:
+${draft.body}
+
+Visible diff hunk:
+\`\`\`diff
+${draftDiffHunk(files, draft)}
+\`\`\``);
+  return `# PR review draft context
+
+PR: ${pr.key}
+URL: ${pr.url}
+Title: ${pr.title}
+Head: ${pr.headSha}
+
+Overall review body:
+${overallBody}
+
+${draftBlocks.join("\n\n")}`;
+}
+
 function upsertHistoryRecord<T extends { id: string; updatedAt: string; createdAt: string }>(records: T[], record: T): T[] {
   return [record, ...records.filter((stored) => stored.id !== record.id)].sort((a, b) => (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt));
 }
@@ -1141,7 +1199,7 @@ function ReviewPage(props: DiffProps & { piPanel: PiPanelProps; submitReview: (e
         <button type="button" className="side-maximize-button" title={sideMaximized ? "Restore side panel" : "Maximize side panel"} aria-label={sideMaximized ? "Restore side panel" : "Maximize side panel"} onClick={toggleSideMaximized}>{sideMaximized ? "⇥" : "⇤"}</button>
       </nav>
       <div className="side-tab-panels">
-        {sideTab === "review" && <ReviewSummary pr={props.review.pr} drafts={props.drafts} setDrafts={props.setDrafts} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} submitReview={props.submitReview} submitting={props.submitting} invalidDraftIds={props.invalidDraftIds} onJumpToDraft={(draft) => jumpToComment({ ...draft, hunk: "" })} />}
+        {sideTab === "review" && <ReviewSummary pr={props.review.pr} files={props.review.files} drafts={props.drafts} setDrafts={props.setDrafts} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} submitReview={props.submitReview} submitting={props.submitting} invalidDraftIds={props.invalidDraftIds} onJumpToDraft={(draft) => jumpToComment({ ...draft, hunk: "" })} />}
         {sideTab === "pi" && <InlineSnippetsProvider value={{ headSha: props.review.pr.headSha, snippets: true }}><AiReviewPanel prUrl={props.review.pr.url} {...props.piPanel} focusAreas={props.focusAreas} setActiveFocusAreaId={props.setActiveFocusAreaId} collapsedFocusAreaIds={props.collapsedFocusAreaIds} setCollapsedFocusAreaIds={props.setCollapsedFocusAreaIds} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} /></InlineSnippetsProvider>}
         {sideTab === "comments" && <ExistingComments prUrl={props.review.pr.url} comments={props.review.comments} issueComments={props.review.issueComments} reviewSummaries={props.review.reviewSummaries} refreshGithubActivity={props.refreshGithubActivity} collapseSignal={props.commentCollapseSignal} commentsCollapsed={props.commentsCollapsed} toggleAllComments={props.toggleAllComments} onJumpToComment={jumpToComment} />}
       </div>
@@ -1497,10 +1555,11 @@ function reviewStatus(pr: StoredPullRequest): { label: string; tone: string } {
   return { label: "Reviewed", tone: "success" };
 }
 
-function ReviewSummary({ drafts, setDrafts, editingDraftId, setEditingDraftId, submitReview, submitting, invalidDraftIds, onJumpToDraft }: { pr: StoredPullRequest; drafts: DraftComment[]; setDrafts: (drafts: DraftComment[]) => void; editingDraftId: string | null; setEditingDraftId: (id: string | null) => void; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; submitting: boolean; invalidDraftIds: Record<string, boolean>; onJumpToDraft?: (draft: DraftComment) => void }) {
+function ReviewSummary({ pr, files, drafts, setDrafts, editingDraftId, setEditingDraftId, submitReview, submitting, invalidDraftIds, onJumpToDraft }: { pr: StoredPullRequest; files: PullFile[]; drafts: DraftComment[]; setDrafts: (drafts: DraftComment[]) => void; editingDraftId: string | null; setEditingDraftId: (id: string | null) => void; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; submitting: boolean; invalidDraftIds: Record<string, boolean>; onJumpToDraft?: (draft: DraftComment) => void }) {
   const [event, setEvent] = useState<"COMMENT" | "APPROVE" | "REQUEST_CHANGES">("COMMENT");
   const [body, setBody] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [copied, setCopied] = useState(false);
   const hasReviewContent = body.trim().length > 0 || drafts.length > 0;
   const showSubmitted = submitted && !hasReviewContent;
   async function handleSubmit() {
@@ -1511,7 +1570,13 @@ function ReviewSummary({ drafts, setDrafts, editingDraftId, setEditingDraftId, s
       setSubmitted(true);
     }
   }
-  return <section className="panel"><h2>Draft review</h2><select className={`review-event ${event.toLowerCase().replace("_", "-")}`} value={event} onChange={(change) => { setEvent(change.target.value as typeof event); setSubmitted(false); }}><option value="COMMENT">Not reviewed</option><option value="APPROVE">Approve</option><option value="REQUEST_CHANGES">Request changes</option></select><textarea className="review-body" rows={2} value={body} onChange={(change) => { setBody(change.target.value); setSubmitted(false); autoGrowTextarea(change.currentTarget); }} placeholder="Overall review body" />{drafts.length === 0 ? <p className="muted">{showSubmitted ? "Review submitted." : "No draft comments yet."}</p> : drafts.map((draft, index) => <DraftView key={draft.id} draft={draft} index={index} invalid={invalidDraftIds[draft.id] === true} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} onJump={onJumpToDraft != null ? () => onJumpToDraft(draft) : undefined} />)}<button className={`review-submit ${event.toLowerCase().replace("_", "-")}`} disabled={submitting || !hasReviewContent} onClick={() => void handleSubmit()}>{submitting ? "Submitting…" : showSubmitted ? "Review submitted" : `Submit review (${drafts.length})`}</button></section>;
+  async function copyDraftContext() {
+    if (!hasReviewContent) return;
+    await writeClipboard(reviewDraftContext(pr, files, body, drafts));
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  }
+  return <section className="panel"><h2>Draft review</h2><select className={`review-event ${event.toLowerCase().replace("_", "-")}`} value={event} onChange={(change) => { setEvent(change.target.value as typeof event); setSubmitted(false); }}><option value="COMMENT">Not reviewed</option><option value="APPROVE">Approve</option><option value="REQUEST_CHANGES">Request changes</option></select><textarea className="review-body" rows={2} value={body} onChange={(change) => { setBody(change.target.value); setSubmitted(false); autoGrowTextarea(change.currentTarget); }} placeholder="Overall review body" />{drafts.length === 0 ? <p className="muted">{showSubmitted ? "Review submitted." : "No draft comments yet."}</p> : drafts.map((draft, index) => <DraftView key={draft.id} draft={draft} index={index} invalid={invalidDraftIds[draft.id] === true} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} onJump={onJumpToDraft != null ? () => onJumpToDraft(draft) : undefined} />)}<div className="review-actions"><button className="small-muted-button" disabled={!hasReviewContent} onClick={() => void copyDraftContext()}>{copied ? "Copied context" : "Copy draft context"}</button><button className={`review-submit ${event.toLowerCase().replace("_", "-")}`} disabled={submitting || !hasReviewContent} onClick={() => void handleSubmit()}>{submitting ? "Submitting…" : showSubmitted ? "Review submitted" : `Submit review (${drafts.length})`}</button></div></section>;
 }
 
 function AgentActivityLine({ activity }: { activity: PiAgentActivity | null | undefined }) {

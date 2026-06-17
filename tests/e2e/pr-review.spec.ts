@@ -119,6 +119,21 @@ test("creates, edits, and removes draft comments", async ({ page }) => {
   await expect(page.locator(".inline-thread.draft")).toHaveCount(0);
 });
 
+test("copies all draft comments with diff context", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await openFirstFile(page);
+  await page.locator(".file").first().locator(".diff-row.added").first().click();
+  await page.locator(".inline-thread textarea").first().fill("send this to another agent");
+  await page.getByRole("button", { name: "Add draft comment" }).first().click();
+  await page.getByRole("button", { name: "Copy draft context" }).click();
+
+  await expect(page.getByRole("button", { name: "Copied context" })).toBeVisible();
+  const text = await page.evaluate(() => navigator.clipboard.readText());
+  expect(text).toContain("# PR review draft context");
+  expect(text).toContain("send this to another agent");
+  expect(text).toContain("Visible diff hunk:\n```diff\n@@");
+});
+
 test("clears empty line threads when clicking elsewhere", async ({ page }) => {
   await openFirstFile(page);
   await page.locator(".file").first().locator(".diff-row.added").first().click();

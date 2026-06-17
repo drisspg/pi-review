@@ -2016,6 +2016,16 @@ button.fold:hover {
   border-color: var(--danger);
 }
 
+.review-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.review-actions .small-muted-button,
+.review-actions .review-submit {
+  width: 100%;
+}
+
 .comment {
   display: grid;
   gap: 5px;
