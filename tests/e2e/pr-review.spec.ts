@@ -523,3 +523,59 @@ test("runs the right-sidebar Pi review panel and continues the chat with Enter",
   await dialog.getByPlaceholder("Ask Pi about this PR…").press("Enter");
   await expect(dialog).toContainText("Follow-up answer");
 });
+
+test("copies a collected review feedback prompt from the Pi panel", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const rows = await openFileWithAddedRows(page, 1);
+  const path = await rows.first().getAttribute("data-path");
+  const line = await rows.first().getAttribute("data-line");
+  if (path == null || line == null) throw new Error("Missing diff row target");
+  const lineNumber = Number.parseInt(line, 10);
+  let feedbackPayload: Record<string, unknown> | null = null;
+
+  await page.route("**/api/pi/prompt", async (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    if (body.mode === "review-feedback") {
+      feedbackPayload = body;
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ prompt: "COPIED REVIEW FEEDBACK PROMPT", purpose: "review-feedback" }) });
+      return;
+    }
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ prompt: `prompt for ${String(body.mode)}`, purpose: String(body.mode) }) });
+  });
+  await page.route(/\/api\/pi\/review\/status$/, async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { status: "complete", answer: "Global feedback from Pi." } }) });
+  });
+  await page.route(/\/api\/pi\/review$/, async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { id: "copy-review-job" } }) });
+  });
+  await page.route(/\/api\/pi\/focus-review\/status$/, async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { status: "complete", answer: `## Focus areas\n- ${path}:${line} — copied focus area\nCheck this focused spot.` } }) });
+  });
+  await page.route(/\/api\/pi\/focus-review$/, async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { id: "copy-focus-job" } }) });
+  });
+  await mockAskPi(page, () => "AI chat answer.");
+
+  await page.getByRole("tab", { name: "Pi" }).click();
+  const panel = page.locator(".ai-review");
+  await panel.getByRole("button", { name: /Full review|Refresh findings/ }).click();
+  await expect(panel).toContainText("Global feedback from Pi");
+  await panel.getByRole("button", { name: /Focus scan|Refresh focus scan/ }).click();
+  await expect(panel).toContainText("copied focus area");
+  await panel.getByPlaceholder("Ask Pi about this PR…").fill("What should I prioritize?");
+  await panel.getByPlaceholder("Ask Pi about this PR…").press("Enter");
+  await expect(panel).toContainText("AI chat answer");
+  await panel.getByRole("button", { name: "Copy feedback prompt" }).click();
+
+  await expect(panel.getByRole("button", { name: "Copied feedback prompt" })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("COPIED REVIEW FEEDBACK PROMPT");
+  await expect.poll(() => feedbackPayload?.mode).toBe("review-feedback");
+  const userComments = feedbackPayload?.userComments as Array<{ body?: string }> | undefined;
+  const aiComments = feedbackPayload?.aiComments as Array<{ role?: string; text?: string }> | undefined;
+  const focusAreas = feedbackPayload?.focusAreas as Array<{ path?: string; startLine?: number; title?: string }> | undefined;
+  expect(userComments?.some((comment) => comment.body?.includes("Before #2448"))).toBe(true);
+  expect(aiComments?.some((comment) => comment.role === "user" && comment.text === "What should I prioritize?")).toBe(true);
+  expect(aiComments?.some((comment) => comment.role === "pi" && comment.text === "AI chat answer.")).toBe(true);
+  expect(focusAreas?.[0]).toMatchObject({ path, startLine: lineNumber, title: "copied focus area" });
+  expect(feedbackPayload?.globalFeedback).toBe("Global feedback from Pi.");
+});

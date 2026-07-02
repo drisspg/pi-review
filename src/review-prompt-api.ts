@@ -1,4 +1,4 @@
-type ReviewPromptMode = "code-walk" | "main-review" | "focus-review" | "test-pr" | "ai-chat" | "inline-chat" | "focus-chat";
+type ReviewPromptMode = "code-walk" | "main-review" | "focus-review" | "test-pr" | "ai-chat" | "inline-chat" | "focus-chat" | "review-feedback";
 
 type PromptFile = {
   additions?: number;
@@ -6,6 +6,32 @@ type PromptFile = {
   filename: string;
   patch?: string;
   status?: string;
+};
+
+type PromptFeedbackItem = {
+  author?: string;
+  body: string;
+  kind?: string;
+  location?: string;
+  state?: string;
+  updatedAt?: string;
+  url?: string;
+};
+
+type PromptAiMessage = {
+  kind?: string;
+  role: string;
+  text: string;
+  title?: string;
+};
+
+type PromptFocusArea = {
+  body: string;
+  endLine: number;
+  path: string;
+  startLine: number;
+  title: string;
+  viewed?: boolean;
 };
 
 export type ReviewPromptApiDeps = {
@@ -30,6 +56,57 @@ function requiredString(payload: Record<string, unknown>, key: string): string {
 function optionalString(payload: Record<string, unknown>, key: string, fallback: string): string {
   const value = payload[key];
   return typeof value === "string" && value.trim().length > 0 ? value : fallback;
+}
+
+function optionalRecordString(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function optionalRecords(payload: Record<string, unknown>, key: string): Record<string, unknown>[] {
+  const value = payload[key];
+  if (value == null) return [];
+  if (!Array.isArray(value)) throw new Error(`Expected ${key}`);
+  return value.map((item) => {
+    if (typeof item !== "object" || item == null || Array.isArray(item)) throw new Error(`Expected ${key}`);
+    return item as Record<string, unknown>;
+  });
+}
+
+function promptFeedbackItems(payload: Record<string, unknown>, key: string): PromptFeedbackItem[] {
+  return optionalRecords(payload, key).map((record) => {
+    const body = optionalRecordString(record, "body");
+    if (body == null) throw new Error(`Expected ${key}.body`);
+    return {
+      author: optionalRecordString(record, "author"),
+      body,
+      kind: optionalRecordString(record, "kind"),
+      location: optionalRecordString(record, "location"),
+      state: optionalRecordString(record, "state"),
+      updatedAt: optionalRecordString(record, "updatedAt"),
+      url: optionalRecordString(record, "url"),
+    };
+  });
+}
+
+function promptAiMessages(payload: Record<string, unknown>): PromptAiMessage[] {
+  return optionalRecords(payload, "aiComments").map((record) => {
+    const role = optionalRecordString(record, "role");
+    const text = optionalRecordString(record, "text");
+    if (role == null || text == null) throw new Error("Expected aiComments role and text");
+    return { role, text, kind: optionalRecordString(record, "kind"), title: optionalRecordString(record, "title") };
+  });
+}
+
+function promptFocusAreas(payload: Record<string, unknown>): PromptFocusArea[] {
+  return optionalRecords(payload, "focusAreas").map((record) => {
+    const path = optionalRecordString(record, "path");
+    const body = optionalRecordString(record, "body");
+    const startLine = record.startLine;
+    const endLine = record.endLine;
+    if (path == null || body == null || typeof startLine !== "number" || typeof endLine !== "number") throw new Error("Expected focusAreas location and body");
+    return { body, endLine, path, startLine, title: optionalRecordString(record, "title") ?? "Focus area", viewed: record.viewed === true };
+  });
 }
 
 function promptFiles(payload: Record<string, unknown>): PromptFile[] {
@@ -230,6 +307,77 @@ function focusChatPrompt(payload: Record<string, unknown>): ReviewPromptResponse
   };
 }
 
+function authorLabel(author: string | undefined): string | undefined {
+  if (author == null) return undefined;
+  return author.startsWith("@") ? author : `@${author}`;
+}
+
+function metadataLine(parts: Array<string | undefined>): string {
+  return parts.filter((part): part is string => part != null && part.length > 0).join(" · ");
+}
+
+function formatFeedbackItems(items: PromptFeedbackItem[]): string {
+  if (items.length === 0) return "No GitHub/user comments were captured.";
+  return items.map((item, index) => `### ${index + 1}. ${metadataLine([item.kind ?? "Comment", authorLabel(item.author), item.location, item.state, item.updatedAt, item.url])}\n${item.body}`).join("\n\n");
+}
+
+function formatAiMessages(messages: PromptAiMessage[]): string {
+  if (messages.length === 0) return "No AI panel chat comments were captured.";
+  return messages.map((message, index) => {
+    const role = message.role === "user" ? "User" : message.role === "pi" ? "Pi" : message.role;
+    return `### ${index + 1}. ${metadataLine([role, message.title, message.kind])}\n${message.text}`;
+  }).join("\n\n");
+}
+
+function formatFocusAreas(areas: PromptFocusArea[]): string {
+  if (areas.length === 0) return "No parsed focus areas were captured.";
+  return areas.map((area, index) => {
+    const range = area.startLine === area.endLine ? String(area.startLine) : `${area.startLine}-${area.endLine}`;
+    return `### ${index + 1}. ${area.path}:${range} — ${area.title} · ${area.viewed === true ? "reviewed" : "unreviewed"}\n${area.body}`;
+  }).join("\n\n");
+}
+
+function reviewFeedbackPrompt(payload: Record<string, unknown>): ReviewPromptResponse {
+  const prKey = requiredString(payload, "prKey");
+  const prTitle = optionalString(payload, "prTitle", "(untitled)");
+  const prUrl = optionalString(payload, "prUrl", "(unknown URL)");
+  const headSha = optionalString(payload, "headSha", "(unknown head)");
+  const globalFeedback = optionalString(payload, "globalFeedback", "No global AI feedback was captured.");
+  const focusScan = optionalString(payload, "focusScan", "No focus scan transcript was captured.");
+  const userComments = promptFeedbackItems(payload, "userComments");
+  const aiComments = promptAiMessages(payload);
+  const focusAreas = promptFocusAreas(payload);
+
+  return {
+    purpose: "review-feedback",
+    prompt: `You are helping triage PR review feedback. Use the collected feedback below to produce a concise action plan for the engineer.
+
+Treat GitHub/user comments as source-of-truth reviewer feedback. Treat Pi/AI comments, focus areas, and global feedback as suggestions that should be verified against the code before acting. Deduplicate overlapping points, identify unresolved actionable items, and suggest reply text or code/test follow-ups when there is enough context.
+
+# PR review feedback bundle
+
+PR: ${prKey}
+URL: ${prUrl}
+Title: ${prTitle}
+Head: ${headSha}
+
+## GitHub/user comments
+${formatFeedbackItems(userComments)}
+
+## AI panel chat comments
+${formatAiMessages(aiComments)}
+
+## AI focus areas
+${formatFocusAreas(focusAreas)}
+
+## AI global feedback
+${globalFeedback}
+
+## Focus scan transcript
+${focusScan}`,
+  };
+}
+
 export function createReviewPromptApi(deps: ReviewPromptApiDeps): ReviewPromptApi {
   async function build(payload: Record<string, unknown>): Promise<ReviewPromptResponse> {
     const mode = payload.mode;
@@ -249,6 +397,8 @@ export function createReviewPromptApi(deps: ReviewPromptApiDeps): ReviewPromptAp
         return inlineChatPrompt(payload);
       case "focus-chat":
         return focusChatPrompt(payload);
+      case "review-feedback":
+        return reviewFeedbackPrompt(payload);
       default:
         throw new Error(`Unknown prompt mode ${mode}`);
     }

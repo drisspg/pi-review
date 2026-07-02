@@ -2436,6 +2436,23 @@ button.fold:hover {
   overflow: auto;
 }
 
+.pi-panel-head {
+  align-items: flex-start;
+}
+
+.side .panel .pi-panel-head h2 {
+  font-size: 20px;
+}
+
+.pi-copy-feedback {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.copy-feedback-error {
+  color: var(--danger-text);
+}
+
 .pi-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;

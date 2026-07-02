@@ -11,7 +11,7 @@ import { contextRowsFromText, hunkNewStart, isTargetInSelection, lastNewLine, pa
 import { autoGrowTextarea } from "./lib/dom";
 import { languageForPath } from "./lib/highlight";
 import { newId, prUrlFromKey, relativeTime, shortSha } from "./lib/pr";
-import type { AiReview, AiReviewMessage, AiReviewRecord, DiffRow, DraftComment, DragSelection, FileReviewState, FlowDag, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, GpuWorkspace, GpuWorkspaceContract, GpuWorkspaceExecResult, LogEntry, OpenResponse, PiAgentActivity, PullFile, PullIssueComment, PullReviewComment, ReviewMemoryRecord, ReviewMemoryResponse, StoredPullRequest, Target, ThemeName, Thread, ThreadMessage } from "./types";
+import type { AiReview, AiReviewMessage, AiReviewRecord, DiffRow, DraftComment, DragSelection, FileReviewState, FlowDag, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, GpuWorkspace, GpuWorkspaceContract, GpuWorkspaceExecResult, LogEntry, OpenResponse, PiAgentActivity, PullFile, PullIssueComment, PullRequestReviewSummary, PullReviewComment, ReviewMemoryRecord, ReviewMemoryResponse, StoredPullRequest, Target, ThemeName, Thread, ThreadMessage } from "./types";
 import "./styles.css";
 
 type DiffViewMode = "unified" | "split";
@@ -93,6 +93,7 @@ type PiPanelProps = {
   sendMessage: (message: string) => Promise<void>;
   chatSending: boolean;
   clearFollowUp: () => void;
+  copyFeedbackPrompt: () => Promise<void>;
   focusReview: FocusReview;
   focusScanHistory: FocusScanRecord[];
   focusScanId: string | null;
@@ -113,6 +114,10 @@ function generalReviewMessage(text: string): AiReviewMessage {
 
 function currentGeneralReviewText(review: AiReview): string {
   return review.messages.find((message) => message.kind === "general-review")?.text.trim() ?? (review.messages.length === 0 ? review.text.trim() : "");
+}
+
+function currentAiReviewMessages(review: AiReview): AiReviewMessage[] {
+  return review.messages.length > 0 ? review.messages : review.text.trim().length > 0 ? [generalReviewMessage(review.text)] : [];
 }
 
 function messagesFromAiReviewRecord(review: AiReviewRecord | null | undefined): AiReviewMessage[] {
@@ -200,6 +205,33 @@ Overall review body:
 ${overallBody}
 
 ${draftBlocks.join("\n\n")}`;
+}
+
+function commentAuthor(comment: PullReviewComment | PullIssueComment | PullRequestReviewSummary): string {
+  return comment.user?.login ?? "github";
+}
+
+function commentUpdatedAt(comment: PullReviewComment | PullIssueComment | PullRequestReviewSummary): string | undefined {
+  if ("submitted_at" in comment && comment.submitted_at != null) return comment.submitted_at;
+  return comment.updated_at;
+}
+
+function reviewFeedbackPromptPayload(review: OpenResponse, aiReview: AiReview, focusReview: FocusReview, focusAreas: FocusArea[], viewedFocusIds: Record<string, boolean>): Record<string, unknown> {
+  const reviewSummaries = review.reviewSummaries.filter((comment) => comment.body.trim().length > 0).map((comment) => ({ kind: `Review summary (${comment.state.toLowerCase().replace("_", " ")})`, author: commentAuthor(comment), body: comment.body.trim(), url: comment.html_url, updatedAt: commentUpdatedAt(comment) }));
+  const issueComments = review.issueComments.filter((comment) => comment.body.trim().length > 0).map((comment) => ({ kind: "Conversation comment", author: commentAuthor(comment), body: comment.body.trim(), url: comment.html_url, updatedAt: commentUpdatedAt(comment) }));
+  const reviewComments = review.comments.filter((comment) => comment.body.trim().length > 0).map((comment) => ({ kind: comment.in_reply_to_id == null ? "Inline review comment" : "Inline review reply", author: commentAuthor(comment), body: comment.body.trim(), location: targetLabel(commentTarget(comment)), state: comment.thread_resolved == null ? undefined : comment.thread_resolved ? "resolved thread" : "unresolved thread", url: comment.html_url, updatedAt: commentUpdatedAt(comment) }));
+  return {
+    mode: "review-feedback",
+    prKey: review.pr.key,
+    prTitle: review.pr.title,
+    prUrl: review.pr.url,
+    headSha: review.pr.headSha,
+    userComments: [...reviewSummaries, ...issueComments, ...reviewComments],
+    aiComments: currentAiReviewMessages(aiReview).filter((message) => message.kind !== "general-review" && message.text.trim().length > 0).map(({ role, text, title, kind }) => ({ role, text: text.trim(), title, kind })),
+    focusAreas: focusAreas.map((area) => ({ path: area.path, startLine: area.startLine, endLine: area.endLine, title: area.title, body: area.body, viewed: viewedFocusIds[area.id] === true })),
+    globalFeedback: currentGeneralReviewText(aiReview),
+    focusScan: focusReview.text,
+  };
 }
 
 function upsertHistoryRecord<T extends { id: string; updatedAt: string; createdAt: string }>(records: T[], record: T): T[] {
@@ -753,6 +785,12 @@ function App() {
     return await api<{ prompt: string; purpose: string }>("/api/pi/prompt", { method: "POST", body: JSON.stringify(payload) });
   }
 
+  async function copyReviewFeedbackPrompt(): Promise<void> {
+    if (review == null) return;
+    const { prompt } = await buildPiPrompt(reviewFeedbackPromptPayload(review, aiReview, focusReview, focusAreas, viewedFocusAreaIds));
+    await writeClipboard(prompt);
+  }
+
   async function runAutomaticPiReviews(nextReview: OpenResponse) {
     const aiReviewUpToDate = nextReview.aiReview != null && nextReview.aiReview.headSha === nextReview.pr.headSha && nextReview.aiReview.answer.trim().length > 0;
     const focusScanUpToDate = nextReview.focusScan != null && nextReview.focusScan.headSha === nextReview.pr.headSha && nextReview.focusScan.answer.trim().length > 0;
@@ -990,7 +1028,7 @@ function App() {
     setCommentCollapseSignal((signal) => signal + 1);
   }
 
-  return <main className="app-shell"><header className="toolbar"><div className="toolbar-title"><strong>Pi PR Review</strong><span>{review == null ? "Paste a PR to start" : `${review.pr.key} · ${review.pr.title}`}</span></div><div className="toolbar-actions">{review != null && <><a className="toolbar-link" href={homeHash} onClick={(event) => { if (!isPlainLeftClick(event)) return; event.preventDefault(); goHome(); }}>Home</a><button type="button" className="toolbar-icon" title="Pi session settings" aria-label="Pi session settings" onClick={() => { setSettingsOpen(true); void loadDiagnostics(); }}>⚙</button><button type="button" className="toolbar-icon" title="Pi session diagnostics" aria-label="Pi session diagnostics" onClick={() => void showDiagnostics()}>🐞</button><button type="button" title="Open GPU workspace" onClick={() => setGpuWorkspaceOpen(true)}>GPU</button><button type="button" className="toolbar-codewalk" title="Code walk" onClick={() => { setFlowDagOpen(true); if (flowDag.text.trim().length === 0 && !flowDag.running) void runFlowDag(); }}><span>Code walk</span>{flowDag.running && <span className="spinner" aria-hidden="true" />}</button></>}<button type="button" className="toolbar-icon" title="Review memory" aria-label="Review memory" onClick={() => void showReviewMemory()}>🧠</button><button type="button" className="toolbar-icon" title="Server log" aria-label="Server log" onClick={() => { setLogsOpen(true); void refreshLogs(); }}>📜</button><select aria-label="Theme" value={theme} onChange={(event) => setTheme(event.target.value as ThemeName)}>{themes.map((item) => <option key={item.name} value={item.name}>{item.label}</option>)}</select>{review != null && <form className="open-form" onSubmit={submit}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="OWNER/REPO#123 or GitHub PR URL" /><button disabled={busy || input.trim().length === 0}>{busy ? "Fetching…" : "Open"}</button></form>}</div></header>{error != null && <div className="error">{error}</div>}{busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, sendMessage: sendAiReviewMessage, chatSending: aiChatSending, clearFollowUp: clearAiReviewFollowUp, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} theme={theme} setTheme={setTheme} />}{diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}{review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} openDiagnostics={() => { setSettingsOpen(false); void showDiagnostics(); }} close={() => setSettingsOpen(false)} />}{memoryOpen && <ReviewMemoryModal memory={reviewMemory} loading={memoryLoading} distilling={memoryDistilling} refresh={() => void loadReviewMemory()} distill={() => void distillReviewMemory()} close={() => setMemoryOpen(false)} />}{review != null && gpuWorkspaceOpen && <GpuWorkspaceModal review={review} close={() => setGpuWorkspaceOpen(false)} refreshLogs={refreshLogs} />}{review != null && flowDagOpen && <FlowDagModal flowDag={flowDag} runFlowDag={runFlowDag} close={() => setFlowDagOpen(false)} prUrl={review.pr.url} headSha={review.pr.headSha} />}{logsOpen && <LogsModal logs={logs} refreshLogs={refreshLogs} close={() => setLogsOpen(false)} />}</main>;
+  return <main className="app-shell"><header className="toolbar"><div className="toolbar-title"><strong>Pi PR Review</strong><span>{review == null ? "Paste a PR to start" : `${review.pr.key} · ${review.pr.title}`}</span></div><div className="toolbar-actions">{review != null && <><a className="toolbar-link" href={homeHash} onClick={(event) => { if (!isPlainLeftClick(event)) return; event.preventDefault(); goHome(); }}>Home</a><button type="button" className="toolbar-icon" title="Pi session settings" aria-label="Pi session settings" onClick={() => { setSettingsOpen(true); void loadDiagnostics(); }}>⚙</button><button type="button" className="toolbar-icon" title="Pi session diagnostics" aria-label="Pi session diagnostics" onClick={() => void showDiagnostics()}>🐞</button><button type="button" title="Open GPU workspace" onClick={() => setGpuWorkspaceOpen(true)}>GPU</button><button type="button" className="toolbar-codewalk" title="Code walk" onClick={() => { setFlowDagOpen(true); if (flowDag.text.trim().length === 0 && !flowDag.running) void runFlowDag(); }}><span>Code walk</span>{flowDag.running && <span className="spinner" aria-hidden="true" />}</button></>}<button type="button" className="toolbar-icon" title="Review memory" aria-label="Review memory" onClick={() => void showReviewMemory()}>🧠</button><button type="button" className="toolbar-icon" title="Server log" aria-label="Server log" onClick={() => { setLogsOpen(true); void refreshLogs(); }}>📜</button><select aria-label="Theme" value={theme} onChange={(event) => setTheme(event.target.value as ThemeName)}>{themes.map((item) => <option key={item.name} value={item.name}>{item.label}</option>)}</select>{review != null && <form className="open-form" onSubmit={submit}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="OWNER/REPO#123 or GitHub PR URL" /><button disabled={busy || input.trim().length === 0}>{busy ? "Fetching…" : "Open"}</button></form>}</div></header>{error != null && <div className="error">{error}</div>}{busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, sendMessage: sendAiReviewMessage, chatSending: aiChatSending, clearFollowUp: clearAiReviewFollowUp, copyFeedbackPrompt: copyReviewFeedbackPrompt, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} theme={theme} setTheme={setTheme} />}{diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}{review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} openDiagnostics={() => { setSettingsOpen(false); void showDiagnostics(); }} close={() => setSettingsOpen(false)} />}{memoryOpen && <ReviewMemoryModal memory={reviewMemory} loading={memoryLoading} distilling={memoryDistilling} refresh={() => void loadReviewMemory()} distill={() => void distillReviewMemory()} close={() => setMemoryOpen(false)} />}{review != null && gpuWorkspaceOpen && <GpuWorkspaceModal review={review} close={() => setGpuWorkspaceOpen(false)} refreshLogs={refreshLogs} />}{review != null && flowDagOpen && <FlowDagModal flowDag={flowDag} runFlowDag={runFlowDag} close={() => setFlowDagOpen(false)} prUrl={review.pr.url} headSha={review.pr.headSha} />}{logsOpen && <LogsModal logs={logs} refreshLogs={refreshLogs} close={() => setLogsOpen(false)} />}</main>;
 }
 
 type StartFilter = "all" | "needs-review" | "in-progress" | "done";
@@ -1591,8 +1629,11 @@ function AgentActivityLine({ activity }: { activity: PiAgentActivity | null | un
   return <span className={`agent-activity ${agentActivityTone(liveActivity)}`} role="status"><span className="agent-activity-line"><span className="agent-activity-pulse" aria-hidden="true" />{agentActivityText(liveActivity)}</span>{detail != null && detail.length > 0 && <span className="agent-activity-detail" title={detail}>{detail}</span>}</span>;
 }
 
-function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiReviewRecord, runReview, sendMessage, chatSending, clearFollowUp, focusReview, focusScanHistory, focusScanId, showFocusScanRecord, runFocusReview, focusAreas, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds, viewedFocusIds, setViewedFocusIds, saveFocusScan, openFiles, setOpenFiles }: PiPanelProps & { prUrl: string; focusAreas: FocusArea[]; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"]; openFiles: Record<string, boolean>; setOpenFiles: (open: Record<string, boolean>) => void }) {
+function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiReviewRecord, runReview, sendMessage, chatSending, clearFollowUp, copyFeedbackPrompt, focusReview, focusScanHistory, focusScanId, showFocusScanRecord, runFocusReview, focusAreas, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds, viewedFocusIds, setViewedFocusIds, saveFocusScan, openFiles, setOpenFiles }: PiPanelProps & { prUrl: string; focusAreas: FocusArea[]; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"]; openFiles: Record<string, boolean>; setOpenFiles: (open: Record<string, boolean>) => void }) {
   const [draftsByRecord, setDraftsByRecord] = useState<Record<string, string>>({});
+  const [copyingFeedback, setCopyingFeedback] = useState(false);
+  const [feedbackCopied, setFeedbackCopied] = useState(false);
+  const [feedbackCopyError, setFeedbackCopyError] = useState<string | null>(null);
   const draftKey = aiReviewId ?? "__pending__";
   const draft = draftsByRecord[draftKey] ?? "";
   const setDraft = (text: string) => setDraftsByRecord((current) => ({ ...current, [draftKey]: text }));
@@ -1600,8 +1641,8 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
   useEffect(() => autoGrowTextarea(composerRef.current), [draft, draftKey]);
   const focusAreaCount = focusAreas.length;
   const allFocusCollapsed = focusAreaCount > 0 && focusAreas.every((area) => collapsedFocusAreaIds[area.id]);
-  const hasMessages = review.messages.length > 0 || review.text.length > 0;
-  const messages = review.messages.length > 0 ? review.messages : review.text.length > 0 ? [generalReviewMessage(review.text)] : [];
+  const messages = currentAiReviewMessages(review);
+  const hasMessages = messages.length > 0;
   const reviewMessages = messages.filter((message) => message.kind === "general-review");
   const chatMessages = messages.filter((message) => message.kind !== "general-review");
   const renderMessage = (message: AiReviewMessage, index: number) => {
@@ -1615,6 +1656,20 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
     {reviewMessages.length > 0 && <div className="ai-chat-messages ai-review-response">{reviewMessages.map(renderMessage)}</div>}
     {chatMessages.length > 0 && <div className="ai-chat-section"><div className="ai-chat-section-head"><span className="ai-chat-section-label">Chat</span><Button variant="muted" className="small-muted-button" onClick={clearFollowUp} disabled={chatSending} aria-label="Clear chat">Clear</Button></div><div className="ai-chat-messages">{chatMessages.map(renderMessage)}</div></div>}
   </div> : <p className="muted">Run review or ask Pi about this PR.</p>;
+  async function copyFeedback() {
+    if (copyingFeedback) return;
+    setCopyingFeedback(true);
+    setFeedbackCopyError(null);
+    try {
+      await copyFeedbackPrompt();
+      setFeedbackCopied(true);
+      window.setTimeout(() => setFeedbackCopied(false), 1600);
+    } catch (err) {
+      setFeedbackCopyError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCopyingFeedback(false);
+    }
+  }
   function submitChat() {
     if (draft.trim().length === 0 || chatSending) return;
     const message = draft;
@@ -1682,7 +1737,8 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
     })}
   </div>;
   return <section className={`panel ai-review${viewingHistory ? " viewing-history" : ""}`}>
-    <h2>Pi{viewingHistory && <span className="pi-history-flag" role="status">Viewing earlier run</span>}</h2>
+    <div className="section-head pi-panel-head"><h2>Pi{viewingHistory && <span className="pi-history-flag" role="status">Viewing earlier run</span>}</h2><Button type="button" variant="muted" className="small-muted-button pi-copy-feedback" onClick={() => void copyFeedback()} disabled={copyingFeedback}>{copyingFeedback ? "Copying…" : feedbackCopied ? "Copied feedback prompt" : "Copy feedback prompt"}</Button></div>
+    {feedbackCopyError != null && <p className="muted copy-feedback-error" role="alert">Copy failed: {feedbackCopyError}</p>}
     <div className="pi-actions">
       <div className="pi-action">
         <Button className="focus-review-run" onClick={() => void runFocusReview()} disabled={focusReview.running}>{focusReview.running ? "Scanning…" : focusReview.text.length > 0 ? "Refresh focus scan" : "Focus scan"}</Button>

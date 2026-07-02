@@ -64,10 +64,38 @@ test("review prompt API builds chat prompts with typed purposes", async () => {
   assert.match(chat.prompt, /Previous dialogue:\nUser: hi/);
 });
 
+test("review prompt API builds copyable review feedback bundles", async () => {
+  const result = await api().build({
+    mode: "review-feedback",
+    prKey: "org/repo#1",
+    prTitle: "Improve review panel",
+    prUrl: "https://github.com/org/repo/pull/1",
+    headSha: "abc123",
+    userComments: [{ kind: "Inline review comment", author: "reviewer", location: "src/a.ts:4", state: "unresolved", body: "please handle this edge case", url: "comment-url" }],
+    aiComments: [{ role: "user", kind: "chat", text: "what should I test?" }, { role: "pi", title: "Follow-up", kind: "chat", text: "add a regression test" }],
+    focusAreas: [{ path: "src/a.ts", startLine: 4, endLine: 6, title: "edge case", body: "src/a.ts:4-6 — check error state", viewed: true }],
+    globalFeedback: "Global review says the flow is sound.",
+    focusScan: "Focus scan raw output.",
+  });
+
+  assert.equal(result.purpose, "review-feedback");
+  assert.match(result.prompt, /source-of-truth reviewer feedback/);
+  assert.match(result.prompt, /PR: org\/repo#1/);
+  assert.match(result.prompt, /Inline review comment · @reviewer · src\/a\.ts:4 · unresolved/);
+  assert.match(result.prompt, /please handle this edge case/);
+  assert.match(result.prompt, /User · chat\nwhat should I test\?/);
+  assert.match(result.prompt, /Pi · Follow-up · chat\nadd a regression test/);
+  assert.match(result.prompt, /src\/a\.ts:4-6 — edge case · reviewed/);
+  assert.match(result.prompt, /Global review says the flow is sound/);
+});
+
 test("review prompt API validates mode and required inputs", async () => {
   await assert.rejects(api().build({}), /Expected mode/);
   await assert.rejects(api().build({ mode: "missing" }), /Unknown prompt mode missing/);
   await assert.rejects(api().build({ mode: "main-review", prKey: "pr" }), /Expected files/);
   await assert.rejects(api().build({ mode: "test-pr", prKey: "pr" }), /Expected testIntent/);
   await assert.rejects(api().build({ mode: "focus-chat", prKey: "pr", path: "p", startLine: 1, body: "b", question: "q" }), /Expected focus range/);
+  await assert.rejects(api().build({ mode: "review-feedback", prKey: "pr", userComments: [{ body: "" }] }), /Expected userComments\.body/);
+  await assert.rejects(api().build({ mode: "review-feedback", prKey: "pr", aiComments: [{ role: "pi" }] }), /Expected aiComments role and text/);
+  await assert.rejects(api().build({ mode: "review-feedback", prKey: "pr", focusAreas: [{ path: "p", body: "b", startLine: 1 }] }), /Expected focusAreas location and body/);
 });
