@@ -1,4 +1,4 @@
-import React, { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import React, { createContext, FormEvent, ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, XIcon } from "@primer/octicons-react";
 import { api, askPi as askPiApi } from "./api";
@@ -6,7 +6,7 @@ import { Button } from "./components/Button";
 import { CodeText, InlineSnippetsProvider, MarkdownText } from "./components/Markdown";
 import { ModalShell } from "./components/Modal";
 import { ExistingComments, ExistingReviewThread } from "./components/Threads";
-import { commentTarget, commentThreadDomId, draftMatchesTarget, groupReviewComments, targetKey, targetLabel, threadForTarget } from "./lib/comments";
+import { buildDiffAnnotationIndex, commentTarget, commentThreadDomId, diffAnnotationTargetKey, targetKey, targetLabel, type DiffAnnotationIndex } from "./lib/comments";
 import { contextRowsFromText, hunkNewStart, isTargetInSelection, lastNewLine, parsePatchRows, parsePatchSetSections, targetFromPoint, targetFromRow } from "./lib/diff";
 import { autoGrowTextarea } from "./lib/dom";
 import { languageForPath } from "./lib/highlight";
@@ -83,6 +83,8 @@ type DiffProps = {
   collapsedFocusAreaIds: Record<string, boolean>;
   setCollapsedFocusAreaIds: (ids: Record<string, boolean> | ((ids: Record<string, boolean>) => Record<string, boolean>)) => void;
 };
+
+const DiffAnnotationsContext = createContext<DiffAnnotationIndex>(buildDiffAnnotationIndex([], [], {}, []));
 
 type PiPanelProps = {
   review: AiReview;
@@ -409,7 +411,8 @@ function App() {
   const [viewedFocusAreaIds, setViewedFocusAreaIds] = useState<Record<string, boolean>>({});
   const reviewCacheRef = useRef<Map<string, OpenResponse>>(new Map());
   const activeReviewKeyRef = useRef<string | null>(null);
-  const pendingOpenInputRef = useRef<string | null>(null);
+  const pendingOpenRef = useRef<{ input: string; requestId: number } | null>(null);
+  const openRequestIdRef = useRef(0);
   const [activeFocusAreaId, setActiveFocusAreaId] = useState<string | null>(null);
   const [collapsedFocusAreaIds, setCollapsedFocusAreaIds] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
@@ -557,29 +560,32 @@ function App() {
   }
 
   async function openPr(nextInput: string, options: OpenPrOptions = {}) {
-    if (pendingOpenInputRef.current === nextInput) return;
+    if (pendingOpenRef.current?.input === nextInput && pendingOpenRef.current.requestId === openRequestIdRef.current) return;
+    const requestId = ++openRequestIdRef.current;
     if (options.syncLocation !== false) navigateHash(reviewHash(nextInput));
     setError(null);
     const cached = reviewCacheRef.current.get(nextInput);
     if (cached != null) {
       showReview(cached);
+      setBusy(false);
       void refreshLogs();
       return;
     }
-    pendingOpenInputRef.current = nextInput;
+    pendingOpenRef.current = { input: nextInput, requestId };
     setBusy(true);
     try {
       const data = await api<OpenResponse>("/api/pr/open", { method: "POST", body: JSON.stringify({ input: nextInput }) });
       cacheReview(data);
+      if (requestId !== openRequestIdRef.current) return;
       showReview(data);
       if (options.syncLocation !== false) navigateHash(reviewHash(data.pr.url));
       void runAutomaticPiReviews(data);
       await Promise.all([refreshHistory(), refreshLogs()]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (requestId === openRequestIdRef.current) setError(err instanceof Error ? err.message : String(err));
     } finally {
-      if (pendingOpenInputRef.current === nextInput) pendingOpenInputRef.current = null;
-      setBusy(false);
+      if (pendingOpenRef.current?.requestId === requestId) pendingOpenRef.current = null;
+      if (requestId === openRequestIdRef.current) setBusy(false);
     }
   }
 
@@ -1193,6 +1199,7 @@ function ReviewPage(props: DiffProps & { piPanel: PiPanelProps; submitReview: (e
   const focusCount = props.focusAreas.length;
   const piBadge = focusCount > 0 ? focusCount : piActivity > 0 ? piActivity : null;
   const commentCount = props.review.comments.length + props.review.issueComments.length + props.review.reviewSummaries.length;
+  const annotations = useMemo(() => buildDiffAnnotationIndex(props.review.comments, props.drafts, props.threads, props.focusAreas), [props.review.comments, props.drafts, props.threads, props.focusAreas]);
   function jumpToComment(target: Target): void {
     if (props.openFiles[target.path] === false) props.setOpenFiles({ ...props.openFiles, [target.path]: true });
     if (props.commentsCollapsed) props.toggleAllComments();
@@ -1226,7 +1233,7 @@ function ReviewPage(props: DiffProps & { piPanel: PiPanelProps; submitReview: (e
         <button className="small-muted-button" onClick={() => props.setDiffViewMode(props.diffViewMode === "unified" ? "split" : "unified")}>{diffViewLabel}</button>
         <button className="small-muted-button" onClick={props.toggleAllComments}>{commentToggleLabel}</button>
       </div>
-      {props.review.files.map((file) => <FileDiff key={file.filename} file={file} {...props} />)}
+      <DiffAnnotationsContext.Provider value={annotations}>{props.review.files.map((file) => <FileDiff key={file.filename} file={file} {...props} />)}</DiffAnnotationsContext.Provider>
     </main>
     <div className="resize-handle" role="separator" aria-label="Resize side panel" onMouseDown={(event) => startResizeSidePanel(event, props.sideWidth, props.setSideWidth)} />
     <aside className={`side${sideMaximized ? " maximized" : ""}`}>
@@ -1373,11 +1380,12 @@ function fileChangeSummary(file: PullFile): string {
 }
 
 function FileDiff({ file, review, openFiles, setOpenFiles, expandedContext, setExpandedContext, expandedNeighborRows, expandNeighbor, threads, setThreads, toggleThread, setViewed, drafts, setDrafts, editingDraftId, setEditingDraftId, askThread, askFocusArea, dragSelection, beginDrag, updateDrag, finishDrag, handleRowClick, refreshGithubActivity, commentCollapseSignal, commentsCollapsed, diffViewMode, focusAreas, activeFocusAreaId, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds }: DiffProps & { file: PullFile }) {
+  const annotations = useContext(DiffAnnotationsContext);
   const rows = useMemo(() => parsePatchRows(file.patch), [file.patch]);
   const patchSetSections = useMemo(() => parsePatchSetSections(file.patch), [file.patch]);
   const fileReview = review.fileReviews.find((state) => state.path === file.filename);
   const open = openFiles[file.filename] ?? true;
-  const reviewCommentThreads = useMemo(() => groupReviewComments(review.comments).filter((thread) => thread[0].path === file.filename), [review.comments, file.filename]);
+  const reviewCommentThreads = annotations.commentThreadsByFile.get(file.filename) ?? [];
   const commentTargets = useMemo(() => reviewCommentThreads.map((thread) => commentTarget(thread[0])), [reviewCommentThreads]);
   const missingRightTargets = useMemo(() => commentTargets.filter((target) => target.side === "RIGHT" && target.line != null && !targetIsRendered(rows, target)), [commentTargets, rows]);
   const fileFocusAreas = useMemo(() => focusAreas.filter((area) => area.path === file.filename), [focusAreas, file.filename]);
@@ -1519,12 +1527,14 @@ function DraftView({ draft, index, invalid = false, drafts, setDrafts, editingDr
 }
 
 function DiffRowView({ row, target, languagePath, threads, setThreads, toggleThread, comments, drafts, setDrafts, editingDraftId, setEditingDraftId, askThread, askFocusArea, dragSelection, beginDrag, updateDrag, finishDrag, handleRowClick, prUrl, refreshGithubActivity, collapseSignal, commentsCollapsed, diffViewMode, focusAreas, activeFocusAreaId, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds }: { row: DiffRow; target: Target | null; languagePath?: string; threads: Record<string, Thread>; setThreads: DiffProps["setThreads"]; toggleThread: (target: Target, extend?: boolean) => void; comments: PullReviewComment[]; drafts: DraftComment[]; setDrafts: (drafts: DraftComment[]) => void; editingDraftId: string | null; setEditingDraftId: (id: string | null) => void; askThread: (thread: Thread) => Promise<void>; askFocusArea: (area: FocusArea, question: string) => Promise<string>; dragSelection: DragSelection | null; beginDrag: (target: Target) => void; updateDrag: (target: Target) => void; finishDrag: (target: Target) => void; handleRowClick: (target: Target, extend: boolean) => void; prUrl: string; refreshGithubActivity: () => Promise<void>; collapseSignal: number; commentsCollapsed: boolean; diffViewMode: DiffViewMode; focusAreas: FocusArea[]; activeFocusAreaId: string | null; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"] }) {
-  const thread = target == null ? null : threadForTarget(threads, target);
-  const inlineCommentThreads = target == null ? [] : groupReviewComments(comments).filter((thread) => { const ct = commentTarget(thread[0]); return ct.path === target.path && ct.side === target.side && ct.line === target.line; });
-  const inlineDrafts = target == null ? [] : drafts.filter((draft) => draftMatchesTarget(draft, target));
+  const annotations = useContext(DiffAnnotationsContext);
+  const annotationKey = target == null ? null : diffAnnotationTargetKey(target);
+  const thread = annotationKey == null ? null : annotations.threadsByTarget.get(annotationKey) ?? null;
+  const inlineCommentThreads = annotationKey == null ? [] : annotations.commentThreadsByTarget.get(annotationKey) ?? [];
+  const inlineDrafts = annotationKey == null ? [] : annotations.draftsByTarget.get(annotationKey) ?? [];
   const selecting = isTargetInSelection(target, dragSelection);
-  const inThreadRange = target != null && target.line != null && Object.values(threads).some((t) => !t.collapsed && t.target.path === target.path && t.target.startLine != null && t.target.line != null && target.line! >= t.target.startLine && target.line! <= t.target.line);
-  const rowFocusAreas = target == null ? [] : focusAreas.filter((area) => target.side === "RIGHT" && area.path === target.path && target.line === area.startLine);
+  const inThreadRange = annotationKey != null && annotations.openThreadRangeTargets.has(annotationKey);
+  const rowFocusAreas = annotationKey == null ? [] : annotations.focusAreasByTarget.get(annotationKey) ?? [];
   const language = rowHasKind(row, "hunk") || rowHasKind(row, "meta") ? "" : languageForPath(languagePath ?? target?.path);
   const hasThreadPill = thread != null || inlineCommentThreads.length + inlineDrafts.length + rowFocusAreas.length > 0;
   const threadPill = hasThreadPill ? <span className="pill">{(thread == null ? 0 : 1) + inlineCommentThreads.length + inlineDrafts.length + rowFocusAreas.length}</span> : null;

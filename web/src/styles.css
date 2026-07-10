@@ -776,7 +776,6 @@ a { color: var(--link); text-decoration: none; }
   background: var(--panel2);
   border-bottom: 1px solid var(--border);
   padding: 0 8px 0 0;
-  backdrop-filter: blur(8px);
 }
 
 .file-summary-left {

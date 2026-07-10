@@ -153,16 +153,19 @@ export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): Git
 
   async function fetchPullRequestReviewData(ref: PullRequestRef): Promise<PullRequestReviewData> {
     logger.info("github", "fetch PR review data", { ref });
-    const [rawPr, rawFiles, rawComments, issueComments, rawReviewSummaries, threadStates, reviewDecision] = await Promise.all([
-      ghApi<PullRequest>(apiBase(ref)),
+    const rawPrPromise = ghApi<PullRequest>(apiBase(ref));
+    const gitattributesPromise = rawPrPromise.then((pr) => fetchRootGitattributes(ref, pr.head.sha));
+    const [rawPr, rawFiles, rawComments, issueComments, rawReviewSummaries, threadStates, reviewDecision, gitattributes] = await Promise.all([
+      rawPrPromise,
       ghApi<PullFile[]>(`${apiBase(ref)}/files`),
       ghApi<PullReviewComment[]>(`${apiBase(ref)}/comments`),
       ghApi<PullIssueComment[]>(`/repos/${ref.owner}/${ref.repo}/issues/${ref.number}/comments`),
       ghApi<PullRequestReviewSummary[]>(`${apiBase(ref)}/reviews`),
       fetchReviewThreadStates(ref),
       fetchReviewDecision(ref),
+      gitattributesPromise,
     ]);
-    const files = markGeneratedPullFiles(rawFiles, await fetchRootGitattributes(ref, rawPr.head.sha));
+    const files = markGeneratedPullFiles(rawFiles, gitattributes);
     const comments = rawComments.map((comment) => ({ ...comment, ...threadStates.get(comment.id) }));
     const reviewSummaries = rawReviewSummaries.filter((review) => review.body.trim().length > 0);
     const pr = toStoredPullRequest(ref, rawPr, files, comments, issueComments, reviewSummaries, reviewDecision, runtime.now());

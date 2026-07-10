@@ -111,6 +111,20 @@ test("upsertPullRequest preserves previous review metadata and writes atomically
   assert.equal(persisted.prs[0]?.headSha, "new-head");
 });
 
+test("state store serializes concurrent mutations without losing updates", async () => {
+  const { runtime } = fakeRuntime(emptyState());
+  const store = createStateStore(runtime, paths);
+  const second = pr({
+    key: "github.com/pytorch/pytorch#2",
+    ref: { host: "github.com", owner: "pytorch", repo: "pytorch", number: 2 },
+    url: "https://github.com/pytorch/pytorch/pull/2",
+  });
+
+  await Promise.all([store.upsertPullRequest(pr()), store.upsertPullRequest(second)]);
+
+  assert.deepEqual((await store.listRecentPullRequests()).map((stored) => stored.key).sort(), ["github.com/pytorch/pytorch#1", "github.com/pytorch/pytorch#2"]);
+});
+
 test("saveReviewProfile trims text, records source count, and writes profile note", async () => {
   const { runtime, files } = fakeRuntime({ ...emptyState(), reviewMemory: [{ prKey: "a", event: "COMMENT", body: "body", comments: [], id: "memory", createdAt: "then" }] });
 

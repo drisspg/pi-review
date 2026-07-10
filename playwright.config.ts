@@ -1,10 +1,13 @@
 import { defineConfig } from "@playwright/test";
+import { resolve } from "node:path";
 
 const port = Number.parseInt(process.env.PI_REVIEW_TEST_PORT ?? process.env.PI_PR_REVIEW_PORT ?? "43134", 10);
 const fast = process.env.PI_REVIEW_FAST_TESTS === "1";
+const statePath = resolve("test-results", `e2e-state-${port}.json`);
+const stateEnv = `PI_REVIEW_STATE_PATH=${JSON.stringify(statePath)}`;
 const command = fast
-  ? `PI_PR_REVIEW_PORT=${port} npx tsx src/server.ts`
-  : `PI_PR_REVIEW_PORT=${port} npm start`;
+  ? `rm -f ${JSON.stringify(statePath)} && ${stateEnv} PI_PR_REVIEW_PORT=${port} npx tsx src/server.ts`
+  : `rm -f ${JSON.stringify(statePath)} && ${stateEnv} PI_PR_REVIEW_PORT=${port} npm start`;
 
 export default defineConfig({
   testDir: "tests/e2e",

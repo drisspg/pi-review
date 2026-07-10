@@ -6,7 +6,9 @@ import { dirname, resolve } from "node:path";
 
 import type { AiReviewRecord, AppState, FileReviewState, FocusScanRecord, ReviewMemoryProfile, ReviewMemoryRecord, StoredPullRequest } from "./types.js";
 
-const STATE_PATH = resolve(homedir(), ".pi", "agent", "state", "pi-pr-review", "state.json");
+const STATE_PATH = process.env.PI_REVIEW_STATE_PATH == null
+  ? resolve(homedir(), ".pi", "agent", "state", "pi-pr-review", "state.json")
+  : resolve(process.env.PI_REVIEW_STATE_PATH);
 const REVIEW_MEMORY_NOTES_PATH = resolve(homedir(), "agent_notes", "findings", "pi_review_preferences.md");
 const REVIEW_PROFILE_PATH = resolve(homedir(), "agent_notes", "findings", "pi_review_profile.md");
 
@@ -125,6 +127,8 @@ function reviewMemoryDistillationSource(records: ReviewMemoryRecord[]): string {
 }
 
 export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, paths: StateStorePaths = defaultPaths): StateStore {
+  let mutationQueue = Promise.resolve();
+
   async function readState(): Promise<AppState> {
     if (!runtime.exists(paths.statePath)) return emptyState();
     return normalizeState(JSON.parse(await runtime.readFile(paths.statePath)) as Partial<AppState>);
@@ -135,6 +139,12 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
     const tempPath = `${paths.statePath}.${runtime.uuid()}.tmp`;
     await runtime.writeFile(tempPath, `${JSON.stringify(state, null, 2)}\n`);
     await runtime.rename(tempPath, paths.statePath);
+  }
+
+  function mutateState<T>(mutation: (state: AppState) => Promise<T> | T): Promise<T> {
+    const result = mutationQueue.then(async () => mutation(await readState()));
+    mutationQueue = result.then(() => undefined, () => undefined);
+    return result;
   }
 
   async function writeReviewMemoryNotes(records: ReviewMemoryRecord[]): Promise<void> {
@@ -181,12 +191,13 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
   }
 
   async function saveReviewProfile(text: string): Promise<ReviewMemoryProfile> {
-    const state = await readState();
-    const profile: ReviewMemoryProfile = { text: text.trim(), sourceRecordCount: state.reviewMemory.length, updatedAt: runtime.now() };
-    state.reviewProfile = profile;
-    await writeState(state);
-    await writeReviewProfile(profile);
-    return profile;
+    return mutateState(async (state) => {
+      const profile: ReviewMemoryProfile = { text: text.trim(), sourceRecordCount: state.reviewMemory.length, updatedAt: runtime.now() };
+      state.reviewProfile = profile;
+      await writeState(state);
+      await writeReviewProfile(profile);
+      return profile;
+    });
   }
 
   async function listRecentPullRequests(): Promise<StoredPullRequest[]> {
@@ -194,20 +205,22 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
   }
 
   async function upsertPullRequest(pr: StoredPullRequest): Promise<StoredPullRequest> {
-    const state = await readState();
-    const previous = state.prs.find((stored) => stored.key === pr.key);
-    state.prs = [{ ...pr, lastReviewedHeadSha: previous?.lastReviewedHeadSha ?? pr.lastReviewedHeadSha, lastReviewEvent: previous?.lastReviewEvent ?? pr.lastReviewEvent, reviewDecision: pr.reviewDecision ?? previous?.reviewDecision ?? null }, ...state.prs.filter((stored) => stored.key !== pr.key)];
-    await writeState(state);
-    return state.prs[0];
+    return mutateState(async (state) => {
+      const previous = state.prs.find((stored) => stored.key === pr.key);
+      state.prs = [{ ...pr, lastReviewedHeadSha: previous?.lastReviewedHeadSha ?? pr.lastReviewedHeadSha, lastReviewEvent: previous?.lastReviewEvent ?? pr.lastReviewEvent, reviewDecision: pr.reviewDecision ?? previous?.reviewDecision ?? null }, ...state.prs.filter((stored) => stored.key !== pr.key)];
+      await writeState(state);
+      return state.prs[0];
+    });
   }
 
   async function markPullRequestReviewed(prKey: string, headSha: string, event: StoredPullRequest["lastReviewEvent"]): Promise<StoredPullRequest | null> {
-    const state = await readState();
-    const index = state.prs.findIndex((pr) => pr.key === prKey);
-    if (index === -1) return null;
-    state.prs[index] = { ...state.prs[index], lastReviewedHeadSha: headSha, lastReviewEvent: event };
-    await writeState(state);
-    return state.prs[index];
+    return mutateState(async (state) => {
+      const index = state.prs.findIndex((pr) => pr.key === prKey);
+      if (index === -1) return null;
+      state.prs[index] = { ...state.prs[index], lastReviewedHeadSha: headSha, lastReviewEvent: event };
+      await writeState(state);
+      return state.prs[index];
+    });
   }
 
   async function listFileReviews(prKey: string): Promise<FileReviewState[]> {
@@ -215,10 +228,11 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
   }
 
   async function setFileViewed(review: FileReviewState): Promise<FileReviewState> {
-    const state = await readState();
-    state.fileReviews = [review, ...state.fileReviews.filter((stored) => !(stored.prKey === review.prKey && stored.path === review.path && stored.fingerprint === review.fingerprint))];
-    await writeState(state);
-    return review;
+    return mutateState(async (state) => {
+      state.fileReviews = [review, ...state.fileReviews.filter((stored) => !(stored.prKey === review.prKey && stored.path === review.path && stored.fingerprint === review.fingerprint))];
+      await writeState(state);
+      return review;
+    });
   }
 
   async function listFocusScans(prKey: string): Promise<FocusScanRecord[]> {
@@ -226,27 +240,28 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
   }
 
   async function saveFocusScan(scan: Omit<FocusScanRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<FocusScanRecord, "id" | "createdAt">>): Promise<FocusScanRecord> {
-    const state = await readState();
-    const previous = scan.id == null ? null : state.focusScans.find((stored) => stored.id === scan.id);
-    const now = runtime.now();
-    const next: FocusScanRecord = {
-      id: scan.id ?? runtime.uuid(),
-      prKey: scan.prKey,
-      headSha: scan.headSha,
-      answer: scan.answer,
-      areaStates: scan.areaStates,
-      createdAt: previous?.createdAt ?? scan.createdAt ?? now,
-      updatedAt: now,
-    };
-    state.focusScans = [next, ...state.focusScans.filter((stored) => stored.id !== next.id)];
-    const counts = new Map<string, number>();
-    state.focusScans = state.focusScans.filter((stored) => {
-      const count = counts.get(stored.prKey) ?? 0;
-      counts.set(stored.prKey, count + 1);
-      return count < maxFocusScansPerPr;
+    return mutateState(async (state) => {
+      const previous = scan.id == null ? null : state.focusScans.find((stored) => stored.id === scan.id);
+      const now = runtime.now();
+      const next: FocusScanRecord = {
+        id: scan.id ?? runtime.uuid(),
+        prKey: scan.prKey,
+        headSha: scan.headSha,
+        answer: scan.answer,
+        areaStates: scan.areaStates,
+        createdAt: previous?.createdAt ?? scan.createdAt ?? now,
+        updatedAt: now,
+      };
+      state.focusScans = [next, ...state.focusScans.filter((stored) => stored.id !== next.id)];
+      const counts = new Map<string, number>();
+      state.focusScans = state.focusScans.filter((stored) => {
+        const count = counts.get(stored.prKey) ?? 0;
+        counts.set(stored.prKey, count + 1);
+        return count < maxFocusScansPerPr;
+      });
+      await writeState(state);
+      return next;
     });
-    await writeState(state);
-    return next;
   }
 
   async function listAiReviews(prKey: string): Promise<AiReviewRecord[]> {
@@ -254,36 +269,38 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
   }
 
   async function saveAiReview(review: Omit<AiReviewRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<AiReviewRecord, "id" | "createdAt">>): Promise<AiReviewRecord> {
-    const state = await readState();
-    const previous = review.id == null ? null : state.aiReviews.find((stored) => stored.id === review.id);
-    const now = runtime.now();
-    const next: AiReviewRecord = {
-      id: review.id ?? runtime.uuid(),
-      prKey: review.prKey,
-      headSha: review.headSha,
-      answer: review.answer,
-      messages: review.messages,
-      createdAt: previous?.createdAt ?? review.createdAt ?? now,
-      updatedAt: now,
-    };
-    state.aiReviews = [next, ...state.aiReviews.filter((stored) => stored.id !== next.id)];
-    const counts = new Map<string, number>();
-    state.aiReviews = state.aiReviews.filter((stored) => {
-      const count = counts.get(stored.prKey) ?? 0;
-      counts.set(stored.prKey, count + 1);
-      return count < maxAiReviewsPerPr;
+    return mutateState(async (state) => {
+      const previous = review.id == null ? null : state.aiReviews.find((stored) => stored.id === review.id);
+      const now = runtime.now();
+      const next: AiReviewRecord = {
+        id: review.id ?? runtime.uuid(),
+        prKey: review.prKey,
+        headSha: review.headSha,
+        answer: review.answer,
+        messages: review.messages,
+        createdAt: previous?.createdAt ?? review.createdAt ?? now,
+        updatedAt: now,
+      };
+      state.aiReviews = [next, ...state.aiReviews.filter((stored) => stored.id !== next.id)];
+      const counts = new Map<string, number>();
+      state.aiReviews = state.aiReviews.filter((stored) => {
+        const count = counts.get(stored.prKey) ?? 0;
+        counts.set(stored.prKey, count + 1);
+        return count < maxAiReviewsPerPr;
+      });
+      await writeState(state);
+      return next;
     });
-    await writeState(state);
-    return next;
   }
 
   async function saveReviewMemory(record: Omit<ReviewMemoryRecord, "id" | "createdAt">): Promise<ReviewMemoryRecord> {
-    const state = await readState();
-    const next: ReviewMemoryRecord = { ...record, id: runtime.uuid(), createdAt: runtime.now() };
-    state.reviewMemory = [next, ...state.reviewMemory].slice(0, maxReviewMemoryRecords);
-    await writeState(state);
-    await writeReviewMemoryNotes(state.reviewMemory);
-    return next;
+    return mutateState(async (state) => {
+      const next: ReviewMemoryRecord = { ...record, id: runtime.uuid(), createdAt: runtime.now() };
+      state.reviewMemory = [next, ...state.reviewMemory].slice(0, maxReviewMemoryRecords);
+      await writeState(state);
+      await writeReviewMemoryNotes(state.reviewMemory);
+      return next;
+    });
   }
 
   async function currentReviewMemoryPrompt(): Promise<string> {
@@ -291,12 +308,13 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
   }
 
   async function removePullRequest(prKey: string): Promise<void> {
-    const state = await readState();
-    state.prs = state.prs.filter((pr) => pr.key !== prKey);
-    state.fileReviews = state.fileReviews.filter((review) => review.prKey !== prKey);
-    state.focusScans = state.focusScans.filter((scan) => scan.prKey !== prKey);
-    state.aiReviews = state.aiReviews.filter((review) => review.prKey !== prKey);
-    await writeState(state);
+    await mutateState(async (state) => {
+      state.prs = state.prs.filter((pr) => pr.key !== prKey);
+      state.fileReviews = state.fileReviews.filter((review) => review.prKey !== prKey);
+      state.focusScans = state.focusScans.filter((scan) => scan.prKey !== prKey);
+      state.aiReviews = state.aiReviews.filter((review) => review.prKey !== prKey);
+      await writeState(state);
+    });
   }
 
   return { readState, currentReviewMemoryDistillationSource, currentReviewMemoryContext, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewProfile, listRecentPullRequests, upsertPullRequest, markPullRequestReviewed, listFileReviews, setFileViewed, listFocusScans, saveFocusScan, listAiReviews, saveAiReview, saveReviewMemory, currentReviewMemoryPrompt, removePullRequest };

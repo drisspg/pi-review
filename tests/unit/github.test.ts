@@ -68,6 +68,26 @@ test("GitHub client fetches and combines PR review data", async () => {
   assert.equal(data.fileReviews[0]?.updatedAt, "2026-06-04T00:00:00.000Z");
 });
 
+test("GitHub client overlaps gitattributes with slower PR detail requests", async () => {
+  const { runtime } = fakeRuntime();
+  const execFile = runtime.execFile;
+  let releaseFiles: (() => void) | null = null;
+  let gitattributesStarted = false;
+  runtime.execFile = async (command: string, args: string[]) => {
+    if (args[1] === "/repos/pytorch/pytorch/pulls/185924/files") await new Promise<void>((resolve) => { releaseFiles = resolve; });
+    if (args[1] === "/repos/pytorch/pytorch/contents/.gitattributes?ref=head") gitattributesStarted = true;
+    return execFile(command, args);
+  };
+
+  const request = createGitHubClient(runtime).fetchPullRequestReviewData(ref);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(gitattributesStarted, true);
+  assert.notEqual(releaseFiles, null);
+  releaseFiles?.();
+  await request;
+});
+
 test("GitHub client marks files flagged linguist-generated", async () => {
   const { runtime } = fakeRuntime({ gitattributes: "generated/** linguist-generated=true\n" });
 
