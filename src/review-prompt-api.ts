@@ -214,11 +214,17 @@ async function focusReviewPrompt(payload: Record<string, unknown>, deps: ReviewP
   const reviewMemory = await deps.currentReviewMemoryPrompt();
   return {
     purpose: "focus-review",
-    prompt: `You are a second, independent PR-review pass for ${prKey}. Look specifically for areas worth deeper human review, not a normal exhaustive review. Prioritize:
-- code that feels inconsistent with nearby codebase patterns or API conventions
-- surprising behavior, hidden assumptions, edge cases, or subtle tradeoffs
-- tests, migrations, performance, concurrency, or compatibility risks that deserve investigation
-- places where the implementation may be valid but reviewers should explicitly decide if the tradeoff is acceptable
+    prompt: `You are a second, independent PR-review pass for ${prKey}. Look specifically for high-signal areas worth deeper human review, not a normal exhaustive review. Prioritize:
+- concrete inconsistencies with nearby codebase patterns or API contracts
+- surprising behavior, hidden assumptions, or edge cases with plausible impact
+- tests, migrations, performance, concurrency, or compatibility risks supported by evidence
+- subtle tradeoffs that remain genuinely unresolved after inspecting the code and its conventions
+
+Investigate before reporting. For every candidate, inspect the surrounding implementation, nearby precedent, tests, and relevant language or build-system semantics, then actively try to disprove the concern. Suppress it when the behavior is standard, matches adjacent code, preserves an intentional user override, is answered by the diff or repository, or depends only on a speculative future scenario. A technically true observation is not a focus area unless it exposes a realistic failure mode or a consequential unresolved design choice.
+
+Do not flag stale generated state, old build directories, prior cache entries, or other incremental-environment residue merely because a clean configuration picks up the new behavior. Treat clean configuration as the normal contract unless the repository explicitly guarantees in-place migration, CI demonstrably reuses that state, or stale state causes a correctness failure rather than only missing an optimization. In particular, do not recommend forcing a cached build option when that would remove a supported user override without evidence that the project intends to forbid the override.
+
+Do not manufacture questions to fill the list. "Could this be intentional?", "should this be different?", and similar questions are not findings without concrete evidence that the current behavior is wrong or risky. Prefer no findings over a weak finding.
 
 Reviewer preference memory:
 ${reviewMemory}
@@ -228,7 +234,7 @@ ${previousFocusAreas}
 
 If a finding is substantially the same as a previous reviewed finding, do not return it again unless the current diff materially changes the concern. If it is substantially the same as a previous unreviewed finding, keep it and use the closest current location. Prefer surfacing genuinely new or still-unreviewed findings over re-listing already-reviewed ones.
 
-Return markdown with a "Focus areas" list. Start each item with a clickable-style location in this exact format: \`path:startLine-endLine — short title\` or \`path:line — short title\`. Then include why it is weird or worth investigation and a concrete reviewer question. Avoid generic praise and avoid blocking language unless there is strong evidence.
+Return markdown with a "Focus areas" list. Start each item with a clickable-style location in this exact format: \`path:startLine-endLine — short title\` or \`path:line — short title\`. Then state the evidence, realistic impact, and the specific unresolved reviewer question. Avoid generic praise and blocking language unless there is strong evidence. If no candidate survives investigation, return exactly: \`No focus areas found.\`
 
 PR title: ${prTitle}
 

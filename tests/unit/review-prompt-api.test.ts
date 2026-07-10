@@ -39,7 +39,12 @@ test("review prompt API injects memory for main and focus review prompts", async
   assert.match(main.prompt, /Previous full review:\nold review/);
   assert.equal(focus.purpose, "focus-review");
   assert.match(focus.prompt, /Previous focus scan state:\nold focus/);
-  assert.match(focus.prompt, /Focus areas/);
+  assert.match(focus.prompt, /actively try to disprove the concern/);
+  assert.match(focus.prompt, /preserves an intentional user override/);
+  assert.match(focus.prompt, /Treat clean configuration as the normal contract/);
+  assert.match(focus.prompt, /do not recommend forcing a cached build option/);
+  assert.match(focus.prompt, /Prefer no findings over a weak finding/);
+  assert.match(focus.prompt, /No focus areas found\./);
 });
 
 test("review prompt API builds test-pr prompts for CLI-first validation", async () => {
