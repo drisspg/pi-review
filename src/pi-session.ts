@@ -40,7 +40,7 @@ type SessionRecord = {
 };
 
 const DEFAULT_PI_MODEL_PROVIDER = "openai-codex";
-const DEFAULT_PI_MODEL_ID = "gpt-5.5";
+const DEFAULT_PI_MODEL_ID = "gpt-5.6-sol";
 const DEFAULT_PI_THINKING_LEVEL: ThinkingLevel = "high";
 const PI_THINKING_LEVEL_BY_PURPOSE: Record<string, ThinkingLevel> = {
   "chat": "medium",
