@@ -227,7 +227,7 @@ a { color: var(--link); text-decoration: none; }
   align-content: start;
 }
 
-.toolbar, .panel, .file {
+.toolbar, .panel, .file, .files-toolbar {
   border: 1px solid var(--border);
   background: var(--panel);
   border-radius: var(--radius);
@@ -242,9 +242,6 @@ a { color: var(--link); text-decoration: none; }
   gap: 8px;
   min-height: 42px;
   padding: 5px 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--panel);
 }
 
 .files-toolbar-actions,
@@ -2054,8 +2051,8 @@ button.fold:hover {
   min-width: 0;
 }
 
-.review-summary-empty h2 {
-  font-size: 16px !important;
+.panel.review-summary-empty h2:first-child {
+  font-size: 16px;
 }
 
 .review-summary-empty p {

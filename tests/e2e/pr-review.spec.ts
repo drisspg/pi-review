@@ -106,15 +106,16 @@ test("expands neighboring context lines", async ({ page }) => {
 
 test("uses a compact files toolbar and collapsible review panel", async ({ page }) => {
   const toolbar = page.locator(".files-toolbar");
+  const emptyReviewSummary = page.locator(".review-summary-empty");
   await expect(toolbar).toContainText("Files");
-  await expect(page.locator(".review-summary-empty")).toBeVisible();
+  await expect(emptyReviewSummary).toBeVisible();
 
   await toolbar.getByRole("button", { name: "Hide review panel" }).click();
   await expect(page.locator(".side")).toHaveCount(0);
   await toolbar.getByRole("button", { name: "Show review panel" }).click();
   await expect(page.locator(".side")).toBeVisible();
 
-  await page.locator(".review-summary-empty").getByRole("button", { name: "Start review" }).click();
+  await emptyReviewSummary.getByRole("button", { name: "Start review" }).click();
   await expect(page.getByPlaceholder("Overall review body")).toBeVisible();
 
   await toolbar.locator(".file-navigator > summary").click();
