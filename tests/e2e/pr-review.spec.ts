@@ -104,6 +104,23 @@ test("expands neighboring context lines", async ({ page }) => {
   await expect.poll(() => firstFile.locator(".diff-row").count()).toBeGreaterThan(before);
 });
 
+test("uses a compact files toolbar and collapsible review panel", async ({ page }) => {
+  const toolbar = page.locator(".files-toolbar");
+  await expect(toolbar).toContainText("Files");
+  await expect(page.locator(".review-summary-empty")).toBeVisible();
+
+  await toolbar.getByRole("button", { name: "Hide review panel" }).click();
+  await expect(page.locator(".side")).toHaveCount(0);
+  await toolbar.getByRole("button", { name: "Show review panel" }).click();
+  await expect(page.locator(".side")).toBeVisible();
+
+  await page.locator(".review-summary-empty").getByRole("button", { name: "Start review" }).click();
+  await expect(page.getByPlaceholder("Overall review body")).toBeVisible();
+
+  await toolbar.locator(".file-navigator > summary").click();
+  await expect(toolbar.locator(".file-navigator-list")).toBeVisible();
+});
+
 test("creates, edits, and removes draft comments", async ({ page }) => {
   await openFirstFile(page);
   await page.locator(".file").first().locator(".diff-row.added").first().click();
