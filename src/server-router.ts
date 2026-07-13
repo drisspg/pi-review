@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { inputFromBody, readBody, recordFromBody, sendJson } from "./http.js";
 import type { AskStreamResponse } from "./ask-stream-api.js";
 import type { CommentApi } from "./comment-api.js";
+import type { DraftReviewApi } from "./draft-review-api.js";
 import type { FileApi } from "./file-api.js";
 import type { PiApi } from "./pi-api.js";
 import type { PrApi } from "./pr-api.js";
@@ -21,6 +22,7 @@ export type ServerLogger = {
 export type ServerRouteDeps = {
   askStreamApi: { stream: (res: AskStreamResponse, payload: Record<string, unknown>) => Promise<void> };
   commentApi: CommentApi;
+  draftReviewApi: DraftReviewApi;
   fileApi: FileApi;
   gpuWorkspaceCreateResponse: (payload: Record<string, unknown>) => Promise<Record<string, unknown>>;
   gpuWorkspaceDeleteResponse: (payload: Record<string, unknown>) => Promise<Record<string, unknown>>;
@@ -103,6 +105,14 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
       deps.logger.info("api", "refresh PR activity requested", { input });
       const response = await deps.prApi.activity(input);
       deps.logger.info("api", "refresh PR activity complete", { key: response.pr.key, existingCommentCount: response.pr.existingCommentCount });
+      sendJson(res, 200, response);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/draft-review/save") {
+      const payload = recordFromBody(await readBody(req));
+      const response = await deps.draftReviewApi.save(payload);
+      deps.logger.info("api", "draft review saved", { prKey: response.draftReview.prKey, comments: response.draftReview.comments.length });
       sendJson(res, 200, response);
       return;
     }

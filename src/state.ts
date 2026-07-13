@@ -4,7 +4,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 
-import type { AiReviewRecord, AppState, FileReviewState, FocusScanRecord, ReviewMemoryProfile, ReviewMemoryRecord, StoredPullRequest } from "./types.js";
+import type { AiReviewRecord, AppState, DraftReview, FileReviewState, FocusScanRecord, ReviewMemoryProfile, ReviewMemoryRecord, StoredPullRequest } from "./types.js";
 
 const STATE_PATH = process.env.PI_REVIEW_STATE_PATH == null
   ? resolve(homedir(), ".pi", "agent", "state", "pi-pr-review", "state.json")
@@ -20,7 +20,7 @@ const maxReviewMemoryDistillationRecords = 250;
 const maxReviewMemoryPromptPatchChars = 4_000;
 const maxReviewMemoryDistillationPatchChars = 12_000;
 
-const emptyState = (): AppState => ({ prs: [], fileReviews: [], focusScans: [], aiReviews: [], reviewMemory: [], reviewProfile: null });
+const emptyState = (): AppState => ({ prs: [], fileReviews: [], draftReviews: [], focusScans: [], aiReviews: [], reviewMemory: [], reviewProfile: null });
 
 export type StateStorePaths = {
   statePath: string;
@@ -51,6 +51,8 @@ export type StateStore = {
   markPullRequestReviewed: (prKey: string, headSha: string, event: StoredPullRequest["lastReviewEvent"]) => Promise<StoredPullRequest | null>;
   listFileReviews: (prKey: string) => Promise<FileReviewState[]>;
   setFileViewed: (review: FileReviewState) => Promise<FileReviewState>;
+  getDraftReview: (prKey: string) => Promise<DraftReview | null>;
+  saveDraftReview: (review: DraftReview) => Promise<DraftReview>;
   listFocusScans: (prKey: string) => Promise<FocusScanRecord[]>;
   saveFocusScan: (scan: Omit<FocusScanRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<FocusScanRecord, "id" | "createdAt">>) => Promise<FocusScanRecord>;
   listAiReviews: (prKey: string) => Promise<AiReviewRecord[]>;
@@ -85,7 +87,7 @@ const defaultRuntime: StateStoreRuntime = {
 };
 
 function normalizeState(state: Partial<AppState>): AppState {
-  return { prs: state.prs ?? [], fileReviews: state.fileReviews ?? [], focusScans: state.focusScans ?? [], aiReviews: state.aiReviews ?? [], reviewMemory: state.reviewMemory ?? [], reviewProfile: state.reviewProfile ?? null };
+  return { prs: state.prs ?? [], fileReviews: state.fileReviews ?? [], draftReviews: state.draftReviews ?? [], focusScans: state.focusScans ?? [], aiReviews: state.aiReviews ?? [], reviewMemory: state.reviewMemory ?? [], reviewProfile: state.reviewProfile ?? null };
 }
 
 function reviewMemoryLocation(comment: ReviewMemoryRecord["comments"][number]): string {
@@ -235,6 +237,18 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
     });
   }
 
+  async function getDraftReview(prKey: string): Promise<DraftReview | null> {
+    return (await readState()).draftReviews.find((review) => review.prKey === prKey) ?? null;
+  }
+
+  async function saveDraftReview(review: DraftReview): Promise<DraftReview> {
+    return mutateState(async (state) => {
+      state.draftReviews = [review, ...state.draftReviews.filter((stored) => stored.prKey !== review.prKey)];
+      await writeState(state);
+      return review;
+    });
+  }
+
   async function listFocusScans(prKey: string): Promise<FocusScanRecord[]> {
     return (await readState()).focusScans.filter((scan) => scan.prKey === prKey).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
@@ -311,13 +325,14 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
     await mutateState(async (state) => {
       state.prs = state.prs.filter((pr) => pr.key !== prKey);
       state.fileReviews = state.fileReviews.filter((review) => review.prKey !== prKey);
+      state.draftReviews = state.draftReviews.filter((review) => review.prKey !== prKey);
       state.focusScans = state.focusScans.filter((scan) => scan.prKey !== prKey);
       state.aiReviews = state.aiReviews.filter((review) => review.prKey !== prKey);
       await writeState(state);
     });
   }
 
-  return { readState, currentReviewMemoryDistillationSource, currentReviewMemoryContext, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewProfile, listRecentPullRequests, upsertPullRequest, markPullRequestReviewed, listFileReviews, setFileViewed, listFocusScans, saveFocusScan, listAiReviews, saveAiReview, saveReviewMemory, currentReviewMemoryPrompt, removePullRequest };
+  return { readState, currentReviewMemoryDistillationSource, currentReviewMemoryContext, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewProfile, listRecentPullRequests, upsertPullRequest, markPullRequestReviewed, listFileReviews, setFileViewed, getDraftReview, saveDraftReview, listFocusScans, saveFocusScan, listAiReviews, saveAiReview, saveReviewMemory, currentReviewMemoryPrompt, removePullRequest };
 }
 
 const defaultStore = createStateStore();
@@ -368,6 +383,14 @@ export async function listFileReviews(prKey: string): Promise<FileReviewState[]>
 
 export async function setFileViewed(review: FileReviewState): Promise<FileReviewState> {
   return defaultStore.setFileViewed(review);
+}
+
+export async function getDraftReview(prKey: string): Promise<DraftReview | null> {
+  return defaultStore.getDraftReview(prKey);
+}
+
+export async function saveDraftReview(review: DraftReview): Promise<DraftReview> {
+  return defaultStore.saveDraftReview(review);
 }
 
 export async function listFocusScans(prKey: string): Promise<FocusScanRecord[]> {

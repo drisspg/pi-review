@@ -11,7 +11,7 @@ const paths = {
 };
 
 function emptyState(): AppState {
-  return { prs: [], fileReviews: [], focusScans: [], aiReviews: [], reviewMemory: [], reviewProfile: null };
+  return { prs: [], fileReviews: [], draftReviews: [], focusScans: [], aiReviews: [], reviewMemory: [], reviewProfile: null };
 }
 
 function fakeRuntime(initialState?: Partial<AppState>) {
@@ -144,6 +144,20 @@ test("saveReviewMemory assigns metadata, prepends records, and writes preference
   assert.equal(saved.createdAt, "2026-06-04T00:00:00.000Z");
   assert.equal(persisted.reviewMemory[0]?.prKey, "new");
   assert.match(files.get(paths.reviewMemoryNotesPath) ?? "", /a\.ts:10: inline/);
+});
+
+test("saveDraftReview replaces the PR draft and persists empty drafts", async () => {
+  const { runtime } = fakeRuntime(emptyState());
+  const store = createStateStore(runtime, paths);
+  const first = { prKey: "pr", headSha: "head", event: "COMMENT" as const, body: "overall", comments: [{ id: "1", path: "a.ts", line: 4, side: "RIGHT" as const, body: "note" }], updatedAt: "first" };
+  const empty = { ...first, event: "APPROVE" as const, body: "", comments: [], updatedAt: "second" };
+
+  await store.saveDraftReview(first);
+  assert.deepEqual(await store.getDraftReview("pr"), first);
+  await store.saveDraftReview(empty);
+
+  assert.deepEqual(await store.getDraftReview("pr"), empty);
+  assert.equal((await store.readState()).draftReviews.length, 1);
 });
 
 test("saveFocusScan updates existing records and caps scans per PR", async () => {

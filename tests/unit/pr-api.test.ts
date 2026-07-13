@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createPrApi } from "../../src/pr-api.js";
-import type { AiReviewRecord, FocusScanRecord, PullRequestRef, PullRequestReviewData, StoredPullRequest } from "../../src/types.js";
+import type { AiReviewRecord, DraftReview, FocusScanRecord, PullRequestRef, PullRequestReviewData, StoredPullRequest } from "../../src/types.js";
 
 const ref: PullRequestRef = { host: "github.com", owner: "pytorch", repo: "pytorch", number: 1 };
 
@@ -41,6 +41,7 @@ function reviewData(pr = storedPr()): PullRequestReviewData {
 
 function fakeDeps() {
   const calls: string[] = [];
+  const draftReview: DraftReview = { prKey: "github.com/pytorch/pytorch#1", headSha: "head", event: "COMMENT", body: "draft body", comments: [], updatedAt: "now" };
   const focusScan: FocusScanRecord = { id: "focus", prKey: "github.com/pytorch/pytorch#1", headSha: "head", answer: "focus", areaStates: {}, createdAt: "then", updatedAt: "now" };
   const aiReview: AiReviewRecord = { id: "ai", prKey: "github.com/pytorch/pytorch#1", headSha: "head", answer: "ai", createdAt: "then", updatedAt: "now" };
   return {
@@ -56,6 +57,10 @@ function fakeDeps() {
       async fetchPullRequestReviewData(requestRef: PullRequestRef) {
         calls.push(`fetch:${requestRef.number}`);
         return reviewData();
+      },
+      async getDraftReview(prKey: string) {
+        calls.push(`draft:${prKey}`);
+        return draftReview;
       },
       async listAiReviews(prKey: string) {
         calls.push(`ai:${prKey}`);
@@ -110,9 +115,10 @@ test("PR API activity fetches, upserts, and hydrates review response", async () 
   const response = await createPrApi(deps).activity("url");
 
   assert.equal(response.pr.title, "Stored PR");
+  assert.equal(response.draftReview?.body, "draft body");
   assert.equal(response.focusScan?.id, "focus");
   assert.equal(response.aiReview?.id, "ai");
-  assert.deepEqual(calls, ["parse:url", "fetch:1", "upsert:github.com/pytorch/pytorch#1", "focus:github.com/pytorch/pytorch#1", "ai:github.com/pytorch/pytorch#1"]);
+  assert.deepEqual(calls, ["parse:url", "fetch:1", "upsert:github.com/pytorch/pytorch#1", "draft:github.com/pytorch/pytorch#1", "focus:github.com/pytorch/pytorch#1", "ai:github.com/pytorch/pytorch#1"]);
 });
 
 test("PR API open prepares worktree, registers Pi cwd, prewarms sessions, and hydrates response", async () => {
@@ -129,6 +135,7 @@ test("PR API open prepares worktree, registers Pi cwd, prewarms sessions, and hy
     "prepare:1:git@github.com:pytorch/pytorch.git:head",
     "cwd:github.com/pytorch/pytorch#1:/tmp/worktree",
     "prewarm:github.com/pytorch/pytorch#1:main-review,focus-review,chat,inline-chat,focus-chat",
+    "draft:github.com/pytorch/pytorch#1",
     "focus:github.com/pytorch/pytorch#1",
     "ai:github.com/pytorch/pytorch#1",
   ]);

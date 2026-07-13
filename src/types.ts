@@ -98,6 +98,24 @@ export type FileReviewState = {
   updatedAt: string;
 };
 
+export type DraftReviewComment = {
+  id: string;
+  path: string;
+  line: number | null;
+  startLine?: number | null;
+  side: "RIGHT" | "LEFT";
+  body: string;
+};
+
+export type DraftReview = {
+  prKey: string;
+  headSha: string;
+  event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES";
+  body: string;
+  comments: DraftReviewComment[];
+  updatedAt: string;
+};
+
 export type FocusAreaReviewState = {
   viewed: boolean;
   collapsed: boolean;
@@ -182,6 +200,7 @@ export type PullRequestReviewData = {
 };
 
 export type PullRequestReviewResponse = PullRequestReviewData & {
+  draftReview: DraftReview | null;
   focusScan: FocusScanRecord | null;
   focusScans: FocusScanRecord[];
   aiReview: AiReviewRecord | null;
@@ -192,6 +211,7 @@ export type PullRequestReviewResponse = PullRequestReviewData & {
 export type AppState = {
   prs: StoredPullRequest[];
   fileReviews: FileReviewState[];
+  draftReviews: DraftReview[];
   focusScans: FocusScanRecord[];
   aiReviews: AiReviewRecord[];
   reviewMemory: ReviewMemoryRecord[];

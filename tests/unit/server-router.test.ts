@@ -69,6 +69,11 @@ function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
         return { result: "reply" };
       },
     },
+    draftReviewApi: {
+      async save(payload) {
+        return { draftReview: { prKey: String(payload.prKey), headSha: "head", event: "COMMENT", body: "", comments: [], updatedAt: "now" } };
+      },
+    },
     fileApi: {
       async open() {
         return { target: "target" };
@@ -112,13 +117,13 @@ function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
     },
     prApi: {
       async activity() {
-        return { pr: { existingCommentCount: 0, filesChanged: 0, key: "pr" }, focusScan: null, focusScans: [], aiReview: null, aiReviews: [] };
+        return { pr: { existingCommentCount: 0, filesChanged: 0, key: "pr" }, draftReview: null, focusScan: null, focusScans: [], aiReview: null, aiReviews: [] };
       },
       async cleanup() {
         return { prKey: "pr", worktreeDir: "/tmp/pr" };
       },
       async open() {
-        return { pr: { existingCommentCount: 0, filesChanged: 0, key: "pr" }, focusScan: null, focusScans: [], aiReview: null, aiReviews: [], worktreeDir: "/tmp/pr" };
+        return { pr: { existingCommentCount: 0, filesChanged: 0, key: "pr" }, draftReview: null, focusScan: null, focusScans: [], aiReview: null, aiReviews: [], worktreeDir: "/tmp/pr" };
       },
       parse(input) {
         return { ref: { host: "github.com", owner: "o", repo: "r", number: Number(input) || 1 } };
@@ -212,6 +217,24 @@ test("server route parses JSON and dispatches POST feature routes", async () => 
   assert.equal(res.statusCode, 200);
   assert.deepEqual(jsonBody(res), { answer: "answer" });
   assert.deepEqual(calls, [{ prKey: "pr", prompt: "prompt" }]);
+});
+
+test("server route saves draft reviews", async () => {
+  const payloads: Record<string, unknown>[] = [];
+  const route = createServerRoute(baseDeps({
+    draftReviewApi: {
+      async save(payload) {
+        payloads.push(payload);
+        return { draftReview: { prKey: String(payload.prKey), headSha: "head", event: "COMMENT", body: "body", comments: [], updatedAt: "now" } };
+      },
+    },
+  }));
+
+  const res = await routeRequest(route, "POST", "/api/draft-review/save", { prKey: "pr", body: "body" });
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(payloads, [{ prKey: "pr", body: "body" }]);
+  assert.deepEqual(jsonBody(res), { draftReview: { prKey: "pr", headSha: "head", event: "COMMENT", body: "body", comments: [], updatedAt: "now" } });
 });
 
 test("server route exposes backend prompt contracts", async () => {

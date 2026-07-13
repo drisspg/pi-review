@@ -384,6 +384,61 @@ test("runs a separate focus areas review and highlights referenced lines", async
   await expect(row).toHaveClass(/focus-highlight-active/);
 });
 
+test("marking a file viewed does not jump to the active focus area", async ({ page }) => {
+  const focusRow = (await openFileWithAddedRows(page, 1)).first();
+  const focusPath = await focusRow.getAttribute("data-path");
+  const focusLine = await focusRow.getAttribute("data-line");
+  if (focusPath == null || focusLine == null) throw new Error("Missing focus row target");
+  const focusFile = focusRow.locator("xpath=ancestor::section[contains(concat(' ', normalize-space(@class), ' '), ' file ')][1]");
+  await focusFile.locator(".file-summary-left").click();
+  await expect(focusFile.locator(".diff-row")).toHaveCount(0);
+
+  await page.route(/\/api\/pi\/focus-review\/status$/, async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { status: "complete", answer: `## Focus areas\n1. active finding\n- ${focusPath}:${focusLine}-${Number.parseInt(focusLine, 10) + 1} — check this line.` } }) });
+  });
+  await page.route(/\/api\/pi\/focus-review$/, async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { id: "focus-no-jump-job" } }) });
+  });
+  await page.route("**/api/focus-scan/save", async (route) => {
+    const request = route.request().postDataJSON() as { prKey: string; headSha: string; answer: string; areaStates: Record<string, unknown> };
+    const now = new Date().toISOString();
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ scan: { id: "focus-no-jump-scan", ...request, createdAt: now, updatedAt: now } }) });
+  });
+  await page.route("**/api/file/viewed", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true }) });
+  });
+
+  await page.getByRole("tab", { name: "Pi" }).click();
+  await page.getByRole("button", { name: /Focus scan|Refresh focus scan/ }).click();
+  const focusLink = page.locator(".focus-area-link-row button").first();
+  await expect(focusLink).toContainText("check this line");
+  await focusLink.click();
+  await expect(focusRow).toHaveClass(/focus-highlight-active/);
+
+  const files = page.locator(".file");
+  let otherFileIndex = -1;
+  for (let index = 0; index < await files.count(); index += 1) {
+    if (await files.nth(index).locator(".file-path").textContent() !== focusPath) {
+      otherFileIndex = index;
+      break;
+    }
+  }
+  expect(otherFileIndex).toBeGreaterThanOrEqual(0);
+  const otherFile = files.nth(otherFileIndex);
+  if (await otherFile.locator(".diff-row").count() === 0) await otherFile.locator(".file-summary-left").click();
+  await expect(otherFile.locator(".diff-row").first()).toBeVisible();
+  await otherFile.locator(".viewed-toggle input").scrollIntoViewIfNeeded();
+  await page.evaluate(() => {
+    const state = window as typeof window & { scrollIntoViewCalls: number };
+    state.scrollIntoViewCalls = 0;
+    Element.prototype.scrollIntoView = () => { state.scrollIntoViewCalls += 1; };
+  });
+
+  await otherFile.locator(".viewed-toggle input").click();
+  await expect(otherFile.locator(".diff-row")).toHaveCount(0);
+  expect(await page.evaluate(() => (window as typeof window & { scrollIntoViewCalls: number }).scrollIntoViewCalls)).toBe(0);
+});
+
 test("minimizes focus area links after all are reviewed", async ({ page }) => {
   const rows = await openFileWithAddedRows(page, 2);
   const firstPath = await rows.nth(0).getAttribute("data-path");
@@ -542,7 +597,7 @@ test("runs the right-sidebar Pi review panel and continues the chat with Enter",
   await expect(dialog).toContainText("Follow-up answer");
 });
 
-test("copies a collected review feedback prompt from the Pi panel", async ({ page, context }) => {
+test("copies local draft comments in a feedback prompt from the Review tab", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   const rows = await openFileWithAddedRows(page, 1);
   const path = await rows.first().getAttribute("data-path");
@@ -574,6 +629,11 @@ test("copies a collected review feedback prompt from the Pi panel", async ({ pag
   });
   await mockAskPi(page, () => "AI chat answer.");
 
+  await rows.first().click();
+  await page.locator(".inline-thread textarea").first().fill("Keep this local feedback out of GitHub.");
+  await page.getByRole("button", { name: "Add draft comment" }).first().click();
+  await expect(page.locator(".inline-thread.draft")).toContainText("Keep this local feedback out of GitHub.");
+
   await page.getByRole("tab", { name: "Pi" }).click();
   const panel = page.locator(".ai-review");
   await panel.getByRole("button", { name: /Full review|Refresh findings/ }).click();
@@ -583,17 +643,30 @@ test("copies a collected review feedback prompt from the Pi panel", async ({ pag
   await panel.getByPlaceholder("Ask Pi about this PR…").fill("What should I prioritize?");
   await panel.getByPlaceholder("Ask Pi about this PR…").press("Enter");
   await expect(panel).toContainText("AI chat answer");
-  await panel.getByRole("button", { name: "Copy feedback prompt" }).click();
+  await page.getByRole("tab", { name: /Review/ }).click();
+  const reviewPanel = page.locator(".side .panel");
+  const finalDraftSave = page.waitForResponse((response) => response.url().endsWith("/api/draft-review/save") && (response.request().postDataJSON() as { body?: string }).body === "Keep this overall note local too.");
+  await reviewPanel.getByPlaceholder("Overall review body").fill("Keep this overall note local too.");
+  await finalDraftSave;
+  await reviewPanel.getByRole("button", { name: "Copy feedback prompt" }).click();
 
-  await expect(panel.getByRole("button", { name: "Copied feedback prompt" })).toBeVisible();
+  await expect(reviewPanel.getByRole("button", { name: "Copied feedback prompt" })).toBeVisible();
+  await expect(reviewPanel.locator(".draft-card")).toContainText("Keep this local feedback out of GitHub.");
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("COPIED REVIEW FEEDBACK PROMPT");
   await expect.poll(() => feedbackPayload?.mode).toBe("review-feedback");
   const userComments = feedbackPayload?.userComments as Array<{ body?: string }> | undefined;
   const aiComments = feedbackPayload?.aiComments as Array<{ role?: string; text?: string }> | undefined;
   const focusAreas = feedbackPayload?.focusAreas as Array<{ path?: string; startLine?: number; title?: string }> | undefined;
+  expect(userComments?.some((comment) => comment.body === "Keep this overall note local too.")).toBe(true);
+  expect(userComments?.some((comment) => comment.body === "Keep this local feedback out of GitHub.")).toBe(true);
   expect(userComments?.some((comment) => comment.body?.includes("Before #2448"))).toBe(true);
   expect(aiComments?.some((comment) => comment.role === "user" && comment.text === "What should I prioritize?")).toBe(true);
   expect(aiComments?.some((comment) => comment.role === "pi" && comment.text === "AI chat answer.")).toBe(true);
   expect(focusAreas?.[0]).toMatchObject({ path, startLine: lineNumber, title: "copied focus area" });
   expect(feedbackPayload?.globalFeedback).toBe("Global feedback from Pi.");
+
+  await page.reload();
+  await expect(page.locator(".review-layout")).toBeVisible({ timeout: 60_000 });
+  await expect(page.locator(".side .draft-card")).toContainText("Keep this local feedback out of GitHub.");
+  await expect(page.getByPlaceholder("Overall review body")).toHaveValue("Keep this overall note local too.");
 });

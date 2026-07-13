@@ -2064,6 +2064,12 @@ button.fold:hover {
   flex-shrink: 0;
 }
 
+.review-summary-empty-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .review-actions {
   display: grid;
   gap: 8px;

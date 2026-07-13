@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 
 import { createAskStreamApi } from "./ask-stream-api.js";
 import { createCommentApi, defaultCommentApiDeps } from "./comment-api.js";
+import { createDraftReviewApi } from "./draft-review-api.js";
 import { createFileApi, defaultFileApiDeps } from "./file-api.js";
 import { gpuWorkspaceCreateResponse, gpuWorkspaceDeleteResponse, gpuWorkspaceExecResponse, gpuWorkspaceStatusResponse } from "./gpu-workspace-api.js";
 import { addIssueComment, editIssueComment, editReviewComment, editReviewSummary, fetchFileText, fetchPullRequestReviewData, replyToReviewComment, submitPullRequestReview } from "./github.js";
@@ -20,7 +21,7 @@ import { createReviewSubmitRouteApi, defaultReviewSubmitRouteApiDeps } from "./r
 import { createSavedAnalysisApi } from "./saved-analysis-api.js";
 import { createServerRoute, createRequestListener } from "./server-router.js";
 import { createShellApi } from "./shell-api.js";
-import { currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, listAiReviews, listFocusScans, listRecentPullRequests, listReviewMemoryRecords, markPullRequestReviewed, removePullRequest, reviewMemoryStats, saveAiReview, saveFocusScan, saveReviewMemory, saveReviewProfile, setFileViewed, upsertPullRequest } from "./state.js";
+import { currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, getDraftReview, listAiReviews, listFocusScans, listRecentPullRequests, listReviewMemoryRecords, markPullRequestReviewed, removePullRequest, reviewMemoryStats, saveAiReview, saveDraftReview, saveFocusScan, saveReviewMemory, saveReviewProfile, setFileViewed, upsertPullRequest } from "./state.js";
 import { cleanupPrWorktree, preparePrWorktree } from "./worktrees.js";
 
 const DEFAULT_PORT = 43133;
@@ -30,11 +31,12 @@ const execFileAsync = promisify(execFile);
 const piJobRunner = createPiJobRunner(askPi);
 const askStreamApi = createAskStreamApi({ askPi, logger });
 const commentApi = createCommentApi(defaultCommentApiDeps({ addIssueComment, editIssueComment, editReviewComment, editReviewSummary, replyToReviewComment }));
+const draftReviewApi = createDraftReviewApi({ now: () => new Date().toISOString(), saveDraftReview });
 const fileApi = createFileApi(defaultFileApiDeps(fetchFileText, setFileViewed, async (url) => {
   await execFileAsync("open", [url]);
 }));
 const piApi = createPiApi({ askPi, piActivity, piDiagnostics, piJobRunner, setPiModel });
-const prApi = createPrApi(defaultPrApiDeps({ cleanupPrWorktree, disposePiSession, fetchPullRequestReviewData, listAiReviews, listFocusScans, preparePrWorktree, prewarmPiSession, registerPiSessionCwd, removePullRequest, upsertPullRequest }));
+const prApi = createPrApi(defaultPrApiDeps({ cleanupPrWorktree, disposePiSession, fetchPullRequestReviewData, getDraftReview, listAiReviews, listFocusScans, preparePrWorktree, prewarmPiSession, registerPiSessionCwd, removePullRequest, upsertPullRequest }));
 const reviewMemoryApi = createReviewMemoryApi({ askPi, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewMemory, saveReviewProfile });
 const reviewPromptApi = createReviewPromptApi({ currentReviewMemoryPrompt });
 const reviewSubmitRouteApi = createReviewSubmitRouteApi(defaultReviewSubmitRouteApiDeps({ fetchPullRequestReviewData, markPullRequestReviewed, saveReviewMemory, submitPullRequestReview }));
@@ -62,6 +64,7 @@ async function sendStatic(res: ServerResponse, pathname: string, head = false): 
 const route = createServerRoute({
   askStreamApi,
   commentApi,
+  draftReviewApi,
   fileApi,
   gpuWorkspaceCreateResponse,
   gpuWorkspaceDeleteResponse,
