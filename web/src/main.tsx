@@ -9,6 +9,7 @@ import { ExistingComments, ExistingReviewThread } from "./components/Threads";
 import { buildDiffAnnotationIndex, commentTarget, commentThreadDomId, diffAnnotationTargetKey, targetKey, targetLabel, type DiffAnnotationIndex } from "./lib/comments";
 import { contextRowsFromText, hunkNewStart, isTargetInSelection, lastNewLine, parsePatchRows, parsePatchSetSections, targetFromPoint, targetFromRow } from "./lib/diff";
 import { autoGrowTextarea } from "./lib/dom";
+import { parseFocusAreas } from "./lib/focus";
 import { languageForPath } from "./lib/highlight";
 import { newId, prUrlFromKey, relativeTime, shortSha } from "./lib/pr";
 import type { AiReview, AiReviewMessage, AiReviewRecord, DiffRow, DraftComment, DragSelection, FileReviewState, FlowDag, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, GpuWorkspace, GpuWorkspaceContract, GpuWorkspaceExecResult, LogEntry, OpenResponse, PiAgentActivity, PullFile, PullIssueComment, PullRequestReviewSummary, PullReviewComment, ReviewMemoryRecord, ReviewMemoryResponse, StoredPullRequest, Target, ThemeName, Thread, ThreadMessage } from "./types";
@@ -271,29 +272,6 @@ function draftIdsFromSubmitError(message: string, drafts: DraftComment[]): Recor
   const ids = Object.fromEntries([...message.matchAll(/draft=([^\s]+)/g)].map((match) => [match[1], true]));
   if (Object.keys(ids).length > 0) return ids;
   return Object.fromEntries(drafts.filter((draft) => message.includes(draftLocation(draft)) || message.includes(draft.body.trim().slice(0, 80))).map((draft) => [draft.id, true]));
-}
-
-function focusAreaPath(path: string) {
-  return path.trim().replace(/^[-*]\s+/, "").trim();
-}
-
-function parseFocusAreas(text: string): FocusArea[] {
-  const location = /(?:^|[`\s(*-])([\w./@+-][\w./@+ -]*?\.[\w+-]+):(\d+)(?:-(\d+))?(?:\s*[—-]\s*([^\n]+))?/gm;
-  const areas: FocusArea[] = [];
-  for (const match of text.matchAll(location)) {
-    const path = focusAreaPath(match[1]);
-    const startLine = Number.parseInt(match[2], 10);
-    const endLine = Number.parseInt(match[3] ?? match[2], 10);
-    if (!Number.isFinite(startLine) || !Number.isFinite(endLine)) continue;
-    areas.push({ id: `${path}:${startLine}-${endLine}:${areas.length}`, path, startLine: Math.min(startLine, endLine), endLine: Math.max(startLine, endLine), title: (match[4] ?? "Focus area").replace(/[`*_]+$/g, "").trim(), body: nearbyMarkdown(text, match.index ?? 0) });
-  }
-  return areas;
-}
-
-function nearbyMarkdown(text: string, index: number): string {
-  const nextItem = text.slice(index + 1).search(/\n\s*(?:[-*]|\d+\.)\s+[`\w./@+-][^\n]*:\d+/);
-  const end = nextItem === -1 ? text.length : index + 1 + nextItem;
-  return text.slice(index, end).trim();
 }
 
 function focusAreaKey(area: FocusArea): string {
