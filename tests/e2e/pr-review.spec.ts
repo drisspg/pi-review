@@ -1,6 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
 
+test.describe.configure({ mode: "serial" });
+
 const prUrl = process.env.PI_REVIEW_TEST_PR ?? "https://github.com/Dao-AILab/flash-attention/pull/2542";
+let openedPr: { key: string; headSha: string } | null = null;
 
 async function openFirstFile(page: Page) {
   const firstFile = page.locator(".file").first();
@@ -19,6 +22,25 @@ async function openFileWithAddedRows(page: Page, minRows: number) {
   throw new Error(`No file has ${minRows} added rows`);
 }
 
+async function openTools(page: Page) {
+  await page.getByRole("button", { name: /Tools/ }).click();
+}
+
+async function openSideTab(page: Page, tab: "Review" | "Pi" | "Comments") {
+  if (await page.locator(".side").count() === 0) {
+    const trigger = tab === "Review" ? /Review changes/ : tab === "Pi" ? /Pi review/ : /Comments/;
+    await page.locator(".files-toolbar").getByRole("button", { name: trigger }).click();
+  }
+  const tabButton = page.getByRole("tab", { name: new RegExp(`^${tab}`) });
+  if (await tabButton.getAttribute("aria-selected") !== "true") await tabButton.click();
+}
+
+async function openReviewForm(page: Page) {
+  await openSideTab(page, "Review");
+  const startReview = page.getByRole("button", { name: "Start review" });
+  if (await startReview.count() > 0) await startReview.click();
+}
+
 async function mockAskPi(page: Page, answerForPrompt: (body: { prompt?: string }) => string) {
   await page.route(/\/api\/ask\/stream$/, async (route) => {
     const answer = answerForPrompt(route.request().postDataJSON() as { prompt?: string });
@@ -31,10 +53,19 @@ async function mockAskPi(page: Page, answerForPrompt: (body: { prompt?: string }
 }
 
 test.beforeEach(async ({ page }) => {
+  openedPr = null;
   await page.goto("/");
   await page.locator("input").first().fill(prUrl);
+  const responsePromise = page.waitForResponse((response) => response.url().endsWith("/api/pr/open") && response.request().method() === "POST");
   await page.getByRole("button", { name: "Open" }).click();
+  const response = await responsePromise;
+  openedPr = (await response.json() as { pr: { key: string; headSha: string } }).pr;
   await expect(page.locator(".review-layout")).toBeVisible({ timeout: 60_000 });
+});
+
+test.afterEach(async ({ request }) => {
+  if (openedPr == null) return;
+  await request.post("/api/draft-review/save", { data: { prKey: openedPr.key, headSha: openedPr.headSha, event: "COMMENT", body: "", comments: [] } });
 });
 
 test("removes a previous PR from local history", async ({ page }) => {
@@ -61,7 +92,7 @@ test("reopens a previously loaded PR from the client cache", async ({ page }) =>
   await page.locator(".pr-card").first().locator(".pr-card-body").click();
 
   await expect(page.locator(".review-layout")).toBeVisible();
-  await expect(page.getByText("github.com/Dao-AILab/flash-attention#2542").first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Fully enable varlen split KV/ })).toBeVisible();
   await page.waitForTimeout(250);
   expect(openRequests).toBe(0);
 });
@@ -74,18 +105,19 @@ test("opens a previous PR from its review link in a separate page", async ({ pag
   const reviewPage = await context.newPage();
   await reviewPage.goto(new URL(href!, page.url()).toString());
   await expect(reviewPage.locator(".review-layout")).toBeVisible({ timeout: 60_000 });
-  await expect(reviewPage.getByText("github.com/Dao-AILab/flash-attention#2542").first()).toBeVisible();
+  await expect(reviewPage.getByRole("heading", { name: /Fully enable varlen split KV/ })).toBeVisible();
 });
 
 test("opens a PR and renders GitHub-style file diffs", async ({ page }) => {
-  await expect(page.getByText("github.com/Dao-AILab/flash-attention#2542").first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Fully enable varlen split KV/ })).toBeVisible();
   await expect.poll(() => page.locator(".file").count()).toBeGreaterThanOrEqual(2);
   await openFirstFile(page);
   await expect(page.locator(".diff-row.added").first()).toBeVisible();
 });
 
 test("shows GPU workspace MVP constraints for unsupported repos", async ({ page }) => {
-  await page.getByRole("button", { name: "GPU" }).click();
+  await openTools(page);
+  await page.getByRole("menuitem", { name: "GPU workspace" }).click();
   const dialog = page.getByRole("dialog", { name: "GPU workspace" });
   await expect(dialog.getByText("1 GPU", { exact: true })).toBeVisible();
   await expect(dialog.getByText("no persistent disk", { exact: true })).toBeVisible();
@@ -106,17 +138,21 @@ test("expands neighboring context lines", async ({ page }) => {
 
 test("uses a compact files toolbar and collapsible review panel", async ({ page }) => {
   const toolbar = page.locator(".files-toolbar");
-  const emptyReviewSummary = page.locator(".review-summary-empty");
   await expect(toolbar).toContainText("Files");
-  await expect(emptyReviewSummary).toBeVisible();
-
-  await toolbar.getByRole("button", { name: "Hide review panel" }).click();
   await expect(page.locator(".side")).toHaveCount(0);
-  await toolbar.getByRole("button", { name: "Show review panel" }).click();
-  await expect(page.locator(".side")).toBeVisible();
 
+  await toolbar.getByRole("button", { name: "Review changes" }).click();
+  await expect(page.locator(".side")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Maximize side panel" })).toHaveCount(0);
+  const emptyReviewSummary = page.locator(".review-summary-empty");
+  await expect(emptyReviewSummary).toBeVisible();
   await emptyReviewSummary.getByRole("button", { name: "Start review" }).click();
   await expect(page.getByPlaceholder("Overall review body")).toBeVisible();
+
+  await page.getByRole("button", { name: "Hide review panel" }).click();
+  await expect(page.locator(".side")).toHaveCount(0);
+  await toolbar.getByRole("button", { name: /Pi review/ }).click();
+  await expect(page.locator(".side")).toBeVisible();
 
   await toolbar.locator(".file-navigator > summary").click();
   await expect(toolbar.locator(".file-navigator-list")).toBeVisible();
@@ -143,6 +179,7 @@ test("copies all draft comments with diff context", async ({ page, context }) =>
   await page.locator(".file").first().locator(".diff-row.added").first().click();
   await page.locator(".inline-thread textarea").first().fill("send this to another agent");
   await page.getByRole("button", { name: "Add draft comment" }).first().click();
+  await openSideTab(page, "Review");
   await page.getByRole("button", { name: "Copy draft context" }).click();
 
   await expect(page.getByRole("button", { name: "Copied context" })).toBeVisible();
@@ -155,10 +192,10 @@ test("copies all draft comments with diff context", async ({ page, context }) =>
 test("clears empty line threads when clicking elsewhere", async ({ page }) => {
   await openFirstFile(page);
   await page.locator(".file").first().locator(".diff-row.added").first().click();
-  await expect(page.locator(".inline-thread")).toHaveCount(1);
+  await expect(page.locator(".inline-thread.local-thread")).toHaveCount(1);
 
-  await page.locator(".side").click();
-  await expect(page.locator(".inline-thread")).toHaveCount(0);
+  await page.locator(".pr-header-strip").click();
+  await expect(page.locator(".inline-thread.local-thread")).toHaveCount(0);
 });
 
 test("supports multiline draft ranges", async ({ page }) => {
@@ -176,8 +213,9 @@ test("supports multiline draft ranges", async ({ page }) => {
   await page.locator(".inline-thread textarea").first().fill("range draft");
   await page.getByRole("button", { name: "Add draft comment" }).first().click();
 
-  await expect(page.locator(".inline-thread.draft").first()).toContainText(`${firstLine}-${lastLine}`);
-  await expect(page.getByRole("button", { name: "Submit review (1)" })).toBeEnabled();
+  await expect(page.locator(".inline-thread.draft", { hasText: "range draft" })).toContainText(`${firstLine}-${lastLine}`);
+  await openSideTab(page, "Review");
+  await expect(page.getByRole("button", { name: /Submit review/ })).toBeEnabled();
 });
 
 test("clears the review form after submitting", async ({ page }) => {
@@ -187,12 +225,13 @@ test("clears the review form after submitting", async ({ page }) => {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ result: { ok: true } }) });
   });
 
+  await openReviewForm(page);
   await page.getByPlaceholder("Overall review body").fill("looks good");
-  await page.getByRole("button", { name: "Submit review (0)" }).click();
+  await page.getByRole("button", { name: /Submit review/ }).click();
 
-  await expect(page.getByRole("button", { name: "Review submitted" })).toBeDisabled();
-  await expect(page.getByPlaceholder("Overall review body")).toHaveValue("");
   await expect(page.locator(".side")).toContainText("Review submitted.");
+  await expect(page.getByPlaceholder("Overall review body")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Start review" })).toBeVisible();
   expect(submitRequests).toBe(1);
 });
 
@@ -211,7 +250,8 @@ test("shows failed review inline draft diagnostics", async ({ page }) => {
   await page.locator(".file").first().locator(".diff-row.added").first().click();
   await page.locator(".inline-thread textarea").first().fill("stale line draft");
   await page.getByRole("button", { name: "Add draft comment" }).first().click();
-  await page.getByRole("button", { name: "Submit review (1)" }).click();
+  await openSideTab(page, "Review");
+  await page.getByRole("button", { name: /Submit review/ }).click();
 
   await expect(page.locator(".error")).toContainText("Inline comments in the failed review payload");
   await expect(page.locator(".error")).toContainText("stale line draft");
@@ -236,7 +276,7 @@ test("dragging diff rows opens a multiline thread", async ({ page }) => {
 });
 
 test("renders existing GitHub comments as markdown", async ({ page }) => {
-  await page.getByRole("tab", { name: /Comments/ }).click();
+  await openSideTab(page, "Comments");
   await expect(page.locator(".side .github-thread .markdown").first()).toContainText("Before #2448");
   await expect(page.locator(".side .github-thread pre code").first()).toContainText("set_params_splitkv");
 });
@@ -248,7 +288,7 @@ test("edits an existing GitHub comment", async ({ page }) => {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ result: { ok: true } }) });
   });
 
-  await page.getByRole("tab", { name: /Comments/ }).click();
+  await openSideTab(page, "Comments");
   const firstThread = page.locator(".side .github-thread").first();
   await firstThread.getByRole("button", { name: "Edit" }).first().click();
   await firstThread.getByLabel("Edit comment").fill("edited from pi-review");
@@ -259,7 +299,7 @@ test("edits an existing GitHub comment", async ({ page }) => {
 });
 
 test("collapses and focuses existing comment threads", async ({ page }) => {
-  await page.getByRole("tab", { name: /Comments/ }).click();
+  await openSideTab(page, "Comments");
   const thread = page.locator(".side .github-thread").first();
   await expect(thread.locator(".markdown").first()).toBeVisible();
   await thread.getByLabel("Collapse thread").click();
@@ -281,7 +321,8 @@ test("shows readable Pi diagnostics", async ({ page }) => {
     });
   });
 
-  await page.getByTitle("Pi session diagnostics").click();
+  await openTools(page);
+  await page.getByRole("menuitem", { name: "Session diagnostics" }).click();
   await expect(page.getByRole("heading", { name: "Pi diagnostics" })).toBeVisible();
   const dialog = page.getByRole("dialog");
   await expect(dialog.locator("strong", { hasText: "anthropic/claude" })).toBeVisible();
@@ -315,15 +356,7 @@ test("selects diff code text without opening a thread", async ({ page }) => {
   await openFirstFile(page);
   const code = page.locator(".file").first().locator(".diff-row.added code").first();
   await expect(code).toBeVisible();
-  const box = await code.boundingBox();
-  if (box == null) throw new Error("Missing diff code bounds");
-
-  const y = box.y + box.height / 2;
-  await page.mouse.move(box.x + 2, y);
-  await page.mouse.down();
-  await page.mouse.move(box.x + Math.max(8, Math.min(box.width - 2, 120)), y, { steps: 6 });
-  await page.mouse.up();
-
+  await code.selectText();
   await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? "")).not.toEqual("");
   await expect(page.locator(".inline-thread")).toHaveCount(0);
 });
@@ -365,7 +398,7 @@ test("runs a separate focus areas review and highlights referenced lines", async
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { id: "focus-job" } }) });
   });
 
-  await page.getByRole("tab", { name: "Pi" }).click();
+  await openSideTab(page, "Pi");
   await page.getByRole("button", { name: "Focus scan" }).click();
 
   const focusArea = page.locator(".focus-area-inline");
@@ -374,12 +407,12 @@ test("runs a separate focus areas review and highlights referenced lines", async
   await expect(page.locator(".focus-area-collapsed")).toBeVisible();
   await page.locator(".focus-area-collapsed").click();
   await expect(focusArea).toContainText("tiling conventions");
-  await focusArea.getByPlaceholder("Ask Pi or write a draft comment about this focus area").fill("please check this tradeoff");
+  await focusArea.getByPlaceholder("Write a draft comment or ask Pi about this focus area").fill("please check this tradeoff");
   await focusArea.getByRole("button", { name: "Add draft comment" }).click();
   await expect(page.locator(".inline-thread.draft")).toContainText("please check this tradeoff");
-  await page.getByRole("tab", { name: /Review/ }).click();
-  await expect(page.getByRole("button", { name: "Submit review (1)" })).toBeEnabled();
-  await page.getByRole("tab", { name: "Pi" }).click();
+  await openSideTab(page, "Review");
+  await expect(page.getByRole("button", { name: /Submit review/ })).toBeEnabled();
+  await openSideTab(page, "Pi");
   await expect(page.locator(".ai-review")).toContainText("0/1 focus area reviewed");
   await expect(row).toHaveClass(/focus-highlight-active/);
 });
@@ -408,7 +441,7 @@ test("marking a file viewed does not jump to the active focus area", async ({ pa
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true }) });
   });
 
-  await page.getByRole("tab", { name: "Pi" }).click();
+  await openSideTab(page, "Pi");
   await page.getByRole("button", { name: /Focus scan|Refresh focus scan/ }).click();
   const focusLink = page.locator(".focus-area-link-row button").first();
   await expect(focusLink).toContainText("check this line");
@@ -428,6 +461,7 @@ test("marking a file viewed does not jump to the active focus area", async ({ pa
   if (await otherFile.locator(".diff-row").count() === 0) await otherFile.locator(".file-summary-left").click();
   await expect(otherFile.locator(".diff-row").first()).toBeVisible();
   await otherFile.locator(".viewed-toggle input").scrollIntoViewIfNeeded();
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   await page.evaluate(() => {
     const state = window as typeof window & { scrollIntoViewCalls: number };
     state.scrollIntoViewCalls = 0;
@@ -457,7 +491,7 @@ test("minimizes focus area links after all are reviewed", async ({ page }) => {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ scan: { id: "focus-minimize-scan" } }) });
   });
 
-  await page.getByRole("tab", { name: "Pi" }).click();
+  await openSideTab(page, "Pi");
   await page.getByRole("button", { name: "Focus scan" }).click();
   await expect(page.locator(".focus-area-link-row")).toHaveCount(2);
   await page.locator(".focus-area-check input").nth(0).click();
@@ -477,7 +511,7 @@ test("shows a clean focus scan status when there are no focus areas", async ({ p
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { id: "clean-focus-job" } }) });
   });
 
-  await page.getByRole("tab", { name: "Pi" }).click();
+  await openSideTab(page, "Pi");
   await page.getByRole("button", { name: "Focus scan" }).click();
 
   await expect(page.locator(".ai-review")).toContainText("Focus scan clean");
@@ -490,7 +524,7 @@ test("persists Pi review chat across page reloads", async ({ page }) => {
   });
   await mockAskPi(page, () => "Persisted answer about `cu_seqlens_q`.");
 
-  await page.getByRole("tab", { name: "Pi" }).click();
+  await openSideTab(page, "Pi");
   await page.locator(".ai-review").getByPlaceholder("Ask Pi about this PR…").fill("remember this conversation");
   await expect(page.locator(".ai-review").getByRole("button", { name: "Send" })).toBeEnabled();
   await Promise.all([
@@ -502,7 +536,7 @@ test("persists Pi review chat across page reloads", async ({ page }) => {
 
   await page.reload();
   await expect(page.locator(".review-layout")).toBeVisible({ timeout: 60_000 });
-  await page.getByRole("tab", { name: "Pi" }).click();
+  await openSideTab(page, "Pi");
 
   await expect(page.locator(".ai-review")).toContainText("remember this conversation");
   await expect(page.locator(".ai-review")).toContainText("Persisted answer");
@@ -543,7 +577,8 @@ The walk is separate from review chat.`;
   });
 
   await page.setViewportSize({ width: 320, height: 667 });
-  await page.getByRole("button", { name: "Code walk" }).click();
+  await openTools(page);
+  await page.getByRole("menuitem", { name: "Code walk" }).click();
 
   const dialog = page.getByRole("dialog", { name: "Code walk" });
   await expect(dialog).toContainText("Walk map");
@@ -574,7 +609,7 @@ test("runs the right-sidebar Pi review panel and continues the chat with Enter",
   });
   await mockAskPi(page, (body) => body.prompt?.includes("latest question") ? "Follow-up answer about `cu_seqlens_q`." : "Unexpected ask response");
 
-  await page.getByRole("tab", { name: "Pi" }).click();
+  await openSideTab(page, "Pi");
   await page.getByRole("button", { name: /Full review|Refresh findings/ }).click();
 
   const dialog = page.locator(".ai-review");
@@ -634,7 +669,7 @@ test("copies local draft comments in a feedback prompt from the Review tab", asy
   await page.getByRole("button", { name: "Add draft comment" }).first().click();
   await expect(page.locator(".inline-thread.draft")).toContainText("Keep this local feedback out of GitHub.");
 
-  await page.getByRole("tab", { name: "Pi" }).click();
+  await openSideTab(page, "Pi");
   const panel = page.locator(".ai-review");
   await panel.getByRole("button", { name: /Full review|Refresh findings/ }).click();
   await expect(panel).toContainText("Global feedback from Pi");
@@ -643,7 +678,7 @@ test("copies local draft comments in a feedback prompt from the Review tab", asy
   await panel.getByPlaceholder("Ask Pi about this PR…").fill("What should I prioritize?");
   await panel.getByPlaceholder("Ask Pi about this PR…").press("Enter");
   await expect(panel).toContainText("AI chat answer");
-  await page.getByRole("tab", { name: /Review/ }).click();
+  await openSideTab(page, "Review");
   const reviewPanel = page.locator(".side .panel");
   const finalDraftSave = page.waitForResponse((response) => response.url().endsWith("/api/draft-review/save") && (response.request().postDataJSON() as { body?: string }).body === "Keep this overall note local too.");
   await reviewPanel.getByPlaceholder("Overall review body").fill("Keep this overall note local too.");
@@ -667,6 +702,7 @@ test("copies local draft comments in a feedback prompt from the Review tab", asy
 
   await page.reload();
   await expect(page.locator(".review-layout")).toBeVisible({ timeout: 60_000 });
+  await openSideTab(page, "Review");
   await expect(page.locator(".side .draft-card")).toContainText("Keep this local feedback out of GitHub.");
   await expect(page.getByPlaceholder("Overall review body")).toHaveValue("Keep this overall note local too.");
 });

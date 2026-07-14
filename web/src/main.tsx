@@ -1,7 +1,8 @@
-import React, { createContext, FormEvent, ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
+import React, { createContext, ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, XIcon } from "@primer/octicons-react";
 import { api, askPi as askPiApi } from "./api";
+import { ActionMenu, ActionMenuItem } from "./components/ActionMenu";
 import { Button } from "./components/Button";
 import { CodeText, InlineSnippetsProvider, MarkdownText } from "./components/Markdown";
 import { ModalShell } from "./components/Modal";
@@ -398,7 +399,7 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [refreshingActivity, setRefreshingActivity] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [sideWidth, setSideWidth] = useState(560);
+  const [sideWidth, setSideWidth] = useState(420);
   const [error, setError] = useState<string | null>(null);
   const [diagnostics, setDiagnostics] = useState<Record<string, unknown> | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -1013,8 +1014,6 @@ function App() {
     void refreshHistory();
   }
 
-  function submit(event: FormEvent) { event.preventDefault(); void openPr(input); }
-
   function toggleAllComments(): void {
     setCommentsCollapsed((collapsed) => {
       const nextCollapsed = !collapsed;
@@ -1026,7 +1025,71 @@ function App() {
     setCommentCollapseSignal((signal) => signal + 1);
   }
 
-  return <main className="app-shell"><header className="toolbar"><div className="toolbar-title"><strong>Pi PR Review</strong><span>{review == null ? "Paste a PR to start" : `${review.pr.key} · ${review.pr.title}`}</span></div><div className="toolbar-actions">{review != null && <><a className="toolbar-link" href={homeHash} onClick={(event) => { if (!isPlainLeftClick(event)) return; event.preventDefault(); goHome(); }}>Home</a><button type="button" className="toolbar-icon" title="Pi session settings" aria-label="Pi session settings" onClick={() => { setSettingsOpen(true); void loadDiagnostics(); }}>⚙</button><button type="button" className="toolbar-icon" title="Pi session diagnostics" aria-label="Pi session diagnostics" onClick={() => void showDiagnostics()}>🐞</button><button type="button" title="Open GPU workspace" onClick={() => setGpuWorkspaceOpen(true)}>GPU</button><button type="button" className="toolbar-codewalk" title="Code walk" onClick={() => { setFlowDagOpen(true); if (flowDag.text.trim().length === 0 && !flowDag.running) void runFlowDag(); }}><span>Code walk</span>{flowDag.running && <span className="spinner" aria-hidden="true" />}</button></>}<button type="button" className="toolbar-icon" title="Review memory" aria-label="Review memory" onClick={() => void showReviewMemory()}>🧠</button><button type="button" className="toolbar-icon" title="Server log" aria-label="Server log" onClick={() => { setLogsOpen(true); void refreshLogs(); }}>📜</button><select aria-label="Theme" value={theme} onChange={(event) => setTheme(event.target.value as ThemeName)}>{themes.map((item) => <option key={item.name} value={item.name}>{item.label}</option>)}</select>{review != null && <form className="open-form" onSubmit={submit}><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="OWNER/REPO#123 or GitHub PR URL" /><button disabled={busy || input.trim().length === 0}>{busy ? "Fetching…" : "Open"}</button></form>}</div></header>{error != null && <div className="error">{error}</div>}{busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, sendMessage: sendAiReviewMessage, chatSending: aiChatSending, clearFollowUp: clearAiReviewFollowUp, copyFeedbackPrompt: copyReviewFeedbackPrompt, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} reviewEvent={reviewEvent} setReviewEvent={setReviewEvent} reviewBody={reviewBody} setReviewBody={setReviewBody} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} theme={theme} setTheme={setTheme} />}{diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}{review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} openDiagnostics={() => { setSettingsOpen(false); void showDiagnostics(); }} close={() => setSettingsOpen(false)} />}{memoryOpen && <ReviewMemoryModal memory={reviewMemory} loading={memoryLoading} distilling={memoryDistilling} refresh={() => void loadReviewMemory()} distill={() => void distillReviewMemory()} close={() => setMemoryOpen(false)} />}{review != null && gpuWorkspaceOpen && <GpuWorkspaceModal review={review} close={() => setGpuWorkspaceOpen(false)} refreshLogs={refreshLogs} />}{review != null && flowDagOpen && <FlowDagModal flowDag={flowDag} runFlowDag={runFlowDag} close={() => setFlowDagOpen(false)} prUrl={review.pr.url} headSha={review.pr.headSha} />}{logsOpen && <LogsModal logs={logs} refreshLogs={refreshLogs} close={() => setLogsOpen(false)} />}</main>;
+  return <main className="app-shell">
+    <AppToolbar
+      review={review}
+      theme={theme}
+      setTheme={setTheme}
+      busy={busy}
+      goHome={goHome}
+      openGpuWorkspace={() => setGpuWorkspaceOpen(true)}
+      openCodeWalk={() => { setFlowDagOpen(true); if (flowDag.text.trim().length === 0 && !flowDag.running) void runFlowDag(); }}
+      codeWalkRunning={flowDag.running}
+      openSettings={() => { setSettingsOpen(true); void loadDiagnostics(); }}
+      openDiagnostics={() => void showDiagnostics()}
+      openMemory={() => void showReviewMemory()}
+      openLogs={() => { setLogsOpen(true); void refreshLogs(); }}
+    />
+    {error != null && <div className="error">{error}</div>}
+    {busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, sendMessage: sendAiReviewMessage, chatSending: aiChatSending, clearFollowUp: clearAiReviewFollowUp, copyFeedbackPrompt: copyReviewFeedbackPrompt, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} reviewEvent={reviewEvent} setReviewEvent={setReviewEvent} reviewBody={reviewBody} setReviewBody={setReviewBody} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} />}
+    {diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}
+    {review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} openDiagnostics={() => { setSettingsOpen(false); void showDiagnostics(); }} close={() => setSettingsOpen(false)} />}
+    {memoryOpen && <ReviewMemoryModal memory={reviewMemory} loading={memoryLoading} distilling={memoryDistilling} refresh={() => void loadReviewMemory()} distill={() => void distillReviewMemory()} close={() => setMemoryOpen(false)} />}
+    {review != null && gpuWorkspaceOpen && <GpuWorkspaceModal review={review} close={() => setGpuWorkspaceOpen(false)} refreshLogs={refreshLogs} />}
+    {review != null && flowDagOpen && <FlowDagModal flowDag={flowDag} runFlowDag={runFlowDag} close={() => setFlowDagOpen(false)} prUrl={review.pr.url} headSha={review.pr.headSha} />}
+    {logsOpen && <LogsModal logs={logs} refreshLogs={refreshLogs} close={() => setLogsOpen(false)} />}
+  </main>;
+}
+
+function toolbarPrLabel(key: string): string {
+  return key.replace(/^github\.com\//, "").replace(/#(\d+)$/, " #$1");
+}
+
+function AppToolbar({ review, theme, setTheme, busy, goHome, openGpuWorkspace, openCodeWalk, codeWalkRunning, openSettings, openDiagnostics, openMemory, openLogs }: {
+  review: OpenResponse | null;
+  theme: ThemeName;
+  setTheme: (theme: ThemeName) => void;
+  busy: boolean;
+  goHome: () => void;
+  openGpuWorkspace: () => void;
+  openCodeWalk: () => void;
+  codeWalkRunning: boolean;
+  openSettings: () => void;
+  openDiagnostics: () => void;
+  openMemory: () => void;
+  openLogs: () => void;
+}) {
+  return <header className="toolbar">
+    <div className="toolbar-identity">
+      <a className="toolbar-brand" aria-label="Home" href={homeHash} onClick={(event) => { if (!isPlainLeftClick(event)) return; event.preventDefault(); goHome(); }}>Pi Review</a>
+      <span className="toolbar-breadcrumb">{review == null ? "Pull request reviews" : toolbarPrLabel(review.pr.key)}</span>
+      {busy && review != null && <span className="toolbar-loading"><span className="spinner" aria-hidden="true" /> Updating…</span>}
+    </div>
+    <div className="toolbar-actions">
+      {review != null && <a className="toolbar-link" href={homeHash} onClick={(event) => { if (!isPlainLeftClick(event)) return; event.preventDefault(); goHome(); }}>New review</a>}
+      <select aria-label="Theme" value={theme} onChange={(event) => setTheme(event.target.value as ThemeName)}>{themes.map((item) => <option key={item.name} value={item.name}>{item.label}</option>)}</select>
+      <ActionMenu trigger={<button type="button" className="toolbar-tools">Tools{codeWalkRunning && <span className="spinner" aria-hidden="true" />} <ChevronDownIcon size={14} /></button>}>
+        {review != null && <>
+          <ActionMenuItem asChild><button type="button" onClick={openCodeWalk}>Code walk</button></ActionMenuItem>
+          <ActionMenuItem asChild><button type="button" onClick={openGpuWorkspace}>GPU workspace</button></ActionMenuItem>
+          <ActionMenuItem asChild><button type="button" title="Pi session settings" onClick={openSettings}>Session settings</button></ActionMenuItem>
+          <ActionMenuItem asChild><button type="button" title="Pi session diagnostics" onClick={openDiagnostics}>Session diagnostics</button></ActionMenuItem>
+        </>}
+        <ActionMenuItem asChild><button type="button" onClick={openMemory}>Review memory</button></ActionMenuItem>
+        <ActionMenuItem asChild><button type="button" onClick={openLogs}>Server log</button></ActionMenuItem>
+      </ActionMenu>
+    </div>
+  </header>;
 }
 
 type StartFilter = "all" | "needs-review" | "in-progress" | "done";
@@ -1098,7 +1161,7 @@ function PrCard({ pr, openPr, cleanupPr }: { pr: StoredPullRequest; openPr: (inp
         <span>{relativeTime(pr.lastOpenedAt)}</span>
       </div>
     </a>
-    <button className="trash-button" title="Remove saved PR and cleanup worktree" onClick={() => void cleanupPr(pr)}>🗑</button>
+    <button className="trash-button" title="Remove saved PR and cleanup worktree" aria-label="Remove saved PR and cleanup worktree" onClick={() => void cleanupPr(pr)}><XIcon size={16} /></button>
   </article>;
 }
 
@@ -1163,35 +1226,26 @@ function agentActivityText(activity: PiAgentActivity | null | undefined): string
 }
 
 function maxSidePanelWidth(): number {
-  return typeof window === "undefined" ? 900 : Math.max(380, window.innerWidth - 96);
+  return typeof window === "undefined" ? 720 : Math.min(720, Math.max(380, window.innerWidth - 520));
 }
 
 function clampSidePanelWidth(width: number): number {
   return Math.min(maxSidePanelWidth(), Math.max(300, width));
 }
 
-function ReviewPage(props: DiffProps & { piPanel: PiPanelProps; reviewEvent: "COMMENT" | "APPROVE" | "REQUEST_CHANGES"; setReviewEvent: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES") => void; reviewBody: string; setReviewBody: (body: string) => void; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; submitting: boolean; invalidDraftIds: Record<string, boolean>; refreshingActivity: boolean; theme: ThemeName; setTheme: (theme: ThemeName) => void }) {
-  const commentToggleLabel = props.commentsCollapsed ? "Expand all comments" : "Collapse all comments";
+function ReviewPage(props: DiffProps & { piPanel: PiPanelProps; reviewEvent: "COMMENT" | "APPROVE" | "REQUEST_CHANGES"; setReviewEvent: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES") => void; reviewBody: string; setReviewBody: (body: string) => void; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; submitting: boolean; invalidDraftIds: Record<string, boolean>; refreshingActivity: boolean }) {
   const diffViewLabel = props.diffViewMode === "unified" ? "Split view" : "Unified view";
   const [sideTab, setSideTab] = useState<"review" | "pi" | "comments">("review");
-  const [sideCollapsed, setSideCollapsed] = useState(false);
-  const restoreSideWidthRef = useRef<number | null>(null);
-  const maxWidth = maxSidePanelWidth();
-  const sideMaximized = props.sideWidth >= maxWidth - 24;
-  function toggleSideMaximized(): void {
-    if (sideMaximized) {
-      props.setSideWidth(clampSidePanelWidth(restoreSideWidthRef.current ?? 420));
-      restoreSideWidthRef.current = null;
-      return;
-    }
-    restoreSideWidthRef.current = props.sideWidth;
-    props.setSideWidth(maxWidth);
-  }
+  const [sideCollapsed, setSideCollapsed] = useState(true);
   const draftCount = props.drafts.length;
   const piActivity = props.piPanel.review.messages.length + (props.piPanel.review.text.length > 0 && props.piPanel.review.messages.length === 0 ? 1 : 0);
   const focusCount = props.focusAreas.length;
   const piBadge = focusCount > 0 ? focusCount : piActivity > 0 ? piActivity : null;
   const commentCount = props.review.comments.length + props.review.issueComments.length + props.review.reviewSummaries.length;
+  function openSidePanel(tab: "review" | "pi" | "comments"): void {
+    setSideTab(tab);
+    setSideCollapsed(false);
+  }
   const annotations = useMemo(() => buildDiffAnnotationIndex(props.review.comments, props.drafts, props.threads, props.focusAreas), [props.review.comments, props.drafts, props.threads, props.focusAreas]);
   function jumpToComment(target: Target): void {
     if (props.openFiles[target.path] === false) props.setOpenFiles({ ...props.openFiles, [target.path]: true });
@@ -1215,13 +1269,12 @@ function ReviewPage(props: DiffProps & { piPanel: PiPanelProps; reviewEvent: "CO
   }
   const sidePanel = sideCollapsed ? null : <>
     <div className="resize-handle" role="separator" aria-label="Resize side panel" onMouseDown={(event) => startResizeSidePanel(event, props.sideWidth, props.setSideWidth)} />
-    <aside className={`side${sideMaximized ? " maximized" : ""}`}>
+    <aside className="side">
       <nav className="side-tabs" role="tablist" aria-label="Review side panel">
-        <button role="tab" aria-selected={sideTab === "review"} className={`side-tab${sideTab === "review" ? " active" : ""}`} onClick={() => setSideTab("review")}><span className="side-tab-pie" aria-hidden="true">🥧</span><span>Review</span>{draftCount > 0 && <span className="side-tab-badge">{draftCount}</span>}</button>
-        <button role="tab" aria-selected={sideTab === "pi"} className={`side-tab${sideTab === "pi" ? " active" : ""}`} onClick={() => setSideTab("pi")}><span className="side-tab-pie" aria-hidden="true">π</span><span>Pi</span>{piBadge != null && <span className="side-tab-badge">{piBadge}</span>}</button>
-        <button role="tab" aria-selected={sideTab === "comments"} className={`side-tab${sideTab === "comments" ? " active" : ""}`} onClick={() => setSideTab("comments")}><span className="side-tab-pie" aria-hidden="true">💬</span><span>Comments</span>{commentCount > 0 && <span className="side-tab-badge">{commentCount}</span>}</button>
-        <button type="button" className="side-maximize-button" title={sideMaximized ? "Restore side panel" : "Maximize side panel"} aria-label={sideMaximized ? "Restore side panel" : "Maximize side panel"} onClick={toggleSideMaximized}>{sideMaximized ? "⇥" : "⇤"}</button>
-        <button type="button" className="side-maximize-button" title="Hide review panel" aria-label="Hide review panel" onClick={() => setSideCollapsed(true)}><ChevronRightIcon size={16} /></button>
+        <button role="tab" aria-selected={sideTab === "review"} className={`side-tab${sideTab === "review" ? " active" : ""}`} onClick={() => setSideTab("review")}><span>Review</span>{draftCount > 0 && <span className="side-tab-badge">{draftCount}</span>}</button>
+        <button role="tab" aria-selected={sideTab === "pi"} className={`side-tab${sideTab === "pi" ? " active" : ""}`} onClick={() => setSideTab("pi")}><span>Pi</span>{piBadge != null && <span className="side-tab-badge">{piBadge}</span>}</button>
+        <button role="tab" aria-selected={sideTab === "comments"} className={`side-tab${sideTab === "comments" ? " active" : ""}`} onClick={() => setSideTab("comments")}><span>Comments</span>{commentCount > 0 && <span className="side-tab-badge">{commentCount}</span>}</button>
+        <button type="button" className="side-panel-button" title="Hide review panel" aria-label="Hide review panel" onClick={() => setSideCollapsed(true)}><ChevronRightIcon size={16} /></button>
       </nav>
       <div className="side-tab-panels">
         {sideTab === "review" && <ReviewSummary pr={props.review.pr} files={props.review.files} drafts={props.drafts} setDrafts={props.setDrafts} event={props.reviewEvent} setEvent={props.setReviewEvent} body={props.reviewBody} setBody={props.setReviewBody} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} submitReview={props.submitReview} submitting={props.submitting} invalidDraftIds={props.invalidDraftIds} copyFeedbackPrompt={props.piPanel.copyFeedbackPrompt} onJumpToDraft={(draft) => jumpToComment({ ...draft, hunk: "" })} />}
@@ -1230,58 +1283,60 @@ function ReviewPage(props: DiffProps & { piPanel: PiPanelProps; reviewEvent: "CO
       </div>
     </aside>
   </>;
-  const gridTemplateColumns = sideCollapsed ? "minmax(0, 1fr)" : sideMaximized ? `0 0 minmax(0, ${props.sideWidth}px)` : `minmax(0, 1fr) 12px ${props.sideWidth}px`;
-  return <div className={`review-layout${sideCollapsed ? " side-collapsed" : ""}`} style={{ gridTemplateColumns }}>
-    <main className="files">
-      <PrHeaderStrip pr={props.review.pr} refreshGithubActivity={props.refreshGithubActivity} refreshingActivity={props.refreshingActivity} />
-      <PrSummary pr={props.review.pr} />
-      <div className="files-toolbar">
-        <FileNavigator files={props.review.files} fileReviews={props.review.fileReviews} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} />
-        <div className="files-toolbar-actions">
-          <div className="theme-buttons">
-            {themes.map((item) => <button key={item.name} className={`small-muted-button${props.theme === item.name ? " active" : ""}`} type="button" title={item.label} aria-pressed={props.theme === item.name} onClick={() => props.setTheme(item.name)}>{item.shortLabel}</button>)}
+  const gridTemplateColumns = sideCollapsed ? "minmax(0, 1fr)" : `minmax(0, 1fr) 12px ${props.sideWidth}px`;
+  return <div className="review-page">
+    <PrHeaderStrip pr={props.review.pr} refreshGithubActivity={props.refreshGithubActivity} refreshingActivity={props.refreshingActivity} />
+    <div className={`review-layout${sideCollapsed ? " side-collapsed" : ""}`} style={{ gridTemplateColumns }}>
+      <main className="files">
+        <PrSummary pr={props.review.pr} />
+        <div className="files-toolbar">
+          <FileNavigator files={props.review.files} fileReviews={props.review.fileReviews} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} />
+          <div className="files-toolbar-actions">
+            <button className="small-muted-button" onClick={() => props.setDiffViewMode(props.diffViewMode === "unified" ? "split" : "unified")}>{diffViewLabel}</button>
+            <button className="small-muted-button panel-launch-button" onClick={() => openSidePanel("comments")}>Comments{commentCount > 0 ? ` ${commentCount}` : ""}</button>
+            <button className="small-muted-button panel-launch-button" onClick={() => openSidePanel("pi")}>Pi review{piBadge != null ? ` ${piBadge}` : ""}</button>
+            <Button className="review-changes-button panel-launch-button" onClick={() => openSidePanel("review")}>Review changes{draftCount > 0 ? ` (${draftCount})` : ""}</Button>
           </div>
-          <button className="small-muted-button" onClick={() => props.setDiffViewMode(props.diffViewMode === "unified" ? "split" : "unified")}>{diffViewLabel}</button>
-          <button className="small-muted-button" onClick={props.toggleAllComments}>{commentToggleLabel}</button>
-          <button className="small-muted-button" onClick={() => setSideCollapsed((collapsed) => !collapsed)}>{sideCollapsed ? "Show review panel" : "Hide review panel"}</button>
         </div>
-      </div>
-      <DiffAnnotationsContext.Provider value={annotations}>{props.review.files.map((file) => <FileDiff key={file.filename} file={file} {...props} />)}</DiffAnnotationsContext.Provider>
-    </main>
-    {sidePanel}
-    {draftCount > 0 && (sideCollapsed || sideTab !== "review") && <Button className="floating-submit" onClick={() => { setSideCollapsed(false); setSideTab("review"); }}>Review draft ({draftCount}) →</Button>}
+        <DiffAnnotationsContext.Provider value={annotations}>{props.review.files.map((file) => <FileDiff key={file.filename} file={file} {...props} />)}</DiffAnnotationsContext.Provider>
+      </main>
+      {sidePanel}
+    </div>
+    {draftCount > 0 && (sideCollapsed || sideTab !== "review") && <Button className="floating-submit" onClick={() => openSidePanel("review")}>Review draft ({draftCount}) →</Button>}
   </div>;
 }
 
 function PrHeaderStrip({ pr, refreshGithubActivity, refreshingActivity }: { pr: StoredPullRequest; refreshGithubActivity: () => Promise<void>; refreshingActivity: boolean }) {
   const status = reviewStatus(pr);
+  const number = pr.key.match(/#(\d+)$/)?.[1];
+  const repository = pr.key.replace(/^github\.com\//, "").replace(/#\d+$/, "");
   return <section className="pr-header-strip">
     <div className="pr-header-main">
-      <h1 className="pr-header-title">{pr.title}</h1>
+      <h1 className="pr-header-title">{pr.title}{number != null && <span className="pr-header-number"> #{number}</span>}</h1>
       <div className="pr-header-meta">
         <span className={`review-status ${status.tone}`}>{status.label}</span>
-        <span>{pr.key}</span>
+        <span>{repository}</span>
         <span>{pr.state}</span>
-        <span>{pr.filesChanged} files</span>
+        <span>{pr.filesChanged} files changed</span>
         <span>{pr.existingCommentCount} comments</span>
-        <span>head {shortSha(pr.headSha)}</span>
+        <span>{shortSha(pr.headSha)}</span>
       </div>
     </div>
     <div className="pr-header-actions">
-      <a href={pr.url} target="_blank" rel="noreferrer">Open GitHub ↗</a>
-      <button onClick={() => void refreshGithubActivity()} disabled={refreshingActivity}>{refreshingActivity ? "Fetching…" : "Fetch activity"}</button>
+      <a href={pr.url} target="_blank" rel="noreferrer">Open on GitHub</a>
+      <button onClick={() => void refreshGithubActivity()} disabled={refreshingActivity}>{refreshingActivity ? "Refreshing…" : "Refresh"}</button>
     </div>
   </section>;
 }
 
 function PrSummary({ pr }: { pr: StoredPullRequest }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const summary = pr.body?.trim();
   return <section className={`pr-summary github-thread${collapsed ? " minimized" : ""}`}>
     <div className="thread-head">
       <div className="thread-title">
         <Button variant="icon" aria-label={collapsed ? "Expand PR summary" : "Collapse PR summary"} onClick={() => setCollapsed(!collapsed)}>{collapsed ? <ChevronRightIcon size={16} /> : <ChevronDownIcon size={16} />}</Button>
-        <div><strong>PR summary</strong><span>{summary == null || summary.length === 0 ? "No summary provided" : `${summary.split(/\s+/).slice(0, 12).join(" ")}${summary.split(/\s+/).length > 12 ? "…" : ""}`}</span></div>
+        <div><strong>Description</strong><span>{summary == null || summary.length === 0 ? "No description provided" : `${summary.split(/\s+/).slice(0, 12).join(" ")}${summary.split(/\s+/).length > 12 ? "…" : ""}`}</span></div>
       </div>
     </div>
     {!collapsed && <div className="pr-summary-body">{summary == null || summary.length === 0 ? <p className="muted">No PR summary provided.</p> : <MarkdownText text={summary} fileLinks={{ prUrl: pr.url }} />}</div>}
@@ -1577,7 +1632,7 @@ function FocusAreaInline({ prUrl, area, active, setActiveFocusAreaId, collapsedF
     }
   }
   if (collapsed) return <div id={`focus-area-${area.id}`} className="inline-thread review-thread focus-area-inline focus-area-minimized focus-area-collapsed minimized" onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: false }))}><div className="thread-head"><div className="thread-title"><Button variant="icon" aria-label="Expand focus area" onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: false }))}><ChevronRightIcon size={16} /></Button><div><strong>Focus area</strong><span>{area.title}</span></div></div></div></div>;
-  return <div id={`focus-area-${area.id}`} className={`inline-thread review-thread focus-area-inline${active ? " active" : ""}`}><div className="thread-head"><div className="thread-title"><strong>Focus area</strong><span>{area.path}:{area.startLine === area.endLine ? area.startLine : `${area.startLine}-${area.endLine}`}</span></div><div className="actions"><Button variant="icon" aria-label="Collapse focus area" onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: true }))}><ChevronDownIcon size={16} /></Button></div></div><div className="thread-messages"><div className="thread-note pi"><div className="message-role">Pi focus</div><MarkdownText text={area.body} fileLinks={{ prUrl }} /></div>{messages.map((message, index) => <div className={`thread-note ${message.role}`} key={index}><div className="message-role">{message.role === "user" ? "You" : "Pi"}</div><MarkdownText text={message.text} fileLinks={{ prUrl }} /></div>)}</div><div className="composer"><textarea rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onInput={(event) => autoGrowTextarea(event.currentTarget)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey) { event.preventDefault(); void ask(); } }} placeholder="Ask Pi or write a draft comment about this focus area" />{asking && <AgentActivityLine activity={activity} />}<div className="actions"><button onClick={() => void ask()} disabled={asking || draft.trim().length === 0}>{asking ? "Asking" : "Ask Pi"}</button><button className="composer-primary" onClick={saveDraftComment} disabled={draft.trim().length === 0}>Add draft comment</button></div></div></div>;
+  return <div id={`focus-area-${area.id}`} className={`inline-thread review-thread focus-area-inline${active ? " active" : ""}`}><div className="thread-head"><div className="thread-title"><strong>Focus area</strong><span>{area.path}:{area.startLine === area.endLine ? area.startLine : `${area.startLine}-${area.endLine}`}</span></div><div className="actions"><Button variant="icon" aria-label="Collapse focus area" onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: true }))}><ChevronDownIcon size={16} /></Button></div></div><div className="thread-messages"><div className="thread-note pi"><div className="message-role">Pi focus</div><MarkdownText text={area.body} fileLinks={{ prUrl }} /></div>{messages.map((message, index) => <div className={`thread-note ${message.role}`} key={index}><div className="message-role">{message.role === "user" ? "You" : "Pi"}</div><MarkdownText text={message.text} fileLinks={{ prUrl }} /></div>)}</div><div className="composer"><textarea rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onInput={(event) => autoGrowTextarea(event.currentTarget)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey) { event.preventDefault(); void ask(); } }} placeholder="Write a draft comment or ask Pi about this focus area" />{asking && <AgentActivityLine activity={activity} />}<div className="actions"><button onClick={() => void ask()} disabled={asking || draft.trim().length === 0}>{asking ? "Asking" : "Ask Pi"}</button><button className="composer-primary" onClick={saveDraftComment} disabled={draft.trim().length === 0}>Add draft comment</button></div></div></div>;
 }
 
 function ThreadMessageTimeline({ prUrl, messages }: { prUrl: string; messages: ThreadMessage[] }) {
