@@ -31,6 +31,14 @@ npm run dev
 
 The web app is served by Vite and the API server runs alongside it. Use browser automation against the Vite URL printed by the command, normally `http://127.0.0.1:5173`.
 
+Assume a server on the default ports belongs to the user or another agent. For independent feature work, use an isolated worktree and launch a separate instance with unique ports and state:
+
+```bash
+PI_PR_REVIEW_PORT=43135 PI_REVIEW_WEB_PORT=5175 PI_REVIEW_STATE_PATH=/tmp/pi-review-$USER-43135.json npm run dev
+```
+
+Choose unused ports for each agent, keep the process in a dedicated terminal, and stop only the process tree you launched. Never use broad `pkill` or `killall` cleanup commands.
+
 ### HMR gotcha (rolldown-vite)
 
 This repo runs rolldown-vite (`vite@8.x`), whose dev HMR sometimes serves a **stale transform**: the saved source has your edit but `http://127.0.0.1:5173/web/src/<file>` returns the old code, so the browser renders pre-edit markup. Symptoms: a class/string you just added is missing from the rendered DOM even after a hard reload.
@@ -38,7 +46,7 @@ This repo runs rolldown-vite (`vite@8.x`), whose dev HMR sometimes serves a **st
 When this happens, do not keep reloading the browser. Instead:
 
 1. Confirm staleness by curling the served module and grepping for your new token, e.g. `curl -s http://127.0.0.1:5173/web/src/main.tsx | rg -c 'my-new-class'`.
-2. If it is missing, restart the dev server with the transform cache cleared: kill the `npm run dev` process tree, `rm -rf node_modules/.vite`, then `npm run dev` again.
+2. If it is missing, restart only the dev server you launched, clear that worktree's `node_modules/.vite`, then restart with the same isolated ports.
 3. Re-verify the served module contains your token before driving the browser.
 
 Prefer the loop: edit → (batch several edits) → restart dev once → verify served module → drive browser. Avoid relying on HMR for markup/class changes.

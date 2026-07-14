@@ -27,6 +27,7 @@ Backend contract endpoints should stay cheap enough for iterative agent prototyp
 For CSS/markup work, drive the running app with `agent-browser` (see `.agents/skills/pi-review-ux/SKILL.md`) instead of only reading code. The reliable loop:
 
 - `npm run dev` serves Vite at `http://127.0.0.1:5173` and the API at `:43133`. Open a real PR (the e2e default is `https://github.com/Dao-AILab/flash-attention/pull/2542`) to reach the review surfaces.
+- Assume a running default-port server belongs to the user or another agent. Do not stop or restart a dev server you did not launch. For separate feature work, use an isolated worktree plus unique ports and state, for example: `PI_PR_REVIEW_PORT=43135 PI_REVIEW_WEB_PORT=5175 PI_REVIEW_STATE_PATH=/tmp/pi-review-$USER-43135.json npm run dev`. Stop only that process tree.
 - Reproduce inline-thread state by clicking an added diff row. A single dispatched `click` opens the thread; do NOT also dispatch mousedown+mouseup, because the row's drag handlers + click toggle the thread back closed.
 - Guard every `agent-browser` call with a `timeout` (e.g. `timeout 15 agent-browser ...`); if the dev server dies, an unguarded call blocks the whole session.
 
@@ -35,7 +36,7 @@ For CSS/markup work, drive the running app with `agent-browser` (see `.agents/sk
 This repo runs rolldown-vite (`vite@8.x`), whose dev HMR sometimes serves a **stale transform**: the saved source has your edit but `http://127.0.0.1:5173/web/src/<file>` returns the old code, so the browser renders pre-edit markup even after a hard reload.
 
 - Confirm with `curl -s http://127.0.0.1:5173/web/src/main.tsx | rg -c 'my-new-token'`.
-- If stale, kill the `npm run dev` tree, `rm -rf node_modules/.vite`, then restart `npm run dev`.
+- If stale, restart only the `npm run dev` tree you launched, clear that worktree's `node_modules/.vite`, and restart with the same isolated ports. Never use broad `pkill`/`killall` commands that can terminate another agent's server.
 - Prefer the loop: batch several edits → restart dev once → verify the served module contains your token → drive the browser. Do not rely on HMR for markup/class changes.
 
 ### Shared CSS conventions (keep new UI consistent)
