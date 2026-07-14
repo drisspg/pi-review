@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import { inputFromBody, readBody, recordFromBody, sendJson } from "./http.js";
+import { inputFromBody, MalformedJsonError, readBody, recordFromBody, sendJson } from "./http.js";
 import type { AskStreamResponse } from "./ask-stream-api.js";
 import type { CommentApi } from "./comment-api.js";
 import type { DraftReviewApi } from "./draft-review-api.js";
@@ -271,8 +271,10 @@ export function createRequestListener(route: ServerRoute, logger: Pick<ServerLog
       if (shouldLogRequest) logger.info("http", "request finish", { method, url, status: res.statusCode, ms: Math.round(performance.now() - startedAt) });
     });
     route(req, res).catch((error: unknown) => {
-      logger.error("http", "request failed", { method, url, error: error instanceof Error ? error.message : String(error) });
-      sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
+      const message = error instanceof Error ? error.message : String(error);
+      const status = error instanceof MalformedJsonError ? 400 : 500;
+      logger.error("http", "request failed", { method, url, error: message });
+      sendJson(res, status, { error: message });
     });
   };
 }

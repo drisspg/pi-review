@@ -29,7 +29,11 @@ class FakeResponse extends EventEmitter {
 }
 
 function fakeRequest(method: string, url: string, body?: unknown): IncomingMessage {
-  const req = Readable.from(body === undefined ? [] : [JSON.stringify(body)]) as IncomingMessage;
+  return fakeRawRequest(method, url, body === undefined ? undefined : JSON.stringify(body));
+}
+
+function fakeRawRequest(method: string, url: string, body?: string): IncomingMessage {
+  const req = Readable.from(body === undefined ? [] : [body]) as IncomingMessage;
   req.method = method;
   req.url = url;
   req.headers = { host: "test.local" };
@@ -283,6 +287,20 @@ test("server route returns JSON 404 for unsupported methods", async () => {
 
   assert.equal(res.statusCode, 404);
   assert.deepEqual(jsonBody(res), { error: "No route for DELETE /api/health" });
+});
+
+test("request listener returns JSON 400 for malformed request bodies", async () => {
+  const deps = baseDeps();
+  const listener = createRequestListener(createServerRoute(deps), deps.logger);
+  const res = new FakeResponse();
+
+  await new Promise<void>((resolve) => {
+    res.on("finish", resolve);
+    listener(fakeRawRequest("POST", "/api/pi/diagnostics", "{prKey:github.com/pytorch/pytorch#188469}"), res as unknown as ServerResponse);
+  });
+
+  assert.equal(res.statusCode, 400);
+  assert.deepEqual(jsonBody(res), { error: "Malformed JSON request body" });
 });
 
 test("request listener logs and wraps route failures as JSON 500", async () => {

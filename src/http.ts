@@ -4,6 +4,13 @@ import { parsePullRequestRef } from "./pr.js";
 
 export type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
 
+export class MalformedJsonError extends Error {
+  constructor() {
+    super("Malformed JSON request body");
+    this.name = "MalformedJsonError";
+  }
+}
+
 export function sendJson(res: ServerResponse, status: number, body: JsonValue): void {
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
@@ -22,7 +29,11 @@ export function readBody(req: IncomingMessage): Promise<unknown> {
       body += chunk;
     });
     req.on("end", () => {
-      resolve(body.length > 0 ? JSON.parse(body) : {});
+      try {
+        resolve(body.length > 0 ? JSON.parse(body) : {});
+      } catch {
+        reject(new MalformedJsonError());
+      }
     });
     req.on("error", reject);
   });
