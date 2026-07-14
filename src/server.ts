@@ -21,7 +21,7 @@ import { createReviewSubmitRouteApi, defaultReviewSubmitRouteApiDeps } from "./r
 import { createSavedAnalysisApi } from "./saved-analysis-api.js";
 import { createServerRoute, createRequestListener } from "./server-router.js";
 import { createShellApi } from "./shell-api.js";
-import { currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, getDraftReview, listAiReviews, listFocusScans, listRecentPullRequests, listReviewMemoryRecords, markPullRequestReviewed, removePullRequest, reviewMemoryStats, saveAiReview, saveDraftReview, saveFocusScan, saveReviewMemory, saveReviewProfile, setFileViewed, upsertPullRequest } from "./state.js";
+import { clearDraftReview, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, getDraftReview, listAiReviews, listFocusScans, listRecentPullRequests, listReviewMemoryRecords, markPullRequestReviewed, removePullRequest, reviewMemoryStats, saveAiReview, saveDraftReview, saveFocusScan, saveReviewMemory, saveReviewProfile, setFileViewed, upsertPullRequest } from "./state.js";
 import { cleanupPrWorktree, preparePrWorktree } from "./worktrees.js";
 
 const DEFAULT_PORT = 43133;
@@ -39,7 +39,7 @@ const piApi = createPiApi({ askPi, piActivity, piDiagnostics, piJobRunner, setPi
 const prApi = createPrApi(defaultPrApiDeps({ cleanupPrWorktree, disposePiSession, fetchPullRequestReviewData, getDraftReview, listAiReviews, listFocusScans, preparePrWorktree, prewarmPiSession, registerPiSessionCwd, removePullRequest, upsertPullRequest }));
 const reviewMemoryApi = createReviewMemoryApi({ askPi, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewMemory, saveReviewProfile });
 const reviewPromptApi = createReviewPromptApi({ currentReviewMemoryPrompt });
-const reviewSubmitRouteApi = createReviewSubmitRouteApi(defaultReviewSubmitRouteApiDeps({ fetchPullRequestReviewData, markPullRequestReviewed, saveReviewMemory, submitPullRequestReview }));
+const reviewSubmitRouteApi = createReviewSubmitRouteApi(defaultReviewSubmitRouteApiDeps({ clearDraftReview, fetchPullRequestReviewData, markPullRequestReviewed, saveReviewMemory, submitPullRequestReview }));
 const savedAnalysisApi = createSavedAnalysisApi({ saveAiReview, saveFocusScan });
 const shellApi = createShellApi({ listRecentPullRequests, logEntries: logger.entries });
 

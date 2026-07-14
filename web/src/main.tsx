@@ -760,9 +760,13 @@ function App() {
     setInvalidDraftIds({});
     setSubmitting(true);
     try {
-      await api("/api/review/submit", { method: "POST", body: JSON.stringify({ prUrl: review.pr.url, headSha: review.pr.headSha, event, body, comments: drafts.filter((draft) => draft.line != null).map(({ id, path, line, startLine, side, body }) => ({ draft_id: id, path, line, side, body, ...(startLine != null && startLine !== line ? { start_line: startLine, start_side: side } : {}) })) }) });
+      const { pr } = await api<{ pr: StoredPullRequest | null }>("/api/review/submit", { method: "POST", body: JSON.stringify({ prUrl: review.pr.url, headSha: review.pr.headSha, event, body, comments: drafts.filter((draft) => draft.line != null).map(({ id, path, line, startLine, side, body }) => ({ draft_id: id, path, line, side, body, ...(startLine != null && startLine !== line ? { start_line: startLine, start_side: side } : {}) })) }) });
       setDrafts([]);
-      await openPr(review.pr.url);
+      setReviewBody("");
+      setReviewEvent("COMMENT");
+      const nextReview = updateCachedReview(review.pr.key, (current) => ({ ...current, pr: pr ?? current.pr, draftReview: null }));
+      if (nextReview != null) setReview(nextReview);
+      await refreshGithubActivity();
       return true;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

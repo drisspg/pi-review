@@ -160,6 +160,18 @@ test("saveDraftReview replaces the PR draft and persists empty drafts", async ()
   assert.equal((await store.readState()).draftReviews.length, 1);
 });
 
+test("clearDraftReview removes only the submitted PR draft", async () => {
+  const first = { prKey: "first", headSha: "head", event: "COMMENT" as const, body: "", comments: [], updatedAt: "first" };
+  const second = { ...first, prKey: "second" };
+  const { runtime } = fakeRuntime({ ...emptyState(), draftReviews: [first, second] });
+  const store = createStateStore(runtime, paths);
+
+  await store.clearDraftReview("first");
+
+  assert.equal(await store.getDraftReview("first"), null);
+  assert.deepEqual(await store.getDraftReview("second"), second);
+});
+
 test("saveFocusScan updates existing records and caps scans per PR", async () => {
   const focusScans = Array.from({ length: 20 }, (_, index) => ({ id: `old-${index}`, prKey: "pr", headSha: "head", answer: `${index}`, areaStates: {}, createdAt: `2026-06-03T00:00:${String(index).padStart(2, "0")}.000Z`, updatedAt: `2026-06-03T00:00:${String(index).padStart(2, "0")}.000Z` }));
   const { runtime } = fakeRuntime({ ...emptyState(), focusScans });

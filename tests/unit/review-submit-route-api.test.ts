@@ -47,6 +47,9 @@ function fakeDeps(options: { submitFails?: boolean } = {}) {
     calls,
     savedMemory,
     deps: {
+      async clearDraftReview(prKey: string) {
+        calls.push(`clear:${prKey}`);
+      },
       async fetchPullRequestReviewData(requestRef: PullRequestRef) {
         calls.push(`fetch:${requestRef.number}`);
         return reviewData();
@@ -94,6 +97,7 @@ test("review submit route API submits review, saves memory, and marks PR reviewe
   assert.deepEqual(calls, [
     "ref",
     "submit:1:{\"event\":\"COMMENT\",\"body\":\" body \",\"comments\":[{\"path\":\"a.ts\",\"line\":10,\"side\":\"RIGHT\",\"body\":\" issue \"}]}",
+    "clear:github.com/pytorch/pytorch#1",
     "fetch:1",
     "memory:github.com/pytorch/pytorch#1:COMMENT:1",
     "mark:github.com/pytorch/pytorch#1:head:COMMENT",

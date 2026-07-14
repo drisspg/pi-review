@@ -4,6 +4,7 @@ import { githubReviewComments, reviewSubmitCommentsFromPayload, reviewSubmitFail
 import type { PullRequestRef, PullRequestReviewData, ReviewMemoryRecord, StoredPullRequest } from "./types.js";
 
 export type ReviewSubmitRouteApiDeps = {
+  clearDraftReview: (prKey: string) => Promise<void>;
   fetchPullRequestReviewData: (ref: PullRequestRef) => Promise<PullRequestReviewData>;
   markPullRequestReviewed: (prKey: string, headSha: string, event: StoredPullRequest["lastReviewEvent"]) => Promise<StoredPullRequest | null>;
   refFromBody: (body: unknown) => PullRequestRef;
@@ -29,6 +30,7 @@ export function createReviewSubmitRouteApi(deps: ReviewSubmitRouteApiDeps): Revi
       throw new Error(reviewSubmitFailureMessage(error, comments));
     }
     const prKey = prKeyForRef(ref);
+    await deps.clearDraftReview(prKey);
     const reviewData = await deps.fetchPullRequestReviewData(ref);
     await deps.saveReviewMemory(reviewSubmitMemoryRecord(payload, reviewData, prKey));
     return { result, pr: await deps.markPullRequestReviewed(prKey, typeof payload.headSha === "string" ? payload.headSha : "", payload.event) };

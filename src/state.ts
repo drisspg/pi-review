@@ -53,6 +53,7 @@ export type StateStore = {
   setFileViewed: (review: FileReviewState) => Promise<FileReviewState>;
   getDraftReview: (prKey: string) => Promise<DraftReview | null>;
   saveDraftReview: (review: DraftReview) => Promise<DraftReview>;
+  clearDraftReview: (prKey: string) => Promise<void>;
   listFocusScans: (prKey: string) => Promise<FocusScanRecord[]>;
   saveFocusScan: (scan: Omit<FocusScanRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<FocusScanRecord, "id" | "createdAt">>) => Promise<FocusScanRecord>;
   listAiReviews: (prKey: string) => Promise<AiReviewRecord[]>;
@@ -249,6 +250,13 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
     });
   }
 
+  async function clearDraftReview(prKey: string): Promise<void> {
+    await mutateState(async (state) => {
+      state.draftReviews = state.draftReviews.filter((review) => review.prKey !== prKey);
+      await writeState(state);
+    });
+  }
+
   async function listFocusScans(prKey: string): Promise<FocusScanRecord[]> {
     return (await readState()).focusScans.filter((scan) => scan.prKey === prKey).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
@@ -332,7 +340,7 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
     });
   }
 
-  return { readState, currentReviewMemoryDistillationSource, currentReviewMemoryContext, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewProfile, listRecentPullRequests, upsertPullRequest, markPullRequestReviewed, listFileReviews, setFileViewed, getDraftReview, saveDraftReview, listFocusScans, saveFocusScan, listAiReviews, saveAiReview, saveReviewMemory, currentReviewMemoryPrompt, removePullRequest };
+  return { readState, currentReviewMemoryDistillationSource, currentReviewMemoryContext, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewProfile, listRecentPullRequests, upsertPullRequest, markPullRequestReviewed, listFileReviews, setFileViewed, getDraftReview, saveDraftReview, clearDraftReview, listFocusScans, saveFocusScan, listAiReviews, saveAiReview, saveReviewMemory, currentReviewMemoryPrompt, removePullRequest };
 }
 
 const defaultStore = createStateStore();
@@ -391,6 +399,10 @@ export async function getDraftReview(prKey: string): Promise<DraftReview | null>
 
 export async function saveDraftReview(review: DraftReview): Promise<DraftReview> {
   return defaultStore.saveDraftReview(review);
+}
+
+export async function clearDraftReview(prKey: string): Promise<void> {
+  await defaultStore.clearDraftReview(prKey);
 }
 
 export async function listFocusScans(prKey: string): Promise<FocusScanRecord[]> {
