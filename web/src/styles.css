@@ -2125,6 +2125,74 @@ button.fold:hover {
   width: 100%;
 }
 
+.side .review-summary {
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--panel);
+}
+
+.side .review-summary-head {
+  align-items: center;
+  padding: 10px 12px;
+  background: var(--panel2);
+}
+
+.side .review-summary-head h2 {
+  font-size: 15px;
+}
+
+.side .review-summary-head p {
+  max-width: 30ch;
+}
+
+.side .review-summary .review-event-field,
+.side .review-summary .review-body,
+.side .review-summary .review-draft-list,
+.side .review-summary .review-no-drafts,
+.side .review-summary .copy-feedback-error {
+  margin-right: 12px;
+  margin-left: 12px;
+}
+
+.side .review-summary .review-event-field {
+  margin-top: 12px;
+}
+
+.side .review-summary .review-body {
+  margin-top: 12px;
+  margin-bottom: 12px;
+  border-color: var(--border);
+  background: var(--bg);
+}
+
+.side .review-summary .review-no-drafts {
+  padding: 10px 0;
+}
+
+.side .review-summary .review-actions {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--panel2);
+}
+
+.side .review-summary .review-actions .small-muted-button,
+.side .review-summary .review-actions .review-submit {
+  width: auto;
+}
+
+.side .review-summary .review-submit {
+  white-space: nowrap;
+}
+
+.side .review-summary-empty .review-summary-empty-actions {
+  padding: 12px;
+  border-top: 1px solid var(--border);
+  background: var(--panel2);
+}
+
 .comment {
   display: grid;
   gap: 5px;
