@@ -5,13 +5,16 @@ import remarkGfm from "remark-gfm";
 
 import { api } from "../api";
 import { highlightedHtml } from "../lib/highlight";
+import { prUrlForNumber } from "../lib/pr";
 import { InlineSnippetsContext, type FileLinkContext } from "./MarkdownContext";
 import { Mermaid } from "./Mermaid";
 
 const fileReferencePattern = /((?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+\.[A-Za-z0-9_+-]+):(\d+)(?:-(\d+))?/g;
 const fileReferenceExactPattern = /^((?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+\.[A-Za-z0-9_+-]+):(\d+)(?:-(\d+))?$/;
 const fileReferenceCodePattern = /^((?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+\.[A-Za-z0-9_+-]+):(\d+)(?:-(\d+))?(?:\s+[—-].*)?$/;
+const pullRequestReferencePattern = /(^|[^\w/])#(\d+)\b/g;
 const fileReferenceUrlPrefix = "pi-review-file://";
+const pullRequestReferenceUrlPrefix = "/pi-review-pr/";
 
 type FileReference = { path: string; line: number; endLine?: number };
 
@@ -126,7 +129,7 @@ export function MarkdownTextRenderer({ text, fileLinks }: { text: string; fileLi
   const inlineCtx = React.useContext(InlineSnippetsContext);
   const mergedFileLinks: FileLinkContext | undefined = fileLinks == null ? undefined : { ...fileLinks, headSha: fileLinks.headSha ?? inlineCtx?.headSha, snippets: fileLinks.snippets ?? inlineCtx?.snippets ?? false };
   const components = mergedFileLinks == null ? { code: MarkdownCode, pre: MarkdownPre } : { code: (props: MarkdownCodeProps) => <MarkdownCode {...props} fileLinks={mergedFileLinks} />, pre: MarkdownPre, a: (props: MarkdownAnchorProps) => <MarkdownAnchor {...props} fileLinks={mergedFileLinks} /> };
-  return <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm, remarkFileReferenceLinks]} components={components}>{text}</ReactMarkdown></div>;
+  return <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm, remarkFileReferenceLinks, remarkPullRequestLinks]} components={components}>{text}</ReactMarkdown></div>;
 }
 
 type MarkdownCodeProps = { className?: string; children?: React.ReactNode; fileLinks?: FileLinkContext };
@@ -176,6 +179,9 @@ function MarkdownAnchor({ href, children, fileLinks, ...props }: MarkdownAnchorP
   if (fileLinks != null) {
     const reference = referenceFromUrl(href);
     if (reference != null) return <FileReferenceAnchor context={fileLinks} reference={reference}>{children}</FileReferenceAnchor>;
+    const pullRequestNumber = pullRequestNumberFromUrl(href);
+    const pullRequestUrl = pullRequestNumber == null ? null : prUrlForNumber(fileLinks.prUrl, pullRequestNumber);
+    if (pullRequestUrl != null) return <a className="pull-request-reference-link" href={`#/review?pr=${encodeURIComponent(pullRequestUrl)}`}>{children}</a>;
   }
   return <a href={href} {...props}>{children}</a>;
 }
@@ -194,6 +200,10 @@ function remarkFileReferenceLinks() {
   return (tree: unknown) => visitTextNodes(tree);
 }
 
+function remarkPullRequestLinks() {
+  return (tree: unknown) => visitPullRequestTextNodes(tree);
+}
+
 function visitTextNodes(node: unknown): void {
   if (!isNode(node)) return;
   if (!Array.isArray(node.children)) return;
@@ -201,6 +211,16 @@ function visitTextNodes(node: unknown): void {
     if (!isNode(child)) return [child];
     if (child.type === "text" && typeof child.value === "string") return splitTextReferences(child.value);
     visitTextNodes(child);
+    return [child];
+  });
+}
+
+function visitPullRequestTextNodes(node: unknown): void {
+  if (!isNode(node) || node.type === "link" || !Array.isArray(node.children)) return;
+  node.children = node.children.flatMap((child) => {
+    if (!isNode(child)) return [child];
+    if (child.type === "text" && typeof child.value === "string") return splitPullRequestReferences(child.value);
+    visitPullRequestTextNodes(child);
     return [child];
   });
 }
@@ -213,6 +233,22 @@ function splitTextReferences(value: string): unknown[] {
     if (index > offset) nodes.push({ type: "text", value: value.slice(offset, index) });
     const reference = referenceFromMatch(match);
     nodes.push({ type: "link", url: fileReferenceHref(reference), children: [{ type: "text", value: referenceLabel(reference) }] });
+    offset = index + match[0].length;
+  }
+  if (offset < value.length) nodes.push({ type: "text", value: value.slice(offset) });
+  return nodes.length === 0 ? [{ type: "text", value }] : nodes;
+}
+
+function splitPullRequestReferences(value: string): unknown[] {
+  const nodes: unknown[] = [];
+  let offset = 0;
+  for (const match of value.matchAll(pullRequestReferencePattern)) {
+    const index = match.index ?? 0;
+    const prefix = match[1];
+    if (index > offset) nodes.push({ type: "text", value: value.slice(offset, index) });
+    if (prefix.length > 0) nodes.push({ type: "text", value: prefix });
+    const number = Number.parseInt(match[2], 10);
+    nodes.push({ type: "link", url: `${pullRequestReferenceUrlPrefix}${number}`, children: [{ type: "text", value: `#${number}` }] });
     offset = index + match[0].length;
   }
   if (offset < value.length) nodes.push({ type: "text", value: value.slice(offset) });
@@ -232,6 +268,12 @@ function parseCodeFileReference(value: string): FileReference | null {
 function referenceFromUrl(url?: string): FileReference | null {
   if (url == null || !url.startsWith(fileReferenceUrlPrefix)) return null;
   return parseFileReference(decodeURIComponent(url.slice(fileReferenceUrlPrefix.length)));
+}
+
+function pullRequestNumberFromUrl(url?: string): number | null {
+  if (url == null || !url.startsWith(pullRequestReferenceUrlPrefix)) return null;
+  const number = Number.parseInt(url.slice(pullRequestReferenceUrlPrefix.length), 10);
+  return Number.isFinite(number) ? number : null;
 }
 
 function referenceFromMatch(match: RegExpMatchArray): FileReference {

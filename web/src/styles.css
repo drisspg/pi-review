@@ -1880,6 +1880,14 @@ a { color: var(--link); text-decoration: none; }
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
   color: var(--accent);
 }
+
+.pull-request-reference-link {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .markdown blockquote {
   padding-left: 10px;
   border-left: 3px solid var(--border);

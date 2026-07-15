@@ -5,6 +5,11 @@ export function prUrlFromKey(key: string): string {
   return `https://${host}/${match[2]}/${match[3]}/pull/${match[4]}`;
 }
 
+export function prUrlForNumber(prUrl: string, number: number): string | null {
+  const match = prUrl.match(/^(https:\/\/[^/]+\/[^/]+\/[^/]+)\/pull\/\d+\/?$/);
+  return match == null ? null : `${match[1]}/pull/${number}`;
+}
+
 export function shortSha(sha: string): string {
   return sha.slice(0, 12);
 }
