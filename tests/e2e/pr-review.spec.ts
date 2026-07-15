@@ -141,6 +141,19 @@ test("uses a compact files toolbar and collapsible review panel", async ({ page 
   await expect(toolbar).toContainText("Files");
   await expect(page.locator(".side")).toHaveCount(0);
 
+  await openFirstFile(page);
+  const firstFile = page.locator(".file").first();
+  const rows = firstFile.locator(".diff-row");
+  await rows.nth(Math.min(30, await rows.count() - 1)).evaluate((row) => row.scrollIntoView({ block: "center" }));
+  const stickyPositions = await page.evaluate(() => {
+    const toolbarRect = document.querySelector(".files-toolbar")!.getBoundingClientRect();
+    const fileHeaderRect = document.querySelector(".file .file-summary")!.getBoundingClientRect();
+    return { toolbarTop: toolbarRect.top, toolbarBottom: toolbarRect.bottom, fileHeaderTop: fileHeaderRect.top };
+  });
+  expect(stickyPositions.toolbarTop).toBeLessThanOrEqual(60);
+  expect(stickyPositions.fileHeaderTop).toBeGreaterThanOrEqual(stickyPositions.toolbarBottom);
+  await expect(firstFile.locator(".file-path")).toBeVisible();
+
   await toolbar.getByRole("button", { name: "Review changes" }).click();
   await expect(page.locator(".side")).toBeVisible();
   await expect(page.getByRole("button", { name: "Maximize side panel" })).toHaveCount(0);
@@ -156,6 +169,13 @@ test("uses a compact files toolbar and collapsible review panel", async ({ page 
 
   await toolbar.locator(".file-navigator > summary").click();
   await expect(toolbar.locator(".file-navigator-list")).toBeVisible();
+});
+
+test("keeps the files toolbar within a mobile viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 667 });
+  const toolbar = page.locator(".files-toolbar");
+  await expect(toolbar).toBeVisible();
+  expect(await toolbar.evaluate((element) => element.getBoundingClientRect().right)).toBeLessThanOrEqual(await page.evaluate(() => window.innerWidth));
 });
 
 test("creates, edits, and removes draft comments", async ({ page }) => {
@@ -469,7 +489,7 @@ test("marking a file viewed does not jump to the active focus area", async ({ pa
   });
 
   await otherFile.locator(".viewed-toggle input").click();
-  await expect(otherFile.locator(".diff-row")).toHaveCount(0);
+  await expect(otherFile.locator(".diff-row").first()).toBeVisible();
   expect(await page.evaluate(() => (window as typeof window & { scrollIntoViewCalls: number }).scrollIntoViewCalls)).toBe(0);
 });
 

@@ -517,7 +517,7 @@ function App() {
   }
 
   function initialOpenFiles(data: OpenResponse): Record<string, boolean> {
-    return Object.fromEntries(data.files.map((file) => [file.filename, !file.generated && !data.fileReviews.find((state) => state.path === file.filename)?.viewed]));
+    return Object.fromEntries(data.files.map((file) => [file.filename, !file.generated]));
   }
 
   function showReview(data: OpenResponse) {
@@ -609,7 +609,6 @@ function App() {
     const nextReview = { ...review, fileReviews: review.fileReviews.map((state) => state.path === file.filename ? { ...state, viewed } : state) };
     cacheReview(nextReview);
     setReview(nextReview);
-    setOpenFiles({ ...openFiles, [file.filename]: !viewed });
   }
 
   async function saveFocusScan(answer: string, viewedIds: Record<string, boolean>, collapsedIds: Record<string, boolean>, id = focusScanId): Promise<string | null> {
