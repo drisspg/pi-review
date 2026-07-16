@@ -181,9 +181,15 @@ function MarkdownAnchor({ href, children, fileLinks, ...props }: MarkdownAnchorP
     if (reference != null) return <FileReferenceAnchor context={fileLinks} reference={reference}>{children}</FileReferenceAnchor>;
     const pullRequestNumber = pullRequestNumberFromUrl(href);
     const pullRequestUrl = pullRequestNumber == null ? null : prUrlForNumber(fileLinks.prUrl, pullRequestNumber);
-    if (pullRequestUrl != null) return <a className="pull-request-reference-link" href={`#/review?pr=${encodeURIComponent(pullRequestUrl)}`}>{children}</a>;
+    if (pullRequestUrl != null) return <a className="pull-request-reference-link" href={pullRequestUrl} title="Open in Pi Review · ⌘-click for GitHub" onClick={(event) => openPullRequestReference(event, pullRequestUrl)}>{children}</a>;
   }
   return <a href={href} {...props}>{children}</a>;
+}
+
+function openPullRequestReference(event: React.MouseEvent<HTMLAnchorElement>, pullRequestUrl: string): void {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  window.location.hash = `#/review?pr=${encodeURIComponent(pullRequestUrl)}`;
 }
 
 function FileReferenceAnchor({ context, reference, children }: { context: FileLinkContext; reference: FileReference; children: React.ReactNode }) {
