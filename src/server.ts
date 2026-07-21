@@ -8,8 +8,9 @@ import { createAskStreamApi } from "./ask-stream-api.js";
 import { createCommentApi, defaultCommentApiDeps } from "./comment-api.js";
 import { createDraftReviewApi } from "./draft-review-api.js";
 import { createFileApi, defaultFileApiDeps } from "./file-api.js";
+import { createGitHubDraftReviewApi, defaultGitHubDraftReviewApiDeps } from "./github-draft-review-api.js";
 import { gpuWorkspaceCreateResponse, gpuWorkspaceDeleteResponse, gpuWorkspaceExecResponse, gpuWorkspaceStatusResponse } from "./gpu-workspace-api.js";
-import { addIssueComment, editIssueComment, editReviewComment, editReviewSummary, fetchFileText, fetchPullRequestReviewData, replyToReviewComment, submitPullRequestReview } from "./github.js";
+import { addIssueComment, addPendingPullRequestReviewThread, createPendingPullRequestReview, editIssueComment, editReviewComment, editReviewSummary, fetchFileText, fetchPendingPullRequestReview, fetchPullRequestReviewData, replyToReviewComment, submitPullRequestReview } from "./github.js";
 import { logger } from "./logger.js";
 import { createPiApi } from "./pi-api.js";
 import { createPiJobRunner } from "./pi-jobs.js";
@@ -35,6 +36,7 @@ const draftReviewApi = createDraftReviewApi({ now: () => new Date().toISOString(
 const fileApi = createFileApi(defaultFileApiDeps(fetchFileText, setFileViewed, async (url) => {
   await execFileAsync("open", [url]);
 }));
+const githubDraftReviewApi = createGitHubDraftReviewApi(defaultGitHubDraftReviewApiDeps({ addPendingPullRequestReviewThread, createPendingPullRequestReview, fetchPendingPullRequestReview }));
 const piApi = createPiApi({ askPi, piActivity, piDiagnostics, piJobRunner, setPiModel });
 const prApi = createPrApi(defaultPrApiDeps({ cleanupPrWorktree, disposePiSession, fetchPullRequestReviewData, getDraftReview, listAiReviews, listFocusScans, preparePrWorktree, prewarmPiSession, registerPiSessionCwd, removePullRequest, upsertPullRequest }));
 const reviewMemoryApi = createReviewMemoryApi({ askPi, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewMemory, saveReviewProfile });
@@ -66,6 +68,7 @@ const route = createServerRoute({
   commentApi,
   draftReviewApi,
   fileApi,
+  githubDraftReviewApi,
   gpuWorkspaceCreateResponse,
   gpuWorkspaceDeleteResponse,
   gpuWorkspaceExecResponse,

@@ -116,6 +116,36 @@ export type DraftReview = {
   updatedAt: string;
 };
 
+export type GitHubDraftCommentInput = {
+  path: string;
+  line: number | null;
+  startLine?: number | null;
+  side: "RIGHT" | "LEFT";
+  body: string;
+};
+
+export type GitHubDraftComment = {
+  id: string;
+  path: string;
+  line: number | null;
+  startLine: number | null;
+  subjectType: "LINE" | "FILE";
+  body: string;
+  url: string;
+};
+
+export type GitHubPendingReview = {
+  id: string;
+  body: string;
+  comments: GitHubDraftComment[];
+  updatedAt: string;
+};
+
+export type GitHubPendingReviewLookup = {
+  pullRequestId: string;
+  review: GitHubPendingReview | null;
+};
+
 export type FocusAreaReviewState = {
   viewed: boolean;
   collapsed: boolean;

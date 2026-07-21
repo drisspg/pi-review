@@ -5,6 +5,7 @@ import type { AskStreamResponse } from "./ask-stream-api.js";
 import type { CommentApi } from "./comment-api.js";
 import type { DraftReviewApi } from "./draft-review-api.js";
 import type { FileApi } from "./file-api.js";
+import type { GitHubDraftReviewApi } from "./github-draft-review-api.js";
 import type { PiApi } from "./pi-api.js";
 import type { PrApi } from "./pr-api.js";
 import type { ReviewMemoryApi } from "./review-memory-api.js";
@@ -24,6 +25,7 @@ export type ServerRouteDeps = {
   commentApi: CommentApi;
   draftReviewApi: DraftReviewApi;
   fileApi: FileApi;
+  githubDraftReviewApi: GitHubDraftReviewApi;
   gpuWorkspaceCreateResponse: (payload: Record<string, unknown>) => Promise<Record<string, unknown>>;
   gpuWorkspaceDeleteResponse: (payload: Record<string, unknown>) => Promise<Record<string, unknown>>;
   gpuWorkspaceExecResponse: (payload: Record<string, unknown>) => Promise<Record<string, unknown>>;
@@ -113,6 +115,22 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
       const payload = recordFromBody(await readBody(req));
       const response = await deps.draftReviewApi.save(payload);
       deps.logger.info("api", "draft review saved", { prKey: response.draftReview.prKey, comments: response.draftReview.comments.length });
+      sendJson(res, 200, response);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/github-draft-review/pull") {
+      const payload = recordFromBody(await readBody(req));
+      const response = await deps.githubDraftReviewApi.pull(payload);
+      deps.logger.info("api", "private GitHub review pulled", { comments: response.review?.comments.length ?? 0 });
+      sendJson(res, 200, response);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/github-draft-review/comment") {
+      const payload = recordFromBody(await readBody(req));
+      const response = await deps.githubDraftReviewApi.addComment(payload);
+      deps.logger.info("api", "private GitHub comment saved", { comments: response.review.comments.length });
       sendJson(res, 200, response);
       return;
     }

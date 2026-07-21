@@ -94,6 +94,23 @@ test("review prompt API builds copyable review feedback bundles", async () => {
   assert.match(result.prompt, /Global review says the flow is sound/);
 });
 
+test("review prompt API builds private GitHub draft handoff prompts", async () => {
+  const result = await api().build({
+    mode: "github-draft-handoff",
+    prKey: "org/repo#1",
+    prTitle: "Fix edge case",
+    prUrl: "https://github.com/org/repo/pull/1",
+    headSha: "abc123",
+    comments: [{ path: "src/a.ts", startLine: 4, line: 6, body: "handle the empty case", diffHunk: "@@ -4,3 +4,3 @@" }],
+  });
+
+  assert.equal(result.purpose, "github-draft-handoff");
+  assert.match(result.prompt, /private GitHub review drafts/);
+  assert.match(result.prompt, /src\/a\.ts:4-6/);
+  assert.match(result.prompt, /handle the empty case/);
+  assert.match(result.prompt, /Do not publish, submit, edit, or delete/);
+});
+
 test("review prompt API validates mode and required inputs", async () => {
   await assert.rejects(api().build({}), /Expected mode/);
   await assert.rejects(api().build({ mode: "missing" }), /Unknown prompt mode missing/);
@@ -103,4 +120,6 @@ test("review prompt API validates mode and required inputs", async () => {
   await assert.rejects(api().build({ mode: "review-feedback", prKey: "pr", userComments: [{ body: "" }] }), /Expected userComments\.body/);
   await assert.rejects(api().build({ mode: "review-feedback", prKey: "pr", aiComments: [{ role: "pi" }] }), /Expected aiComments role and text/);
   await assert.rejects(api().build({ mode: "review-feedback", prKey: "pr", focusAreas: [{ path: "p", body: "b", startLine: 1 }] }), /Expected focusAreas location and body/);
+  await assert.rejects(api().build({ mode: "github-draft-handoff", prKey: "pr", comments: [] }), /Expected GitHub draft comments/);
+  await assert.rejects(api().build({ mode: "github-draft-handoff", prKey: "pr", comments: [{ path: "p", body: "" }] }), /Expected GitHub draft comment location and body/);
 });

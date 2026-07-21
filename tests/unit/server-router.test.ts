@@ -89,6 +89,14 @@ function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
         return { fileReview: { fingerprint: "fp", path: "p", prKey: "pr", updatedAt: "now", viewed: true } };
       },
     },
+    githubDraftReviewApi: {
+      async addComment() {
+        return { review: { id: "review", body: "", comments: [], updatedAt: "now" } };
+      },
+      async pull() {
+        return { review: null };
+      },
+    },
     async gpuWorkspaceCreateResponse() {
       return { workspace: { id: "gpu" } };
     },
@@ -239,6 +247,27 @@ test("server route saves draft reviews", async () => {
   assert.equal(res.statusCode, 200);
   assert.deepEqual(payloads, [{ prKey: "pr", body: "body" }]);
   assert.deepEqual(jsonBody(res), { draftReview: { prKey: "pr", headSha: "head", event: "COMMENT", body: "body", comments: [], updatedAt: "now" } });
+});
+
+test("server route pulls and saves private GitHub review comments", async () => {
+  const calls: unknown[] = [];
+  const review = { id: "review", body: "", comments: [], updatedAt: "now" };
+  const route = createServerRoute(baseDeps({
+    githubDraftReviewApi: {
+      async addComment(payload) {
+        calls.push(["add", payload]);
+        return { review };
+      },
+      async pull(payload) {
+        calls.push(["pull", payload]);
+        return { review };
+      },
+    },
+  }));
+
+  assert.deepEqual(jsonBody(await routeRequest(route, "POST", "/api/github-draft-review/pull", { prUrl: "url" })), { review });
+  assert.deepEqual(jsonBody(await routeRequest(route, "POST", "/api/github-draft-review/comment", { prUrl: "url", body: "note" })), { review });
+  assert.deepEqual(calls, [["pull", { prUrl: "url" }], ["add", { prUrl: "url", body: "note" }]]);
 });
 
 test("server route exposes backend prompt contracts", async () => {

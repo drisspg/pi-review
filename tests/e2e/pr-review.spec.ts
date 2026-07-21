@@ -193,6 +193,51 @@ test("creates, edits, and removes draft comments", async ({ page }) => {
   await expect(page.locator(".inline-thread.draft")).toHaveCount(0);
 });
 
+test("pulls private GitHub comments and copies an agent handoff", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const row = (await openFileWithAddedRows(page, 1)).first();
+  const path = await row.getAttribute("data-path");
+  const line = Number(await row.getAttribute("data-line"));
+  if (path == null || !Number.isFinite(line)) throw new Error("Missing diff target");
+  const githubReview = { id: "pending-review", body: "", updatedAt: "now", comments: [{ id: "private-comment", path, line, startLine: null, subjectType: "LINE", body: "send this private note to the coding agent", url: "https://github.com/comment" }] };
+  await page.route("**/api/github-draft-review/pull", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ review: githubReview }) });
+  });
+
+  await openSideTab(page, "Review");
+  await page.getByRole("button", { name: "Pull private GitHub comments" }).click();
+
+  await expect(page.locator(".github-draft-card")).toContainText(`${path}:${line}`);
+  await expect(page.locator(".github-draft-card")).toContainText("send this private note to the coding agent");
+  await page.getByRole("button", { name: "Copy agent handoff" }).click();
+  await expect(page.getByRole("button", { name: "Copied agent handoff" })).toBeVisible();
+  const text = await page.evaluate(() => navigator.clipboard.readText());
+  expect(text).toContain("private GitHub review drafts");
+  expect(text).toContain(`${path}:${line}`);
+  expect(text).toContain("send this private note to the coding agent");
+});
+
+test("saves a line comment immediately to a private GitHub review", async ({ page }) => {
+  const row = (await openFileWithAddedRows(page, 1)).first();
+  const path = await row.getAttribute("data-path");
+  const line = Number(await row.getAttribute("data-line"));
+  if (path == null || !Number.isFinite(line)) throw new Error("Missing diff target");
+  let payload: Record<string, unknown> | null = null;
+  await page.route("**/api/github-draft-review/comment", async (route) => {
+    payload = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ review: { id: "pending-review", body: "", updatedAt: "now", comments: [{ id: "private-comment", path, line, startLine: null, subjectType: "LINE", body: "private implementation note", url: "https://github.com/comment" }] } }) });
+  });
+
+  await row.click();
+  await page.locator(".inline-thread textarea").first().fill("private implementation note");
+  await page.getByRole("button", { name: "Save private on GitHub" }).click();
+
+  await expect(page.locator(".inline-thread.local-thread")).toHaveCount(0);
+  expect(payload).toMatchObject({ path, line, side: "RIGHT", body: "private implementation note" });
+  await openSideTab(page, "Review");
+  await expect(page.locator(".github-draft-card")).toContainText("private implementation note");
+});
+
 test("copies all draft comments with diff context", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await openFirstFile(page);

@@ -9,7 +9,7 @@ import { markGeneratedPullFiles, parseGitattributes } from "./gitattributes.js";
 import { logger } from "./logger.js";
 import { prKey } from "./pr.js";
 import { listFileReviews } from "./state.js";
-import type { FileReviewState, PullFile, PullIssueComment, PullRequest, PullRequestRef, PullRequestReviewData, PullRequestReviewDecision, PullRequestReviewSummary, PullReviewComment, StoredPullRequest } from "./types.js";
+import type { FileReviewState, GitHubDraftComment, GitHubDraftCommentInput, GitHubPendingReview, GitHubPendingReviewLookup, PullFile, PullIssueComment, PullRequest, PullRequestRef, PullRequestReviewData, PullRequestReviewDecision, PullRequestReviewSummary, PullReviewComment, StoredPullRequest } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -27,6 +27,9 @@ export type GitHubRuntime = {
 export type GitHubClient = {
   fetchPullRequestReviewData: (ref: PullRequestRef) => Promise<PullRequestReviewData>;
   fetchFileText: (ref: PullRequestRef, path: string, sha: string) => Promise<string>;
+  fetchPendingPullRequestReview: (ref: PullRequestRef) => Promise<GitHubPendingReviewLookup>;
+  createPendingPullRequestReview: (ref: PullRequestRef, pullRequestId: string) => Promise<string>;
+  addPendingPullRequestReviewThread: (ref: PullRequestRef, reviewId: string, comment: GitHubDraftCommentInput) => Promise<void>;
   submitPullRequestReview: (ref: PullRequestRef, payload: unknown) => Promise<unknown>;
   replyToReviewComment: (ref: PullRequestRef, commentId: number, body: string) => Promise<unknown>;
   addIssueComment: (ref: PullRequestRef, body: string) => Promise<unknown>;
@@ -56,9 +59,35 @@ const defaultRuntime: GitHubRuntime = {
 
 type ReviewThreadGraphql = { data?: { repository?: { pullRequest?: { reviewThreads?: { nodes?: Array<{ id: string; isResolved: boolean; comments?: { nodes?: Array<{ databaseId: number | null }> } }> } } } } };
 type ReviewDecisionGraphql = { data?: { repository?: { pullRequest?: { reviewDecision?: PullRequestReviewDecision } } } };
+type GraphqlResponse<T> = { data?: T; errors?: Array<{ message?: string }> };
+type PendingReviewCommentGraphql = { id?: string; path?: string; line?: number | null; startLine?: number | null; subjectType?: "LINE" | "FILE"; body?: string; url?: string };
+type PendingReviewGraphql = { id?: string; body?: string; state?: string; updatedAt?: string; viewerDidAuthor?: boolean; comments?: { nodes?: PendingReviewCommentGraphql[]; pageInfo?: { hasNextPage?: boolean; endCursor?: string | null } } };
 
 function apiBase(ref: PullRequestRef): string {
   return `/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}`;
+}
+
+function pendingReviewComment(comment: PendingReviewCommentGraphql): GitHubDraftComment {
+  if (typeof comment.id !== "string" || typeof comment.path !== "string" || typeof comment.body !== "string" || typeof comment.url !== "string") throw new Error("GitHub returned an invalid pending review comment");
+  return {
+    id: comment.id,
+    path: comment.path,
+    line: typeof comment.line === "number" ? comment.line : null,
+    startLine: typeof comment.startLine === "number" ? comment.startLine : null,
+    subjectType: comment.subjectType === "FILE" ? "FILE" : "LINE",
+    body: comment.body,
+    url: comment.url,
+  };
+}
+
+function pendingReview(review: PendingReviewGraphql, comments: PendingReviewCommentGraphql[]): GitHubPendingReview {
+  if (typeof review.id !== "string") throw new Error("GitHub returned an invalid pending review");
+  return {
+    id: review.id,
+    body: typeof review.body === "string" ? review.body : "",
+    comments: comments.map(pendingReviewComment),
+    updatedAt: typeof review.updatedAt === "string" ? review.updatedAt : "",
+  };
 }
 
 function toStoredPullRequest(ref: PullRequestRef, pr: PullRequest, files: PullFile[], comments: PullReviewComment[], issueComments: PullIssueComment[], reviewSummaries: PullRequestReviewSummary[], reviewDecision: PullRequestReviewDecision, now: string): StoredPullRequest {
@@ -99,6 +128,24 @@ export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): Git
       return JSON.parse(stdout) as T;
     } catch (error) {
       logger.error("github", "gh api failed", { path, ms: Math.round(performance.now() - startedAt), error: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
+  }
+
+  async function ghGraphql<T>(query: string, variables: Record<string, string | number>, scope: string): Promise<T> {
+    const startedAt = performance.now();
+    const args = ["api", "graphql", "-f", `query=${query}`];
+    for (const [key, value] of Object.entries(variables)) args.push(typeof value === "number" ? "-F" : "-f", `${key}=${value}`);
+    logger.info("github", `${scope} start`);
+    try {
+      const { stdout, stderr } = await runtime.execFile("gh", args, { maxBuffer: 50 * 1024 * 1024 });
+      const response = JSON.parse(stdout) as GraphqlResponse<T>;
+      if (response.errors?.length) throw new Error(response.errors.map((error) => error.message ?? "GraphQL error").join("; "));
+      if (response.data == null) throw new Error("GitHub GraphQL response did not include data");
+      logger.info("github", `${scope} complete`, { ms: Math.round(performance.now() - startedAt), bytes: stdout.length, stderr: stderr.trim() || undefined });
+      return response.data;
+    } catch (error) {
+      logger.error("github", `${scope} failed`, { ms: Math.round(performance.now() - startedAt), error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
   }
@@ -193,6 +240,47 @@ export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): Git
     return stdout.replace(/\r\n/g, "\n");
   }
 
+  async function fetchPendingPullRequestReview(ref: PullRequestRef): Promise<GitHubPendingReviewLookup> {
+    const query = `query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { id reviews(first: 10, states: [PENDING]) { nodes { id body state updatedAt viewerDidAuthor comments(first: 100) { nodes { id path line startLine subjectType body url } pageInfo { hasNextPage endCursor } } } } } } }`;
+    const data = await ghGraphql<{ repository?: { pullRequest?: { id?: string; reviews?: { nodes?: PendingReviewGraphql[] } } } }>(query, { owner: ref.owner, repo: ref.repo, number: ref.number }, "fetch pending review");
+    const pullRequest = data.repository?.pullRequest;
+    if (typeof pullRequest?.id !== "string") throw new Error("GitHub pull request was not found");
+    const review = pullRequest.reviews?.nodes?.find((candidate) => candidate.state === "PENDING" && candidate.viewerDidAuthor === true);
+    if (review == null) return { pullRequestId: pullRequest.id, review: null };
+    if (typeof review.id !== "string") throw new Error("GitHub returned an invalid pending review");
+    const comments = [...(review.comments?.nodes ?? [])];
+    let pageInfo = review.comments?.pageInfo;
+    while (pageInfo?.hasNextPage === true && typeof pageInfo.endCursor === "string") {
+      const commentsQuery = `query($reviewId: ID!, $after: String!) { node(id: $reviewId) { ... on PullRequestReview { comments(first: 100, after: $after) { nodes { id path line startLine subjectType body url } pageInfo { hasNextPage endCursor } } } } }`;
+      const next = await ghGraphql<{ node?: { comments?: { nodes?: PendingReviewCommentGraphql[]; pageInfo?: { hasNextPage?: boolean; endCursor?: string | null } } } }>(commentsQuery, { reviewId: review.id, after: pageInfo.endCursor }, "fetch pending review comments");
+      comments.push(...(next.node?.comments?.nodes ?? []));
+      pageInfo = next.node?.comments?.pageInfo;
+    }
+    return { pullRequestId: pullRequest.id, review: pendingReview(review, comments) };
+  }
+
+  async function createPendingPullRequestReview(ref: PullRequestRef, pullRequestId: string): Promise<string> {
+    const mutation = `mutation($pullRequestId: ID!) { addPullRequestReview(input: { pullRequestId: $pullRequestId }) { pullRequestReview { id } } }`;
+    const data = await ghGraphql<{ addPullRequestReview?: { pullRequestReview?: { id?: string } } }>(mutation, { pullRequestId }, "create pending review");
+    const reviewId = data.addPullRequestReview?.pullRequestReview?.id;
+    if (typeof reviewId !== "string") throw new Error("GitHub did not return the new pending review");
+    return reviewId;
+  }
+
+  async function addPendingPullRequestReviewThread(ref: PullRequestRef, reviewId: string, comment: GitHubDraftCommentInput): Promise<void> {
+    const mutation = `mutation($reviewId: ID!, $path: String!, $body: String!, $line: Int, $side: DiffSide, $startLine: Int, $startSide: DiffSide, $subjectType: PullRequestReviewThreadSubjectType!) { addPullRequestReviewThread(input: { pullRequestReviewId: $reviewId, path: $path, body: $body, line: $line, side: $side, startLine: $startLine, startSide: $startSide, subjectType: $subjectType }) { thread { id } } }`;
+    const variables: Record<string, string | number> = { reviewId, path: comment.path, body: comment.body, subjectType: comment.line == null ? "FILE" : "LINE" };
+    if (comment.line != null) {
+      variables.line = comment.line;
+      variables.side = comment.side;
+    }
+    if (comment.startLine != null && comment.startLine !== comment.line) {
+      variables.startLine = comment.startLine;
+      variables.startSide = comment.side;
+    }
+    await ghGraphql(mutation, variables, "add pending review thread");
+  }
+
   async function ghApiWrite(ref: PullRequestRef, method: "POST" | "PATCH", path: string, payload: unknown, scope: string): Promise<unknown> {
     const dir = await runtime.mkdtemp(join(tmpdir(), "pi-review-"));
     const inputPath = join(dir, "payload.json");
@@ -249,7 +337,7 @@ export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): Git
     return (await fetchPullRequestReviewData(ref)).pr;
   }
 
-  return { fetchPullRequestReviewData, fetchFileText, submitPullRequestReview, replyToReviewComment, addIssueComment, editReviewComment, editIssueComment, editReviewSummary, fetchPullRequestSummary };
+  return { fetchPullRequestReviewData, fetchFileText, fetchPendingPullRequestReview, createPendingPullRequestReview, addPendingPullRequestReviewThread, submitPullRequestReview, replyToReviewComment, addIssueComment, editReviewComment, editIssueComment, editReviewSummary, fetchPullRequestSummary };
 }
 
 const defaultClient = createGitHubClient();
@@ -260,6 +348,18 @@ export async function fetchPullRequestReviewData(ref: PullRequestRef): Promise<P
 
 export async function fetchFileText(ref: PullRequestRef, path: string, sha: string): Promise<string> {
   return defaultClient.fetchFileText(ref, path, sha);
+}
+
+export async function fetchPendingPullRequestReview(ref: PullRequestRef): Promise<GitHubPendingReviewLookup> {
+  return defaultClient.fetchPendingPullRequestReview(ref);
+}
+
+export async function createPendingPullRequestReview(ref: PullRequestRef, pullRequestId: string): Promise<string> {
+  return defaultClient.createPendingPullRequestReview(ref, pullRequestId);
+}
+
+export async function addPendingPullRequestReviewThread(ref: PullRequestRef, reviewId: string, comment: GitHubDraftCommentInput): Promise<void> {
+  await defaultClient.addPendingPullRequestReviewThread(ref, reviewId, comment);
 }
 
 export async function submitPullRequestReview(ref: PullRequestRef, payload: unknown): Promise<unknown> {

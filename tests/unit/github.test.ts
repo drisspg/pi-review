@@ -30,6 +30,9 @@ function fakeRuntime(options: { failMutations?: boolean; gitattributes?: string 
         if (args[0] === "api" && key === "/repos/pytorch/pytorch/issues/185924/comments") return { stdout: JSON.stringify([{ id: 456, body: "issue", html_url: "issue" }]), stderr: "" };
         if (args[0] === "api" && key === "/repos/pytorch/pytorch/pulls/185924/reviews") return { stdout: JSON.stringify([{ id: 789, body: "summary", html_url: "review", state: "COMMENTED" }, { id: 790, body: "   ", html_url: "empty", state: "COMMENTED" }]), stderr: "" };
         if (args[0] === "api" && key === "/repos/pytorch/pytorch/contents/.gitattributes?ref=head") return { stdout: options.gitattributes ?? "", stderr: "" };
+        if (args[0] === "api" && key === "graphql" && args.some((arg) => String(arg).includes("states: [PENDING]"))) return { stdout: JSON.stringify({ data: { repository: { pullRequest: { id: "pr-id", reviews: { nodes: [{ id: "pending-id", state: "PENDING", viewerDidAuthor: true, body: "", updatedAt: "now", comments: { nodes: [{ id: "comment-id", path: "torch/a.py", line: 7, startLine: null, subjectType: "LINE", body: "private", url: "private-url" }], pageInfo: { hasNextPage: false, endCursor: null } } }] } } } } }), stderr: "" };
+        if (args[0] === "api" && key === "graphql" && args.some((arg) => String(arg).includes("addPullRequestReviewThread"))) return { stdout: JSON.stringify({ data: { addPullRequestReviewThread: { thread: { id: "thread-id" } } } }), stderr: "" };
+        if (args[0] === "api" && key === "graphql" && args.some((arg) => String(arg).includes("addPullRequestReview(input"))) return { stdout: JSON.stringify({ data: { addPullRequestReview: { pullRequestReview: { id: "pending-id" } } } }), stderr: "" };
         if (args[0] === "api" && key === "graphql" && args.some((arg) => String(arg).includes("reviewThreads"))) return { stdout: JSON.stringify({ data: { repository: { pullRequest: { reviewThreads: { nodes: [{ id: "thread-1", isResolved: true, comments: { nodes: [{ databaseId: 123 }] } }] } } } } }), stderr: "" };
         if (args[0] === "api" && key === "graphql") return { stdout: JSON.stringify({ data: { repository: { pullRequest: { reviewDecision: "REVIEW_REQUIRED" } } } }), stderr: "" };
         if (args[0] === "api" && key === "/repos/pytorch/pytorch/contents/torch/a.py?ref=head") return { stdout: "line\r\n", stderr: "" };
@@ -103,6 +106,25 @@ test("GitHub client fetchFileText uses raw content header and normalizes newline
 
   assert.equal(await createGitHubClient(runtime).fetchFileText(ref, "torch/a.py", "head"), "line\n");
   assert.deepEqual(execCalls[0], { command: "gh", args: ["api", "/repos/pytorch/pytorch/contents/torch/a.py?ref=head", "-H", "Accept: application/vnd.github.raw"] });
+});
+
+test("GitHub client reads and mutates the current pending review through GraphQL", async () => {
+  const { runtime, execCalls } = fakeRuntime();
+  const client = createGitHubClient(runtime);
+
+  assert.deepEqual(await client.fetchPendingPullRequestReview(ref), {
+    pullRequestId: "pr-id",
+    review: { id: "pending-id", body: "", updatedAt: "now", comments: [{ id: "comment-id", path: "torch/a.py", line: 7, startLine: null, subjectType: "LINE", body: "private", url: "private-url" }] },
+  });
+  assert.equal(await client.createPendingPullRequestReview(ref, "pr-id"), "pending-id");
+  await client.addPendingPullRequestReviewThread(ref, "pending-id", { path: "torch/a.py", line: 9, startLine: 7, side: "RIGHT", body: "note" });
+
+  const graphqlCalls = execCalls.filter((call) => call.args[1] === "graphql");
+  assert.equal(graphqlCalls.length, 3);
+  assert(graphqlCalls[1]?.args.some((arg) => String(arg).includes("addPullRequestReview(input")));
+  assert(graphqlCalls[2]?.args.includes("line=9"));
+  assert(graphqlCalls[2]?.args.includes("startLine=7"));
+  assert(graphqlCalls[2]?.args.includes("side=RIGHT"));
 });
 
 test("GitHub client writes mutation payloads through temp files and cleans successful calls", async () => {

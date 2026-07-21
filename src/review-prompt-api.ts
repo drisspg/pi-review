@@ -1,4 +1,4 @@
-type ReviewPromptMode = "code-walk" | "main-review" | "focus-review" | "test-pr" | "ai-chat" | "inline-chat" | "focus-chat" | "review-feedback";
+type ReviewPromptMode = "code-walk" | "main-review" | "focus-review" | "test-pr" | "ai-chat" | "inline-chat" | "focus-chat" | "review-feedback" | "github-draft-handoff";
 
 type PromptFile = {
   additions?: number;
@@ -32,6 +32,14 @@ type PromptFocusArea = {
   startLine: number;
   title: string;
   viewed?: boolean;
+};
+
+type PromptDraftHandoffComment = {
+  body: string;
+  diffHunk: string;
+  line: number | null;
+  path: string;
+  startLine: number | null;
 };
 
 export type ReviewPromptApiDeps = {
@@ -343,6 +351,42 @@ function formatFocusAreas(areas: PromptFocusArea[]): string {
   }).join("\n\n");
 }
 
+function promptDraftHandoffComments(payload: Record<string, unknown>): PromptDraftHandoffComment[] {
+  return optionalRecords(payload, "comments").map((record) => {
+    const path = optionalRecordString(record, "path");
+    const body = optionalRecordString(record, "body");
+    const diffHunk = optionalRecordString(record, "diffHunk") ?? "Patch hunk unavailable.";
+    if (path == null || body == null || (record.line !== null && typeof record.line !== "number") || (record.startLine !== null && record.startLine !== undefined && typeof record.startLine !== "number")) throw new Error("Expected GitHub draft comment location and body");
+    return { path, body, diffHunk, line: record.line as number | null, startLine: typeof record.startLine === "number" ? record.startLine : null };
+  });
+}
+
+function githubDraftHandoffPrompt(payload: Record<string, unknown>): ReviewPromptResponse {
+  const prKey = requiredString(payload, "prKey");
+  const prTitle = optionalString(payload, "prTitle", "(untitled)");
+  const prUrl = optionalString(payload, "prUrl", "(unknown URL)");
+  const headSha = optionalString(payload, "headSha", "(unknown head)");
+  const comments = promptDraftHandoffComments(payload);
+  if (comments.length === 0) throw new Error("Expected GitHub draft comments");
+  const blocks = comments.map((comment, index) => {
+    const range = comment.line == null ? "file" : comment.startLine != null && comment.startLine !== comment.line ? `${comment.startLine}-${comment.line}` : String(comment.line);
+    return `## Private draft ${index + 1}: ${comment.path}:${range}\n${comment.body}\n\nDiff hunk context:\n\`\`\`diff\n${comment.diffHunk}\n\`\`\``;
+  }).join("\n\n");
+  return {
+    purpose: "github-draft-handoff",
+    prompt: `Work through the private GitHub review drafts for ${prKey}. Treat them as reviewer notes for the current PR head, not as already-published GitHub feedback.
+
+Inspect the referenced code before changing it. Address each valid note at the narrowest authoritative layer, add or update focused tests, and report what changed for every draft. If a note is incorrect or ambiguous, explain why instead of forcing a change. Do not publish, submit, edit, or delete the GitHub review drafts.
+
+PR: ${prKey}
+URL: ${prUrl}
+Title: ${prTitle}
+Head: ${headSha}
+
+${blocks}`,
+  };
+}
+
 function reviewFeedbackPrompt(payload: Record<string, unknown>): ReviewPromptResponse {
   const prKey = requiredString(payload, "prKey");
   const prTitle = optionalString(payload, "prTitle", "(untitled)");
@@ -405,6 +449,8 @@ export function createReviewPromptApi(deps: ReviewPromptApiDeps): ReviewPromptAp
         return focusChatPrompt(payload);
       case "review-feedback":
         return reviewFeedbackPrompt(payload);
+      case "github-draft-handoff":
+        return githubDraftHandoffPrompt(payload);
       default:
         throw new Error(`Unknown prompt mode ${mode}`);
     }

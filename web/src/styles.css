@@ -1651,6 +1651,10 @@ a { color: var(--link); text-decoration: none; }
   min-height: 34px;
 }
 
+.local-thread .composer .actions {
+  flex-wrap: wrap;
+}
+
 .local-thread .composer .actions button,
 .focus-area-inline .composer .actions button {
   min-height: 28px;
@@ -2121,6 +2125,84 @@ button.fold:hover {
 .review-no-drafts {
   margin: 0;
   padding: 8px 0;
+}
+
+.github-draft-review {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--attention) 5%, var(--panel));
+}
+
+.github-draft-review-head {
+  display: grid;
+  gap: 3px;
+}
+
+.github-draft-review-head > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.github-draft-review-head strong {
+  font-size: 0.82rem;
+}
+
+.github-draft-review-head span {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.github-draft-review-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.github-draft-list {
+  display: grid;
+  gap: 7px;
+}
+
+.github-draft-card {
+  display: grid;
+  gap: 6px;
+  padding: 8px 9px;
+  border: 1px solid color-mix(in srgb, var(--attention) 32%, var(--border));
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.github-draft-location {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  color: var(--text);
+  background: transparent;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+}
+
+.github-draft-location span {
+  color: var(--muted);
+}
+
+.github-draft-location:hover strong {
+  color: var(--accent);
+}
+
+.github-draft-card p {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 0.82rem;
+  line-height: 1.45;
 }
 
 .review-actions {
