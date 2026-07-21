@@ -482,7 +482,7 @@ test("runs a separate focus areas review and highlights referenced lines", async
   await expect(row).toHaveClass(/focus-highlight-active/);
 });
 
-test("marking a file viewed does not jump to the active focus area", async ({ page }) => {
+test("marking a file viewed collapses it without jumping to the active focus area", async ({ page }) => {
   const focusRow = (await openFileWithAddedRows(page, 1)).first();
   const focusPath = await focusRow.getAttribute("data-path");
   const focusLine = await focusRow.getAttribute("data-line");
@@ -534,7 +534,7 @@ test("marking a file viewed does not jump to the active focus area", async ({ pa
   });
 
   await otherFile.locator(".viewed-toggle input").click();
-  await expect(otherFile.locator(".diff-row").first()).toBeVisible();
+  await expect(otherFile.locator(".diff-row")).toHaveCount(0);
   expect(await page.evaluate(() => (window as typeof window & { scrollIntoViewCalls: number }).scrollIntoViewCalls)).toBe(0);
 });
 
