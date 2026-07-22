@@ -12,7 +12,7 @@ export type PrApiDeps = {
   parsePullRequestRef: (input: string) => PullRequestRef;
   preparePrWorktree: (ref: PullRequestRef, cloneUrl: string, headSha: string) => Promise<string>;
   prewarmPiSession: (prKey: string, purposes: string[]) => void;
-  registerPiSessionCwd: (prKey: string, cwd: string) => Promise<void>;
+  registerPiSessionContext: (prKey: string, cwd: string, context: { headSha: string; files: PullRequestReviewData["files"] }) => Promise<void>;
   removePullRequest: (prKey: string) => Promise<void>;
   upsertPullRequest: (pr: StoredPullRequest) => Promise<StoredPullRequest>;
 };
@@ -57,7 +57,7 @@ export function createPrApi(deps: PrApiDeps): PrApi {
     const data = await deps.fetchPullRequestReviewData(ref);
     const pr = await deps.upsertPullRequest(data.pr);
     const worktreeDir = await deps.preparePrWorktree(ref, data.raw.base.repo.clone_url, data.pr.headSha);
-    await deps.registerPiSessionCwd(pr.key, worktreeDir);
+    await deps.registerPiSessionContext(pr.key, worktreeDir, { headSha: pr.headSha, files: data.files });
     deps.prewarmPiSession(pr.key, ["main-review", "focus-review", "chat", "inline-chat", "focus-chat"]);
     return hydrateReviewResponse(data, pr, { worktreeDir });
   }

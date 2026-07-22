@@ -53,6 +53,7 @@ export type StateStore = {
   setFileViewed: (review: FileReviewState) => Promise<FileReviewState>;
   getDraftReview: (prKey: string) => Promise<DraftReview | null>;
   saveDraftReview: (review: DraftReview) => Promise<DraftReview>;
+  appendDraftReviewComment: (prKey: string, headSha: string, comment: Omit<DraftReview["comments"][number], "id">) => Promise<{ draftReview: DraftReview; comment: DraftReview["comments"][number]; created: boolean }>;
   clearDraftReview: (prKey: string) => Promise<void>;
   listFocusScans: (prKey: string) => Promise<FocusScanRecord[]>;
   saveFocusScan: (scan: Omit<FocusScanRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<FocusScanRecord, "id" | "createdAt">>) => Promise<FocusScanRecord>;
@@ -250,6 +251,27 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
     });
   }
 
+  /** Atomically append a model-created comment without replacing the user's review fields. */
+  async function appendDraftReviewComment(prKey: string, headSha: string, input: Omit<DraftReview["comments"][number], "id">): Promise<{ draftReview: DraftReview; comment: DraftReview["comments"][number]; created: boolean }> {
+    return mutateState(async (state) => {
+      const existing = state.draftReviews.find((review) => review.prKey === prKey && review.headSha === headSha);
+      const duplicate = existing?.comments.find((comment) => comment.path === input.path && comment.line === input.line && comment.startLine === input.startLine && comment.side === input.side && comment.body === input.body);
+      if (existing != null && duplicate != null) return { draftReview: existing, comment: duplicate, created: false };
+      const comment = { id: `pi-${runtime.uuid()}`, ...input };
+      const draftReview: DraftReview = {
+        prKey,
+        headSha,
+        event: existing?.event ?? "COMMENT",
+        body: existing?.body ?? "",
+        comments: [...(existing?.comments ?? []), comment],
+        updatedAt: runtime.now(),
+      };
+      state.draftReviews = [draftReview, ...state.draftReviews.filter((review) => review.prKey !== prKey)];
+      await writeState(state);
+      return { draftReview, comment, created: true };
+    });
+  }
+
   async function clearDraftReview(prKey: string): Promise<void> {
     await mutateState(async (state) => {
       state.draftReviews = state.draftReviews.filter((review) => review.prKey !== prKey);
@@ -340,7 +362,7 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
     });
   }
 
-  return { readState, currentReviewMemoryDistillationSource, currentReviewMemoryContext, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewProfile, listRecentPullRequests, upsertPullRequest, markPullRequestReviewed, listFileReviews, setFileViewed, getDraftReview, saveDraftReview, clearDraftReview, listFocusScans, saveFocusScan, listAiReviews, saveAiReview, saveReviewMemory, currentReviewMemoryPrompt, removePullRequest };
+  return { readState, currentReviewMemoryDistillationSource, currentReviewMemoryContext, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewProfile, listRecentPullRequests, upsertPullRequest, markPullRequestReviewed, listFileReviews, setFileViewed, getDraftReview, saveDraftReview, appendDraftReviewComment, clearDraftReview, listFocusScans, saveFocusScan, listAiReviews, saveAiReview, saveReviewMemory, currentReviewMemoryPrompt, removePullRequest };
 }
 
 const defaultStore = createStateStore();
@@ -399,6 +421,10 @@ export async function getDraftReview(prKey: string): Promise<DraftReview | null>
 
 export async function saveDraftReview(review: DraftReview): Promise<DraftReview> {
   return defaultStore.saveDraftReview(review);
+}
+
+export async function appendDraftReviewComment(prKey: string, headSha: string, comment: Omit<DraftReview["comments"][number], "id">): Promise<{ draftReview: DraftReview; comment: DraftReview["comments"][number]; created: boolean }> {
+  return defaultStore.appendDraftReviewComment(prKey, headSha, comment);
 }
 
 export async function clearDraftReview(prKey: string): Promise<void> {

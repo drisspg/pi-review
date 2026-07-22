@@ -1,11 +1,13 @@
 import type { DraftReview, DraftReviewComment } from "./types.js";
 
 export type DraftReviewApiDeps = {
+  getDraftReview: (prKey: string) => Promise<DraftReview | null>;
   now: () => string;
   saveDraftReview: (review: DraftReview) => Promise<DraftReview>;
 };
 
 export type DraftReviewApi = {
+  get: (payload: Record<string, unknown>) => Promise<{ draftReview: DraftReview | null }>;
   save: (payload: Record<string, unknown>) => Promise<{ draftReview: DraftReview }>;
 };
 
@@ -23,9 +25,14 @@ function draftReviewFromPayload(payload: Record<string, unknown>, updatedAt: str
 }
 
 export function createDraftReviewApi(deps: DraftReviewApiDeps): DraftReviewApi {
+  async function get(payload: Record<string, unknown>): Promise<{ draftReview: DraftReview | null }> {
+    if (typeof payload.prKey !== "string" || payload.prKey.trim().length === 0) throw new Error("Expected prKey");
+    return { draftReview: await deps.getDraftReview(payload.prKey) };
+  }
+
   async function save(payload: Record<string, unknown>): Promise<{ draftReview: DraftReview }> {
     return { draftReview: await deps.saveDraftReview(draftReviewFromPayload(payload, deps.now())) };
   }
 
-  return { save };
+  return { get, save };
 }

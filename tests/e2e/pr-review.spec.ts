@@ -697,6 +697,32 @@ test("runs the right-sidebar Pi review panel and continues the chat with Enter",
   await expect(dialog).toContainText("Follow-up answer");
 });
 
+test("shows Pi-created review comments as editable local drafts", async ({ page }) => {
+  const row = (await openFileWithAddedRows(page, 1)).first();
+  const path = await row.getAttribute("data-path");
+  const line = await row.getAttribute("data-line");
+  if (path == null || line == null || openedPr == null) throw new Error("Missing draft target");
+  const body = "Could this preserve the previous behavior for empty inputs?";
+
+  await page.route("**/api/draft-review/get", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ draftReview: { prKey: openedPr!.key, headSha: openedPr!.headSha, event: "COMMENT", body: "", comments: [{ id: "pi-e2e-draft", path, line: Number.parseInt(line, 10), side: "RIGHT", body }], updatedAt: "now" } }) });
+  });
+  await mockAskPi(page, () => "I added that as a private draft comment.");
+
+  await openSideTab(page, "Pi");
+  const panel = page.locator(".ai-review");
+  await panel.getByPlaceholder("Ask Pi about this PR…").fill("Draft a review comment for the empty-input concern.");
+  await panel.getByPlaceholder("Ask Pi about this PR…").press("Enter");
+
+  const draft = page.locator(".inline-thread.draft", { hasText: body });
+  await expect(draft).toBeVisible();
+  await draft.getByRole("button", { name: "Edit draft" }).click();
+  const editor = page.locator(".inline-thread.draft textarea").first();
+  await expect(editor).toHaveValue(body);
+  await editor.fill("Edited model draft.");
+  await expect(editor).toHaveValue("Edited model draft.");
+});
+
 test("copies local draft comments in a feedback prompt from the Review tab", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   const rows = await openFileWithAddedRows(page, 1);

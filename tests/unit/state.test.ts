@@ -160,6 +160,33 @@ test("saveDraftReview replaces the PR draft and persists empty drafts", async ()
   assert.equal((await store.readState()).draftReviews.length, 1);
 });
 
+test("appendDraftReviewComment preserves review fields, avoids duplicates, and resets stale heads", async () => {
+  const existing = { prKey: "pr", headSha: "head", event: "REQUEST_CHANGES" as const, body: "overall", comments: [{ id: "local-1", path: "a.ts", line: 4, side: "RIGHT" as const, body: "existing" }], updatedAt: "first" };
+  const { runtime } = fakeRuntime({ ...emptyState(), draftReviews: [existing] });
+  const store = createStateStore(runtime, paths);
+  const input = { path: "b.ts", line: 8, startLine: 7, side: "RIGHT" as const, body: "model draft" };
+
+  const created = await store.appendDraftReviewComment("pr", "head", input);
+  const duplicate = await store.appendDraftReviewComment("pr", "head", input);
+  const nextHead = await store.appendDraftReviewComment("pr", "next", { ...input, body: "new head" });
+
+  assert.equal(created.created, true);
+  assert.equal(created.comment.id, "pi-uuid-1");
+  assert.equal(created.draftReview.event, "REQUEST_CHANGES");
+  assert.equal(created.draftReview.body, "overall");
+  assert.deepEqual(created.draftReview.comments.map((comment) => comment.body), ["existing", "model draft"]);
+  assert.equal(duplicate.created, false);
+  assert.equal(duplicate.comment.id, created.comment.id);
+  assert.deepEqual(nextHead.draftReview, {
+    prKey: "pr",
+    headSha: "next",
+    event: "COMMENT",
+    body: "",
+    comments: [{ id: "pi-uuid-3", ...input, body: "new head" }],
+    updatedAt: "2026-06-04T00:00:00.000Z",
+  });
+});
+
 test("clearDraftReview removes only the submitted PR draft", async () => {
   const first = { prKey: "first", headSha: "head", event: "COMMENT" as const, body: "", comments: [], updatedAt: "first" };
   const second = { ...first, prKey: "second" };

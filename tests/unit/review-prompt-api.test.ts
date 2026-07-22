@@ -63,10 +63,16 @@ test("review prompt API builds chat prompts with typed purposes", async () => {
   const focus = await api().build({ mode: "focus-chat", prKey: "pr", path: "src/a.ts", startLine: 4, endLine: 6, body: "finding", question: "what now?" });
   const chat = await api().build({ mode: "ai-chat", prKey: "pr", previousDialogue: "User: hi", question: "next?" });
 
-  assert.deepEqual(inline, { purpose: "inline-chat", prompt: "Review PR pr. File: src/a.ts. Lines: 10-12. Side: RIGHT.\n\nDiff hunk context:\n@@\n\nPrevious dialogue:\n(none)\n\nUse the diff hunk as context for the question and keep the answer concise. The hunk includes removed (-), added (+), and unchanged context lines. Do not start with a formulaic preface like \"From the hunk\". Use tools only if the question cannot be answered from the hunk or asks for broader context.\n\nQuestion: why?" });
-  assert.deepEqual(focus, { purpose: "focus-chat", prompt: "Review PR pr. Focus area: src/a.ts:4-6\n\nFocus finding:\nfinding\n\nQuestion: what now?" });
+  assert.equal(inline.purpose, "inline-chat");
+  assert.match(inline.prompt, /File: src\/a\.ts\. Lines: 10-12\. Side: RIGHT/);
+  assert.match(inline.prompt, /draft_review_comment tool/);
+  assert.match(inline.prompt, /Question: why\?/);
+  assert.equal(focus.purpose, "focus-chat");
+  assert.match(focus.prompt, /Focus area: src\/a\.ts:4-6/);
+  assert.match(focus.prompt, /draft_review_comment tool/);
   assert.equal(chat.purpose, "chat");
   assert.match(chat.prompt, /Previous dialogue:\nUser: hi/);
+  assert.match(chat.prompt, /Do not create drafts for ordinary questions/);
 });
 
 test("review prompt API builds copyable review feedback bundles", async () => {

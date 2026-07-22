@@ -81,8 +81,8 @@ function fakeDeps() {
       prewarmPiSession(prKey: string, purposes: string[]) {
         calls.push(`prewarm:${prKey}:${purposes.join(",")}`);
       },
-      async registerPiSessionCwd(prKey: string, cwd: string) {
-        calls.push(`cwd:${prKey}:${cwd}`);
+      async registerPiSessionContext(prKey: string, cwd: string, context: { headSha: string; files: PullRequestReviewData["files"] }) {
+        calls.push(`context:${prKey}:${cwd}:${context.headSha}:${context.files.map((file) => file.filename).join(",")}`);
       },
       async removePullRequest(prKey: string) {
         calls.push(`remove:${prKey}`);
@@ -133,7 +133,7 @@ test("PR API open prepares worktree, registers Pi cwd, prewarms sessions, and hy
     "fetch:1",
     "upsert:github.com/pytorch/pytorch#1",
     "prepare:1:git@github.com:pytorch/pytorch.git:head",
-    "cwd:github.com/pytorch/pytorch#1:/tmp/worktree",
+    "context:github.com/pytorch/pytorch#1:/tmp/worktree:head:a.ts",
     "prewarm:github.com/pytorch/pytorch#1:main-review,focus-review,chat,inline-chat,focus-chat",
     "draft:github.com/pytorch/pytorch#1",
     "focus:github.com/pytorch/pytorch#1",

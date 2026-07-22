@@ -423,6 +423,7 @@ function App() {
   const draggedRef = useRef(false);
   const suppressClickRef = useRef(false);
   const [drafts, setDrafts] = useState<DraftComment[]>([]);
+  const draftsRef = useRef<DraftComment[]>([]);
   const [githubDraftReview, setGithubDraftReview] = useState<GitHubPendingReview | null>(null);
   const [githubDraftLoaded, setGithubDraftLoaded] = useState(false);
   const [githubDraftLoading, setGithubDraftLoading] = useState(false);
@@ -467,6 +468,7 @@ function App() {
   async function refreshLogs() { setLogs((await api<{ logs: LogEntry[] }>("/api/logs")).logs.slice(-40).reverse()); }
 
   useEffect(() => { refreshHistory().catch((err: unknown) => setError(err instanceof Error ? err.message : String(err))); refreshLogs().catch(() => undefined); }, []);
+  useEffect(() => { draftsRef.current = drafts; }, [drafts]);
 
   useEffect(() => {
     function openRoute() {
@@ -579,7 +581,8 @@ function App() {
     setActiveTarget(null);
     dragSelectionRef.current = null;
     setDragSelection(null);
-    setDrafts(data.draftReview?.comments ?? []);
+    draftsRef.current = data.draftReview?.comments ?? [];
+    setDrafts(draftsRef.current);
     setGithubDraftReview(null);
     setGithubDraftLoaded(false);
     setGithubDraftLoading(false);
@@ -809,7 +812,9 @@ function App() {
     };
     void pollActivity();
     try {
-      return await askPiApi({ prKey: review.pr.key, prompt, purpose }, onDelta);
+      const answer = await askPiApi({ prKey: review.pr.key, prompt, purpose }, onDelta);
+      await refreshModelDrafts(review);
+      return answer;
     } finally {
       cancelled = true;
       await refreshLogs();
@@ -839,7 +844,7 @@ function App() {
       const answer = await askPiApi({ prKey: review.pr.key, prompt, purpose }, setAnswer);
       cancelActivityPolling();
       setThreads((current) => ({ ...current, [thread.key]: { ...current[thread.key], asking: false, activity: null, messages: [...(current[thread.key]?.messages ?? []).slice(0, -1), { role: "pi", text: answer }] } }));
-      await refreshLogs();
+      await Promise.all([refreshModelDrafts(review), refreshLogs()]);
     } catch (err) {
       cancelActivityPolling();
       const text = `Ask Pi failed: ${err instanceof Error ? err.message : String(err)}`;
@@ -884,6 +889,25 @@ function App() {
 
   async function buildPiPrompt(payload: Record<string, unknown>): Promise<{ prompt: string; purpose: string }> {
     return await api<{ prompt: string; purpose: string }>("/api/pi/prompt", { method: "POST", body: JSON.stringify(payload) });
+  }
+
+  /** Merge newly tool-created drafts without replacing edits already made in the browser. */
+  async function refreshModelDrafts(targetReview: OpenResponse): Promise<void> {
+    try {
+      const { draftReview } = await api<{ draftReview: OpenResponse["draftReview"] }>("/api/draft-review/get", { method: "POST", body: JSON.stringify({ prKey: targetReview.pr.key }) });
+      if (activeReviewKeyRef.current !== targetReview.pr.key || draftReview == null || draftReview.headSha !== targetReview.pr.headSha) return;
+      const currentDrafts = draftsRef.current;
+      const currentIds = new Set(currentDrafts.map((draft) => draft.id));
+      const addedDrafts = draftReview.comments.filter((draft) => draft.id.startsWith("pi-") && !currentIds.has(draft.id));
+      if (addedDrafts.length === 0) return;
+      const mergedDrafts = [...currentDrafts, ...addedDrafts];
+      draftsRef.current = mergedDrafts;
+      setDrafts(mergedDrafts);
+      setOpenFiles((current) => ({ ...current, ...Object.fromEntries(addedDrafts.map((draft) => [draft.path, true])) }));
+      updateCachedReview(targetReview.pr.key, (current) => ({ ...current, draftReview: { ...draftReview, comments: mergedDrafts } }));
+    } catch (err) {
+      setError(`Loading Pi-created drafts failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   async function copyReviewFeedbackPrompt(overallBody = ""): Promise<void> {
@@ -987,6 +1011,7 @@ function App() {
       };
       const answer = await askPiApi({ prKey: targetReview.pr.key, prompt, purpose }, setAnswer);
       cancelActivityPolling();
+      await refreshModelDrafts(targetReview);
       const nextMessages: AiReviewMessage[] = [...startingReview.messages, { role: "user", kind: "chat", text: question }, { role: "pi", kind: "chat", text: answer }];
       if (activeReviewKeyRef.current === targetReview.pr.key) setAiReview((current) => ({ ...current, open: true, expanded: true, activity: null, messages: nextMessages }));
       void saveAiReviewFor(targetReview, currentGeneralReviewText({ ...startingReview, text: answer, messages: nextMessages }) || answer, nextMessages, aiReviewId);

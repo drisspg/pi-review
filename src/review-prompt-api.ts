@@ -277,13 +277,15 @@ ${changedFiles}`,
   };
 }
 
+const reviewDraftToolInstructions = `When the user explicitly asks you to draft, add, create, or turn feedback into review comments, call the draft_review_comment tool once for each concrete comment. Draft only comments supported by the current diff, use exact changed-file paths and reviewable diff lines, and write concise comment text in the user's voice. Do not create drafts for ordinary questions or publish anything to GitHub.`;
+
 function aiChatPrompt(payload: Record<string, unknown>): ReviewPromptResponse {
   const prKey = requiredString(payload, "prKey");
   const question = requiredString(payload, "question");
   const previousDialogue = optionalString(payload, "previousDialogue", "(none)");
   return {
     purpose: "chat",
-    prompt: `Continue discussing PR ${prKey}. Answer the user's latest question using the checked-out PR worktree. Be concise and cite files/lines when useful.\n\nPrevious dialogue:\n${previousDialogue}\n\nUser: ${question}`,
+    prompt: `Continue discussing PR ${prKey}. Answer the user's latest question using the checked-out PR worktree. Be concise and cite files/lines when useful.\n\n${reviewDraftToolInstructions}\n\nPrevious dialogue:\n${previousDialogue}\n\nUser: ${question}`,
   };
 }
 
@@ -304,7 +306,9 @@ ${hunk}
 Previous dialogue:
 ${previousDialogue}
 
-Use the diff hunk as context for the question and keep the answer concise. The hunk includes removed (-), added (+), and unchanged context lines. Do not start with a formulaic preface like "From the hunk". Use tools only if the question cannot be answered from the hunk or asks for broader context.
+Use the diff hunk as context for the question and keep the answer concise. The hunk includes removed (-), added (+), and unchanged context lines. Do not start with a formulaic preface like "From the hunk". Use inspection tools only if the question cannot be answered from the hunk or asks for broader context.
+
+${reviewDraftToolInstructions}
 
 Question: ${question}`,
   };
@@ -317,7 +321,7 @@ function focusChatPrompt(payload: Record<string, unknown>): ReviewPromptResponse
   const question = requiredString(payload, "question");
   return {
     purpose: "focus-chat",
-    prompt: `Review PR ${prKey}. Focus area: ${path}:${focusRange(payload)}\n\nFocus finding:\n${body}\n\nQuestion: ${question}`,
+    prompt: `Review PR ${prKey}. Focus area: ${path}:${focusRange(payload)}\n\nFocus finding:\n${body}\n\n${reviewDraftToolInstructions}\n\nQuestion: ${question}`,
   };
 }
 

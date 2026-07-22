@@ -111,6 +111,11 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
       return;
     }
 
+    if (req.method === "POST" && url.pathname === "/api/draft-review/get") {
+      sendJson(res, 200, await deps.draftReviewApi.get(recordFromBody(await readBody(req))));
+      return;
+    }
+
     if (req.method === "POST" && url.pathname === "/api/draft-review/save") {
       const payload = recordFromBody(await readBody(req));
       const response = await deps.draftReviewApi.save(payload);

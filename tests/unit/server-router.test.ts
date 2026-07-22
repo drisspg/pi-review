@@ -74,6 +74,9 @@ function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
       },
     },
     draftReviewApi: {
+      async get() {
+        return { draftReview: null };
+      },
       async save(payload) {
         return { draftReview: { prKey: String(payload.prKey), headSha: "head", event: "COMMENT", body: "", comments: [], updatedAt: "now" } };
       },
@@ -231,10 +234,29 @@ test("server route parses JSON and dispatches POST feature routes", async () => 
   assert.deepEqual(calls, [{ prKey: "pr", prompt: "prompt" }]);
 });
 
+test("server route gets local draft reviews", async () => {
+  const draftReview = { prKey: "pr", headSha: "head", event: "COMMENT" as const, body: "", comments: [], updatedAt: "now" };
+  const route = createServerRoute(baseDeps({
+    draftReviewApi: {
+      async get(payload) {
+        return { draftReview: payload.prKey === "pr" ? draftReview : null };
+      },
+      async save() {
+        return { draftReview };
+      },
+    },
+  }));
+
+  assert.deepEqual(jsonBody(await routeRequest(route, "POST", "/api/draft-review/get", { prKey: "pr" })), { draftReview });
+});
+
 test("server route saves draft reviews", async () => {
   const payloads: Record<string, unknown>[] = [];
   const route = createServerRoute(baseDeps({
     draftReviewApi: {
+      async get() {
+        return { draftReview: null };
+      },
       async save(payload) {
         payloads.push(payload);
         return { draftReview: { prKey: String(payload.prKey), headSha: "head", event: "COMMENT", body: "body", comments: [], updatedAt: "now" } };

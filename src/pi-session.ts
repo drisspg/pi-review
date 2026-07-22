@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 
 import { createGpuWorkspaceTool } from "./gpu-workspace-tool.js";
 import { logger } from "./logger.js";
+import { createReviewDraftTool, type ReviewDraftToolContext } from "./review-draft-tool.js";
 
 type TextPart = {
   text?: string;
@@ -57,6 +58,7 @@ const PI_THINKING_LEVEL_BY_PURPOSE: Record<string, ThinkingLevel> = {
 const REVIEW_TOOLS = ["read", "grep", "find", "bash"];
 const CHAT_TOOLS = ["read", "grep", "find", "bash", "web_search"];
 const INLINE_TOOLS = ["read", "grep", "find", "web_search"];
+const DRAFT_TOOL_PURPOSES = new Set(["chat", "inline-chat", "focus-chat"]);
 
 const PI_TOOLS_BY_PURPOSE: Record<string, string[]> = {
   "chat": CHAT_TOOLS,
@@ -71,6 +73,7 @@ const PI_TOOLS_BY_PURPOSE: Record<string, string[]> = {
 
 const sessions = new Map<string, Promise<SessionRecord>>();
 const cwdByPr = new Map<string, string>();
+const reviewContextByPr = new Map<string, ReviewDraftToolContext>();
 const lastPromptByPr = new Map<string, { chars: number; preview: string; startedAt: string }>();
 const promptQueueByPr = new Map<string, Promise<void>>();
 type PromptState = { status: "queued" | "running" | "complete" | "failed"; purpose: string; chars: number; queuedAt: string; startedAt?: string; finishedAt?: string; answerChars?: number; error?: string; lastActivityAt?: string; detail?: string };
@@ -106,12 +109,13 @@ function sessionDirForPr(prKey: string, purpose = "chat"): string {
   return resolve(homedir(), ".pi", "agent", "state", "pi-pr-review", "pi-sessions", sessionKeyForPr(prKey, purpose));
 }
 
-export async function registerPiSessionCwd(prKey: string, cwd: string): Promise<void> {
+/** Register the checkout and current diff used by PR-scoped conversational tools. */
+export async function registerPiSessionContext(prKey: string, cwd: string, context: ReviewDraftToolContext): Promise<void> {
   const existingCwd = cwdByPr.get(prKey);
+  const existingContext = reviewContextByPr.get(prKey);
+  if (existingCwd != null && (existingCwd !== cwd || existingContext?.headSha !== context.headSha)) await disposePiSession(prKey);
   cwdByPr.set(prKey, cwd);
-  if (existingCwd != null && existingCwd !== cwd) {
-    await disposePiSession(prKey);
-  }
+  reviewContextByPr.set(prKey, context);
 }
 
 let sharedModelRegistry: ReturnType<typeof ModelRegistry.create> | null = null;
@@ -132,13 +136,18 @@ async function createSession(prKey: string, purpose = "chat"): Promise<SessionRe
   if (model == null) throw new Error(`Default Pi Review model not found: ${DEFAULT_PI_MODEL_PROVIDER}/${DEFAULT_PI_MODEL_ID}`);
   const thinkingLevel = PI_THINKING_LEVEL_BY_PURPOSE[purpose] ?? DEFAULT_PI_THINKING_LEVEL;
   const scopedTools = PI_TOOLS_BY_PURPOSE[purpose];
+  const reviewContext = reviewContextByPr.get(prKey);
+  const draftTool = reviewContext == null || !DRAFT_TOOL_PURPOSES.has(purpose) ? null : createReviewDraftTool(prKey, reviewContext);
+  const customTools = draftTool == null ? [] : [draftTool];
   const { session } = await createAgentSession({
     cwd,
     model,
     modelRegistry,
     sessionManager: SessionManager.create(cwd, sessionDir),
     thinkingLevel,
-    ...(scopedTools == null ? { customTools: [createGpuWorkspaceTool(prKey)] } : { tools: scopedTools }),
+    ...(scopedTools == null
+      ? { customTools: [createGpuWorkspaceTool(prKey), ...customTools] }
+      : { tools: [...scopedTools, ...(draftTool == null ? [] : ["draft_review_comment"])], customTools }),
   });
   logger.info("pi", "create session complete", { prKey, purpose, model: `${DEFAULT_PI_MODEL_PROVIDER}/${DEFAULT_PI_MODEL_ID}`, thinkingLevel, ms: Math.round(performance.now() - startedAt) });
   return session as SessionRecord;
@@ -269,6 +278,7 @@ export async function disposePiSession(prKey: string): Promise<void> {
   const sessionEntries = [...sessions.entries()].filter(([sessionKey]) => sessionKey.startsWith(`${safe(prKey)}--`));
   for (const [sessionKey] of sessionEntries) sessions.delete(sessionKey);
   cwdByPr.delete(prKey);
+  reviewContextByPr.delete(prKey);
   for (const key of [...lastPromptByPr.keys()]) if (key.startsWith(`${safe(prKey)}--`)) lastPromptByPr.delete(key);
   for (const key of [...promptQueueByPr.keys()]) if (key.startsWith(`${safe(prKey)}--`)) promptQueueByPr.delete(key);
   for (const key of [...promptStateByPr.keys()]) if (key.startsWith(`${safe(prKey)}--`)) promptStateByPr.delete(key);

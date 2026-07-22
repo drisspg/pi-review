@@ -14,7 +14,7 @@ import { addIssueComment, addPendingPullRequestReviewThread, createPendingPullRe
 import { logger } from "./logger.js";
 import { createPiApi } from "./pi-api.js";
 import { createPiJobRunner } from "./pi-jobs.js";
-import { askPi, disposePiSession, disposePiSessions, piActivity, piDiagnostics, prewarmPiSession, registerPiSessionCwd, setPiModel } from "./pi-session.js";
+import { askPi, disposePiSession, disposePiSessions, piActivity, piDiagnostics, prewarmPiSession, registerPiSessionContext, setPiModel } from "./pi-session.js";
 import { createPrApi, defaultPrApiDeps } from "./pr-api.js";
 import { createReviewMemoryApi } from "./review-memory-api.js";
 import { createReviewPromptApi } from "./review-prompt-api.js";
@@ -32,13 +32,13 @@ const execFileAsync = promisify(execFile);
 const piJobRunner = createPiJobRunner(askPi);
 const askStreamApi = createAskStreamApi({ askPi, logger });
 const commentApi = createCommentApi(defaultCommentApiDeps({ addIssueComment, editIssueComment, editReviewComment, editReviewSummary, replyToReviewComment }));
-const draftReviewApi = createDraftReviewApi({ now: () => new Date().toISOString(), saveDraftReview });
+const draftReviewApi = createDraftReviewApi({ getDraftReview, now: () => new Date().toISOString(), saveDraftReview });
 const fileApi = createFileApi(defaultFileApiDeps(fetchFileText, setFileViewed, async (url) => {
   await execFileAsync("open", [url]);
 }));
 const githubDraftReviewApi = createGitHubDraftReviewApi(defaultGitHubDraftReviewApiDeps({ addPendingPullRequestReviewThread, createPendingPullRequestReview, fetchPendingPullRequestReview }));
 const piApi = createPiApi({ askPi, piActivity, piDiagnostics, piJobRunner, setPiModel });
-const prApi = createPrApi(defaultPrApiDeps({ cleanupPrWorktree, disposePiSession, fetchPullRequestReviewData, getDraftReview, listAiReviews, listFocusScans, preparePrWorktree, prewarmPiSession, registerPiSessionCwd, removePullRequest, upsertPullRequest }));
+const prApi = createPrApi(defaultPrApiDeps({ cleanupPrWorktree, disposePiSession, fetchPullRequestReviewData, getDraftReview, listAiReviews, listFocusScans, preparePrWorktree, prewarmPiSession, registerPiSessionContext, removePullRequest, upsertPullRequest }));
 const reviewMemoryApi = createReviewMemoryApi({ askPi, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewMemory, saveReviewProfile });
 const reviewPromptApi = createReviewPromptApi({ currentReviewMemoryPrompt });
 const reviewSubmitRouteApi = createReviewSubmitRouteApi(defaultReviewSubmitRouteApiDeps({ clearDraftReview, fetchPullRequestReviewData, markPullRequestReviewed, saveReviewMemory, submitPullRequestReview }));
