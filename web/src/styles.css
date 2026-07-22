@@ -22,7 +22,7 @@
   --bgColor-muted: var(--panel2);
   --bgColor-success-muted: rgba(46, 160, 67, 0.15);
   --bgColor-danger-muted: rgba(248, 81, 73, 0.15);
-  --add: var(--bgColor-success-muted);
+  --add: color-mix(in srgb, var(--success) 11%, transparent);
   --del: var(--bgColor-danger-muted);
   --code-bg: #161b22;
   --syntax-keyword: #ff7b72;
@@ -62,7 +62,7 @@
   --bgColor-muted: var(--panel2);
   --bgColor-success-muted: #dafbe1;
   --bgColor-danger-muted: #ffebe9;
-  --add: var(--bgColor-success-muted);
+  --add: color-mix(in srgb, var(--success) 11%, transparent);
   --del: var(--bgColor-danger-muted);
   --code-bg: #f6f8fa;
   --syntax-keyword: #cf222e;
@@ -98,7 +98,7 @@
   --bgColor-muted: var(--panel2);
   --bgColor-success-muted: rgba(70, 149, 74, 0.18);
   --bgColor-danger-muted: rgba(229, 83, 75, 0.16);
-  --add: var(--bgColor-success-muted);
+  --add: color-mix(in srgb, var(--success) 11%, transparent);
   --del: var(--bgColor-danger-muted);
   --code-bg: #1c2128;
   --syntax-keyword: #f47067;
