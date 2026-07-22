@@ -1,6 +1,6 @@
 import React, { createContext, ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, XIcon } from "@primer/octicons-react";
+import { ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, ScreenFullIcon, ScreenNormalIcon, XIcon } from "@primer/octicons-react";
 import { api, askPi as askPiApi } from "./api";
 import { ActionMenu, ActionMenuItem } from "./components/ActionMenu";
 import { Button } from "./components/Button";
@@ -1364,6 +1364,7 @@ function ReviewPage(props: DiffProps & { piPanel: PiPanelProps; reviewEvent: "CO
   const diffViewLabel = props.diffViewMode === "unified" ? "Split view" : "Unified view";
   const [sideTab, setSideTab] = useState<"review" | "pi" | "comments">("review");
   const [sideCollapsed, setSideCollapsed] = useState(true);
+  const [sideFocused, setSideFocused] = useState(false);
   const draftCount = props.drafts.length;
   const piActivity = props.piPanel.review.messages.length + (props.piPanel.review.text.length > 0 && props.piPanel.review.messages.length === 0 ? 1 : 0);
   const focusCount = props.focusAreas.length;
@@ -1373,6 +1374,14 @@ function ReviewPage(props: DiffProps & { piPanel: PiPanelProps; reviewEvent: "CO
     setSideTab(tab);
     setSideCollapsed(false);
   }
+  useEffect(() => {
+    if (!sideFocused) return;
+    function restorePanel(event: KeyboardEvent): void {
+      if (event.key === "Escape") setSideFocused(false);
+    }
+    window.addEventListener("keydown", restorePanel);
+    return () => window.removeEventListener("keydown", restorePanel);
+  }, [sideFocused]);
   const annotations = useMemo(() => buildDiffAnnotationIndex(props.review.comments, props.drafts, props.threads, props.focusAreas), [props.review.comments, props.drafts, props.threads, props.focusAreas]);
   function jumpToComment(target: Target): void {
     if (props.openFiles[target.path] === false) props.setOpenFiles({ ...props.openFiles, [target.path]: true });
@@ -1395,13 +1404,14 @@ function ReviewPage(props: DiffProps & { piPanel: PiPanelProps; reviewEvent: "CO
     window.setTimeout(tryScroll, 50);
   }
   const sidePanel = sideCollapsed ? null : <>
-    <div className="resize-handle" role="separator" aria-label="Resize side panel" onMouseDown={(event) => startResizeSidePanel(event, props.sideWidth, props.setSideWidth)} />
+    {!sideFocused && <div className="resize-handle" role="separator" aria-label="Resize side panel" onMouseDown={(event) => startResizeSidePanel(event, props.sideWidth, props.setSideWidth)} />}
     <aside className="side">
       <nav className="side-tabs" role="tablist" aria-label="Review side panel">
         <button role="tab" aria-selected={sideTab === "review"} className={`side-tab${sideTab === "review" ? " active" : ""}`} onClick={() => setSideTab("review")}><span>Review</span>{draftCount > 0 && <span className="side-tab-badge">{draftCount}</span>}</button>
         <button role="tab" aria-selected={sideTab === "pi"} className={`side-tab${sideTab === "pi" ? " active" : ""}`} onClick={() => setSideTab("pi")}><span>Pi</span>{piBadge != null && <span className="side-tab-badge">{piBadge}</span>}</button>
         <button role="tab" aria-selected={sideTab === "comments"} className={`side-tab${sideTab === "comments" ? " active" : ""}`} onClick={() => setSideTab("comments")}><span>Comments</span>{commentCount > 0 && <span className="side-tab-badge">{commentCount}</span>}</button>
-        <button type="button" className="side-panel-button" title="Hide review panel" aria-label="Hide review panel" onClick={() => setSideCollapsed(true)}><ChevronRightIcon size={16} /></button>
+        <button type="button" className="side-panel-button" title={sideFocused ? "Restore panel" : "Focus panel"} aria-label={sideFocused ? "Restore review panel" : "Focus review panel"} aria-pressed={sideFocused} onClick={() => setSideFocused(!sideFocused)}>{sideFocused ? <ScreenNormalIcon size={16} /> : <ScreenFullIcon size={16} />}</button>
+        <button type="button" className="side-panel-button" title="Hide review panel" aria-label="Hide review panel" onClick={() => { setSideFocused(false); setSideCollapsed(true); }}><ChevronRightIcon size={16} /></button>
       </nav>
       <div className="side-tab-panels">
         {sideTab === "review" && <ReviewSummary pr={props.review.pr} files={props.review.files} drafts={props.drafts} setDrafts={props.setDrafts} event={props.reviewEvent} setEvent={props.setReviewEvent} body={props.reviewBody} setBody={props.setReviewBody} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} submitReview={props.submitReview} submitting={props.submitting} invalidDraftIds={props.invalidDraftIds} copyFeedbackPrompt={props.piPanel.copyFeedbackPrompt} onJumpToTarget={jumpToComment} />}
@@ -1410,10 +1420,10 @@ function ReviewPage(props: DiffProps & { piPanel: PiPanelProps; reviewEvent: "CO
       </div>
     </aside>
   </>;
-  const gridTemplateColumns = sideCollapsed ? "minmax(0, 1fr)" : `minmax(0, 1fr) 12px ${props.sideWidth}px`;
+  const gridTemplateColumns = sideCollapsed || sideFocused ? "minmax(0, 1fr)" : `minmax(0, 1fr) 12px ${props.sideWidth}px`;
   return <GitHubDraftContext.Provider value={props.githubDrafts}><div className="review-page">
     <PrHeaderStrip pr={props.review.pr} refreshGithubActivity={props.refreshGithubActivity} refreshingActivity={props.refreshingActivity} />
-    <div className={`review-layout${sideCollapsed ? " side-collapsed" : ""}`} style={{ gridTemplateColumns }}>
+    <div className={`review-layout${sideCollapsed ? " side-collapsed" : ""}${sideFocused ? " side-focused" : ""}`} style={{ gridTemplateColumns }}>
       <main className="files">
         <PrSummary pr={props.review.pr} />
         <div className="files-toolbar">

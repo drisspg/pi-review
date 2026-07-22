@@ -155,8 +155,15 @@ test("uses a compact files toolbar and collapsible review panel", async ({ page 
   await expect(firstFile.locator(".file-path")).toBeVisible();
 
   await toolbar.getByRole("button", { name: "Review changes" }).click();
-  await expect(page.locator(".side")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Maximize side panel" })).toHaveCount(0);
+  const side = page.locator(".side");
+  await expect(side).toBeVisible();
+  await page.getByRole("button", { name: "Focus review panel" }).click();
+  await expect(page.locator(".review-layout")).toHaveClass(/side-focused/);
+  await expect(page.locator(".files")).toBeHidden();
+  expect(await side.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(900);
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".review-layout")).not.toHaveClass(/side-focused/);
+  await expect(page.locator(".files")).toBeVisible();
   const emptyReviewSummary = page.locator(".review-summary-empty");
   await expect(emptyReviewSummary).toBeVisible();
   await emptyReviewSummary.getByRole("button", { name: "Start review" }).click();

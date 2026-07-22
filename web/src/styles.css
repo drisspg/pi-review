@@ -431,6 +431,16 @@ a { color: var(--link); text-decoration: none; }
   align-items: start;
 }
 
+.review-layout.side-focused .files {
+  display: none;
+}
+
+.review-layout.side-focused .side {
+  width: 100%;
+  height: calc(100vh - 70px);
+  max-height: calc(100vh - 70px);
+}
+
 .resize-handle {
   position: sticky;
   top: 58px;
