@@ -30,8 +30,10 @@ test("ask stream writes delta and done SSE events", async () => {
   const calls: string[] = [];
   const res = fakeResponse();
   const api = createAskStreamApi({
-    async askPi(prKey, prompt, purpose, onDelta) {
+    async askPi(prKey, prompt, purpose, onDelta, onEvent) {
       calls.push(`${prKey}:${prompt}:${purpose}`);
+      onEvent({ type: "thinking", delta: "checking" });
+      onEvent({ type: "tool", phase: "start", toolCallId: "call-1", toolName: "read", detail: "read: src/a.ts" });
       onDelta("hello");
       onDelta(" world");
       return "answer";
@@ -47,6 +49,8 @@ test("ask stream writes delta and done SSE events", async () => {
     "content-type": "text/event-stream; charset=utf-8",
   });
   assert.deepEqual(events(res.chunks), [
+    'event: session\ndata: {"type":"thinking","delta":"checking"}',
+    'event: session\ndata: {"type":"tool","phase":"start","toolCallId":"call-1","toolName":"read","detail":"read: src/a.ts"}',
     'event: delta\ndata: {"delta":"hello"}',
     'event: delta\ndata: {"delta":" world"}',
     'event: done\ndata: {"answer":"answer"}',

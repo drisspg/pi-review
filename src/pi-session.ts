@@ -78,6 +78,10 @@ const lastPromptByPr = new Map<string, { chars: number; preview: string; started
 const promptQueueByPr = new Map<string, Promise<void>>();
 type PromptState = { status: "queued" | "running" | "complete" | "failed"; purpose: string; chars: number; queuedAt: string; startedAt?: string; finishedAt?: string; answerChars?: number; error?: string; lastActivityAt?: string; detail?: string };
 
+export type PiPromptEvent =
+  | { type: "thinking"; delta: string }
+  | { type: "tool"; phase: "start" | "update" | "end"; toolCallId: string; toolName: string; detail: string; output?: string; isError?: boolean };
+
 export type PiActivity = {
   purpose: string;
   status: "queued" | "running" | "complete" | "failed" | "idle";
@@ -303,6 +307,37 @@ export async function disposePiSessions(): Promise<void> {
   }
 }
 
+/** Extract bounded text from a streaming or final SDK tool result. */
+function resultText(result: unknown, maxChars = 12_000): string {
+  if (typeof result !== "object" || result == null || !("content" in result) || !Array.isArray(result.content)) return "";
+  const text = result.content.map((part) => typeof part === "object" && part != null && "text" in part && typeof part.text === "string" ? part.text : "").join("\n").trim();
+  return text.length <= maxChars ? text : `${text.slice(0, maxChars)}\n… truncated ${text.length - maxChars} chars …`;
+}
+
+/** Normalize SDK thinking and tool lifecycle events for web session transcripts. */
+export function piPromptEventFromSessionEvent(event: unknown): PiPromptEvent | null {
+  if (typeof event !== "object" || event == null || !("type" in event) || typeof event.type !== "string") return null;
+  if (event.type === "message_update") {
+    const update = event as { assistantMessageEvent?: { type?: string; delta?: string } };
+    const delta = update.assistantMessageEvent?.type === "thinking_delta" ? update.assistantMessageEvent.delta : undefined;
+    return typeof delta === "string" && delta.length > 0 ? { type: "thinking", delta } : null;
+  }
+  if (event.type !== "tool_execution_start" && event.type !== "tool_execution_update" && event.type !== "tool_execution_end") return null;
+  const toolEvent = event as { type: string; toolCallId?: string; toolName?: string; args?: unknown; partialResult?: unknown; result?: unknown; isError?: boolean };
+  if (typeof toolEvent.toolCallId !== "string" || typeof toolEvent.toolName !== "string") return null;
+  const phase = toolEvent.type === "tool_execution_start" ? "start" : toolEvent.type === "tool_execution_update" ? "update" : "end";
+  const output = phase === "update" ? resultText(toolEvent.partialResult) : phase === "end" ? resultText(toolEvent.result) : undefined;
+  return {
+    type: "tool",
+    phase,
+    toolCallId: toolEvent.toolCallId,
+    toolName: toolEvent.toolName,
+    detail: summarizeToolArgs(toolEvent.toolName, toolEvent.args),
+    ...(output == null || output.length === 0 ? {} : { output }),
+    ...(phase === "end" ? { isError: toolEvent.isError === true } : {}),
+  };
+}
+
 function textDeltaFromEvent(event: unknown): string {
   if (typeof event !== "object" || event == null || !("type" in event) || event.type !== "message_update") return "";
   const update = event as { assistantMessageEvent?: { type?: string; delta?: string; text?: string } };
@@ -365,7 +400,7 @@ function errorFromMessage(message: unknown): string | null {
   return errorMessage ?? "Assistant stopped with an error.";
 }
 
-async function runPiPrompt(prKey: string, prompt: string, purpose = "chat", onDelta?: (delta: string) => void): Promise<string> {
+async function runPiPrompt(prKey: string, prompt: string, purpose = "chat", onDelta?: (delta: string) => void, onEvent?: (event: PiPromptEvent) => void): Promise<string> {
   const startedAt = performance.now();
   const sessionKey = sessionKeyForPr(prKey, purpose);
   const session = await getSession(prKey, purpose);
@@ -375,6 +410,8 @@ async function runPiPrompt(prKey: string, prompt: string, purpose = "chat", onDe
   const unsubscribe = session.subscribe((event) => {
     const now = new Date().toISOString();
     const toolDetail = toolCallDetailFromEvent(event);
+    const promptEvent = piPromptEventFromSessionEvent(event);
+    if (promptEvent != null) onEvent?.(promptEvent);
     const previousState = promptStateByPr.get(sessionKey);
     if (previousState != null) promptStateByPr.set(sessionKey, { ...previousState, lastActivityAt: now, ...(toolDetail != null ? { detail: toolDetail } : {}) });
     const message = messageFromEvent(event);
@@ -404,7 +441,7 @@ async function runPiPrompt(prKey: string, prompt: string, purpose = "chat", onDe
   }
 }
 
-export async function askPi(prKey: string, prompt: string, purpose = "chat", onDelta?: (delta: string) => void): Promise<string> {
+export async function askPi(prKey: string, prompt: string, purpose = "chat", onDelta?: (delta: string) => void, onEvent?: (event: PiPromptEvent) => void): Promise<string> {
   const sessionKey = sessionKeyForPr(prKey, purpose);
   const previous = promptQueueByPr.get(sessionKey) ?? Promise.resolve();
   const queuedAt = new Date().toISOString();
@@ -418,7 +455,7 @@ export async function askPi(prKey: string, prompt: string, purpose = "chat", onD
   const startedAt = new Date().toISOString();
   promptStateByPr.set(sessionKey, { status: "running", purpose, chars: prompt.length, queuedAt: promptStateByPr.get(sessionKey)?.queuedAt ?? startedAt, startedAt, lastActivityAt: startedAt });
   try {
-    const answer = await runPiPrompt(prKey, prompt, purpose, onDelta);
+    const answer = await runPiPrompt(prKey, prompt, purpose, onDelta, onEvent);
     promptStateByPr.set(sessionKey, { ...promptStateByPr.get(sessionKey)!, status: "complete", finishedAt: new Date().toISOString(), answerChars: answer.length });
     return answer;
   } catch (error) {

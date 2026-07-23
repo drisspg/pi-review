@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { toolCallDetailFromEvent } from "../../src/pi-session.js";
+import { piPromptEventFromSessionEvent, toolCallDetailFromEvent } from "../../src/pi-session.js";
 
 function assistantEvent(content: unknown): unknown {
   return { type: "message_update", message: { role: "assistant", content } };
@@ -48,4 +48,10 @@ test("ignores non-assistant messages", () => {
 
 test("ignores events without a message", () => {
   assert.equal(toolCallDetailFromEvent({ type: "text_delta", delta: "hi" }), null);
+});
+
+test("normalizes thinking and tool lifecycle events for session transcripts", () => {
+  assert.deepEqual(piPromptEventFromSessionEvent({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "checking" } }), { type: "thinking", delta: "checking" });
+  assert.deepEqual(piPromptEventFromSessionEvent({ type: "tool_execution_start", toolCallId: "call-1", toolName: "bash", args: { command: "pytest tests/unit" } }), { type: "tool", phase: "start", toolCallId: "call-1", toolName: "bash", detail: "bash: pytest tests/unit" });
+  assert.deepEqual(piPromptEventFromSessionEvent({ type: "tool_execution_end", toolCallId: "call-1", toolName: "bash", args: { command: "pytest tests/unit" }, result: { content: [{ type: "text", text: "2 passed" }] }, isError: false }), { type: "tool", phase: "end", toolCallId: "call-1", toolName: "bash", detail: "bash: pytest tests/unit", output: "2 passed", isError: false });
 });

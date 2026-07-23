@@ -41,10 +41,12 @@ async function openReviewForm(page: Page) {
   if (await startReview.count() > 0) await startReview.click();
 }
 
-async function mockAskPi(page: Page, answerForPrompt: (body: { prompt?: string }) => string) {
+async function mockAskPi(page: Page, answerForPrompt: (body: { prompt?: string }) => string, sessionEventsForPrompt?: (body: { prompt?: string }) => Record<string, unknown>[]) {
   await page.route(/\/api\/ask\/stream$/, async (route) => {
-    const answer = answerForPrompt(route.request().postDataJSON() as { prompt?: string });
-    await route.fulfill({ contentType: "text/event-stream", body: `event: delta\ndata: ${JSON.stringify({ delta: answer })}\n\nevent: done\ndata: ${JSON.stringify({ answer })}\n\n` });
+    const request = route.request().postDataJSON() as { prompt?: string };
+    const answer = answerForPrompt(request);
+    const sessionEvents = (sessionEventsForPrompt?.(request) ?? []).map((event) => `event: session\ndata: ${JSON.stringify(event)}\n\n`).join("");
+    await route.fulfill({ contentType: "text/event-stream", body: `${sessionEvents}event: delta\ndata: ${JSON.stringify({ delta: answer })}\n\nevent: done\ndata: ${JSON.stringify({ answer })}\n\n` });
   });
   await page.route(/\/api\/ask$/, async (route) => {
     const answer = answerForPrompt(route.request().postDataJSON() as { prompt?: string });
@@ -363,8 +365,11 @@ test("edits an existing GitHub comment", async ({ page }) => {
   await openSideTab(page, "Comments");
   const firstThread = page.locator(".side .github-thread").first();
   await firstThread.getByRole("button", { name: "Edit" }).first().click();
-  await firstThread.getByLabel("Edit comment").fill("edited from pi-review");
-  await firstThread.getByRole("button", { name: "Save" }).click();
+  const editor = firstThread.locator(".github-comment-edit");
+  await expect(editor.getByRole("button", { name: "Cancel" })).toBeVisible();
+  await expect(firstThread.locator(".github-comment-header").getByRole("button", { name: "Cancel" })).toHaveCount(0);
+  await editor.getByLabel("Edit comment").fill("edited from pi-review");
+  await editor.getByRole("button", { name: "Save" }).click();
 
   await expect.poll(() => editPayload).toMatchObject({ body: "edited from pi-review" });
   await expect(firstThread.locator(".markdown").first()).toContainText("edited from pi-review");
@@ -597,11 +602,11 @@ test("persists Pi review chat across page reloads", async ({ page }) => {
   await mockAskPi(page, () => "Persisted answer about `cu_seqlens_q`.");
 
   await openSideTab(page, "Pi");
-  await page.locator(".ai-review").getByPlaceholder("Ask Pi about this PR…").fill("remember this conversation");
+  await page.locator(".ai-review").getByPlaceholder("Message Pi…").fill("remember this conversation");
   await expect(page.locator(".ai-review").getByRole("button", { name: "Send" })).toBeEnabled();
   await Promise.all([
     page.waitForResponse(/\/api\/ai-review\/save$/),
-    page.locator(".ai-review").getByPlaceholder("Ask Pi about this PR…").press("Enter"),
+    page.locator(".ai-review").getByPlaceholder("Message Pi…").press("Enter"),
   ]);
   await expect(page.locator(".ai-review")).toContainText("remember this conversation");
   await expect(page.locator(".ai-review")).toContainText("Persisted answer");
@@ -679,7 +684,11 @@ test("runs the right-sidebar Pi review panel and continues the chat with Enter",
   await page.route(/\/api\/pi\/review$/, async (route) => {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { id: "review-job" } }) });
   });
-  await mockAskPi(page, (body) => body.prompt?.includes("latest question") ? "Follow-up answer about `cu_seqlens_q`." : "Unexpected ask response");
+  await mockAskPi(page, (body) => body.prompt?.includes("latest question") ? "Follow-up answer about `cu_seqlens_q`." : "Unexpected ask response", (body) => body.prompt?.includes("latest question") ? [
+    { type: "thinking", delta: "Inspecting the changed call path." },
+    { type: "tool", phase: "start", toolCallId: "read-1", toolName: "read", detail: "read: csrc/flash_attn/flash_api.cpp" },
+    { type: "tool", phase: "end", toolCallId: "read-1", toolName: "read", detail: "read: csrc/flash_attn/flash_api.cpp", output: "Relevant source lines", isError: false },
+  ] : []);
 
   await openSideTab(page, "Pi");
   await page.getByRole("button", { name: /Full review|Refresh findings/ }).click();
@@ -699,9 +708,15 @@ test("runs the right-sidebar Pi review panel and continues the chat with Enter",
   await expect(dialog.getByText("CUDA smoke test")).toBeVisible();
   await expect(dialog).not.toContainText("Correctness:");
   await expect(dialog.getByText("General review")).toHaveCount(1);
-  await dialog.getByPlaceholder("Ask Pi about this PR…").fill("what should I test?");
-  await dialog.getByPlaceholder("Ask Pi about this PR…").press("Enter");
+  await dialog.getByPlaceholder("Message Pi…").fill("what should I test?");
+  await dialog.getByPlaceholder("Message Pi…").press("Enter");
   await expect(dialog).toContainText("Follow-up answer");
+  await expect(dialog.getByText("Thinking")).toBeVisible();
+  await expect(dialog.getByText("read: csrc/flash_attn/flash_api.cpp")).toBeVisible();
+  await dialog.getByText("read: csrc/flash_attn/flash_api.cpp").click();
+  await expect(dialog).toContainText("Relevant source lines");
+  await page.getByRole("button", { name: "Focus review panel" }).click();
+  await expect(dialog.getByPlaceholder("Message Pi…")).toBeInViewport();
 });
 
 test("shows Pi-created review comments as editable local drafts", async ({ page }) => {
@@ -717,12 +732,15 @@ test("shows Pi-created review comments as editable local drafts", async ({ page 
   await mockAskPi(page, () => "I added that as a private draft comment.");
 
   await openSideTab(page, "Pi");
+  await page.getByRole("button", { name: "Focus review panel" }).click();
+  await expect(page.locator(".files")).toBeHidden();
   const panel = page.locator(".ai-review");
-  await panel.getByPlaceholder("Ask Pi about this PR…").fill("Draft a review comment for the empty-input concern.");
-  await panel.getByPlaceholder("Ask Pi about this PR…").press("Enter");
+  await panel.getByPlaceholder("Message Pi…").fill("Draft a review comment for the empty-input concern.");
+  await panel.getByPlaceholder("Message Pi…").press("Enter");
 
   const draft = page.locator(".inline-thread.draft", { hasText: body });
-  await expect(draft).toBeVisible();
+  await expect(page.locator(".files")).toBeVisible();
+  await expect(draft).toBeInViewport();
   await draft.getByRole("button", { name: "Edit draft" }).click();
   const editor = page.locator(".inline-thread.draft textarea").first();
   await expect(editor).toHaveValue(body);
@@ -773,8 +791,8 @@ test("copies local draft comments in a feedback prompt from the Review tab", asy
   await expect(panel).toContainText("Global feedback from Pi");
   await panel.getByRole("button", { name: /Focus scan|Refresh focus scan/ }).click();
   await expect(panel).toContainText("copied focus area");
-  await panel.getByPlaceholder("Ask Pi about this PR…").fill("What should I prioritize?");
-  await panel.getByPlaceholder("Ask Pi about this PR…").press("Enter");
+  await panel.getByPlaceholder("Message Pi…").fill("What should I prioritize?");
+  await panel.getByPlaceholder("Message Pi…").press("Enter");
   await expect(panel).toContainText("AI chat answer");
   await openSideTab(page, "Review");
   const reviewPanel = page.locator(".side .panel");

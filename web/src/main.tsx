@@ -13,7 +13,7 @@ import { autoGrowTextarea } from "./lib/dom";
 import { parseFocusAreas } from "./lib/focus";
 import { languageForPath } from "./lib/highlight";
 import { newId, prUrlFromKey, relativeTime, shortSha } from "./lib/pr";
-import type { AiReview, AiReviewMessage, AiReviewRecord, DiffRow, DraftComment, DragSelection, FileReviewState, FlowDag, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, GitHubDraftComment, GitHubPendingReview, GpuWorkspace, GpuWorkspaceContract, GpuWorkspaceExecResult, LogEntry, OpenResponse, PiAgentActivity, PullFile, PullIssueComment, PullRequestReviewSummary, PullReviewComment, ReviewMemoryRecord, ReviewMemoryResponse, StoredPullRequest, Target, ThemeName, Thread, ThreadMessage } from "./types";
+import type { AiReview, AiReviewMessage, AiReviewRecord, DiffRow, DraftComment, DragSelection, FileReviewState, FlowDag, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, GitHubDraftComment, GitHubPendingReview, GpuWorkspace, GpuWorkspaceContract, GpuWorkspaceExecResult, LogEntry, OpenResponse, PiAgentActivity, PiSessionEvent, PullFile, PullIssueComment, PullRequestReviewSummary, PullReviewComment, ReviewMemoryRecord, ReviewMemoryResponse, StoredPullRequest, Target, ThemeName, Thread, ThreadMessage } from "./types";
 import "./styles.css";
 
 type DiffViewMode = "unified" | "split";
@@ -150,6 +150,29 @@ function messagesFromAiReviewRecord(review: AiReviewRecord | null | undefined): 
   return review.answer.trim().length > 0 ? [generalReviewMessage(review.answer)] : [];
 }
 
+/** Fold a streamed Pi lifecycle event into the visible entries for the current turn. */
+function applyPiSessionEvent(entries: AiReviewMessage[], event: PiSessionEvent): AiReviewMessage[] {
+  if (event.type === "thinking") {
+    const previous = entries.at(-1);
+    return previous?.role === "thinking"
+      ? [...entries.slice(0, -1), { ...previous, text: previous.text + event.delta }]
+      : [...entries, { role: "thinking", kind: "chat", text: event.delta, title: "Thinking" }];
+  }
+  const existingIndex = entries.findIndex((entry) => entry.role === "tool" && entry.toolCallId === event.toolCallId);
+  const existing = existingIndex < 0 ? null : entries[existingIndex];
+  const toolEntry: AiReviewMessage = {
+    role: "tool",
+    kind: "chat",
+    text: event.output ?? existing?.text ?? "",
+    title: existing?.title != null && event.detail === event.toolName ? existing.title : event.detail,
+    toolCallId: event.toolCallId,
+    toolName: event.toolName,
+    toolStatus: event.phase === "end" ? event.isError ? "error" : "success" : "running",
+  };
+  if (existingIndex < 0) return [...entries, toolEntry];
+  return entries.map((entry, index) => index === existingIndex ? toolEntry : entry);
+}
+
 function historyTimestamp(record: { updatedAt: string; createdAt: string }): string {
   const date = new Date(record.updatedAt || record.createdAt);
   return Number.isNaN(date.getTime()) ? record.updatedAt || record.createdAt : date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -278,7 +301,7 @@ function reviewFeedbackPromptPayload(review: OpenResponse, drafts: DraftComment[
     prUrl: review.pr.url,
     headSha: review.pr.headSha,
     userComments: [...localReviewComments, ...reviewSummaries, ...issueComments, ...reviewComments],
-    aiComments: currentAiReviewMessages(aiReview).filter((message) => message.kind !== "general-review" && message.text.trim().length > 0).map(({ role, text, title, kind }) => ({ role, text: text.trim(), title, kind })),
+    aiComments: currentAiReviewMessages(aiReview).filter((message) => message.kind !== "general-review" && (message.role === "user" || message.role === "pi") && message.text.trim().length > 0).map(({ role, text, title, kind }) => ({ role, text: text.trim(), title, kind })),
     focusAreas: focusAreas.map((area) => ({ path: area.path, startLine: area.startLine, endLine: area.endLine, title: area.title, body: area.body, viewed: viewedFocusIds[area.id] === true })),
     globalFeedback: currentGeneralReviewText(aiReview),
     focusScan: focusReview.text,
@@ -424,6 +447,7 @@ function App() {
   const suppressClickRef = useRef(false);
   const [drafts, setDrafts] = useState<DraftComment[]>([]);
   const draftsRef = useRef<DraftComment[]>([]);
+  const [draftRevealId, setDraftRevealId] = useState<string | null>(null);
   const [githubDraftReview, setGithubDraftReview] = useState<GitHubPendingReview | null>(null);
   const [githubDraftLoaded, setGithubDraftLoaded] = useState(false);
   const [githubDraftLoading, setGithubDraftLoading] = useState(false);
@@ -434,6 +458,7 @@ function App() {
   const [invalidDraftIds, setInvalidDraftIds] = useState<Record<string, boolean>>({});
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [aiReview, setAiReview] = useState<AiReview>({ expanded: false, open: false, running: false, text: "", messages: [] });
+  const aiReviewRef = useRef<AiReview>(aiReview);
   const [aiChatSending, setAiChatSending] = useState(false);
   const [aiReviewId, setAiReviewId] = useState<string | null>(null);
   const [focusReview, setFocusReview] = useState<FocusReview>({ expanded: false, open: false, running: false, text: "" });
@@ -469,6 +494,7 @@ function App() {
 
   useEffect(() => { refreshHistory().catch((err: unknown) => setError(err instanceof Error ? err.message : String(err))); refreshLogs().catch(() => undefined); }, []);
   useEffect(() => { draftsRef.current = drafts; }, [drafts]);
+  useEffect(() => { aiReviewRef.current = aiReview; }, [aiReview]);
 
   useEffect(() => {
     function openRoute() {
@@ -583,6 +609,7 @@ function App() {
     setDragSelection(null);
     draftsRef.current = data.draftReview?.comments ?? [];
     setDrafts(draftsRef.current);
+    setDraftRevealId(null);
     setGithubDraftReview(null);
     setGithubDraftLoaded(false);
     setGithubDraftLoading(false);
@@ -903,6 +930,7 @@ function App() {
       const mergedDrafts = [...currentDrafts, ...addedDrafts];
       draftsRef.current = mergedDrafts;
       setDrafts(mergedDrafts);
+      setDraftRevealId(addedDrafts[addedDrafts.length - 1].id);
       setOpenFiles((current) => ({ ...current, ...Object.fromEntries(addedDrafts.map((draft) => [draft.path, true])) }));
       updateCachedReview(targetReview.pr.key, (current) => ({ ...current, draftReview: { ...draftReview, comments: mergedDrafts } }));
     } catch (err) {
@@ -978,8 +1006,10 @@ function App() {
         if (status.status === "failed") throw new Error(status.error ?? "AI review failed");
         if (status.status !== "complete") throw new Error("AI review returned an unknown job status");
         const answer = status.answer ?? "AI review completed without output.";
-        const nextMessages: AiReviewMessage[] = [generalReviewMessage(answer)];
-        setAiReview((current) => ({ ...current, open: !background || current.open, expanded: !background || current.expanded, running: false, text: answer, messages: nextMessages, activity: null }));
+        const nextMessages: AiReviewMessage[] = [generalReviewMessage(answer), ...aiReviewRef.current.messages.filter((message) => message.kind !== "general-review")];
+        const nextReview = { ...aiReviewRef.current, open: !background || aiReviewRef.current.open, expanded: !background || aiReviewRef.current.expanded, running: false, text: answer, messages: nextMessages, activity: null };
+        aiReviewRef.current = nextReview;
+        setAiReview(nextReview);
         void saveAiReviewFor(targetReview, answer, nextMessages, null);
         break;
       }
@@ -997,29 +1027,43 @@ function App() {
     const question = message.trim();
     const initialActivity = runningAgentActivity("chat");
     let cancelActivityPolling: () => void = () => undefined;
+    const turnStart: AiReviewMessage[] = [...startingReview.messages.filter((message) => message.kind !== "general-review"), { role: "user", kind: "chat", text: question }];
+    let turnEntries: AiReviewMessage[] = [];
+    let answerText = "";
     setAiChatSending(true);
-    setAiReview((current) => ({ ...current, open: true, expanded: true, activity: initialActivity, messages: [...current.messages, { role: "user", kind: "chat", text: question }, { role: "pi", kind: "chat", text: "" }] }));
+    setAiReview((current) => ({ ...current, open: true, expanded: true, activity: initialActivity, messages: [...current.messages.filter((entry) => entry.kind === "general-review"), ...turnStart] }));
+    function publishTurn(): void {
+      if (activeReviewKeyRef.current !== targetReview.pr.key) return;
+      const messages = [...aiReviewRef.current.messages.filter((entry) => entry.kind === "general-review"), ...turnStart, ...turnEntries, ...(answerText.length === 0 ? [] : [{ role: "pi" as const, kind: "chat" as const, text: answerText }])];
+      setAiReview((current) => ({ ...current, open: true, expanded: true, activity: streamingAgentActivity(current.activity, answerText), messages }));
+    }
     try {
-      const previousDialogue = startingReview.messages.filter((entry) => entry.kind !== "general-review").map((entry) => `${entry.role === "user" ? "User" : "Pi"}: ${entry.text}`).join("\n\n");
+      const previousDialogue = startingReview.messages.filter((entry) => entry.kind !== "general-review" && (entry.role === "user" || entry.role === "pi")).map((entry) => `${entry.role === "user" ? "User" : "Pi"}: ${entry.text}`).join("\n\n");
       const { prompt, purpose } = await buildPiPrompt({ mode: "ai-chat", prKey: targetReview.pr.key, previousDialogue: previousDialogue || "(none)", question });
       cancelActivityPolling = startPiAgentActivityPolling(targetReview.pr.key, purpose, (activity) => {
         if (activeReviewKeyRef.current === targetReview.pr.key) setAiReview((current) => ({ ...current, activity: activity ?? current.activity ?? null }));
       }, initialActivity);
-      const setAnswer = (answer: string) => {
-        if (activeReviewKeyRef.current !== targetReview.pr.key) return;
-        setAiReview((current) => ({ ...current, open: true, expanded: true, activity: streamingAgentActivity(current.activity, answer), messages: [...current.messages.slice(0, -1), { role: "pi", kind: "chat", text: answer }] }));
-      };
-      const answer = await askPiApi({ prKey: targetReview.pr.key, prompt, purpose }, setAnswer);
+      const answer = await askPiApi({ prKey: targetReview.pr.key, prompt, purpose }, (streamedAnswer) => {
+        answerText = streamedAnswer;
+        publishTurn();
+      }, (event) => {
+        turnEntries = applyPiSessionEvent(turnEntries, event);
+        publishTurn();
+      });
       cancelActivityPolling();
       await refreshModelDrafts(targetReview);
-      const nextMessages: AiReviewMessage[] = [...startingReview.messages, { role: "user", kind: "chat", text: question }, { role: "pi", kind: "chat", text: answer }];
-      if (activeReviewKeyRef.current === targetReview.pr.key) setAiReview((current) => ({ ...current, open: true, expanded: true, activity: null, messages: nextMessages }));
+      const nextMessages: AiReviewMessage[] = [...aiReviewRef.current.messages.filter((entry) => entry.kind === "general-review"), ...turnStart, ...turnEntries, { role: "pi", kind: "chat", text: answer }];
+      if (activeReviewKeyRef.current === targetReview.pr.key) {
+        const nextReview = { ...aiReviewRef.current, open: true, expanded: true, activity: null, messages: nextMessages };
+        aiReviewRef.current = nextReview;
+        setAiReview(nextReview);
+      }
       void saveAiReviewFor(targetReview, currentGeneralReviewText({ ...startingReview, text: answer, messages: nextMessages }) || answer, nextMessages, aiReviewId);
     } catch (err) {
       cancelActivityPolling();
       if (activeReviewKeyRef.current !== targetReview.pr.key) return;
       const text = `Ask Pi failed: ${err instanceof Error ? err.message : String(err)}`;
-      setAiReview((current) => ({ ...current, open: true, expanded: true, activity: null, messages: [...current.messages.slice(0, -1), { role: "pi", kind: "chat", text }] }));
+      setAiReview((current) => ({ ...current, open: true, expanded: true, activity: null, messages: [...current.messages.filter((entry) => entry.kind === "general-review"), ...turnStart, ...turnEntries, { role: "pi", kind: "chat", text }] }));
     } finally {
       if (activeReviewKeyRef.current === targetReview.pr.key) setAiChatSending(false);
     }
@@ -1168,7 +1212,7 @@ function App() {
       openLogs={() => { setLogsOpen(true); void refreshLogs(); }}
     />
     {error != null && <div className="error">{error}</div>}
-    {busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, sendMessage: sendAiReviewMessage, chatSending: aiChatSending, clearFollowUp: clearAiReviewFollowUp, copyFeedbackPrompt: copyReviewFeedbackPrompt, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} reviewEvent={reviewEvent} setReviewEvent={setReviewEvent} reviewBody={reviewBody} setReviewBody={setReviewBody} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} githubDrafts={{ review: githubDraftReview, loaded: githubDraftLoaded, loading: githubDraftLoading, savingTarget: githubDraftSavingTarget, pull: pullGithubDraftReview, saveComment: saveGithubDraftComment, copyHandoff: copyGithubDraftHandoff }} />}
+    {busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} toggleThread={toggleThread} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} draftRevealId={draftRevealId} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, sendMessage: sendAiReviewMessage, chatSending: aiChatSending, clearFollowUp: clearAiReviewFollowUp, copyFeedbackPrompt: copyReviewFeedbackPrompt, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} reviewEvent={reviewEvent} setReviewEvent={setReviewEvent} reviewBody={reviewBody} setReviewBody={setReviewBody} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} githubDrafts={{ review: githubDraftReview, loaded: githubDraftLoaded, loading: githubDraftLoading, savingTarget: githubDraftSavingTarget, pull: pullGithubDraftReview, saveComment: saveGithubDraftComment, copyHandoff: copyGithubDraftHandoff }} />}
     {diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}
     {review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} openDiagnostics={() => { setSettingsOpen(false); void showDiagnostics(); }} close={() => setSettingsOpen(false)} />}
     {memoryOpen && <ReviewMemoryModal memory={reviewMemory} loading={memoryLoading} distilling={memoryDistilling} refresh={() => void loadReviewMemory()} distill={() => void distillReviewMemory()} close={() => setMemoryOpen(false)} />}
@@ -1360,7 +1404,7 @@ function clampSidePanelWidth(width: number): number {
   return Math.min(maxSidePanelWidth(), Math.max(300, width));
 }
 
-function ReviewPage(props: DiffProps & { piPanel: PiPanelProps; reviewEvent: "COMMENT" | "APPROVE" | "REQUEST_CHANGES"; setReviewEvent: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES") => void; reviewBody: string; setReviewBody: (body: string) => void; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; submitting: boolean; invalidDraftIds: Record<string, boolean>; refreshingActivity: boolean; githubDrafts: GitHubDraftControls }) {
+function ReviewPage(props: DiffProps & { draftRevealId: string | null; piPanel: PiPanelProps; reviewEvent: "COMMENT" | "APPROVE" | "REQUEST_CHANGES"; setReviewEvent: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES") => void; reviewBody: string; setReviewBody: (body: string) => void; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; submitting: boolean; invalidDraftIds: Record<string, boolean>; refreshingActivity: boolean; githubDrafts: GitHubDraftControls }) {
   const diffViewLabel = props.diffViewMode === "unified" ? "Split view" : "Unified view";
   const [sideTab, setSideTab] = useState<"review" | "pi" | "comments">("review");
   const [sideCollapsed, setSideCollapsed] = useState(true);
@@ -1382,6 +1426,26 @@ function ReviewPage(props: DiffProps & { piPanel: PiPanelProps; reviewEvent: "CO
     window.addEventListener("keydown", restorePanel);
     return () => window.removeEventListener("keydown", restorePanel);
   }, [sideFocused]);
+  useEffect(() => {
+    if (props.draftRevealId == null) return;
+    const draft = props.drafts.find((candidate) => candidate.id === props.draftRevealId);
+    if (draft == null) return;
+    setSideFocused(false);
+    if (props.openFiles[draft.path] === false) props.setOpenFiles({ ...props.openFiles, [draft.path]: true });
+    let cancelled = false;
+    let attempts = 0;
+    function revealDraft(): void {
+      if (cancelled) return;
+      const element = document.getElementById(`draft-${props.draftRevealId}`);
+      if (element != null) {
+        element.scrollIntoView({ behavior: "smooth", block: "center" });
+      } else if (++attempts < 20) {
+        window.setTimeout(revealDraft, 100);
+      }
+    }
+    window.setTimeout(revealDraft, 50);
+    return () => { cancelled = true; };
+  }, [props.draftRevealId]);
   const annotations = useMemo(() => buildDiffAnnotationIndex(props.review.comments, props.drafts, props.threads, props.focusAreas), [props.review.comments, props.drafts, props.threads, props.focusAreas]);
   function jumpToComment(target: Target): void {
     if (props.openFiles[target.path] === false) props.setOpenFiles({ ...props.openFiles, [target.path]: true });
@@ -1421,7 +1485,7 @@ function ReviewPage(props: DiffProps & { piPanel: PiPanelProps; reviewEvent: "CO
     </aside>
   </>;
   const gridTemplateColumns = sideCollapsed || sideFocused ? "minmax(0, 1fr)" : `minmax(0, 1fr) 12px ${props.sideWidth}px`;
-  return <GitHubDraftContext.Provider value={props.githubDrafts}><div className="review-page">
+  return <GitHubDraftContext.Provider value={props.githubDrafts}><div className={`review-page${sideFocused ? " panel-focused" : ""}`}>
     <PrHeaderStrip pr={props.review.pr} refreshGithubActivity={props.refreshGithubActivity} refreshingActivity={props.refreshingActivity} />
     <div className={`review-layout${sideCollapsed ? " side-collapsed" : ""}${sideFocused ? " side-focused" : ""}`} style={{ gridTemplateColumns }}>
       <main className="files">
@@ -1731,7 +1795,7 @@ function DiffRowView({ row, target, languagePath, threads, setThreads, toggleThr
   const codeCell = (className = "code-cell") => <span className={className}>{showMarker && <span className="diff-marker">{diffMarker(row)}</span>}<CodeText code={codeText} language={language} syntaxContext={row.syntaxContext} /></span>;
   const unifiedCells = <><span className="num old-num">{row.oldLine ?? ""}</span><span className="num new-num">{row.newLine ?? ""}</span>{codeCell()}{threadPill}</>;
   const splitCells = <><span className="num old-num">{row.oldLine ?? ""}</span><div className="split-code old-code">{row.newLine == null || rowHasKind(row, "context") || rowHasKind(row, "hunk") || rowHasKind(row, "meta") ? codeCell("code-cell split-code-cell") : null}</div><span className="num new-num">{row.newLine ?? ""}</span><div className="split-code new-code">{row.oldLine == null || rowHasKind(row, "context") || rowHasKind(row, "hunk") || rowHasKind(row, "meta") ? codeCell("code-cell split-code-cell") : null}</div>{threadPill}</>;
-  return <><div className={`diff-row ${diffViewMode} ${row.kind} ${thread != null && !thread.collapsed ? "selected" : ""} ${selecting ? "range-selecting" : ""} ${inThreadRange ? "in-thread-range" : ""}`} data-path={target?.path} data-line={target?.line ?? undefined} data-side={target?.side} data-hunk={target?.hunk} onMouseDown={(event) => { if (target != null && event.button === 0) { if (isDiffCodeSelection(event)) return; event.preventDefault(); beginDrag(target); } }} onMouseEnter={() => { if (target != null && dragSelection != null) updateDrag(target); }} onMouseUp={() => { if (target != null) finishDrag(target); }} onClick={(event) => { if (target != null && !hasSelectedDiffCode(event)) handleRowClick(target, event.shiftKey); }}>{diffViewMode === "split" ? splitCells : unifiedCells}</div>{inlineCommentThreads.map((commentThread) => <ExistingReviewThread key={commentThread.map((comment) => comment.id).join(":")} comments={commentThread} prUrl={prUrl} refreshGithubActivity={refreshGithubActivity} collapseSignal={collapseSignal} collapseComments={commentsCollapsed} />)}{rowFocusAreas.map((area) => <FocusAreaInline key={area.id} prUrl={prUrl} area={area} active={area.id === activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} askFocusArea={askFocusArea} addDraft={(body) => setDrafts([...drafts, { id: newId(), path: area.path, line: area.endLine, startLine: area.startLine, side: "RIGHT", body }])} />)}{inlineDrafts.map((draft) => <div className="inline-thread draft" key={draft.id}><DraftView draft={draft} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} /></div>)}{thread != null && <ThreadBox prUrl={prUrl} thread={thread} setThread={(updatedThread) => setThreads((current) => { const next = { ...current }; delete next[thread.key]; next[updatedThread.key] = updatedThread; return next; })} closeThread={() => setThreads((current) => { const next = { ...current }; delete next[thread.key]; return next; })} addDraft={() => { if (thread.draft.trim().length > 0) setDrafts([...drafts, { id: newId(), path: thread.target.path, line: thread.target.line, startLine: thread.target.startLine, side: thread.target.side, body: thread.draft.trim() }]); setThreads((current) => { const next = { ...current }; if (thread.messages.length === 0) delete next[thread.key]; else next[thread.key] = { ...thread, draft: "", collapsed: true }; return next; }); }} askThread={askThread} />}</>;
+  return <><div className={`diff-row ${diffViewMode} ${row.kind} ${thread != null && !thread.collapsed ? "selected" : ""} ${selecting ? "range-selecting" : ""} ${inThreadRange ? "in-thread-range" : ""}`} data-path={target?.path} data-line={target?.line ?? undefined} data-side={target?.side} data-hunk={target?.hunk} onMouseDown={(event) => { if (target != null && event.button === 0) { if (isDiffCodeSelection(event)) return; event.preventDefault(); beginDrag(target); } }} onMouseEnter={() => { if (target != null && dragSelection != null) updateDrag(target); }} onMouseUp={() => { if (target != null) finishDrag(target); }} onClick={(event) => { if (target != null && !hasSelectedDiffCode(event)) handleRowClick(target, event.shiftKey); }}>{diffViewMode === "split" ? splitCells : unifiedCells}</div>{inlineCommentThreads.map((commentThread) => <ExistingReviewThread key={commentThread.map((comment) => comment.id).join(":")} comments={commentThread} prUrl={prUrl} refreshGithubActivity={refreshGithubActivity} collapseSignal={collapseSignal} collapseComments={commentsCollapsed} />)}{rowFocusAreas.map((area) => <FocusAreaInline key={area.id} prUrl={prUrl} area={area} active={area.id === activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} askFocusArea={askFocusArea} addDraft={(body) => setDrafts([...drafts, { id: newId(), path: area.path, line: area.endLine, startLine: area.startLine, side: "RIGHT", body }])} />)}{inlineDrafts.map((draft) => <div className="inline-thread draft" id={`draft-${draft.id}`} key={draft.id}><DraftView draft={draft} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} /></div>)}{thread != null && <ThreadBox prUrl={prUrl} thread={thread} setThread={(updatedThread) => setThreads((current) => { const next = { ...current }; delete next[thread.key]; next[updatedThread.key] = updatedThread; return next; })} closeThread={() => setThreads((current) => { const next = { ...current }; delete next[thread.key]; return next; })} addDraft={() => { if (thread.draft.trim().length > 0) setDrafts([...drafts, { id: newId(), path: thread.target.path, line: thread.target.line, startLine: thread.target.startLine, side: thread.target.side, body: thread.draft.trim() }]); setThreads((current) => { const next = { ...current }; if (thread.messages.length === 0) delete next[thread.key]; else next[thread.key] = { ...thread, draft: "", collapsed: true }; return next; }); }} askThread={askThread} />}</>;
 }
 
 function FocusAreaInline({ prUrl, area, active, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds, askFocusArea, addDraft }: { prUrl: string; area: FocusArea; active: boolean; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"]; askFocusArea: DiffProps["askFocusArea"]; addDraft: (body: string) => void }) {
@@ -1898,17 +1962,27 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
   const hasMessages = messages.length > 0;
   const reviewMessages = messages.filter((message) => message.kind === "general-review");
   const chatMessages = messages.filter((message) => message.kind !== "general-review");
-  const renderMessage = (message: AiReviewMessage, index: number) => {
-    const isGeneralReview = message.kind === "general-review";
-    return <details className={`ai-chat-message ${message.role}${isGeneralReview ? " general-review" : ""}`} key={index} open>
-      <summary><span className="message-role">{message.title ?? (message.role === "user" ? "You" : "Pi")}</span></summary>
-      <MarkdownText text={message.text} fileLinks={{ prUrl, snippets: false }} />
+  const renderGeneralReview = (message: AiReviewMessage, index: number) => <details className="ai-chat-message general-review" key={index} open>
+    <summary><span className="message-role">{message.title ?? "General review"}</span></summary>
+    <MarkdownText text={message.text} fileLinks={{ prUrl, snippets: false }} />
+  </details>;
+  const renderSessionEntry = (message: AiReviewMessage, index: number) => {
+    if (message.role === "thinking") return <details className="pi-session-entry thinking" key={index}>
+      <summary><span className="pi-session-entry-icon" aria-hidden="true">◇</span><span>{message.title ?? "Thinking"}</span></summary>
+      <p>{message.text}</p>
     </details>;
+    if (message.role === "tool") {
+      const status = message.toolStatus ?? "success";
+      return <details className={`pi-session-entry tool ${status}`} key={index} open={status !== "success"}>
+        <summary><span className="pi-session-entry-icon" aria-hidden="true">{status === "running" ? "●" : status === "error" ? "×" : "✓"}</span><span>{message.title ?? message.toolName ?? "Tool"}</span></summary>
+        {message.text.length > 0 && <pre>{message.text}</pre>}
+      </details>;
+    }
+    return <article className={`pi-session-message ${message.role}`} key={index}>
+      <div className="pi-session-message-role">{message.role === "user" ? "You" : "Pi"}</div>
+      {message.role === "user" ? <p>{message.text}</p> : <MarkdownText text={message.text} fileLinks={{ prUrl, snippets: false }} />}
+    </article>;
   };
-  const body = messages.length > 0 ? <div className="ai-review-dialogue">
-    {reviewMessages.length > 0 && <div className="ai-chat-messages ai-review-response">{reviewMessages.map(renderMessage)}</div>}
-    {chatMessages.length > 0 && <div className="ai-chat-section"><div className="ai-chat-section-head"><span className="ai-chat-section-label">Chat</span><Button variant="muted" className="small-muted-button" onClick={clearFollowUp} disabled={chatSending} aria-label="Clear chat">Clear</Button></div><div className="ai-chat-messages">{chatMessages.map(renderMessage)}</div></div>}
-  </div> : <p className="muted">Run review or ask Pi about this PR.</p>;
   async function copyFeedback() {
     if (copyingFeedback) return;
     setCopyingFeedback(true);
@@ -1954,7 +2028,8 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
     if (next) setCollapsedFocusAreaIds(nextCollapsedIds);
     void saveFocusScan(focusReview.text, nextViewedIds, nextCollapsedIds);
   }
-  const composer = <div className="ai-chat-followup"><div className="ai-chat-divider"><span>Ask Pi about this PR</span></div><div className="ai-chat-composer"><textarea ref={composerRef} value={draft} onChange={(event) => setDraft(event.target.value)} onInput={(event) => autoGrowTextarea(event.currentTarget)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submitChat(); } }} placeholder="Ask Pi about this PR…" /><Button variant="muted" onClick={submitChat} disabled={chatSending || draft.trim().length === 0}>{chatSending ? "Sending…" : "Send"}</Button></div>{chatSending && <AgentActivityLine activity={review.activity} />}</div>;
+  const composer = <div className="pi-session-composer"><textarea ref={composerRef} rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onInput={(event) => autoGrowTextarea(event.currentTarget)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submitChat(); } }} placeholder="Message Pi…" /><div className="pi-session-composer-foot"><span className="pi-session-input-hint">Enter to send · Shift+Enter for newline</span>{chatSending && <AgentActivityLine activity={review.activity} />}<Button variant="muted" onClick={submitChat} disabled={chatSending || draft.trim().length === 0}>{chatSending ? "Running…" : "Send"}</Button></div></div>;
+  const sessionChat = <section className="pi-session-chat" aria-label="Pi session chat"><div className="pi-session-chat-head"><strong>Session</strong>{chatMessages.length > 0 && <Button variant="muted" className="small-muted-button" onClick={clearFollowUp} disabled={chatSending} aria-label="Clear chat">Clear</Button>}</div><div className="pi-session-transcript">{chatMessages.length > 0 ? chatMessages.map(renderSessionEntry) : <div className="pi-session-empty"><strong>Start a Pi session</strong><span>Ask about the PR, investigate the checkout, or request editable review drafts.</span></div>}</div>{composer}</section>;
   const selectedAiReviewId = aiReviewId ?? "";
   const selectedFocusScanId = focusScanId ?? "";
   const latestAiReviewId = aiReviewHistory[0]?.id ?? null;
@@ -1990,7 +2065,7 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
     })}
   </div>;
   return <section className={`panel ai-review${viewingHistory ? " viewing-history" : ""}`}>
-    <div className="section-head pi-panel-head"><h2>Pi{viewingHistory && <span className="pi-history-flag" role="status">Viewing earlier run</span>}</h2><Button type="button" variant="muted" className="small-muted-button pi-copy-feedback" onClick={() => void copyFeedback()} disabled={copyingFeedback}>{copyingFeedback ? "Copying…" : feedbackCopied ? "Copied feedback prompt" : "Copy feedback prompt"}</Button></div>
+    <div className="section-head pi-panel-head"><h2>Pi session{viewingHistory && <span className="pi-history-flag" role="status">Viewing earlier run</span>}</h2><Button type="button" variant="muted" className="small-muted-button pi-copy-feedback" onClick={() => void copyFeedback()} disabled={copyingFeedback}>{copyingFeedback ? "Copying…" : feedbackCopied ? "Copied feedback prompt" : "Copy feedback prompt"}</Button></div>
     {feedbackCopyError != null && <p className="muted copy-feedback-error" role="alert">Copy failed: {feedbackCopyError}</p>}
     <div className="pi-actions">
       <div className="pi-action">
@@ -2004,9 +2079,10 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
         {aiReviewHistory.length > 1 && <details className="pi-history-compact"><summary><span className="disclosure-chevron" aria-hidden="true">›</span>Review/chat history ({aiReviewHistory.length})</summary><div className="pi-history-picker"><select aria-label="Review chat history" value={selectedAiReviewId} onChange={(event) => showAiReviewRecord(aiReviewHistory.find((record) => record.id === event.target.value))}>{aiHistoryOptions}</select>{viewingOlderAiReview && <Button variant="muted" className="pi-history-back" onClick={() => showAiReviewRecord(aiReviewHistory[0])}>Latest</Button>}</div></details>}
       </div>
     </div>
+    {sessionChat}
     {focusReviewHasNoFindings(focusReview.text) && <div className="focus-review-note clean" role="status"><strong>✓ Focus scan clean.</strong><span>All scanned up for this pass.</span></div>}
     {focusAreaLinks}
-    {body}{composer}
+    {reviewMessages.length > 0 && <div className="ai-chat-messages ai-review-response">{reviewMessages.map(renderGeneralReview)}</div>}
   </section>;
 }
 

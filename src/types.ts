@@ -163,10 +163,13 @@ export type FocusScanRecord = {
 };
 
 export type AiReviewMessageRecord = {
-  role: "user" | "pi";
+  role: "user" | "pi" | "thinking" | "tool";
   text: string;
   title?: string;
   kind?: "general-review" | "chat";
+  toolCallId?: string;
+  toolName?: string;
+  toolStatus?: "running" | "success" | "error";
 };
 
 export type AiReviewRecord = {

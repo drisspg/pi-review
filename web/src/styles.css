@@ -424,6 +424,14 @@ a { color: var(--link); text-decoration: none; }
   gap: 16px;
 }
 
+.review-page.panel-focused {
+  gap: 0;
+}
+
+.review-page.panel-focused .pr-header-strip {
+  display: none;
+}
+
 .review-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 12px 420px;
@@ -1688,7 +1696,23 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .github-comment-edit {
+  display: grid;
+  gap: 8px;
   padding: 10px;
+}
+
+.github-comment-edit textarea {
+  width: 100%;
+  min-height: 58px;
+  padding: 8px 10px;
+  resize: none;
+  overflow: hidden;
+}
+
+.github-comment-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .side .thread-reply {
@@ -3211,6 +3235,186 @@ button.fold:hover {
 .ai-review-dialogue {
   display: grid;
   gap: 10px;
+}
+
+.pi-session-chat {
+  display: flex;
+  flex-direction: column;
+  height: min(560px, calc(100vh - 255px));
+  min-height: 300px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel2);
+}
+
+.pi-session-chat-head {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px 5px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.pi-session-chat-head strong {
+  flex: 1;
+}
+
+.pi-session-transcript {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+}
+
+.pi-session-empty {
+  display: grid;
+  place-content: center;
+  gap: 4px;
+  min-height: 220px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.pi-session-empty strong {
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+.pi-session-message {
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border-radius: var(--radius);
+}
+
+.pi-session-message.user {
+  margin-left: clamp(0px, 8%, 70px);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+}
+
+.pi-session-message.pi {
+  padding-inline: 2px;
+}
+
+.pi-session-message-role {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.pi-session-message p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.pi-session-message .markdown {
+  max-height: none;
+  overflow: visible;
+}
+
+.pi-session-entry {
+  margin: 6px 0 10px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.pi-session-entry summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  cursor: pointer;
+}
+
+.pi-session-entry-icon {
+  width: 14px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.pi-session-entry.thinking p,
+.pi-session-entry.tool pre {
+  margin: 4px 0 8px 21px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--border);
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+
+.pi-session-entry.thinking p {
+  font-style: italic;
+}
+
+.pi-session-entry.tool.running .pi-session-entry-icon {
+  color: var(--attention);
+}
+
+.pi-session-entry.tool.success .pi-session-entry-icon {
+  color: var(--success);
+}
+
+.pi-session-entry.tool.error .pi-session-entry-icon {
+  color: var(--danger);
+}
+
+.pi-session-entry.tool pre {
+  max-height: 260px;
+  overflow: auto;
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.74rem;
+  font-style: normal;
+}
+
+.pi-session-composer {
+  flex: 0 0 auto;
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.pi-session-composer textarea {
+  min-height: 42px;
+  max-height: 180px;
+  resize: none;
+  overflow-y: auto;
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
+  background: var(--panel2);
+}
+
+.pi-session-composer textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.pi-session-composer-foot {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.pi-session-input-hint {
+  flex: 1;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.pi-session-composer-foot .agent-activity {
+  flex: 1;
 }
 
 .review-modal {

@@ -1,5 +1,7 @@
+import type { PiPromptEvent } from "./pi-session.js";
+
 export type AskStreamDeps = {
-  askPi: (prKey: string, prompt: string, purpose: string | undefined, onDelta: (delta: string) => void) => Promise<string>;
+  askPi: (prKey: string, prompt: string, purpose: string | undefined, onDelta: (delta: string) => void, onEvent: (event: PiPromptEvent) => void) => Promise<string>;
   logger?: {
     info: (scope: string, message: string, data?: Record<string, unknown>) => void;
     error: (scope: string, message: string, data?: Record<string, unknown>) => void;
@@ -38,7 +40,7 @@ export function createAskStreamApi(deps: AskStreamDeps) {
     });
     deps.logger?.info("pi", "stream prompt start", { prKey: request.prKey, purpose: request.purpose ?? "chat", chars: request.prompt.length });
     try {
-      const answer = await deps.askPi(request.prKey, request.prompt, request.purpose, (delta) => writeSse(res, "delta", { delta }));
+      const answer = await deps.askPi(request.prKey, request.prompt, request.purpose, (delta) => writeSse(res, "delta", { delta }), (event) => writeSse(res, "session", event));
       writeSse(res, "done", { answer });
       deps.logger?.info("pi", "stream prompt done", { prKey: request.prKey, purpose: request.purpose ?? "chat", answerChars: answer.length });
     } catch (error) {
