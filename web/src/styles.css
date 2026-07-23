@@ -473,6 +473,7 @@ a { color: var(--link); text-decoration: none; }
   gap: 0;
   grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
+  height: calc(100vh - 70px);
   max-height: calc(100vh - 70px);
   overflow: hidden;
   border: 1px solid var(--border);
@@ -565,6 +566,18 @@ a { color: var(--link); text-decoration: none; }
   gap: 10px;
   min-width: 0;
   padding: 8px;
+}
+
+.side-tab-panels.pi-tab-panel {
+  display: flex;
+  align-content: normal;
+  overflow: hidden;
+}
+
+.side-tab-panels.pi-tab-panel > .ai-review {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .side .panel,
@@ -3028,11 +3041,24 @@ button.fold:hover {
   overflow: hidden;
 }
 
+.pi-review-findings {
+  display: grid;
+  flex: 0 1 auto;
+  gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.pi-review-findings:empty {
+  display: none;
+}
+
 .pi-session-chat {
   display: flex;
+  flex: 1 1 300px;
   flex-direction: column;
-  height: min(560px, calc(100vh - 255px));
-  min-height: 300px;
+  height: auto;
+  min-height: 220px;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -3068,7 +3094,7 @@ button.fold:hover {
   display: grid;
   place-content: center;
   gap: 4px;
-  min-height: 220px;
+  min-height: 100%;
   color: var(--muted);
   text-align: center;
 }
@@ -4108,6 +4134,7 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
     position: static;
     grid-row: 1;
     width: auto;
+    height: auto;
     max-height: 70vh;
   }
   .files { grid-row: 2; }

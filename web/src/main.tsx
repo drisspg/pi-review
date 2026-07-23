@@ -1476,7 +1476,7 @@ function agentActivityText(activity: PiAgentActivity | null | undefined): string
 }
 
 function maxSidePanelWidth(): number {
-  return typeof window === "undefined" ? 720 : Math.min(720, Math.max(380, window.innerWidth - 520));
+  return typeof window === "undefined" ? 960 : Math.min(960, Math.max(380, window.innerWidth - 420));
 }
 
 function clampSidePanelWidth(width: number): number {
@@ -1553,7 +1553,7 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { d
         <button type="button" className="side-panel-button" title={sideFocused ? "Restore panel" : "Focus panel"} aria-label={sideFocused ? "Restore review panel" : "Focus review panel"} aria-pressed={sideFocused} onClick={() => setSideFocused(!sideFocused)}>{sideFocused ? <ScreenNormalIcon size={16} /> : <ScreenFullIcon size={16} />}</button>
         <button type="button" className="side-panel-button" title="Hide review panel" aria-label="Hide review panel" onClick={() => { setSideFocused(false); setSideCollapsed(true); }}><ChevronRightIcon size={16} /></button>
       </nav>
-      <div className="side-tab-panels">
+      <div className={`side-tab-panels ${sideTab}-tab-panel`}>
         {sideTab === "review" && <ReviewSummary pr={props.review.pr} files={props.review.files} drafts={props.drafts} setDrafts={props.setDrafts} event={props.reviewEvent} setEvent={props.setReviewEvent} body={props.reviewBody} setBody={props.setReviewBody} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} submitReview={props.submitReview} submitting={props.submitting} invalidDraftIds={props.invalidDraftIds} copyFeedbackPrompt={props.piPanel.copyFeedbackPrompt} onJumpToTarget={jumpToComment} />}
         {sideTab === "pi" && <InlineSnippetsProvider value={{ headSha: props.review.pr.headSha, snippets: true }}><AiReviewPanel prUrl={props.review.pr.url} {...props.piPanel} focusAreas={props.focusAreas} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={props.collapsedFocusAreaIds} setCollapsedFocusAreaIds={props.setCollapsedFocusAreaIds} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} /></InlineSnippetsProvider>}
         {sideTab === "comments" && <ExistingComments prUrl={props.review.pr.url} comments={props.review.comments} issueComments={props.review.issueComments} reviewSummaries={props.review.reviewSummaries} refreshGithubActivity={props.refreshGithubActivity} collapseSignal={props.commentCollapseSignal} commentsCollapsed={props.commentsCollapsed} toggleAllComments={props.toggleAllComments} onJumpToComment={jumpToComment} />}
@@ -2058,13 +2058,23 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
   const draft = draftsByRecord[draftKey] ?? "";
   const setDraft = (text: string) => setDraftsByRecord((current) => ({ ...current, [draftKey]: text }));
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const transcriptRef = useRef<HTMLDivElement | null>(null);
+  const followTranscriptRef = useRef(true);
   useEffect(() => autoGrowTextarea(composerRef.current), [draft, draftKey]);
+  useEffect(() => { followTranscriptRef.current = true; }, [draftKey]);
   const focusAreaCount = focusAreas.length;
   const allFocusCollapsed = focusAreaCount > 0 && focusAreas.every((area) => collapsedFocusAreaIds[area.id]);
   const messages = currentAiReviewMessages(review);
   const hasMessages = messages.length > 0;
   const reviewMessages = generalReviewMessages(messages);
   const chatMessages = sessionMessages(messages);
+  useEffect(() => {
+    if (!followTranscriptRef.current || transcriptRef.current == null) return;
+    const frame = window.requestAnimationFrame(() => {
+      if (transcriptRef.current != null) transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [chatMessages, chatSending]);
   async function copyFeedback() {
     if (copyingFeedback) return;
     setCopyingFeedback(true);
@@ -2082,6 +2092,7 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
   function submitChat() {
     if (draft.trim().length === 0 || chatSending) return;
     const message = draft;
+    followTranscriptRef.current = true;
     setDraft("");
     void sendMessage(message);
   }
@@ -2123,7 +2134,10 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
       <strong>Session</strong>
       {chatMessages.length > 0 && <Button variant="muted" className="small-muted-button" onClick={clearFollowUp} disabled={chatSending} aria-label="Clear chat">Clear</Button>}
     </div>
-    <div className="pi-session-transcript">
+    <div ref={transcriptRef} className="pi-session-transcript" onScroll={(event) => {
+      const transcript = event.currentTarget;
+      followTranscriptRef.current = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 48;
+    }}>
       {chatMessages.length > 0
         ? chatMessages.map((message, index) => <PiSessionEntry key={index} message={message} prUrl={prUrl} />)
         : <div className="pi-session-empty"><strong>Start a Pi session</strong><span>Ask about the PR, investigate the checkout, or request editable review drafts.</span></div>}
@@ -2179,10 +2193,12 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
         {aiReviewHistory.length > 1 && <details className="pi-history-compact"><summary><span className="disclosure-chevron" aria-hidden="true">›</span>Review/chat history ({aiReviewHistory.length})</summary><div className="pi-history-picker"><select aria-label="Review chat history" value={selectedAiReviewId} onChange={(event) => showAiReviewRecord(aiReviewHistory.find((record) => record.id === event.target.value))}>{aiHistoryOptions}</select>{viewingOlderAiReview && <Button variant="muted" className="pi-history-back" onClick={() => showAiReviewRecord(aiReviewHistory[0])}>Latest</Button>}</div></details>}
       </div>
     </div>
+    <div className="pi-review-findings">
+      {focusReviewHasNoFindings(focusReview.text) && <div className="focus-review-note clean" role="status"><strong>✓ Focus scan clean.</strong><span>All scanned up for this pass.</span></div>}
+      {focusAreaLinks}
+      {reviewMessages.length > 0 && <div className="ai-chat-messages ai-review-response">{reviewMessages.map((message, index) => <GeneralReviewEntry key={index} message={message} prUrl={prUrl} />)}</div>}
+    </div>
     {sessionChat}
-    {focusReviewHasNoFindings(focusReview.text) && <div className="focus-review-note clean" role="status"><strong>✓ Focus scan clean.</strong><span>All scanned up for this pass.</span></div>}
-    {focusAreaLinks}
-    {reviewMessages.length > 0 && <div className="ai-chat-messages ai-review-response">{reviewMessages.map((message, index) => <GeneralReviewEntry key={index} message={message} prUrl={prUrl} />)}</div>}
   </section>;
 }
 

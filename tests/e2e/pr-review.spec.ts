@@ -193,6 +193,14 @@ test("uses a compact files toolbar and collapsible review panel", async ({ page 
   await toolbar.getByRole("button", { name: "Review changes" }).click();
   const side = page.locator(".side");
   await expect(side).toBeVisible();
+  const resizeHandle = page.getByRole("separator", { name: "Resize side panel" });
+  const resizeBox = await resizeHandle.boundingBox();
+  if (resizeBox == null) throw new Error("Missing side panel resize handle");
+  await page.mouse.move(resizeBox.x + resizeBox.width / 2, resizeBox.y + 100);
+  await page.mouse.down();
+  await page.mouse.move(resizeBox.x - 600, resizeBox.y + 100);
+  await page.mouse.up();
+  expect(await side.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(720);
   await page.getByRole("button", { name: "Focus review panel" }).click();
   await expect(page.locator(".review-layout")).toHaveClass(/side-focused/);
   await expect(page.locator(".files")).toBeHidden();
@@ -718,7 +726,8 @@ test("runs the right-sidebar Pi review panel and continues the chat with Enter",
   await page.route(/\/api\/pi\/review$/, async (route) => {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { id: "review-job" } }) });
   });
-  await mockAskPi(page, (body) => body.prompt?.includes("latest question") ? "Follow-up answer about `cu_seqlens_q`." : "Unexpected ask response", (body) => body.prompt?.includes("latest question") ? [
+  const followUpAnswer = `Follow-up answer about \`cu_seqlens_q\`.\n\n${Array.from({ length: 60 }, (_, index) => `Streaming detail ${index + 1}.`).join("\n\n")}`;
+  await mockAskPi(page, (body) => body.prompt?.includes("latest question") ? followUpAnswer : "Unexpected ask response", (body) => body.prompt?.includes("latest question") ? [
     { type: "thinking", delta: "Inspecting the changed call path." },
     { type: "tool", phase: "start", toolCallId: "read-1", toolName: "read", detail: "read: csrc/flash_attn/flash_api.cpp" },
     { type: "tool", phase: "end", toolCallId: "read-1", toolName: "read", detail: "read: csrc/flash_attn/flash_api.cpp", output: "Relevant source lines", isError: false },
@@ -730,6 +739,10 @@ test("runs the right-sidebar Pi review panel and continues the chat with Enter",
   const dialog = page.locator(".ai-review");
   await expect(dialog).toContainText("Correctness:");
   await expect(dialog.locator(".file-snippet")).toHaveCount(0);
+  const findingsBox = await dialog.locator(".pi-review-findings").boundingBox();
+  const sessionBox = await dialog.locator(".pi-session-chat").boundingBox();
+  if (findingsBox == null || sessionBox == null) throw new Error("Missing Pi review layout");
+  expect(findingsBox.y + findingsBox.height).toBeLessThanOrEqual(sessionBox.y + 1);
   await Promise.all([
     page.waitForRequest(/\/api\/file\/open$/),
     dialog.getByRole("link", { name: "csrc/flash_attn/src/flash_fwd_kernel.h:1276" }).click(),
@@ -745,6 +758,7 @@ test("runs the right-sidebar Pi review panel and continues the chat with Enter",
   await dialog.getByPlaceholder("Message Pi…").fill("what should I test?");
   await dialog.getByPlaceholder("Message Pi…").press("Enter");
   await expect(dialog).toContainText("Follow-up answer");
+  await expect.poll(() => dialog.locator(".pi-session-transcript").evaluate((element) => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThan(2);
   await expect(dialog.getByText("Thinking")).toBeVisible();
   await expect(dialog.getByText("read: csrc/flash_attn/flash_api.cpp")).toBeVisible();
   await dialog.getByText("read: csrc/flash_attn/flash_api.cpp").click();
