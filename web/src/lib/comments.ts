@@ -25,14 +25,6 @@ export function commentTarget(comment: PullReviewComment): Target {
   return { path: comment.path, startLine: comment.start_line ?? comment.line ?? comment.original_line ?? null, line: comment.line ?? comment.original_line ?? null, side: comment.side ?? comment.original_side ?? "RIGHT", hunk: "" };
 }
 
-export function draftMatchesTarget(draft: DraftComment, target: Target): boolean {
-  return draft.path === target.path && draft.side === target.side && draft.line === target.line;
-}
-
-export function threadForTarget<T extends { target: Target }>(threads: Record<string, T>, target: Target): T | null {
-  return threads[targetKey(target)] ?? Object.values(threads).find((thread) => thread.target.path === target.path && thread.target.side === target.side && thread.target.line === target.line) ?? null;
-}
-
 export function groupReviewComments(comments: PullReviewComment[]): PullReviewComment[][] {
   const byId = new Map(comments.map((comment) => [comment.id, comment]));
   const rootForComment = (comment: PullReviewComment): PullReviewComment => {

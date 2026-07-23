@@ -98,14 +98,15 @@ export type FileReviewState = {
   updatedAt: string;
 };
 
-export type DraftReviewComment = {
-  id: string;
+type InlineReviewComment = {
   path: string;
   line: number | null;
   startLine?: number | null;
   side: "RIGHT" | "LEFT";
   body: string;
 };
+
+export type DraftReviewComment = InlineReviewComment & { id: string };
 
 export type DraftReview = {
   prKey: string;
@@ -116,13 +117,7 @@ export type DraftReview = {
   updatedAt: string;
 };
 
-export type GitHubDraftCommentInput = {
-  path: string;
-  line: number | null;
-  startLine?: number | null;
-  side: "RIGHT" | "LEFT";
-  body: string;
-};
+export type GitHubDraftCommentInput = InlineReviewComment;
 
 export type GitHubDraftComment = {
   id: string;
@@ -162,6 +157,10 @@ export type FocusScanRecord = {
   updatedAt: string;
 };
 
+export type PiPromptEvent =
+  | { type: "thinking"; delta: string }
+  | { type: "tool"; phase: "start" | "update" | "end"; toolCallId: string; toolName: string; detail: string; output?: string; isError?: boolean };
+
 export type AiReviewMessageRecord = {
   role: "user" | "pi" | "thinking" | "tool";
   text: string;
@@ -182,13 +181,7 @@ export type AiReviewRecord = {
   updatedAt: string;
 };
 
-export type ReviewMemoryComment = {
-  path: string;
-  line: number | null;
-  startLine?: number | null;
-  side: "RIGHT" | "LEFT";
-  body: string;
-};
+export type ReviewMemoryComment = InlineReviewComment;
 
 export type ReviewMemoryFile = {
   path: string;

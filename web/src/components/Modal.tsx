@@ -18,6 +18,3 @@ export function ModalShell({ open, onOpenChange, label, children, className }: {
     </Dialog.Root>
   );
 }
-
-export const ModalTitle = Dialog.Title;
-export const ModalClose = Dialog.Close;

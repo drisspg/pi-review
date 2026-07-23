@@ -37,17 +37,20 @@ function reviewerHandle(input: string): string {
   return input.trim().replace(/^@+/, "").toLowerCase();
 }
 
-function commentIncludesReviewer(comment: PullReviewComment | PullIssueComment | PullRequestReviewSummary, reviewer: string): boolean {
+type GitHubComment = PullReviewComment | PullIssueComment | PullRequestReviewSummary;
+type CommentKind = "issue" | "review" | "review-summary";
+
+function commentIncludesReviewer(comment: GitHubComment, reviewer: string): boolean {
   if (reviewer.length === 0) return true;
   const login = comment.user?.login?.toLowerCase();
   return login === reviewer || new RegExp(`(^|\\W)@${reviewer.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=\\W|$)`, "i").test(comment.body);
 }
 
-function threadIncludesReviewer(comments: Array<PullReviewComment | PullIssueComment | PullRequestReviewSummary>, reviewer: string): boolean {
+function threadIncludesReviewer(comments: GitHubComment[], reviewer: string): boolean {
   return comments.some((comment) => commentIncludesReviewer(comment, reviewer));
 }
 
-function reviewerOptions(comments: Array<PullReviewComment | PullIssueComment | PullRequestReviewSummary>): string[] {
+function reviewerOptions(comments: GitHubComment[]): string[] {
   const reviewers = new Set<string>();
   for (const comment of comments) {
     if (comment.user?.login != null) reviewers.add(comment.user.login);
@@ -63,11 +66,15 @@ export function ExistingReviewThread({ comments, prUrl, refreshGithubActivity, c
   return <GitHubThreadCard id={commentThreadDomId(target)} className="inline-thread existing" title="GitHub thread" subtitle={`${targetLabel(target)} · ${commentCountLabel(comments.length)}${locationState}`} status={status} href={comments[0].html_url} comments={comments} commentKind="review" prUrl={prUrl} refreshGithubActivity={refreshGithubActivity} collapseSignal={collapseSignal} collapseComments={collapseComments} reply={<ThreadReplyBox prUrl={prUrl} kind="review" commentId={comments[0].id} refreshGithubActivity={refreshGithubActivity} />} />;
 }
 
-function ReviewCommentTimeline({ comments, commentKind, prUrl, refreshGithubActivity }: { comments: Array<PullReviewComment | PullIssueComment | PullRequestReviewSummary>; commentKind: "issue" | "review" | "review-summary"; prUrl: string; refreshGithubActivity: () => Promise<void> }) {
+function ReviewCommentTimeline({ comments, commentKind, prUrl, refreshGithubActivity }: { comments: GitHubComment[]; commentKind: CommentKind; prUrl: string; refreshGithubActivity: () => Promise<void> }) {
   return <div className="github-comment-timeline">{comments.map((comment) => <GitHubCommentView key={comment.id} comment={comment} commentKind={commentKind} prUrl={prUrl} refreshGithubActivity={refreshGithubActivity} />)}</div>;
 }
 
-function GitHubCommentView({ comment, commentKind, prUrl, refreshGithubActivity }: { comment: PullReviewComment | PullIssueComment | PullRequestReviewSummary; commentKind: "issue" | "review" | "review-summary"; prUrl: string; refreshGithubActivity: () => Promise<void> }) {
+function CommentEditor({ body, submitting, onChange, onCancel, onSave }: { body: string; submitting: boolean; onChange: (body: string) => void; onCancel: () => void; onSave: () => void }) {
+  return <div className="github-comment-edit"><textarea rows={1} value={body} onChange={(event) => onChange(event.target.value)} onInput={(event) => autoGrowTextarea(event.currentTarget)} ref={(element) => autoGrowTextarea(element)} aria-label="Edit comment" /><div className="github-comment-edit-actions"><Button variant="muted" onClick={onCancel} disabled={submitting}>Cancel</Button><Button onClick={onSave} disabled={submitting || body.trim().length === 0}>{submitting ? "Saving…" : "Save"}</Button></div></div>;
+}
+
+function GitHubCommentView({ comment, commentKind, prUrl, refreshGithubActivity }: { comment: GitHubComment; commentKind: CommentKind; prUrl: string; refreshGithubActivity: () => Promise<void> }) {
   const login = comment.user?.login ?? "github";
   const timestamp = ("submitted_at" in comment ? comment.submitted_at : null) ?? comment.updated_at ?? null;
   const [editing, setEditing] = useState(false);
@@ -84,10 +91,18 @@ function GitHubCommentView({ comment, commentKind, prUrl, refreshGithubActivity 
       setSubmitting(false);
     }
   }
-  return <div className="github-comment" style={{ "--commenter": commenterColor(login) } as React.CSSProperties}><div className="avatar" aria-hidden="true">{avatarLabel(login)}</div><div className="github-comment-body"><div className="github-comment-header"><span className="github-comment-meta"><strong>@{login}</strong>{timestamp != null && <span className="comment-time">commented {relativeTime(timestamp)}</span>}</span>{!editing && <Button variant="muted" className="small-muted-button" onClick={() => { setBody(comment.body); setEditing(true); }}>Edit</Button>}</div>{editing ? <div className="github-comment-edit"><textarea rows={1} value={body} onChange={(event) => setBody(event.target.value)} onInput={(event) => autoGrowTextarea(event.currentTarget)} ref={(element) => autoGrowTextarea(element)} aria-label="Edit comment" /><div className="github-comment-edit-actions"><Button variant="muted" onClick={() => { setBody(comment.body); setEditing(false); }} disabled={submitting}>Cancel</Button><Button onClick={() => void saveEdit()} disabled={submitting || body.trim().length === 0}>{submitting ? "Saving…" : "Save"}</Button></div></div> : <MarkdownText text={body} />}</div></div>;
+  function startEditing() {
+    setBody(comment.body);
+    setEditing(true);
+  }
+  function cancelEditing() {
+    setBody(comment.body);
+    setEditing(false);
+  }
+  return <div className="github-comment" style={{ "--commenter": commenterColor(login) } as React.CSSProperties}><div className="avatar" aria-hidden="true">{avatarLabel(login)}</div><div className="github-comment-body"><div className="github-comment-header"><span className="github-comment-meta"><strong>@{login}</strong>{timestamp != null && <span className="comment-time">commented {relativeTime(timestamp)}</span>}</span>{!editing && <Button variant="muted" className="small-muted-button" onClick={startEditing}>Edit</Button>}</div>{editing ? <CommentEditor body={body} submitting={submitting} onChange={setBody} onCancel={cancelEditing} onSave={() => void saveEdit()} /> : <MarkdownText text={body} />}</div></div>;
 }
 
-function GitHubThreadCard({ id, className = "comment", title, subtitle, status, href, comments, commentKind, prUrl, refreshGithubActivity, reply, collapseSignal = 0, collapseComments = true, onJump }: { id?: string; className?: string; title: string; subtitle: string; status?: string | null; href: string; comments: Array<PullReviewComment | PullIssueComment | PullRequestReviewSummary>; commentKind: "issue" | "review" | "review-summary"; prUrl: string; refreshGithubActivity: () => Promise<void>; reply?: React.ReactNode; collapseSignal?: number; collapseComments?: boolean; onJump?: () => void }) {
+function GitHubThreadCard({ id, className = "comment", title, subtitle, status, href, comments, commentKind, prUrl, refreshGithubActivity, reply, collapseSignal = 0, collapseComments = true, onJump }: { id?: string; className?: string; title: string; subtitle: string; status?: string | null; href: string; comments: GitHubComment[]; commentKind: CommentKind; prUrl: string; refreshGithubActivity: () => Promise<void>; reply?: React.ReactNode; collapseSignal?: number; collapseComments?: boolean; onJump?: () => void }) {
   const [collapsed, setCollapsed] = useState(false);
   useEffect(() => {
     if (collapseSignal > 0) setCollapsed(collapseComments);

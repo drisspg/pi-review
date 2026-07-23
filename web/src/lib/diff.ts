@@ -1,6 +1,6 @@
 import type { DiffRow, DragSelection, Target } from "../types";
 
-export type PatchSetSection = {
+type PatchSetSection = {
   path: string;
   title: string;
   rows: DiffRow[];

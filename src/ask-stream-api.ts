@@ -1,4 +1,4 @@
-import type { PiPromptEvent } from "./pi-session.js";
+import type { PiPromptEvent } from "./types.js";
 
 export type AskStreamDeps = {
   askPi: (prKey: string, prompt: string, purpose: string | undefined, onDelta: (delta: string) => void, onEvent: (event: PiPromptEvent) => void) => Promise<string>;
@@ -38,14 +38,16 @@ export function createAskStreamApi(deps: AskStreamDeps) {
       "connection": "keep-alive",
       "content-type": "text/event-stream; charset=utf-8",
     });
-    deps.logger?.info("pi", "stream prompt start", { prKey: request.prKey, purpose: request.purpose ?? "chat", chars: request.prompt.length });
+    const logContext = { prKey: request.prKey, purpose: request.purpose ?? "chat" };
+    deps.logger?.info("pi", "stream prompt start", { ...logContext, chars: request.prompt.length });
     try {
       const answer = await deps.askPi(request.prKey, request.prompt, request.purpose, (delta) => writeSse(res, "delta", { delta }), (event) => writeSse(res, "session", event));
       writeSse(res, "done", { answer });
-      deps.logger?.info("pi", "stream prompt done", { prKey: request.prKey, purpose: request.purpose ?? "chat", answerChars: answer.length });
+      deps.logger?.info("pi", "stream prompt done", { ...logContext, answerChars: answer.length });
     } catch (error) {
-      deps.logger?.error("pi", "stream prompt failed", { prKey: request.prKey, purpose: request.purpose ?? "chat", error: error instanceof Error ? error.message : String(error) });
-      writeSse(res, "error", { error: error instanceof Error ? error.message : String(error) });
+      const message = error instanceof Error ? error.message : String(error);
+      deps.logger?.error("pi", "stream prompt failed", { ...logContext, error: message });
+      writeSse(res, "error", { error: message });
     } finally {
       res.end();
     }

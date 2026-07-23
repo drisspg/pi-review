@@ -1,11 +1,11 @@
 import React, { lazy, Suspense } from "react";
 
 import { highlightedHtml } from "../lib/highlight";
-import { InlineSnippetsContext, InlineSnippetsProvider, type FileLinkContext } from "./MarkdownContext";
+import { InlineSnippetsProvider, type FileLinkContext } from "./MarkdownContext";
 
 const MarkdownTextRenderer = lazy(() => import("./MarkdownRenderer").then((module) => ({ default: module.MarkdownTextRenderer })));
 
-export { InlineSnippetsContext, InlineSnippetsProvider };
+export { InlineSnippetsProvider };
 
 export const CodeText = React.memo(function CodeText({ code, language, syntaxContext }: { code: string; language: string; syntaxContext?: "string" }) {
   return <code dangerouslySetInnerHTML={{ __html: highlightedHtml(code, language, syntaxContext) }} />;

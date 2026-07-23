@@ -259,7 +259,7 @@ export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): Git
     return { pullRequestId: pullRequest.id, review: pendingReview(review, comments) };
   }
 
-  async function createPendingPullRequestReview(ref: PullRequestRef, pullRequestId: string): Promise<string> {
+  async function createPendingPullRequestReview(_ref: PullRequestRef, pullRequestId: string): Promise<string> {
     const mutation = `mutation($pullRequestId: ID!) { addPullRequestReview(input: { pullRequestId: $pullRequestId }) { pullRequestReview { id } } }`;
     const data = await ghGraphql<{ addPullRequestReview?: { pullRequestReview?: { id?: string } } }>(mutation, { pullRequestId }, "create pending review");
     const reviewId = data.addPullRequestReview?.pullRequestReview?.id;
@@ -267,7 +267,7 @@ export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): Git
     return reviewId;
   }
 
-  async function addPendingPullRequestReviewThread(ref: PullRequestRef, reviewId: string, comment: GitHubDraftCommentInput): Promise<void> {
+  async function addPendingPullRequestReviewThread(_ref: PullRequestRef, reviewId: string, comment: GitHubDraftCommentInput): Promise<void> {
     const mutation = `mutation($reviewId: ID!, $path: String!, $body: String!, $line: Int, $side: DiffSide, $startLine: Int, $startSide: DiffSide, $subjectType: PullRequestReviewThreadSubjectType!) { addPullRequestReviewThread(input: { pullRequestReviewId: $reviewId, path: $path, body: $body, line: $line, side: $side, startLine: $startLine, startSide: $startSide, subjectType: $subjectType }) { thread { id } } }`;
     const variables: Record<string, string | number> = { reviewId, path: comment.path, body: comment.body, subjectType: comment.line == null ? "FILE" : "LINE" };
     if (comment.line != null) {

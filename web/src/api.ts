@@ -7,7 +7,9 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
-export async function askPi(payload: { prKey: string; prompt: string; purpose?: string }, onDelta?: (answer: string) => void, onEvent?: (event: PiSessionEvent) => void): Promise<string> {
+type AskPiPayload = { prKey: string; prompt: string; purpose?: string };
+
+export async function askPi(payload: AskPiPayload, onDelta?: (answer: string) => void, onEvent?: (event: PiSessionEvent) => void): Promise<string> {
   try {
     const streamed = await streamAskPi(payload, onDelta, onEvent);
     if (streamed != null) return streamed;
@@ -19,7 +21,7 @@ export async function askPi(payload: { prKey: string; prompt: string; purpose?: 
   return answer;
 }
 
-async function streamAskPi(payload: { prKey: string; prompt: string; purpose?: string }, onDelta?: (answer: string) => void, onEvent?: (event: PiSessionEvent) => void): Promise<string | null> {
+async function streamAskPi(payload: AskPiPayload, onDelta?: (answer: string) => void, onEvent?: (event: PiSessionEvent) => void): Promise<string | null> {
   if (onDelta == null) return null;
   const response = await fetch("/api/ask/stream", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
   if (!response.ok || response.body == null) return null;
@@ -52,8 +54,9 @@ async function streamAskPi(payload: { prKey: string; prompt: string; purpose?: s
 }
 
 function parseSseEvent(text: string): { event: string; data: Record<string, unknown> } | null {
-  const event = text.split("\n").find((line) => line.startsWith("event: "))?.slice("event: ".length);
-  const data = text.split("\n").find((line) => line.startsWith("data: "))?.slice("data: ".length);
+  const lines = text.split("\n");
+  const event = lines.find((line) => line.startsWith("event: "))?.slice("event: ".length);
+  const data = lines.find((line) => line.startsWith("data: "))?.slice("data: ".length);
   if (event == null || data == null) return null;
   return { event, data: JSON.parse(data) as Record<string, unknown> };
 }

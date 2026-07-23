@@ -1,4 +1,4 @@
-import { AuthStorage, createAgentSession, ModelRegistry, SessionManager } from "@earendil-works/pi-coding-agent";
+import { AuthStorage, createAgentSession, type AgentSession, type AgentSessionEvent, ModelRegistry, SessionManager } from "@earendil-works/pi-coding-agent";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
@@ -6,6 +6,9 @@ import { resolve } from "node:path";
 import { createGpuWorkspaceTool } from "./gpu-workspace-tool.js";
 import { logger } from "./logger.js";
 import { createReviewDraftTool, type ReviewDraftToolContext } from "./review-draft-tool.js";
+import type { PiPromptEvent } from "./types.js";
+
+export type { PiPromptEvent } from "./types.js";
 
 type TextPart = {
   text?: string;
@@ -19,26 +22,7 @@ type MessageLike = {
   stopReason?: string;
 };
 
-type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
-
-type SessionRecord = {
-  abort?: () => Promise<void>;
-  dispose?: () => void;
-  getActiveToolNames?: () => string[];
-  getAllTools?: () => Array<{ name?: string; description?: string; source?: unknown }>;
-  getAvailableThinkingLevels?: () => string[];
-  isStreaming?: boolean;
-  model?: { id?: string; name?: string; provider?: string };
-  modelRegistry?: { find?: (provider: string, modelId: string) => unknown; getAvailable?: () => Array<{ id?: string; name?: string; provider?: string }> };
-  prompt: (text: string, options?: { streamingBehavior?: "steer" | "followUp" }) => Promise<void>;
-  sessionFile?: string;
-  sessionId?: string;
-  sessionName?: string;
-  setModel?: (model: unknown) => Promise<void>;
-  setThinkingLevel?: (level: ThinkingLevel) => void;
-  subscribe: (listener: (event: unknown) => void) => () => void;
-  thinkingLevel?: ThinkingLevel;
-};
+type ThinkingLevel = AgentSession["thinkingLevel"];
 
 const DEFAULT_PI_MODEL_PROVIDER = "openai-codex";
 const DEFAULT_PI_MODEL_ID = "gpt-5.6-sol";
@@ -71,16 +55,12 @@ const PI_TOOLS_BY_PURPOSE: Record<string, string[]> = {
   "test-pr": REVIEW_TOOLS,
 };
 
-const sessions = new Map<string, Promise<SessionRecord>>();
+const sessions = new Map<string, Promise<AgentSession>>();
 const cwdByPr = new Map<string, string>();
 const reviewContextByPr = new Map<string, ReviewDraftToolContext>();
 const lastPromptByPr = new Map<string, { chars: number; preview: string; startedAt: string }>();
 const promptQueueByPr = new Map<string, Promise<void>>();
 type PromptState = { status: "queued" | "running" | "complete" | "failed"; purpose: string; chars: number; queuedAt: string; startedAt?: string; finishedAt?: string; answerChars?: number; error?: string; lastActivityAt?: string; detail?: string };
-
-export type PiPromptEvent =
-  | { type: "thinking"; delta: string }
-  | { type: "tool"; phase: "start" | "update" | "end"; toolCallId: string; toolName: string; detail: string; output?: string; isError?: boolean };
 
 export type PiActivity = {
   purpose: string;
@@ -105,8 +85,26 @@ function safe(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "unknown";
 }
 
+function sessionPrefixForPr(prKey: string): string {
+  return `${safe(prKey)}--`;
+}
+
 function sessionKeyForPr(prKey: string, purpose = "chat"): string {
-  return `${safe(prKey)}--${safe(purpose)}`;
+  return `${sessionPrefixForPr(prKey)}${safe(purpose)}`;
+}
+
+function sessionEntriesForPr(prKey: string): Array<[string, Promise<AgentSession>]> {
+  const prefix = sessionPrefixForPr(prKey);
+  return [...sessions.entries()].filter(([key]) => key.startsWith(prefix));
+}
+
+async function settledSession(sessionPromise: Promise<AgentSession> | undefined): Promise<AgentSession | null> {
+  if (sessionPromise == null) return null;
+  return Promise.race([sessionPromise, new Promise<null>((resolveCreating) => setTimeout(() => resolveCreating(null), 0))]);
+}
+
+function deleteEntriesWithPrefix<T>(map: Map<string, T>, prefix: string): void {
+  for (const key of map.keys()) if (key.startsWith(prefix)) map.delete(key);
 }
 
 function sessionDirForPr(prKey: string, purpose = "chat"): string {
@@ -129,7 +127,7 @@ function getModelRegistry(): ReturnType<typeof ModelRegistry.create> {
   return sharedModelRegistry;
 }
 
-async function createSession(prKey: string, purpose = "chat"): Promise<SessionRecord> {
+async function createSession(prKey: string, purpose = "chat"): Promise<AgentSession> {
   const cwd = cwdByPr.get(prKey) ?? process.cwd();
   const sessionDir = sessionDirForPr(prKey, purpose);
   await mkdir(sessionDir, { recursive: true });
@@ -154,10 +152,10 @@ async function createSession(prKey: string, purpose = "chat"): Promise<SessionRe
       : { tools: [...scopedTools, ...(draftTool == null ? [] : ["draft_review_comment"])], customTools }),
   });
   logger.info("pi", "create session complete", { prKey, purpose, model: `${DEFAULT_PI_MODEL_PROVIDER}/${DEFAULT_PI_MODEL_ID}`, thinkingLevel, ms: Math.round(performance.now() - startedAt) });
-  return session as SessionRecord;
+  return session;
 }
 
-function getSession(prKey: string, purpose = "chat"): Promise<SessionRecord> {
+function getSession(prKey: string, purpose = "chat"): Promise<AgentSession> {
   const sessionKey = sessionKeyForPr(prKey, purpose);
   const existing = sessions.get(sessionKey);
   if (existing != null) return existing;
@@ -176,7 +174,7 @@ function isThinkingLevel(value: string): value is ThinkingLevel {
   return ["off", "minimal", "low", "medium", "high", "xhigh"].includes(value);
 }
 
-function modelLabel(model: SessionRecord["model"]): string | null {
+function modelLabel(model: AgentSession["model"]): string | null {
   if (model == null) return null;
   if (model.provider != null && model.id != null) return `${model.provider}/${model.id}`;
   return model.id ?? ([model.provider, model.name].filter(Boolean).join("/") || null);
@@ -201,10 +199,9 @@ function activityLabel(state: PromptState | null, activeTools: string[], isStrea
 export async function piActivity(prKey: string, purpose = "chat"): Promise<PiActivity> {
   const key = sessionKeyForPr(prKey, purpose);
   const state = promptStateByPr.get(key) ?? null;
-  const sessionPromise = sessions.get(key);
-  const settled = sessionPromise == null ? { status: "missing" as const } : await Promise.race([sessionPromise.then((value) => ({ status: "ready" as const, value })), new Promise<{ status: "creating" }>((resolveCreating) => setTimeout(() => resolveCreating({ status: "creating" }), 0))]);
-  const activeTools = settled.status === "ready" ? settled.value.getActiveToolNames?.() ?? [] : [];
-  const isStreaming = settled.status === "ready" ? settled.value.isStreaming ?? null : null;
+  const session = await settledSession(sessions.get(key));
+  const activeTools = session?.getActiveToolNames() ?? [];
+  const isStreaming = session?.isStreaming ?? null;
   const now = Date.now();
   const startedAt = state?.startedAt ?? state?.queuedAt;
   const lastActivityAt = state?.lastActivityAt ?? startedAt;
@@ -228,18 +225,18 @@ export async function piActivity(prKey: string, purpose = "chat"): Promise<PiAct
 
 export async function piDiagnostics(prKey: string): Promise<Record<string, unknown>> {
   const session = await getSession(prKey);
-  const prPrefix = `${safe(prKey)}--`;
-  const sessionSummaries = await Promise.all([...sessions.entries()].filter(([key]) => key.startsWith(prPrefix)).map(async ([key, sessionPromise]) => {
+  const prPrefix = sessionPrefixForPr(prKey);
+  const sessionSummaries = await Promise.all(sessionEntriesForPr(prKey).map(async ([key, sessionPromise]) => {
     const purpose = key.slice(prPrefix.length);
     const state = promptStateByPr.get(key) ?? null;
-    const settled = await Promise.race([sessionPromise.then((value) => ({ status: "ready" as const, value })), new Promise<{ status: "creating" }>((resolveCreating) => setTimeout(() => resolveCreating({ status: "creating" }), 0))]);
+    const readySession = await settledSession(sessionPromise);
     return {
       purpose,
-      ready: settled.status === "ready",
-      sessionFile: settled.status === "ready" ? settled.value.sessionFile ?? null : null,
-      sessionId: settled.status === "ready" ? settled.value.sessionId ?? null : null,
-      isStreaming: settled.status === "ready" ? settled.value.isStreaming ?? null : null,
-      activeTools: settled.status === "ready" ? settled.value.getActiveToolNames?.() ?? [] : [],
+      ready: readySession != null,
+      sessionFile: readySession?.sessionFile ?? null,
+      sessionId: readySession?.sessionId ?? null,
+      isStreaming: readySession?.isStreaming ?? null,
+      activeTools: readySession?.getActiveToolNames() ?? [],
       lastPrompt: lastPromptByPr.get(key) ?? null,
       promptState: state == null ? null : { ...state, elapsedMs: Math.round(Date.parse(state.finishedAt ?? new Date().toISOString()) - Date.parse(state.startedAt ?? state.queuedAt)) },
       queued: promptQueueByPr.has(key),
@@ -254,10 +251,10 @@ export async function piDiagnostics(prKey: string): Promise<Record<string, unkno
     sessionName: session.sessionName ?? null,
     model: modelLabel(session.model),
     thinkingLevel: session.thinkingLevel ?? null,
-    availableModels: session.modelRegistry?.getAvailable?.().map((model) => ({ provider: model.provider, id: model.id, name: model.name })) ?? [],
-    availableThinkingLevels: session.getAvailableThinkingLevels?.() ?? [],
-    activeTools: session.getActiveToolNames?.() ?? [],
-    tools: session.getAllTools?.().map((tool) => ({ name: tool.name, source: tool.source })).filter((tool) => tool.name != null) ?? [],
+    availableModels: session.modelRegistry.getAvailable().map((model) => ({ provider: model.provider, id: model.id, name: model.name })),
+    availableThinkingLevels: session.getAvailableThinkingLevels(),
+    activeTools: session.getActiveToolNames(),
+    tools: session.getAllTools().map(({ name, sourceInfo }) => ({ name, source: sourceInfo })),
     lastPrompt: lastPromptByPr.get(sessionKeyForPr(prKey)) ?? null,
     sessions: sessionSummaries,
   };
@@ -267,29 +264,28 @@ export async function setPiModel(prKey: string, provider: string, modelId: strin
   const model = getModelRegistry().find(provider, modelId);
   if (model == null) throw new Error(`Unknown model ${provider}/${modelId}`);
   if (thinkingLevel != null && thinkingLevel.length > 0 && !isThinkingLevel(thinkingLevel)) throw new Error(`Unknown thinking level ${thinkingLevel}`);
-  const prefix = `${safe(prKey)}--`;
-  const prSessions = await Promise.all([...sessions.entries()].filter(([key]) => key.startsWith(prefix)).map(([, value]) => value));
+  const prSessions = await Promise.all(sessionEntriesForPr(prKey).map(([, sessionPromise]) => sessionPromise));
   if (prSessions.length === 0) prSessions.push(await getSession(prKey));
   for (const session of prSessions) {
-    if (session.setModel == null) throw new Error("Pi session does not expose model switching");
     await session.setModel(model);
-    if (thinkingLevel != null && thinkingLevel.length > 0) session.setThinkingLevel?.(thinkingLevel as ThinkingLevel);
+    if (thinkingLevel != null && thinkingLevel.length > 0) session.setThinkingLevel(thinkingLevel as ThinkingLevel);
   }
   return piDiagnostics(prKey);
 }
 
 export async function disposePiSession(prKey: string): Promise<void> {
-  const sessionEntries = [...sessions.entries()].filter(([sessionKey]) => sessionKey.startsWith(`${safe(prKey)}--`));
+  const prefix = sessionPrefixForPr(prKey);
+  const sessionEntries = sessionEntriesForPr(prKey);
   for (const [sessionKey] of sessionEntries) sessions.delete(sessionKey);
   cwdByPr.delete(prKey);
   reviewContextByPr.delete(prKey);
-  for (const key of [...lastPromptByPr.keys()]) if (key.startsWith(`${safe(prKey)}--`)) lastPromptByPr.delete(key);
-  for (const key of [...promptQueueByPr.keys()]) if (key.startsWith(`${safe(prKey)}--`)) promptQueueByPr.delete(key);
-  for (const key of [...promptStateByPr.keys()]) if (key.startsWith(`${safe(prKey)}--`)) promptStateByPr.delete(key);
+  deleteEntriesWithPrefix(lastPromptByPr, prefix);
+  deleteEntriesWithPrefix(promptQueueByPr, prefix);
+  deleteEntriesWithPrefix(promptStateByPr, prefix);
   for (const [, sessionPromise] of sessionEntries) {
     const session = await sessionPromise;
-    await session.abort?.();
-    session.dispose?.();
+    await session.abort();
+    session.dispose();
   }
 }
 
@@ -299,50 +295,64 @@ export async function disposePiSessions(): Promise<void> {
   for (const result of settled) {
     if (result.status !== "fulfilled") continue;
     try {
-      await result.value.abort?.();
-      result.value.dispose?.();
+      await result.value.abort();
+      result.value.dispose();
     } catch (error) {
       logger.debug("pi", "dispose ignored failure", { error: error instanceof Error ? error.message : String(error) });
     }
   }
 }
 
+function sessionEventFromUnknown(event: unknown): AgentSessionEvent | null {
+  if (typeof event !== "object" || event == null || !("type" in event) || typeof event.type !== "string") return null;
+  return event as AgentSessionEvent;
+}
+
 /** Extract bounded text from a streaming or final SDK tool result. */
 function resultText(result: unknown, maxChars = 12_000): string {
   if (typeof result !== "object" || result == null || !("content" in result) || !Array.isArray(result.content)) return "";
-  const text = result.content.map((part) => typeof part === "object" && part != null && "text" in part && typeof part.text === "string" ? part.text : "").join("\n").trim();
+  const text = result.content.map((part) => {
+    if (typeof part !== "object" || part == null || !("text" in part) || typeof part.text !== "string") return "";
+    return part.text;
+  }).join("\n").trim();
   return text.length <= maxChars ? text : `${text.slice(0, maxChars)}\n… truncated ${text.length - maxChars} chars …`;
+}
+
+function promptEventFromSessionEvent(sessionEvent: AgentSessionEvent): PiPromptEvent | null {
+  if (sessionEvent.type === "message_update") {
+    const delta = sessionEvent.assistantMessageEvent?.type === "thinking_delta" ? sessionEvent.assistantMessageEvent.delta : undefined;
+    return typeof delta === "string" && delta.length > 0 ? { type: "thinking", delta } : null;
+  }
+  if (sessionEvent.type !== "tool_execution_start" && sessionEvent.type !== "tool_execution_update" && sessionEvent.type !== "tool_execution_end") return null;
+  if (typeof sessionEvent.toolCallId !== "string" || typeof sessionEvent.toolName !== "string") return null;
+  let phase: "start" | "update" | "end";
+  if (sessionEvent.type === "tool_execution_start") phase = "start";
+  else if (sessionEvent.type === "tool_execution_update") phase = "update";
+  else phase = "end";
+  let output = "";
+  if (sessionEvent.type === "tool_execution_update") output = resultText(sessionEvent.partialResult);
+  if (sessionEvent.type === "tool_execution_end") output = resultText(sessionEvent.result);
+  return {
+    type: "tool",
+    phase,
+    toolCallId: sessionEvent.toolCallId,
+    toolName: sessionEvent.toolName,
+    detail: summarizeToolArgs(sessionEvent.toolName, "args" in sessionEvent ? sessionEvent.args : undefined),
+    ...(output.length === 0 ? {} : { output }),
+    ...(sessionEvent.type === "tool_execution_end" ? { isError: sessionEvent.isError === true } : {}),
+  };
 }
 
 /** Normalize SDK thinking and tool lifecycle events for web session transcripts. */
 export function piPromptEventFromSessionEvent(event: unknown): PiPromptEvent | null {
-  if (typeof event !== "object" || event == null || !("type" in event) || typeof event.type !== "string") return null;
-  if (event.type === "message_update") {
-    const update = event as { assistantMessageEvent?: { type?: string; delta?: string } };
-    const delta = update.assistantMessageEvent?.type === "thinking_delta" ? update.assistantMessageEvent.delta : undefined;
-    return typeof delta === "string" && delta.length > 0 ? { type: "thinking", delta } : null;
-  }
-  if (event.type !== "tool_execution_start" && event.type !== "tool_execution_update" && event.type !== "tool_execution_end") return null;
-  const toolEvent = event as { type: string; toolCallId?: string; toolName?: string; args?: unknown; partialResult?: unknown; result?: unknown; isError?: boolean };
-  if (typeof toolEvent.toolCallId !== "string" || typeof toolEvent.toolName !== "string") return null;
-  const phase = toolEvent.type === "tool_execution_start" ? "start" : toolEvent.type === "tool_execution_update" ? "update" : "end";
-  const output = phase === "update" ? resultText(toolEvent.partialResult) : phase === "end" ? resultText(toolEvent.result) : undefined;
-  return {
-    type: "tool",
-    phase,
-    toolCallId: toolEvent.toolCallId,
-    toolName: toolEvent.toolName,
-    detail: summarizeToolArgs(toolEvent.toolName, toolEvent.args),
-    ...(output == null || output.length === 0 ? {} : { output }),
-    ...(phase === "end" ? { isError: toolEvent.isError === true } : {}),
-  };
+  const sessionEvent = sessionEventFromUnknown(event);
+  return sessionEvent == null ? null : promptEventFromSessionEvent(sessionEvent);
 }
 
-function textDeltaFromEvent(event: unknown): string {
-  if (typeof event !== "object" || event == null || !("type" in event) || event.type !== "message_update") return "";
-  const update = event as { assistantMessageEvent?: { type?: string; delta?: string; text?: string } };
-  if (update.assistantMessageEvent?.type !== "text_delta") return "";
-  return update.assistantMessageEvent.delta ?? update.assistantMessageEvent.text ?? "";
+function textDeltaFromSessionEvent(sessionEvent: AgentSessionEvent): string {
+  if (sessionEvent.type !== "message_update" || sessionEvent.assistantMessageEvent?.type !== "text_delta") return "";
+  const delta = sessionEvent.assistantMessageEvent as { delta?: string; text?: string };
+  return delta.delta ?? delta.text ?? "";
 }
 
 function compactLine(text: string, maxChars = 80): string {
@@ -354,13 +364,13 @@ function summarizeToolArgs(name: string, args: unknown): string {
   if (args == null || typeof args !== "object") return name;
   const values = args as Record<string, unknown>;
   for (const key of ["command", "path", "file_path", "pattern", "query", "url", "prompt"] as const) {
-    if (typeof values[key] === "string" && values[key].trim().length > 0) return `${name}: ${compactLine(values[key] as string)}`;
+    const value = values[key];
+    if (typeof value === "string" && value.trim().length > 0) return `${name}: ${compactLine(value)}`;
   }
   return name;
 }
 
-export function toolCallDetailFromEvent(event: unknown): string | null {
-  const message = messageFromEvent(event);
+function toolCallDetailFromMessage(message: unknown): string | null {
   if (typeof message !== "object" || message == null) return null;
   const { content, role } = message as MessageLike;
   if (role != null && role !== "assistant") return null;
@@ -372,6 +382,11 @@ export function toolCallDetailFromEvent(event: unknown): string | null {
     if (item.type === "toolCall" && typeof item.name === "string") detail = summarizeToolArgs(item.name, item.arguments);
   }
   return detail;
+}
+
+export function toolCallDetailFromEvent(event: unknown): string | null {
+  const sessionEvent = sessionEventFromUnknown(event);
+  return sessionEvent == null ? null : toolCallDetailFromMessage(messageFromSessionEvent(sessionEvent));
 }
 
 function textFromMessage(message: unknown): string {
@@ -387,10 +402,8 @@ function textFromMessage(message: unknown): string {
   }).join("");
 }
 
-function messageFromEvent(event: unknown): unknown {
-  if (typeof event !== "object" || event == null || !("type" in event)) return null;
-  const typedEvent = event as { message?: unknown; type?: string };
-  return typedEvent.type === "message_update" || typedEvent.type === "message_end" || typedEvent.type === "turn_end" ? typedEvent.message : null;
+function messageFromSessionEvent(sessionEvent: AgentSessionEvent): unknown {
+  return sessionEvent.type === "message_update" || sessionEvent.type === "message_end" || sessionEvent.type === "turn_end" ? sessionEvent.message : null;
 }
 
 function errorFromMessage(message: unknown): string | null {
@@ -409,16 +422,16 @@ async function runPiPrompt(prKey: string, prompt: string, purpose = "chat", onDe
   let latestAssistantError: string | null = null;
   const unsubscribe = session.subscribe((event) => {
     const now = new Date().toISOString();
-    const toolDetail = toolCallDetailFromEvent(event);
-    const promptEvent = piPromptEventFromSessionEvent(event);
+    const message = messageFromSessionEvent(event);
+    const toolDetail = toolCallDetailFromMessage(message);
+    const promptEvent = promptEventFromSessionEvent(event);
     if (promptEvent != null) onEvent?.(promptEvent);
     const previousState = promptStateByPr.get(sessionKey);
     if (previousState != null) promptStateByPr.set(sessionKey, { ...previousState, lastActivityAt: now, ...(toolDetail != null ? { detail: toolDetail } : {}) });
-    const message = messageFromEvent(event);
     const assistantText = textFromMessage(message);
     if (assistantText.trim().length > 0) latestAssistantText = assistantText;
     latestAssistantError = errorFromMessage(message) ?? latestAssistantError;
-    const delta = textDeltaFromEvent(event);
+    const delta = textDeltaFromSessionEvent(event);
     if (delta.length === 0) return;
     answer += delta;
     const state = promptStateByPr.get(sessionKey);
@@ -447,11 +460,12 @@ export async function askPi(prKey: string, prompt: string, purpose = "chat", onD
   const queuedAt = new Date().toISOString();
   promptStateByPr.set(sessionKey, { status: "queued", purpose, chars: prompt.length, queuedAt, lastActivityAt: queuedAt });
   let releaseQueue: () => void = () => undefined;
-  const queued = previous.catch(() => undefined).then(() => new Promise<void>((resolveQueue) => {
+  const ready = previous.catch(() => undefined);
+  const queued = ready.then(() => new Promise<void>((resolveQueue) => {
     releaseQueue = resolveQueue;
   }));
   promptQueueByPr.set(sessionKey, queued);
-  await previous.catch(() => undefined);
+  await ready;
   const startedAt = new Date().toISOString();
   promptStateByPr.set(sessionKey, { status: "running", purpose, chars: prompt.length, queuedAt: promptStateByPr.get(sessionKey)?.queuedAt ?? startedAt, startedAt, lastActivityAt: startedAt });
   try {

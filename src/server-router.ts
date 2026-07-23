@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import { inputFromBody, MalformedJsonError, readBody, recordFromBody, sendJson } from "./http.js";
+import { inputFromBody, type JsonValue, MalformedJsonError, readBody, recordFromBody, sendJson } from "./http.js";
 import type { AskStreamResponse } from "./ask-stream-api.js";
 import type { CommentApi } from "./comment-api.js";
 import type { DraftReviewApi } from "./draft-review-api.js";
@@ -43,7 +43,34 @@ export type ServerRouteDeps = {
 
 export type ServerRoute = (req: IncomingMessage, res: ServerResponse) => Promise<void>;
 
+type JsonPostHandler = (payload: Record<string, unknown>) => Promise<JsonValue>;
+
+async function recordFromRequest(req: IncomingMessage): Promise<Record<string, unknown>> {
+  return recordFromBody(await readBody(req));
+}
+
+async function inputFromRequest(req: IncomingMessage): Promise<string> {
+  return inputFromBody(await readBody(req));
+}
+
 export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
+  const jsonPostHandlers: Record<string, JsonPostHandler> = {
+    "/api/ai-review/save": (payload) => deps.savedAnalysisApi.saveAiReview(payload),
+    "/api/ask": (payload) => deps.piApi.ask(payload),
+    "/api/comment/edit": (payload) => deps.commentApi.edit(payload),
+    "/api/comment/reply": (payload) => deps.commentApi.reply(payload),
+    "/api/draft-review/get": (payload) => deps.draftReviewApi.get(payload),
+    "/api/file/open": (payload) => deps.fileApi.open(payload),
+    "/api/file/text": (payload) => deps.fileApi.text(payload),
+    "/api/focus-scan/save": (payload) => deps.savedAnalysisApi.saveFocusScan(payload),
+    "/api/gpu/workspaces/status": (payload) => deps.gpuWorkspaceStatusResponse(payload),
+    "/api/pi/diagnostics": (payload) => deps.piApi.diagnostics(payload),
+    "/api/pi/focus-review/status": (payload) => deps.piApi.jobStatus(payload),
+    "/api/pi/model": (payload) => deps.piApi.setModel(payload),
+    "/api/pi/prompt": (payload) => deps.reviewPromptApi.build(payload),
+    "/api/pi/review/status": (payload) => deps.piApi.jobStatus(payload),
+  };
+
   return async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (req.method === "OPTIONS") {
       sendJson(res, 204, null);
@@ -79,7 +106,7 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
     }
 
     if (req.method === "POST" && url.pathname === "/api/review-memory/capture") {
-      const payload = recordFromBody(await readBody(req));
+      const payload = await recordFromRequest(req);
       const response = await deps.reviewMemoryApi.capture(payload);
       deps.logger.info("api", "review memory captured", { prKey: payload.prKey, comments: response.memory.comments.length, event: payload.event });
       sendJson(res, 200, response);
@@ -87,14 +114,14 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
     }
 
     if (req.method === "POST" && url.pathname === "/api/pr/parse") {
-      const input = inputFromBody(await readBody(req));
+      const input = await inputFromRequest(req);
       deps.logger.info("api", "parse PR input", { input });
       sendJson(res, 200, deps.prApi.parse(input));
       return;
     }
 
     if (req.method === "POST" && url.pathname === "/api/pr/cleanup") {
-      const input = inputFromBody(await readBody(req));
+      const input = await inputFromRequest(req);
       deps.logger.info("api", "cleanup PR requested", { input });
       const response = await deps.prApi.cleanup(input);
       deps.logger.info("api", "cleanup PR complete", { prKey: response.prKey, worktreeDir: response.worktreeDir });
@@ -103,7 +130,7 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
     }
 
     if (req.method === "POST" && url.pathname === "/api/pr/activity") {
-      const input = inputFromBody(await readBody(req));
+      const input = await inputFromRequest(req);
       deps.logger.info("api", "refresh PR activity requested", { input });
       const response = await deps.prApi.activity(input);
       deps.logger.info("api", "refresh PR activity complete", { key: response.pr.key, existingCommentCount: response.pr.existingCommentCount });
@@ -111,13 +138,16 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
       return;
     }
 
-    if (req.method === "POST" && url.pathname === "/api/draft-review/get") {
-      sendJson(res, 200, await deps.draftReviewApi.get(recordFromBody(await readBody(req))));
-      return;
+    if (req.method === "POST") {
+      const handler = jsonPostHandlers[url.pathname];
+      if (handler != null) {
+        sendJson(res, 200, await handler(await recordFromRequest(req)));
+        return;
+      }
     }
 
     if (req.method === "POST" && url.pathname === "/api/draft-review/save") {
-      const payload = recordFromBody(await readBody(req));
+      const payload = await recordFromRequest(req);
       const response = await deps.draftReviewApi.save(payload);
       deps.logger.info("api", "draft review saved", { prKey: response.draftReview.prKey, comments: response.draftReview.comments.length });
       sendJson(res, 200, response);
@@ -125,7 +155,7 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
     }
 
     if (req.method === "POST" && url.pathname === "/api/github-draft-review/pull") {
-      const payload = recordFromBody(await readBody(req));
+      const payload = await recordFromRequest(req);
       const response = await deps.githubDraftReviewApi.pull(payload);
       deps.logger.info("api", "private GitHub review pulled", { comments: response.review?.comments.length ?? 0 });
       sendJson(res, 200, response);
@@ -133,7 +163,7 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
     }
 
     if (req.method === "POST" && url.pathname === "/api/github-draft-review/comment") {
-      const payload = recordFromBody(await readBody(req));
+      const payload = await recordFromRequest(req);
       const response = await deps.githubDraftReviewApi.addComment(payload);
       deps.logger.info("api", "private GitHub comment saved", { comments: response.review.comments.length });
       sendJson(res, 200, response);
@@ -141,44 +171,19 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
     }
 
     if (req.method === "POST" && url.pathname === "/api/file/viewed") {
-      const payload = recordFromBody(await readBody(req));
+      const payload = await recordFromRequest(req);
       deps.logger.info("api", "set file viewed", payload);
       sendJson(res, 200, await deps.fileApi.viewed(payload));
       return;
     }
 
-    if (req.method === "POST" && url.pathname === "/api/file/text") {
-      sendJson(res, 200, await deps.fileApi.text(recordFromBody(await readBody(req))));
-      return;
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/file/open") {
-      sendJson(res, 200, await deps.fileApi.open(recordFromBody(await readBody(req))));
-      return;
-    }
-
     if (req.method === "POST" && url.pathname === "/api/ask/stream") {
-      await deps.askStreamApi.stream(res, recordFromBody(await readBody(req)));
-      return;
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/ask") {
-      sendJson(res, 200, await deps.piApi.ask(recordFromBody(await readBody(req))));
-      return;
-    }
-
-    if (req.method === "POST" && (url.pathname === "/api/pi/review/status" || url.pathname === "/api/pi/focus-review/status")) {
-      sendJson(res, 200, await deps.piApi.jobStatus(recordFromBody(await readBody(req))));
-      return;
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/pi/prompt") {
-      sendJson(res, 200, await deps.reviewPromptApi.build(recordFromBody(await readBody(req))));
+      await deps.askStreamApi.stream(res, await recordFromRequest(req));
       return;
     }
 
     if (req.method === "POST" && url.pathname === "/api/pi/review") {
-      const payload = recordFromBody(await readBody(req));
+      const payload = await recordFromRequest(req);
       const response = await deps.piApi.startReviewJob(payload, "main-review");
       deps.logger.info("api", "main review job started", { prKey: payload.prKey, jobId: response.job.id });
       sendJson(res, 202, response);
@@ -186,40 +191,15 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
     }
 
     if (req.method === "POST" && url.pathname === "/api/pi/focus-review") {
-      const payload = recordFromBody(await readBody(req));
+      const payload = await recordFromRequest(req);
       const response = await deps.piApi.startReviewJob(payload, "focus-review");
       deps.logger.info("api", "focus review job started", { prKey: payload.prKey, jobId: response.job.id });
       sendJson(res, 202, response);
       return;
     }
 
-    if (req.method === "POST" && url.pathname === "/api/focus-scan/save") {
-      sendJson(res, 200, await deps.savedAnalysisApi.saveFocusScan(recordFromBody(await readBody(req))));
-      return;
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/ai-review/save") {
-      sendJson(res, 200, await deps.savedAnalysisApi.saveAiReview(recordFromBody(await readBody(req))));
-      return;
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/pi/diagnostics") {
-      sendJson(res, 200, await deps.piApi.diagnostics(recordFromBody(await readBody(req))));
-      return;
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/pi/model") {
-      sendJson(res, 200, await deps.piApi.setModel(recordFromBody(await readBody(req))));
-      return;
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/gpu/workspaces/status") {
-      sendJson(res, 200, await deps.gpuWorkspaceStatusResponse(recordFromBody(await readBody(req))));
-      return;
-    }
-
     if (req.method === "POST" && url.pathname === "/api/gpu/workspaces") {
-      const payload = recordFromBody(await readBody(req));
+      const payload = await recordFromRequest(req);
       deps.logger.info("api", "gpu workspace requested", { prUrl: payload.prUrl, gpuType: payload.gpuType });
       const response = await deps.gpuWorkspaceCreateResponse(payload);
       const workspace = response.workspace as { gpuType?: unknown; id?: unknown; uri?: unknown } | undefined;
@@ -229,7 +209,7 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
     }
 
     if (req.method === "POST" && url.pathname === "/api/gpu/workspaces/delete") {
-      const payload = recordFromBody(await readBody(req));
+      const payload = await recordFromRequest(req);
       deps.logger.info("api", "gpu workspace delete requested", { id: payload.id });
       const response = await deps.gpuWorkspaceDeleteResponse(payload);
       const result = response.result as { id?: unknown } | undefined;
@@ -239,7 +219,7 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
     }
 
     if (req.method === "POST" && url.pathname === "/api/gpu/workspaces/exec") {
-      const payload = recordFromBody(await readBody(req));
+      const payload = await recordFromRequest(req);
       deps.logger.info("api", "gpu workspace exec requested", { id: payload.id, command: payload.command });
       const response = await deps.gpuWorkspaceExecResponse(payload);
       const result = response.result as { id?: unknown; exitCode?: unknown; signal?: unknown } | undefined;
@@ -249,24 +229,14 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
     }
 
     if (req.method === "POST" && url.pathname === "/api/review/submit") {
-      const payload = recordFromBody(await readBody(req));
+      const payload = await recordFromRequest(req);
       deps.logger.info("api", "submit review requested", { prUrl: payload.prUrl, comments: Array.isArray(payload.comments) ? payload.comments.length : 0, event: payload.event });
       sendJson(res, 200, await deps.reviewSubmitRouteApi.submit(payload));
       return;
     }
 
-    if (req.method === "POST" && url.pathname === "/api/comment/reply") {
-      sendJson(res, 200, await deps.commentApi.reply(recordFromBody(await readBody(req))));
-      return;
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/comment/edit") {
-      sendJson(res, 200, await deps.commentApi.edit(recordFromBody(await readBody(req))));
-      return;
-    }
-
     if (req.method === "POST" && url.pathname === "/api/pr/open") {
-      const input = inputFromBody(await readBody(req));
+      const input = await inputFromRequest(req);
       deps.logger.info("api", "open PR requested", { input });
       const response = await deps.prApi.open(input);
       deps.logger.info("api", "open PR complete", { key: response.pr.key, filesChanged: response.pr.filesChanged, existingCommentCount: response.pr.existingCommentCount, worktreeDir: response.worktreeDir });
