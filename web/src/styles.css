@@ -2451,11 +2451,56 @@ button.fold:hover {
   text-align: center;
 }
 
+.start-list-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
 .start-filters {
   display: flex;
+  flex: 1;
   flex-wrap: wrap;
   gap: 18px;
-  border-bottom: 1px solid var(--border);
+}
+
+.start-bulk-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-height: 36px;
+  padding-bottom: 6px;
+  font-size: 0.82rem;
+}
+
+.start-select-visible {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.start-select-visible.disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.start-select-visible input,
+.pr-card-select input {
+  accent-color: var(--accent);
+}
+
+.start-bulk-actions .bulk-delete-button {
+  color: var(--danger-text);
+}
+
+.start-bulk-actions .bulk-delete-button:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, var(--panel));
+  color: var(--danger);
 }
 
 .start-filter {
@@ -2531,6 +2576,33 @@ button.fold:hover {
 
 .pr-card:hover {
   background: color-mix(in srgb, var(--accent) 5%, var(--panel));
+}
+
+.pr-card.selecting {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.pr-card.selected,
+.pr-card.selected:hover,
+.pr-card.selected:hover .pr-card-body {
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+}
+
+.pr-card-select {
+  display: grid;
+  place-items: center;
+  padding-left: 14px;
+  cursor: pointer;
+}
+
+.pr-card-select input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+.pr-card.selecting .pr-card-body {
+  cursor: pointer;
 }
 
 .pr-card.status-success,
@@ -2619,6 +2691,20 @@ button.fold:hover {
   background: color-mix(in srgb, var(--danger) 12%, var(--panel));
   color: var(--danger);
 }
+
+@media (max-width: 760px) {
+  .start-list-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .start-bulk-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+}
+
 .ai-review .markdown,
 .focus-review .markdown {
   max-height: 360px;

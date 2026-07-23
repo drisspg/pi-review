@@ -83,6 +83,40 @@ test("removes a previous PR from local history", async ({ page }) => {
   if (key != null) await expect(page.locator(".pr-card", { hasText: key })).toHaveCount(0);
 });
 
+test("selects and removes multiple previous PRs", async ({ page }) => {
+  const savedPrs = [
+    { key: "github.com/example/one#1", title: "First saved PR", url: "https://github.com/example/one/pull/1", headSha: "111111111111", lastOpenedAt: "2026-07-23T03:00:00.000Z", filesChanged: 1, existingCommentCount: 0 },
+    { key: "github.com/example/two#2", title: "Second saved PR", url: "https://github.com/example/two/pull/2", headSha: "222222222222", lastOpenedAt: "2026-07-23T02:00:00.000Z", filesChanged: 2, existingCommentCount: 1 },
+    { key: "github.com/example/three#3", title: "Keep this PR", url: "https://github.com/example/three/pull/3", headSha: "333333333333", lastOpenedAt: "2026-07-23T01:00:00.000Z", filesChanged: 3, existingCommentCount: 2 },
+  ];
+  const cleanupInputs: string[] = [];
+  const dialogs: string[] = [];
+  page.on("dialog", async (dialog) => {
+    dialogs.push(dialog.message());
+    await dialog.accept();
+  });
+  await page.route("**/api/prs", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ prs: savedPrs }) });
+  });
+  await page.route("**/api/pr/cleanup", async (route) => {
+    cleanupInputs.push((route.request().postDataJSON() as { input: string }).input);
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true }) });
+  });
+
+  await page.getByRole("link", { name: "Home" }).click();
+  await expect(page.locator(".pr-card")).toHaveCount(3);
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await page.getByLabel("Select github.com/example/one#1").check();
+  await page.getByLabel("Select github.com/example/two#2").check();
+  await page.getByRole("button", { name: "Delete selected (2)" }).click();
+
+  await expect(page.locator(".pr-card")).toHaveCount(1);
+  await expect(page.locator(".pr-card")).toContainText("Keep this PR");
+  await expect(page.getByRole("button", { name: "Select", exact: true })).toBeVisible();
+  expect(cleanupInputs.sort()).toEqual(savedPrs.slice(0, 2).map((pr) => pr.url).sort());
+  expect(dialogs).toEqual(["Remove 2 saved PRs from history and delete their local worktree/session caches?"]);
+});
+
 test("reopens a previously loaded PR from the client cache", async ({ page }) => {
   let openRequests = 0;
   await page.route("**/api/pr/open", async (route) => {
