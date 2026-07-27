@@ -763,6 +763,13 @@ test("runs the right-sidebar Pi review panel and continues the chat with Enter",
   await expect(dialog.getByText("read: csrc/flash_attn/flash_api.cpp")).toBeVisible();
   await dialog.getByText("read: csrc/flash_attn/flash_api.cpp").click();
   await expect(dialog).toContainText("Relevant source lines");
+  await dialog.getByRole("button", { name: "Focus chat" }).click();
+  await expect(dialog).toHaveClass(/chat-focused/);
+  await expect(dialog.locator(".pi-actions")).toBeHidden();
+  await expect(dialog.locator(".pi-review-findings")).toBeHidden();
+  await expect(dialog.getByRole("button", { name: "Show review context" })).toBeVisible();
+  await dialog.getByRole("button", { name: "Show review context" }).click();
+  await expect(dialog).not.toHaveClass(/chat-focused/);
   await page.getByRole("button", { name: "Focus review panel" }).click();
   await expect(dialog.getByPlaceholder("Message Pi…")).toBeInViewport();
 });

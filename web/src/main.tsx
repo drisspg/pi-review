@@ -1555,7 +1555,7 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { d
       </nav>
       <div className={`side-tab-panels ${sideTab}-tab-panel`}>
         {sideTab === "review" && <ReviewSummary pr={props.review.pr} files={props.review.files} drafts={props.drafts} setDrafts={props.setDrafts} event={props.reviewEvent} setEvent={props.setReviewEvent} body={props.reviewBody} setBody={props.setReviewBody} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} submitReview={props.submitReview} submitting={props.submitting} invalidDraftIds={props.invalidDraftIds} copyFeedbackPrompt={props.piPanel.copyFeedbackPrompt} onJumpToTarget={jumpToComment} />}
-        {sideTab === "pi" && <InlineSnippetsProvider value={{ headSha: props.review.pr.headSha, snippets: true }}><AiReviewPanel prUrl={props.review.pr.url} {...props.piPanel} focusAreas={props.focusAreas} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={props.collapsedFocusAreaIds} setCollapsedFocusAreaIds={props.setCollapsedFocusAreaIds} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} /></InlineSnippetsProvider>}
+        {sideTab === "pi" && <InlineSnippetsProvider value={{ headSha: props.review.pr.headSha, snippets: true }}><AiReviewPanel key={props.review.pr.url} prUrl={props.review.pr.url} {...props.piPanel} focusAreas={props.focusAreas} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={props.collapsedFocusAreaIds} setCollapsedFocusAreaIds={props.setCollapsedFocusAreaIds} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} /></InlineSnippetsProvider>}
         {sideTab === "comments" && <ExistingComments prUrl={props.review.pr.url} comments={props.review.comments} issueComments={props.review.issueComments} reviewSummaries={props.review.reviewSummaries} refreshGithubActivity={props.refreshGithubActivity} collapseSignal={props.commentCollapseSignal} commentsCollapsed={props.commentsCollapsed} toggleAllComments={props.toggleAllComments} onJumpToComment={jumpToComment} />}
       </div>
     </aside>
@@ -2054,6 +2054,7 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
   const [copyingFeedback, setCopyingFeedback] = useState(false);
   const [feedbackCopied, setFeedbackCopied] = useState(false);
   const [feedbackCopyError, setFeedbackCopyError] = useState<string | null>(null);
+  const [chatFocused, setChatFocused] = useState(false);
   const draftKey = aiReviewId ?? "__pending__";
   const draft = draftsByRecord[draftKey] ?? "";
   const setDraft = (text: string) => setDraftsByRecord((current) => ({ ...current, [draftKey]: text }));
@@ -2074,7 +2075,7 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
       if (transcriptRef.current != null) transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [chatMessages, chatSending]);
+  }, [chatMessages, chatSending, chatFocused]);
   async function copyFeedback() {
     if (copyingFeedback) return;
     setCopyingFeedback(true);
@@ -2131,7 +2132,8 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
   </div>;
   const sessionChat = <section className="pi-session-chat" aria-label="Pi session chat">
     <div className="pi-session-chat-head">
-      <strong>Session</strong>
+      <strong>{chatFocused ? "Chat" : "Session"}</strong>
+      <Button variant="muted" className="small-muted-button" onClick={() => setChatFocused(!chatFocused)} aria-pressed={chatFocused}>{chatFocused ? "Show review context" : "Focus chat"}</Button>
       {chatMessages.length > 0 && <Button variant="muted" className="small-muted-button" onClick={clearFollowUp} disabled={chatSending} aria-label="Clear chat">Clear</Button>}
     </div>
     <div ref={transcriptRef} className="pi-session-transcript" onScroll={(event) => {
@@ -2178,7 +2180,7 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
       </div>;
     })}
   </div>;
-  return <section className={`panel ai-review${viewingHistory ? " viewing-history" : ""}`}>
+  return <section className={`panel ai-review${viewingHistory ? " viewing-history" : ""}${chatFocused ? " chat-focused" : ""}`}>
     <div className="section-head pi-panel-head"><h2>Pi session{viewingHistory && <span className="pi-history-flag" role="status">Viewing earlier run</span>}</h2><Button type="button" variant="muted" className="small-muted-button pi-copy-feedback" onClick={() => void copyFeedback()} disabled={copyingFeedback}>{copyingFeedback ? "Copying…" : feedbackCopied ? "Copied feedback prompt" : "Copy feedback prompt"}</Button></div>
     {feedbackCopyError != null && <p className="muted copy-feedback-error" role="alert">Copy failed: {feedbackCopyError}</p>}
     <div className="pi-actions">

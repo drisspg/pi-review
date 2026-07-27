@@ -3065,6 +3065,19 @@ button.fold:hover {
   background: var(--panel2);
 }
 
+.ai-review.chat-focused {
+  overflow: hidden;
+}
+
+.ai-review.chat-focused > :not(.pi-session-chat) {
+  display: none;
+}
+
+.ai-review.chat-focused .pi-session-chat {
+  flex-basis: 100%;
+  min-height: 0;
+}
+
 .pi-session-chat-head {
   display: flex;
   min-height: 34px;
@@ -3087,7 +3100,7 @@ button.fold:hover {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 14px;
+  padding: 20px max(14px, calc((100% - 880px) / 2));
 }
 
 .pi-session-empty {
@@ -3106,38 +3119,58 @@ button.fold:hover {
 
 .pi-session-message {
   display: grid;
-  gap: 5px;
-  padding: 10px 12px;
-  margin-bottom: 12px;
+  gap: 6px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
   border-radius: var(--radius);
 }
 
 .pi-session-message.user {
-  margin-left: clamp(0px, 8%, 70px);
-  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
-  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+  max-width: 82%;
+  margin-left: auto;
+  border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--border));
+  background: color-mix(in srgb, var(--accent) 13%, var(--panel));
 }
 
 .pi-session-message.pi {
-  padding-inline: 2px;
+  padding: 15px 17px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  box-shadow: inset 3px 0 color-mix(in srgb, var(--accent) 65%, var(--border));
 }
 
 .pi-session-message-role {
-  color: var(--muted);
+  color: color-mix(in srgb, var(--text) 72%, var(--muted));
   font-size: 0.7rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
+}
+
+.pi-session-message.pi .pi-session-message-role {
+  color: var(--accent);
 }
 
 .pi-session-message p {
   margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.6;
   white-space: pre-wrap;
 }
 
 .pi-session-message .markdown {
   max-height: none;
   overflow: visible;
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.pi-session-message .markdown p,
+.pi-session-message .markdown ul,
+.pi-session-message .markdown ol,
+.pi-session-message .markdown .markdown-code-block,
+.pi-session-message .markdown blockquote {
+  margin-bottom: 0.9rem;
 }
 
 .pi-session-entry {
@@ -3198,7 +3231,7 @@ button.fold:hover {
   flex: 0 0 auto;
   display: grid;
   gap: 6px;
-  padding: 10px;
+  padding: 12px max(10px, calc((100% - 900px) / 2));
   border-top: 1px solid var(--border);
   background: var(--panel);
 }
