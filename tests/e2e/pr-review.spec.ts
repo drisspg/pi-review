@@ -334,6 +334,28 @@ test("supports multiline draft ranges", async ({ page }) => {
   await expect(page.getByRole("button", { name: /Submit review/ })).toBeEnabled();
 });
 
+test("keeps submit visible while many draft comments scroll", async ({ page }) => {
+  const row = (await openFileWithAddedRows(page, 1)).first();
+  const path = await row.getAttribute("data-path");
+  const line = await row.getAttribute("data-line");
+  if (openedPr == null || path == null || line == null) throw new Error("Missing draft review target");
+  await page.request.post("/api/draft-review/save", { data: {
+    prKey: openedPr.key,
+    headSha: openedPr.headSha,
+    event: "COMMENT",
+    body: "",
+    comments: Array.from({ length: 12 }, (_, index) => ({ id: `scroll-draft-${index}`, path, line: Number.parseInt(line, 10), side: "RIGHT", body: `Draft comment ${index + 1} with enough text to occupy space in the review panel.` })),
+  } });
+
+  await page.reload();
+  await expect(page.locator(".review-layout")).toBeVisible({ timeout: 60_000 });
+  await openSideTab(page, "Review");
+
+  await expect(page.getByRole("button", { name: "Submit review (12)" })).toBeInViewport();
+  await expect(page.locator(".review-draft-list")).toHaveJSProperty("scrollTop", 0);
+  expect(await page.locator(".review-draft-list").evaluate((list) => list.scrollHeight > list.clientHeight)).toBe(true);
+});
+
 test("clears the review form after submitting", async ({ page }) => {
   let submitRequests = 0;
   await page.route("**/api/review/submit", async (route) => {
@@ -469,6 +491,24 @@ test("renders inline Ask Pi responses as markdown", async ({ page }) => {
   await expect(thread.locator("pre code")).toContainText("return batch_offset;");
   expect(prompt).toContain("Diff hunk context:\n@@");
   expect(prompt).toContain("review this line");
+});
+
+test("keeps inline draft actions visible after a long Pi response", async ({ page }) => {
+  await mockAskPi(page, () => Array.from({ length: 80 }, (_, index) => `Paragraph ${index + 1}: detailed review analysis.`).join("\n\n"));
+
+  await openFirstFile(page);
+  const row = page.locator(".file").first().locator(".diff-row.added").first();
+  await row.scrollIntoViewIfNeeded();
+  await row.click();
+  const localThread = page.locator(".local-thread").first();
+  await localThread.locator("textarea").fill("review this thoroughly");
+  await localThread.getByRole("button", { name: "Ask Pi" }).click();
+
+  const timeline = localThread.locator(".local-comment-timeline");
+  await expect(timeline).toContainText("Paragraph 80");
+  expect(await timeline.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+  await localThread.scrollIntoViewIfNeeded();
+  await expect(localThread.getByRole("button", { name: "Add draft comment" })).toBeInViewport();
 });
 
 test("selects diff code text without opening a thread", async ({ page }) => {

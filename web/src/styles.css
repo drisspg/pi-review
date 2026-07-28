@@ -568,15 +568,20 @@ a { color: var(--link); text-decoration: none; }
   padding: 8px;
 }
 
-.side-tab-panels.pi-tab-panel {
+.side-tab-panels.pi-tab-panel,
+.side-tab-panels.review-tab-panel {
   display: flex;
   align-content: normal;
   overflow: hidden;
 }
 
-.side-tab-panels.pi-tab-panel > .ai-review {
+.side-tab-panels.pi-tab-panel > .ai-review,
+.side-tab-panels.review-tab-panel > .review-summary {
   flex: 1 1 auto;
   min-height: 0;
+}
+
+.side-tab-panels.pi-tab-panel > .ai-review {
   overflow-y: auto;
 }
 
@@ -1493,6 +1498,13 @@ a { color: var(--link); text-decoration: none; }
   padding: 12px 12px 8px;
 }
 
+.github-thread > .github-comment-timeline,
+.local-thread > .local-comment-timeline,
+.focus-area-inline > .thread-messages {
+  max-height: min(420px, 50vh);
+  overflow-y: auto;
+}
+
 .github-comment,
 .local-comment {
   position: relative;
@@ -2217,7 +2229,11 @@ button.fold:hover {
 }
 
 .side .review-summary {
+  display: flex;
+  flex-direction: column;
   gap: 0;
+  height: 100%;
+  min-height: 0;
   padding: 0;
   overflow: hidden;
   background: var(--panel);
@@ -2257,11 +2273,24 @@ button.fold:hover {
   background: var(--bg);
 }
 
+.side .review-summary .review-draft-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-bottom: 12px;
+  overflow-y: auto;
+}
+
+.side .github-draft-list {
+  max-height: 180px;
+  overflow-y: auto;
+}
+
 .side .review-summary .review-no-drafts {
   padding: 10px 0;
 }
 
 .side .review-summary .review-actions {
+  flex: 0 0 auto;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   padding: 10px 12px;
@@ -2279,6 +2308,7 @@ button.fold:hover {
 }
 
 .side .review-summary-empty .review-summary-empty-actions {
+  margin-top: auto;
   padding: 12px;
   border-top: 1px solid var(--border);
   background: var(--panel2);
