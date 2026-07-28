@@ -133,6 +133,22 @@ test("reopens a previously loaded PR from the client cache", async ({ page }) =>
   expect(openRequests).toBe(0);
 });
 
+test("can cancel a slow pull request open", async ({ page }) => {
+  await page.getByRole("link", { name: "Home" }).click();
+  await page.route("**/api/pr/open", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await route.abort();
+  });
+
+  await page.locator("input").first().fill("https://github.com/example/repo/pull/999");
+  await page.getByRole("button", { name: "Open" }).click();
+  await expect(page.getByRole("button", { name: "Cancel" })).toBeVisible();
+  await page.getByRole("button", { name: "Cancel" }).click();
+
+  await expect(page.getByRole("heading", { name: "Review a pull request" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Cancel" })).toHaveCount(0);
+});
+
 test("opens a previous PR from its review link in a separate page", async ({ page, context }) => {
   await page.getByRole("link", { name: "Home" }).click();
   const href = await page.locator(".pr-card").first().locator(".pr-card-body").getAttribute("href");
@@ -268,6 +284,17 @@ test("pulls private GitHub comments and copies an agent handoff", async ({ page,
   expect(text).toContain("send this private note to the coding agent");
 });
 
+test("shows private GitHub draft pull failures in the Review panel", async ({ page }) => {
+  await page.route("**/api/github-draft-review/pull", async (route) => {
+    await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "GitHub unavailable" }) });
+  });
+
+  await openSideTab(page, "Review");
+  await page.getByRole("button", { name: "Pull private GitHub comments" }).click();
+
+  await expect(page.locator(".github-draft-review").getByRole("alert")).toContainText("GitHub draft failed: GitHub unavailable");
+});
+
 test("saves a line comment immediately to a private GitHub review", async ({ page }) => {
   const row = (await openFileWithAddedRows(page, 1)).first();
   const path = await row.getAttribute("data-path");
@@ -289,6 +316,22 @@ test("saves a line comment immediately to a private GitHub review", async ({ pag
   await expect(page.locator(".github-draft-card")).toContainText("private implementation note");
 });
 
+test("keeps a failed private GitHub line comment retryable", async ({ page }) => {
+  const row = (await openFileWithAddedRows(page, 1)).first();
+  await page.route("**/api/github-draft-review/comment", async (route) => {
+    await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "GitHub rejected the draft" }) });
+  });
+
+  await row.click();
+  const thread = page.locator(".inline-thread.local-thread").first();
+  await thread.locator("textarea").fill("keep this private draft");
+  await thread.getByRole("button", { name: "Save private on GitHub" }).click();
+
+  await expect(thread.getByRole("alert")).toContainText("GitHub draft failed: GitHub rejected the draft");
+  await expect(thread.locator("textarea")).toHaveValue("keep this private draft");
+  await expect(thread.getByRole("button", { name: "Save private on GitHub" })).toBeEnabled();
+});
+
 test("copies all draft comments with diff context", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await openFirstFile(page);
@@ -303,6 +346,24 @@ test("copies all draft comments with diff context", async ({ page, context }) =>
   expect(text).toContain("# PR review draft context");
   expect(text).toContain("send this to another agent");
   expect(text).toContain("Diff hunk context:\n```diff\n@@");
+});
+
+test("shows local draft save failures and retries them", async ({ page }) => {
+  let saves = 0;
+  await page.route("**/api/draft-review/save", async (route) => {
+    saves += 1;
+    if (saves === 1) {
+      await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "disk full" }) });
+      return;
+    }
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ draftReview: { prKey: openedPr!.key, headSha: openedPr!.headSha, event: "COMMENT", body: "keep this", comments: [], updatedAt: "now" } }) });
+  });
+
+  await openReviewForm(page);
+  await page.getByPlaceholder("Overall review body").fill("keep this");
+  await expect(page.locator(".draft-save-status.is-error")).toContainText("Draft not saved: disk full");
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect(page.locator(".draft-save-status.is-saved")).toContainText("Draft saved");
 });
 
 test("clears empty line threads when clicking elsewhere", async ({ page }) => {
@@ -354,6 +415,18 @@ test("keeps submit visible while many draft comments scroll", async ({ page }) =
   await expect(page.getByRole("button", { name: "Submit review (12)" })).toBeInViewport();
   await expect(page.locator(".review-draft-list")).toHaveJSProperty("scrollTop", 0);
   expect(await page.locator(".review-draft-list").evaluate((list) => list.scrollHeight > list.clientHeight)).toBe(true);
+});
+
+test("keeps review submission reachable on a short mobile viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 480 });
+  await openSideTab(page, "Review");
+  await page.getByRole("button", { name: "Start review" }).click();
+  await page.getByPlaceholder("Overall review body").fill("mobile review");
+
+  await expect(page.getByRole("button", { name: "Submit review (0)" })).toBeInViewport();
+  const sideBox = await page.locator(".side").boundingBox();
+  expect(sideBox?.y).toBeLessThanOrEqual(8);
+  expect((sideBox?.y ?? 0) + (sideBox?.height ?? 0)).toBeLessThanOrEqual(480);
 });
 
 test("clears the review form after submitting", async ({ page }) => {
@@ -439,6 +512,31 @@ test("edits an existing GitHub comment", async ({ page }) => {
   await expect(firstThread.locator(".markdown").first()).toContainText("edited from pi-review");
 });
 
+test("keeps failed GitHub comment edits and replies retryable", async ({ page }) => {
+  await page.route("**/api/comment/edit", async (route) => {
+    await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "edit rejected" }) });
+  });
+  await page.route("**/api/comment/reply", async (route) => {
+    await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "reply rejected" }) });
+  });
+
+  await openSideTab(page, "Comments");
+  const firstThread = page.locator(".side .github-thread").first();
+  await firstThread.getByRole("button", { name: "Edit" }).first().click();
+  await firstThread.getByLabel("Edit comment").fill("preserve this edit");
+  await firstThread.getByRole("button", { name: "Save" }).click();
+  await expect(firstThread.getByRole("alert")).toContainText("Edit failed: edit rejected");
+  await expect(firstThread.getByLabel("Edit comment")).toHaveValue("preserve this edit");
+  await expect(firstThread.getByRole("button", { name: "Retry" })).toBeVisible();
+
+  const replyThread = page.locator(".side .github-thread", { has: page.getByLabel("Reply to thread") }).first();
+  await replyThread.getByLabel("Reply to thread").fill("preserve this reply");
+  await replyThread.getByRole("button", { name: "Reply" }).click();
+  await expect(replyThread.locator(".thread-reply").getByRole("alert")).toContainText("Reply failed: reply rejected");
+  await expect(replyThread.getByLabel("Reply to thread")).toHaveValue("preserve this reply");
+  await expect(replyThread.locator(".thread-reply").getByRole("button", { name: "Retry" })).toBeVisible();
+});
+
 test("collapses and focuses existing comment threads", async ({ page }) => {
   await openSideTab(page, "Comments");
   const thread = page.locator(".side .github-thread").first();
@@ -452,6 +550,17 @@ test("collapses and focuses existing comment threads", async ({ page }) => {
 test("switches GitHub-style themes", async ({ page }) => {
   await page.getByLabel("Theme").selectOption("github-light");
   await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe("github-light");
+});
+
+test("keeps the Pi composer usable on a short mobile viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 480 });
+  await openSideTab(page, "Pi");
+  await page.getByRole("button", { name: "Focus chat" }).click();
+  const composer = page.getByPlaceholder("Message Pi…");
+  await composer.fill("line one\nline two\nline three\nline four");
+
+  await expect(composer).toBeInViewport();
+  await expect(page.getByRole("button", { name: "Send" })).toBeInViewport();
 });
 
 test("shows readable Pi diagnostics", async ({ page }) => {
@@ -563,8 +672,10 @@ test("runs a separate focus areas review and highlights referenced lines", async
   const focusArea = page.locator(".focus-area-inline");
   await expect(focusArea).toContainText("tiling conventions");
   await focusArea.getByRole("button", { name: "Collapse" }).click();
-  await expect(page.locator(".focus-area-collapsed")).toBeVisible();
-  await page.locator(".focus-area-collapsed").click();
+  const collapsedFocusArea = page.locator(".focus-area-collapsed");
+  await expect(collapsedFocusArea).toBeVisible();
+  await collapsedFocusArea.focus();
+  await page.keyboard.press("Enter");
   await expect(focusArea).toContainText("tiling conventions");
   await focusArea.getByPlaceholder("Write a draft comment or ask Pi about this focus area").fill("please check this tradeoff");
   await focusArea.getByRole("button", { name: "Add draft comment" }).click();

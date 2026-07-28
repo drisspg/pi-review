@@ -397,6 +397,17 @@ a { color: var(--link); text-decoration: none; }
   white-space: pre-wrap;
 }
 
+.operation-error {
+  margin: 0;
+  color: var(--danger-text);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.local-thread > .operation-error {
+  margin: 8px 10px 0;
+}
+
 .panel {
   padding: 12px;
   display: grid;
@@ -1756,8 +1767,14 @@ a { color: var(--link); text-decoration: none; }
   overflow: hidden;
 }
 
-.thread-reply button {
+.thread-reply > button {
+  grid-column: 2;
+  grid-row: 1;
   min-height: 34px;
+}
+
+.thread-reply > .operation-error {
+  grid-column: 1 / -1;
 }
 
 .thread-head > div:not(.thread-title):not(.actions) {
@@ -2105,6 +2122,33 @@ button.fold:hover {
 .review-summary-head p {
   margin: 3px 0 0;
   font-size: 0.8rem;
+}
+
+.draft-save-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.draft-save-status.is-saved {
+  color: var(--success);
+}
+
+.draft-save-status.is-error {
+  color: var(--danger-text);
+}
+
+.draft-save-status button {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font-size: inherit;
+  text-decoration: underline;
 }
 
 .review-summary-empty-actions {
@@ -3025,6 +3069,13 @@ button.fold:hover {
   border-color: color-mix(in srgb, var(--thread-accent) 30%, var(--border));
   background: var(--panel);
   box-shadow: inset 3px 0 color-mix(in srgb, var(--thread-accent) 60%, var(--border));
+}
+
+button.focus-area-collapsed {
+  width: 100%;
+  padding: 0;
+  color: inherit;
+  text-align: left;
 }
 
 .ai-chat-messages {
@@ -4206,6 +4257,17 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
 @media (max-width: 760px) {
   .app-shell { padding: 8px; }
   .toolbar { margin: -8px -8px 2px; padding: 8px 10px; }
+  .side {
+    position: fixed;
+    inset: 8px;
+    z-index: 110;
+    width: auto;
+    height: auto;
+    max-height: none;
+  }
+  .side .review-summary .review-actions { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .side .review-summary .review-actions .small-muted-button,
+  .side .review-summary .review-actions .review-submit { width: 100%; white-space: normal; }
   .toolbar-actions > .toolbar-link { display: none; }
   .pr-header-strip { display: grid; }
   .pr-header-actions { justify-content: flex-start; }

@@ -70,8 +70,8 @@ function ReviewCommentTimeline({ comments, commentKind, prUrl, refreshGithubActi
   return <div className="github-comment-timeline">{comments.map((comment) => <GitHubCommentView key={comment.id} comment={comment} commentKind={commentKind} prUrl={prUrl} refreshGithubActivity={refreshGithubActivity} />)}</div>;
 }
 
-function CommentEditor({ body, submitting, onChange, onCancel, onSave }: { body: string; submitting: boolean; onChange: (body: string) => void; onCancel: () => void; onSave: () => void }) {
-  return <div className="github-comment-edit"><textarea rows={1} value={body} onChange={(event) => onChange(event.target.value)} onInput={(event) => autoGrowTextarea(event.currentTarget)} ref={(element) => autoGrowTextarea(element)} aria-label="Edit comment" /><div className="github-comment-edit-actions"><Button variant="muted" onClick={onCancel} disabled={submitting}>Cancel</Button><Button onClick={onSave} disabled={submitting || body.trim().length === 0}>{submitting ? "Saving…" : "Save"}</Button></div></div>;
+function CommentEditor({ body, submitting, error, onChange, onCancel, onSave }: { body: string; submitting: boolean; error: string | null; onChange: (body: string) => void; onCancel: () => void; onSave: () => void }) {
+  return <div className="github-comment-edit"><textarea rows={1} value={body} onChange={(event) => onChange(event.target.value)} onInput={(event) => autoGrowTextarea(event.currentTarget)} ref={(element) => autoGrowTextarea(element)} aria-label="Edit comment" />{error != null && <p className="operation-error" role="alert">Edit failed: {error}</p>}<div className="github-comment-edit-actions"><Button variant="muted" onClick={onCancel} disabled={submitting}>Cancel</Button><Button onClick={onSave} disabled={submitting || body.trim().length === 0}>{submitting ? "Saving…" : error == null ? "Save" : "Retry"}</Button></div></div>;
 }
 
 function GitHubCommentView({ comment, commentKind, prUrl, refreshGithubActivity }: { comment: GitHubComment; commentKind: CommentKind; prUrl: string; refreshGithubActivity: () => Promise<void> }) {
@@ -80,26 +80,32 @@ function GitHubCommentView({ comment, commentKind, prUrl, refreshGithubActivity 
   const [editing, setEditing] = useState(false);
   const [body, setBody] = useState(comment.body);
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   async function saveEdit() {
     if (body.trim().length === 0 || submitting) return;
     setSubmitting(true);
+    setError(null);
     try {
       await api("/api/comment/edit", { method: "POST", body: JSON.stringify({ prUrl, kind: commentKind, commentId: comment.id, body }) });
       setEditing(false);
       void refreshGithubActivity();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSubmitting(false);
     }
   }
   function startEditing() {
     setBody(comment.body);
+    setError(null);
     setEditing(true);
   }
   function cancelEditing() {
     setBody(comment.body);
+    setError(null);
     setEditing(false);
   }
-  return <div className="github-comment" style={{ "--commenter": commenterColor(login) } as React.CSSProperties}><div className="avatar" aria-hidden="true">{avatarLabel(login)}</div><div className="github-comment-body"><div className="github-comment-header"><span className="github-comment-meta"><strong>@{login}</strong>{timestamp != null && <span className="comment-time">commented {relativeTime(timestamp)}</span>}</span>{!editing && <Button variant="muted" className="small-muted-button" onClick={startEditing}>Edit</Button>}</div>{editing ? <CommentEditor body={body} submitting={submitting} onChange={setBody} onCancel={cancelEditing} onSave={() => void saveEdit()} /> : <MarkdownText text={body} />}</div></div>;
+  return <div className="github-comment" style={{ "--commenter": commenterColor(login) } as React.CSSProperties}><div className="avatar" aria-hidden="true">{avatarLabel(login)}</div><div className="github-comment-body"><div className="github-comment-header"><span className="github-comment-meta"><strong>@{login}</strong>{timestamp != null && <span className="comment-time">commented {relativeTime(timestamp)}</span>}</span>{!editing && <Button variant="muted" className="small-muted-button" onClick={startEditing}>Edit</Button>}</div>{editing ? <CommentEditor body={body} submitting={submitting} error={error} onChange={setBody} onCancel={cancelEditing} onSave={() => void saveEdit()} /> : <MarkdownText text={body} />}</div></div>;
 }
 
 function GitHubThreadCard({ id, className = "comment", title, subtitle, status, href, comments, commentKind, prUrl, refreshGithubActivity, reply, collapseSignal = 0, collapseComments = true, onJump }: { id?: string; className?: string; title: string; subtitle: string; status?: string | null; href: string; comments: GitHubComment[]; commentKind: CommentKind; prUrl: string; refreshGithubActivity: () => Promise<void>; reply?: React.ReactNode; collapseSignal?: number; collapseComments?: boolean; onJump?: () => void }) {
@@ -126,18 +132,22 @@ function GitHubThreadCard({ id, className = "comment", title, subtitle, status, 
 function ThreadReplyBox({ prUrl, kind, commentId, refreshGithubActivity }: { prUrl: string; kind: "issue" | "review"; commentId?: number; refreshGithubActivity: () => Promise<void> }) {
   const [body, setBody] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   async function submitReply() {
     if (body.trim().length === 0 || submitting) return;
     setSubmitting(true);
+    setError(null);
     try {
       await api("/api/comment/reply", { method: "POST", body: JSON.stringify({ prUrl, kind, commentId, body }) });
       setBody("");
       await refreshGithubActivity();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSubmitting(false);
     }
   }
-  return <div className="thread-reply thread-reply-box"><textarea rows={1} value={body} onChange={(event) => setBody(event.target.value)} onInput={(event) => autoGrowTextarea(event.currentTarget)} placeholder="Reply…" aria-label="Reply to thread" /><Button variant="muted" onClick={() => void submitReply()} disabled={submitting || body.trim().length === 0}>{submitting ? "Replying…" : "Reply"}</Button></div>;
+  return <div className="thread-reply thread-reply-box"><textarea rows={1} value={body} onChange={(event) => setBody(event.target.value)} onInput={(event) => autoGrowTextarea(event.currentTarget)} placeholder="Reply…" aria-label="Reply to thread" />{error != null && <p className="operation-error" role="alert">Reply failed: {error}</p>}<Button variant="muted" onClick={() => void submitReply()} disabled={submitting || body.trim().length === 0}>{submitting ? "Replying…" : error == null ? "Reply" : "Retry"}</Button></div>;
 }
 
 export function ExistingComments({ prUrl, comments, issueComments, reviewSummaries, refreshGithubActivity, collapseSignal, commentsCollapsed, toggleAllComments, onJumpToComment }: { prUrl: string; comments: PullReviewComment[]; issueComments: PullIssueComment[]; reviewSummaries: PullRequestReviewSummary[]; refreshGithubActivity: () => Promise<void>; collapseSignal: number; commentsCollapsed: boolean; toggleAllComments: () => void; onJumpToComment?: (target: ReturnType<typeof commentTarget>) => void }) {
