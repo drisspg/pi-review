@@ -2792,6 +2792,11 @@ button.fold:hover {
   }
 }
 
+.ai-review {
+  display: flex;
+  flex-direction: column;
+}
+
 .ai-review .markdown,
 .focus-review .markdown {
   max-height: 360px;
@@ -2819,11 +2824,22 @@ button.fold:hover {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
+  width: 100%;
+  max-width: 1040px;
 }
 
 .pi-action {
   display: grid;
+  align-content: start;
   gap: 4px;
+}
+
+.pi-action > button {
+  justify-self: start;
+  width: fit-content;
+  min-height: 28px;
+  padding: 4px 8px;
+  font-size: 0.78rem;
 }
 
 .pi-action span {
@@ -2938,13 +2954,6 @@ button.fold:hover {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   vertical-align: middle;
-}
-
-.focus-review-run {
-  width: fit-content;
-  min-height: 28px;
-  padding: 4px 8px;
-  font-size: 0.78rem;
 }
 
 .focus-review-note {

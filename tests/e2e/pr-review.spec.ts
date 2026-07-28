@@ -773,7 +773,7 @@ test("minimizes focus area links after all are reviewed", async ({ page }) => {
   await expect(page.locator(".focus-area-link-row")).toHaveCount(2);
 });
 
-test("shows a clean focus scan status when there are no focus areas", async ({ page }) => {
+test("keeps a clean focus scan compact when the Pi panel is focused", async ({ page }) => {
   await page.route(/\/api\/pi\/focus-review\/status$/, async (route) => {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { status: "complete", answer: "No focus areas found. All good." } }) });
   });
@@ -781,11 +781,23 @@ test("shows a clean focus scan status when there are no focus areas", async ({ p
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { id: "clean-focus-job" } }) });
   });
 
+  await page.setViewportSize({ width: 1600, height: 1200 });
   await openSideTab(page, "Pi");
+  await page.getByRole("button", { name: "Focus review panel" }).click();
   await page.getByRole("button", { name: "Focus scan" }).click();
 
-  await expect(page.locator(".ai-review")).toContainText("Focus scan clean");
+  const panel = page.locator(".ai-review");
+  await expect(panel).toContainText("Focus scan clean");
   await expect(page.locator(".focus-area-inline")).toHaveCount(0);
+  const actionBox = await panel.locator(".pi-actions").boundingBox();
+  const chatBox = await panel.locator(".pi-session-chat").boundingBox();
+  const actionButtons = panel.locator(".pi-action > button");
+  await expect(actionButtons).toHaveCount(2);
+  const buttonBoxes = await actionButtons.evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().height));
+  if (actionBox == null || chatBox == null) throw new Error("Missing compact Pi layout");
+  expect(actionBox.height).toBeLessThan(80);
+  expect(Math.max(...buttonBoxes)).toBeLessThan(40);
+  expect(chatBox.height).toBeGreaterThan(500);
 });
 
 test("persists Pi review chat across page reloads", async ({ page }) => {

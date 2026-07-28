@@ -2109,8 +2109,12 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const followTranscriptRef = useRef(true);
+  const transcriptUserScrollRef = useRef(false);
   useEffect(() => autoGrowTextarea(composerRef.current), [draft, draftKey]);
-  useEffect(() => { followTranscriptRef.current = true; }, [draftKey]);
+  useEffect(() => {
+    followTranscriptRef.current = true;
+    transcriptUserScrollRef.current = false;
+  }, [draftKey]);
   const focusAreaCount = focusAreas.length;
   const allFocusCollapsed = focusAreaCount > 0 && focusAreas.every((area) => collapsedFocusAreaIds[area.id]);
   const messages = currentAiReviewMessages(review);
@@ -2142,6 +2146,7 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
     if (draft.trim().length === 0 || chatSending) return;
     const message = draft;
     followTranscriptRef.current = true;
+    transcriptUserScrollRef.current = false;
     setDraft("");
     void sendMessage(message);
   }
@@ -2184,10 +2189,20 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
       <Button variant="muted" className="small-muted-button" onClick={() => setChatFocused(!chatFocused)} aria-pressed={chatFocused}>{chatFocused ? "Show review context" : "Focus chat"}</Button>
       {chatMessages.length > 0 && <Button variant="muted" className="small-muted-button" onClick={clearFollowUp} disabled={chatSending} aria-label="Clear chat">Clear</Button>}
     </div>
-    <div ref={transcriptRef} className="pi-session-transcript" onScroll={(event) => {
-      const transcript = event.currentTarget;
-      followTranscriptRef.current = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 48;
-    }}>
+    <div ref={transcriptRef} className="pi-session-transcript"
+      onWheel={() => { transcriptUserScrollRef.current = true; }}
+      onTouchMove={() => { transcriptUserScrollRef.current = true; }}
+      onPointerMove={(event) => { if (event.buttons !== 0) transcriptUserScrollRef.current = true; }}
+      onScroll={(event) => {
+        const transcript = event.currentTarget;
+        const nearBottom = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 48;
+        if (nearBottom) {
+          followTranscriptRef.current = true;
+          transcriptUserScrollRef.current = false;
+        } else if (transcriptUserScrollRef.current) {
+          followTranscriptRef.current = false;
+        }
+      }}>
       {chatMessages.length > 0
         ? chatMessages.map((message, index) => <PiSessionEntry key={index} message={message} prUrl={prUrl} />)
         : <div className="pi-session-empty"><strong>Start a Pi session</strong><span>Ask about the PR, investigate the checkout, or request editable review drafts.</span></div>}
