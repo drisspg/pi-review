@@ -2176,6 +2176,7 @@ button.fold:hover {
 
 .review-draft-list {
   display: grid;
+  align-content: start;
   gap: 8px;
 }
 
@@ -2276,8 +2277,11 @@ button.fold:hover {
   display: flex;
   flex-direction: column;
   gap: 0;
+  width: 100%;
+  max-width: 1100px;
   height: 100%;
   min-height: 0;
+  margin-inline: auto;
   padding: 0;
   overflow: hidden;
   background: var(--panel);

@@ -167,6 +167,24 @@ test("opens a PR and renders GitHub-style file diffs", async ({ page }) => {
   await expect(page.locator(".diff-row.added").first()).toBeVisible();
 });
 
+test("opens PR description references on GitHub", async ({ page }) => {
+  const sourceResponse = await page.request.post("/api/pr/open", { data: { input: prUrl } });
+  const sourceReview = await sourceResponse.json() as { pr: Record<string, unknown> } & Record<string, unknown>;
+  const linkedPrUrl = "https://github.com/example/stack/pull/190596";
+  await page.getByRole("link", { name: "Home" }).click();
+  await page.route("**/api/pr/open", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ ...sourceReview, pr: { ...sourceReview.pr, key: "github.com/example/stack#190596", url: linkedPrUrl, body: "Stack from ghstack (oldest at bottom):\n\n* #190594\n* #190595\n* -> #190596" } }) });
+  });
+  await page.locator("input").first().fill(linkedPrUrl);
+  await page.getByRole("button", { name: "Open" }).click();
+  await expect(page.locator(".review-layout")).toBeVisible();
+  await page.getByRole("button", { name: "Expand PR summary" }).click();
+
+  const reference = page.getByRole("link", { name: "#190594" });
+  await expect(reference).toHaveAttribute("href", "https://github.com/example/stack/pull/190594");
+  await expect(reference).toHaveAttribute("target", "_blank");
+});
+
 test("shows GPU workspace MVP constraints for unsupported repos", async ({ page }) => {
   await openTools(page);
   await page.getByRole("menuitem", { name: "GPU workspace" }).click();
@@ -415,6 +433,33 @@ test("keeps submit visible while many draft comments scroll", async ({ page }) =
   await expect(page.getByRole("button", { name: "Submit review (12)" })).toBeInViewport();
   await expect(page.locator(".review-draft-list")).toHaveJSProperty("scrollTop", 0);
   expect(await page.locator(".review-draft-list").evaluate((list) => list.scrollHeight > list.clientHeight)).toBe(true);
+});
+
+test("keeps draft cards compact in the focused Review panel", async ({ page }) => {
+  const row = (await openFileWithAddedRows(page, 1)).first();
+  const path = await row.getAttribute("data-path");
+  const line = await row.getAttribute("data-line");
+  if (openedPr == null || path == null || line == null) throw new Error("Missing draft review target");
+  await page.request.post("/api/draft-review/save", { data: {
+    prKey: openedPr.key,
+    headSha: openedPr.headSha,
+    event: "COMMENT",
+    body: "",
+    comments: Array.from({ length: 4 }, (_, index) => ({ id: `compact-draft-${index}`, path, line: Number.parseInt(line, 10), side: "RIGHT", body: `Compact draft comment ${index + 1}.` })),
+  } });
+
+  await page.setViewportSize({ width: 1600, height: 1200 });
+  await page.reload();
+  await expect(page.locator(".review-layout")).toBeVisible({ timeout: 60_000 });
+  await openSideTab(page, "Review");
+  await page.getByRole("button", { name: "Focus review panel" }).click();
+
+  const summaryBox = await page.locator(".review-summary").boundingBox();
+  const cardHeights = await page.locator(".review-draft-list .draft-card").evaluateAll((cards) => cards.map((card) => card.getBoundingClientRect().height));
+  if (summaryBox == null) throw new Error("Missing focused Review panel");
+  expect(summaryBox.width).toBeLessThanOrEqual(1100);
+  expect(Math.max(...cardHeights)).toBeLessThan(100);
+  await expect(page.getByRole("button", { name: "Submit review (4)" })).toBeInViewport();
 });
 
 test("keeps review submission reachable on a short mobile viewport", async ({ page }) => {
