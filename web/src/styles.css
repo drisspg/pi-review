@@ -1502,8 +1502,7 @@ a { color: var(--link); text-decoration: none; }
   background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
-.github-comment-timeline,
-.local-comment-timeline {
+.github-comment-timeline {
   display: grid;
   gap: 0;
   padding: 12px 12px 8px;
@@ -1516,8 +1515,7 @@ a { color: var(--link); text-decoration: none; }
   overflow-y: auto;
 }
 
-.github-comment,
-.local-comment {
+.github-comment {
   position: relative;
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr);
@@ -1525,11 +1523,7 @@ a { color: var(--link); text-decoration: none; }
   padding-bottom: 12px;
 }
 
-.local-comment.user { --commenter: var(--accent); }
-.local-comment.pi { --commenter: var(--thread-accent); }
-
-.github-comment:not(:last-child)::before,
-.local-comment:not(:last-child)::before {
+.github-comment:not(:last-child)::before {
   content: "";
   position: absolute;
   left: 15px;
@@ -1624,10 +1618,6 @@ a { color: var(--link); text-decoration: none; }
   padding: 10px;
 }
 
-.local-thread > .local-comment-timeline {
-  padding-bottom: 0;
-}
-
 .local-thread {
   margin-left: 64px;
 }
@@ -1673,6 +1663,19 @@ a { color: var(--link); text-decoration: none; }
   min-height: 28px;
   padding: 0 0.7rem;
   font-size: 0.82rem;
+}
+
+.local-thread .composer .pi-chat-action,
+.focus-area-inline .composer .pi-chat-action {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  color: var(--accent);
+}
+
+.local-thread .composer .pi-chat-action:hover,
+.focus-area-inline .composer .pi-chat-action:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, var(--panel));
 }
 
 .thread-reply {
@@ -1805,18 +1808,39 @@ a { color: var(--link); text-decoration: none; }
   overflow: hidden;
 }
 
-.thread-note {
-  display: grid;
-  grid-template-columns: 64px minmax(0, 1fr);
+.inline-pi-chat {
+  display: flex;
+  flex-direction: column;
   gap: 10px;
-  padding: 8px 10px;
-  background: var(--panel);
-  border-top: 1px solid var(--border);
+  padding: 12px;
+  background: color-mix(in srgb, var(--panel2) 56%, var(--bg));
 }
 
-.thread-note:first-child { border-top: 0; }
-.thread-note.user { background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
-.thread-note.pi { background: var(--panel); }
+.local-comment-timeline.inline-pi-chat {
+  border-bottom: 1px solid var(--border);
+}
+
+.thread-messages.inline-pi-chat {
+  overflow-y: auto;
+}
+
+.inline-pi-chat .pi-session-message {
+  width: min(100%, 900px);
+  margin-bottom: 0;
+  padding: 10px 12px;
+}
+
+.inline-pi-chat .pi-session-message.user {
+  width: fit-content;
+  min-width: min(240px, 82%);
+  max-width: 82%;
+}
+
+.inline-pi-chat .pi-session-message p,
+.inline-pi-chat .pi-session-message .markdown {
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
 
 .message-role {
   color: var(--muted);

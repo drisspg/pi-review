@@ -643,6 +643,12 @@ test("renders inline Ask Pi responses as markdown", async ({ page }) => {
   const thread = page.locator(".local-comment-timeline").first();
   await expect(thread).toContainText("Finding:");
   await expect(thread.locator("pre code")).toContainText("return batch_offset;");
+  await expect(thread.locator(".pi-session-message.user")).toContainText("review this line");
+  await expect(thread.locator(".pi-session-message.pi")).toContainText("Finding:");
+  const userBox = await thread.locator(".pi-session-message.user").boundingBox();
+  const piBox = await thread.locator(".pi-session-message.pi").boundingBox();
+  if (userBox == null || piBox == null) throw new Error("Missing inline Pi chat messages");
+  expect(userBox.x).toBeGreaterThan(piBox.x);
   expect(prompt).toContain("Diff hunk context:\n@@");
   expect(prompt).toContain("review this line");
 });
