@@ -628,7 +628,8 @@ test("shows readable Pi diagnostics", async ({ page }) => {
   await expect(dialog).toContainText("running · 12s");
 });
 
-test("renders inline Ask Pi responses as markdown", async ({ page }) => {
+test("renders inline Ask Pi responses as a compact chat", async ({ page }) => {
+  await page.setViewportSize({ width: 2000, height: 700 });
   let prompt = "";
   await mockAskPi(page, (body) => {
     prompt = body.prompt ?? "";
@@ -640,15 +641,19 @@ test("renders inline Ask Pi responses as markdown", async ({ page }) => {
   await page.locator(".inline-thread textarea").first().fill("review this line");
   await page.getByRole("button", { name: "Ask Pi" }).first().click();
 
-  const thread = page.locator(".local-comment-timeline").first();
+  const localThread = page.locator(".local-thread").first();
+  const thread = localThread.locator(".local-comment-timeline");
   await expect(thread).toContainText("Finding:");
   await expect(thread.locator("pre code")).toContainText("return batch_offset;");
   await expect(thread.locator(".pi-session-message.user")).toContainText("review this line");
   await expect(thread.locator(".pi-session-message.pi")).toContainText("Finding:");
   const userBox = await thread.locator(".pi-session-message.user").boundingBox();
   const piBox = await thread.locator(".pi-session-message.pi").boundingBox();
-  if (userBox == null || piBox == null) throw new Error("Missing inline Pi chat messages");
+  const threadBox = await localThread.boundingBox();
+  if (userBox == null || piBox == null || threadBox == null) throw new Error("Missing inline Pi chat messages");
   expect(userBox.x).toBeGreaterThan(piBox.x);
+  expect(userBox.width).toBeLessThanOrEqual(720);
+  expect(threadBox.width).toBeLessThanOrEqual(1180);
   expect(prompt).toContain("Diff hunk context:\n@@");
   expect(prompt).toContain("review this line");
 });

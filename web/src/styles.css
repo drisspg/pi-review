@@ -1619,7 +1619,14 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .local-thread {
+  max-width: 1180px;
+  margin-right: auto;
   margin-left: 64px;
+}
+
+.focus-area-inline:not(.focus-area-minimized) {
+  max-width: 1180px;
+  margin-right: auto;
 }
 
 .local-thread > .thread-head {
@@ -1833,7 +1840,7 @@ a { color: var(--link); text-decoration: none; }
 .inline-pi-chat .pi-session-message.user {
   width: fit-content;
   min-width: min(240px, 82%);
-  max-width: 82%;
+  max-width: min(82%, 720px);
 }
 
 .inline-pi-chat .pi-session-message p,
