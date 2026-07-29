@@ -605,16 +605,16 @@ a { color: var(--link); text-decoration: none; }
   overflow: auto;
 }
 
-.side-tab-panel[hidden] {
-  display: none;
-}
-
 .side-tab-panel.pi-tab-panel,
 .side-tab-panel.review-tab-panel {
   display: flex;
   align-content: normal;
   min-height: 0;
   overflow: hidden;
+}
+
+.side-tab-panel[hidden] {
+  display: none;
 }
 
 .side-tab-panel.pi-tab-panel > .ai-review,
@@ -3228,7 +3228,7 @@ button.focus-area-collapsed {
 }
 
 .review-layout.side-focused .pi-session-transcript {
-  padding-inline: max(20px, calc((100% - 1600px) / 2));
+  padding-inline: clamp(20px, 2vw, 48px);
 }
 
 .pi-session-empty {
@@ -3365,7 +3365,7 @@ button.focus-area-collapsed {
 }
 
 .review-layout.side-focused .pi-session-composer {
-  padding-inline: max(20px, calc((100% - 1600px) / 2));
+  padding-inline: clamp(20px, 2vw, 48px);
 }
 
 .pi-session-composer textarea {

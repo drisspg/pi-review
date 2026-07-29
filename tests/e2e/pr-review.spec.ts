@@ -1024,12 +1024,14 @@ test("runs the right-sidebar Pi review panel and continues the chat with Enter",
   await dialog.getByRole("button", { name: "Show review context" }).click();
   await expect(dialog).not.toHaveClass(/chat-focused/);
   await page.getByRole("button", { name: "Focus review panel" }).click();
+  const focusedSide = await page.locator(".side").boundingBox();
+  const focusedChat = await dialog.locator(".pi-session-chat").boundingBox();
   const focusedPiMessage = await dialog.locator(".pi-session-message.pi").last().boundingBox();
   const focusedComposer = await dialog.getByPlaceholder("Message Pi…").boundingBox();
-  if (focusedPiMessage == null || focusedComposer == null) throw new Error("Missing focused Pi chat layout");
-  expect(focusedPiMessage.width).toBeGreaterThan(1200);
-  expect(focusedPiMessage.width).toBeLessThanOrEqual(1600);
-  expect(focusedComposer.width).toBeGreaterThan(1200);
+  if (focusedSide == null || focusedChat == null || focusedPiMessage == null || focusedComposer == null) throw new Error("Missing focused Pi chat layout");
+  expect(focusedChat.width).toBeGreaterThan(focusedSide.width * 0.95);
+  expect(focusedPiMessage.width).toBeGreaterThan(focusedChat.width * 0.9);
+  expect(focusedComposer.width).toBeGreaterThan(focusedChat.width * 0.9);
   await expect(dialog.getByPlaceholder("Message Pi…")).toBeInViewport();
 });
 
