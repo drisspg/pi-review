@@ -251,16 +251,68 @@ test("uses a compact files toolbar and collapsible review panel", async ({ page 
   await expect(page.locator(".side")).toHaveCount(0);
   await toolbar.getByRole("button", { name: /Pi review/ }).click();
   await expect(page.locator(".side")).toBeVisible();
+  await expect(page.getByPlaceholder("Message Pi…")).toBeInViewport();
 
   await toolbar.locator(".file-navigator > summary").click();
   await expect(toolbar.locator(".file-navigator-list")).toBeVisible();
 });
 
-test("keeps the files toolbar within a mobile viewport", async ({ page }) => {
+test("keeps the diff and files toolbar within a mobile viewport", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 667 });
   const toolbar = page.locator(".files-toolbar");
   await expect(toolbar).toBeVisible();
   expect(await toolbar.evaluate((element) => element.getBoundingClientRect().right)).toBeLessThanOrEqual(await page.evaluate(() => window.innerWidth));
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await expect(toolbar.getByRole("button", { name: "Split view" })).toBeInViewport();
+  await expect(toolbar.getByRole("button", { name: "Review changes" })).toBeInViewport();
+  expect((await page.locator(".file").first().boundingBox())?.width).toBeLessThanOrEqual(359);
+});
+
+test("keeps compact Review actions separate on mobile", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openSideTab(page, "Review");
+  const actions = page.locator(".github-draft-review-actions button");
+  const first = await actions.nth(0).boundingBox();
+  const second = await actions.nth(1).boundingBox();
+  if (first == null || second == null) throw new Error("Missing private GitHub review actions");
+  expect(first.x).toBeGreaterThanOrEqual(0);
+  expect(first.x + first.width).toBeLessThanOrEqual(390);
+  expect(first.x + first.width).toBeLessThanOrEqual(second.x);
+
+  await page.getByRole("button", { name: "Focus review panel" }).click();
+  const focusedSide = await page.locator(".side").boundingBox();
+  if (focusedSide == null) throw new Error("Missing focused mobile Review panel");
+  expect(focusedSide.x + focusedSide.width).toBeLessThanOrEqual(382);
+});
+
+test("keeps tablet Review controls reachable through panel scrolling", async ({ page }) => {
+  await page.setViewportSize({ width: 768, height: 600 });
+  await openReviewForm(page);
+  await page.getByPlaceholder("Overall review body").fill("tablet review");
+  const reviewPanel = page.locator(".review-tab-panel");
+  await page.getByRole("button", { name: "Submit review (0)" }).scrollIntoViewIfNeeded();
+  await expect(page.getByRole("button", { name: "Submit review (0)" })).toBeInViewport();
+  expect(await reviewPanel.evaluate((element) => getComputedStyle(element).overflowY)).toBe("auto");
+  expect(await reviewPanel.evaluate((element) => element.scrollHeight)).toBeGreaterThan(await reviewPanel.evaluate((element) => element.clientHeight));
+});
+
+test("caps focused Comments content on ultrawide screens", async ({ page }) => {
+  await page.setViewportSize({ width: 4800, height: 1800 });
+  await openSideTab(page, "Comments");
+  await page.getByRole("button", { name: "Focus review panel" }).click();
+  const comments = await page.locator(".comments-tab-panel > .panel").boundingBox();
+  if (comments == null) throw new Error("Missing focused Comments panel");
+  expect(comments.width).toBeLessThanOrEqual(1100);
+  expect(comments.x).toBeGreaterThan(1500);
+});
+
+test("opens a line thread from the keyboard", async ({ page }) => {
+  const row = (await openFileWithAddedRows(page, 1)).first();
+  await row.focus();
+  await expect(row).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".inline-thread.local-thread")).toBeVisible();
+  await expect(page.locator(".inline-thread.local-thread textarea")).toBeFocused();
 });
 
 test("creates, edits, and removes draft comments", async ({ page }) => {
@@ -639,6 +691,15 @@ test("keeps the Pi composer usable on a short mobile viewport", async ({ page })
 
   await expect(composer).toBeInViewport();
   await expect(page.getByRole("button", { name: "Send" })).toBeInViewport();
+});
+
+test("describes shared dialogs for assistive technology", async ({ page }) => {
+  await openTools(page);
+  await page.getByRole("menuitem", { name: "Session settings" }).click();
+  const dialog = page.getByRole("dialog");
+  const descriptionId = await dialog.getAttribute("aria-describedby");
+  if (descriptionId == null) throw new Error("Missing dialog description");
+  await expect(page.locator(`#${descriptionId}`)).toContainText("Pi settings dialog");
 });
 
 test("shows readable Pi diagnostics", async ({ page }) => {
@@ -1135,6 +1196,6 @@ test("copies local draft comments in a feedback prompt from the Review tab", asy
   await page.reload();
   await expect(page.locator(".review-layout")).toBeVisible({ timeout: 60_000 });
   await openSideTab(page, "Review");
-  await expect(page.locator(".side .draft-card")).toContainText("Keep this local feedback out of GitHub.");
+  await expect(page.locator(".side .draft-card", { hasText: "Keep this local feedback out of GitHub." })).toBeVisible();
   await expect(page.getByPlaceholder("Overall review body")).toHaveValue("Keep this overall note local too.");
 });

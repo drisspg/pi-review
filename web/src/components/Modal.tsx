@@ -11,6 +11,7 @@ export function ModalShell({ open, onOpenChange, label, children, className }: {
         <Dialog.Overlay className="review-modal" />
         <Dialog.Content className={`review-modal-card${className != null ? ` ${className}` : ""}`} aria-label={label}>
           <Dialog.Title asChild><span className="visually-hidden">{label}</span></Dialog.Title>
+          <Dialog.Description asChild><span className="visually-hidden">{label} dialog</span></Dialog.Description>
           <Dialog.Close asChild><Button variant="icon" className="modal-close-button" aria-label={`Close ${label}`}><XIcon size={16} /></Button></Dialog.Close>
           {children}
         </Dialog.Content>
