@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import type mermaidNs from "mermaid";
 
+import { Button } from "./Button";
+
 type PanPoint = { x: number; y: number };
 type DragState = { pointerId: number; startX: number; startY: number; originX: number; originY: number };
 
@@ -130,10 +132,10 @@ export function Mermaid({ code }: { code: string }) {
   return <div className="mermaid-zoom-shell">
     <div className="mermaid-zoom-controls" aria-label="Diagram zoom controls">
       <span className="mermaid-zoom-hint">Drag to pan · wheel to zoom</span>
-      <button type="button" onClick={() => applyZoom(zoom - ZOOM_STEP)}>−</button>
+      <Button variant="muted" onClick={() => applyZoom(zoom - ZOOM_STEP)}>−</Button>
       <span>{Math.round(zoom * 100)}%</span>
-      <button type="button" onClick={() => applyZoom(zoom + ZOOM_STEP)}>+</button>
-      <button type="button" onClick={resetView}>Reset</button>
+      <Button variant="muted" onClick={() => applyZoom(zoom + ZOOM_STEP)}>+</Button>
+      <Button variant="muted" onClick={resetView}>Reset</Button>
     </div>
     <div
       ref={viewportRef}

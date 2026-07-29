@@ -1,11 +1,13 @@
 import React, { createContext, ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, ScreenFullIcon, ScreenNormalIcon, XIcon } from "@primer/octicons-react";
+import { BaseStyles, Checkbox, Flash, Radio, Select, Textarea, TextInput, ThemeProvider } from "@primer/react";
 import { api, askPi as askPiApi } from "./api";
 import { ActionMenu, ActionMenuItem } from "./components/ActionMenu";
 import { Button } from "./components/Button";
 import { CodeText, InlineSnippetsProvider, MarkdownText } from "./components/Markdown";
 import { ModalShell } from "./components/Modal";
+import { Tab, TabList, TabPanel, Tabs } from "./components/Tabs";
 import { ExistingComments, ExistingReviewThread } from "./components/Threads";
 import { buildDiffAnnotationIndex, commentTarget, commentThreadDomId, diffAnnotationTargetKey, targetKey, targetLabel, type DiffAnnotationIndex } from "./lib/comments";
 import { contextRowsFromText, hunkNewStart, isTargetInSelection, lastNewLine, parsePatchRows, parsePatchSetSections, targetFromPoint, targetFromRow } from "./lib/diff";
@@ -14,6 +16,10 @@ import { parseFocusAreas } from "./lib/focus";
 import { languageForPath } from "./lib/highlight";
 import { newId, prUrlFromKey, relativeTime, shortSha } from "./lib/pr";
 import type { AiReview, AiReviewMessage, AiReviewRecord, DiffRow, DraftComment, DragSelection, FileReviewState, FlowDag, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, GitHubDraftComment, GitHubPendingReview, GpuWorkspace, GpuWorkspaceContract, GpuWorkspaceExecResult, LogEntry, OpenResponse, PiAgentActivity, PiSessionEvent, PullFile, PullIssueComment, PullRequestReviewSummary, PullReviewComment, ReviewMemoryRecord, ReviewMemoryResponse, StoredPullRequest, Target, ThemeName, Thread, ThreadMessage } from "./types";
+import "@primer/primitives/dist/css/primitives.css";
+import "@primer/primitives/dist/css/functional/themes/dark.css";
+import "@primer/primitives/dist/css/functional/themes/dark-dimmed.css";
+import "@primer/primitives/dist/css/functional/themes/light.css";
 import "./styles.css";
 
 type DiffViewMode = "unified" | "split";
@@ -1272,7 +1278,10 @@ function App() {
     setCommentCollapseSignal((signal) => signal + 1);
   }
 
-  return <main className="app-shell">
+  const primerColorMode = theme === "github-light" ? "day" : "night";
+  const primerNightScheme = theme === "github-dimmed" ? "dark_dimmed" : "dark";
+  return <ThemeProvider colorMode={primerColorMode} dayScheme="light" nightScheme={primerNightScheme}>
+    <BaseStyles as="main" className="app-shell">
     <AppToolbar
       review={review}
       theme={theme}
@@ -1287,7 +1296,7 @@ function App() {
       openMemory={() => void showReviewMemory()}
       openLogs={() => { setLogsOpen(true); void refreshLogs(); }}
     />
-    {error != null && <div className="error">{error}</div>}
+    {error != null && <Flash variant="danger" className="error" role="alert">{error}</Flash>}
     {busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p><Button variant="muted" onClick={cancelOpen}>Cancel</Button></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} cleanupPrs={cleanupPrs} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} draftRevealId={draftRevealId} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, sendMessage: sendAiReviewMessage, chatSending: aiChatSending, clearFollowUp: clearAiReviewFollowUp, copyFeedbackPrompt: copyReviewFeedbackPrompt, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} reviewEvent={reviewEvent} setReviewEvent={setReviewEvent} reviewBody={reviewBody} setReviewBody={setReviewBody} draftSaveStatus={draftSaveStatus} draftSaveError={draftSaveError} retryDraftSave={() => setDraftSaveRetry((retry) => retry + 1)} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} githubDrafts={{ review: githubDraftReview, loaded: githubDraftLoaded, loading: githubDraftLoading, error: githubDraftError, savingTarget: githubDraftSavingTarget, pull: pullGithubDraftReview, saveComment: saveGithubDraftComment, copyHandoff: copyGithubDraftHandoff }} />}
     {diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}
     {review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} openDiagnostics={() => { setSettingsOpen(false); void showDiagnostics(); }} close={() => setSettingsOpen(false)} />}
@@ -1295,7 +1304,8 @@ function App() {
     {review != null && gpuWorkspaceOpen && <GpuWorkspaceModal review={review} close={() => setGpuWorkspaceOpen(false)} refreshLogs={refreshLogs} />}
     {review != null && flowDagOpen && <FlowDagModal flowDag={flowDag} runFlowDag={runFlowDag} close={() => setFlowDagOpen(false)} prUrl={review.pr.url} headSha={review.pr.headSha} />}
     {logsOpen && <LogsModal logs={logs} refreshLogs={refreshLogs} close={() => setLogsOpen(false)} />}
-  </main>;
+    </BaseStyles>
+  </ThemeProvider>;
 }
 
 function toolbarPrLabel(key: string): string {
@@ -1324,16 +1334,16 @@ function AppToolbar({ review, theme, setTheme, busy, goHome, openGpuWorkspace, o
     </div>
     <div className="toolbar-actions">
       {review != null && <a className="toolbar-link" href={homeHash} onClick={(event) => { if (!isPlainLeftClick(event)) return; event.preventDefault(); goHome(); }}>New review</a>}
-      <select aria-label="Theme" value={theme} onChange={(event) => setTheme(event.target.value as ThemeName)}>{themes.map((item) => <option key={item.name} value={item.name}>{item.label}</option>)}</select>
+      <Select aria-label="Theme" value={theme} onChange={(event) => setTheme(event.target.value as ThemeName)}>{themes.map((item) => <option key={item.name} value={item.name}>{item.label}</option>)}</Select>
       <ActionMenu trigger={<button type="button" className="toolbar-tools">Tools{codeWalkRunning && <span className="spinner" aria-hidden="true" />} <ChevronDownIcon size={14} /></button>}>
         {review != null && <>
-          <ActionMenuItem asChild><button type="button" onClick={openCodeWalk}>Code walk</button></ActionMenuItem>
-          <ActionMenuItem asChild><button type="button" onClick={openGpuWorkspace}>GPU workspace</button></ActionMenuItem>
-          <ActionMenuItem asChild><button type="button" title="Pi session settings" onClick={openSettings}>Session settings</button></ActionMenuItem>
-          <ActionMenuItem asChild><button type="button" title="Pi session diagnostics" onClick={openDiagnostics}>Session diagnostics</button></ActionMenuItem>
+          <ActionMenuItem onSelect={openCodeWalk}>Code walk</ActionMenuItem>
+          <ActionMenuItem onSelect={openGpuWorkspace}>GPU workspace</ActionMenuItem>
+          <ActionMenuItem title="Pi session settings" onSelect={openSettings}>Session settings</ActionMenuItem>
+          <ActionMenuItem title="Pi session diagnostics" onSelect={openDiagnostics}>Session diagnostics</ActionMenuItem>
         </>}
-        <ActionMenuItem asChild><button type="button" onClick={openMemory}>Review memory</button></ActionMenuItem>
-        <ActionMenuItem asChild><button type="button" onClick={openLogs}>Server log</button></ActionMenuItem>
+        <ActionMenuItem onSelect={openMemory}>Review memory</ActionMenuItem>
+        <ActionMenuItem onSelect={openLogs}>Server log</ActionMenuItem>
       </ActionMenu>
     </div>
   </header>;
@@ -1396,8 +1406,8 @@ function StartPage({ prs, openPr, cleanupPr, cleanupPrs, openInput, setOpenInput
       <h1>Review a pull request</h1>
       <p className="muted">Paste a GitHub PR URL or <code>OWNER/REPO#123</code>. Pi will check it out and assist your review.</p>
       <form className="hero-form" onSubmit={(event) => { event.preventDefault(); void openPr(openInput); }}>
-        <input autoFocus value={openInput} onChange={(event) => setOpenInput(event.target.value)} placeholder="https://github.com/owner/repo/pull/123" />
-        <button disabled={busy || openInput.trim().length === 0}>{busy ? "Fetching…" : "Open"}</button>
+        <TextInput autoFocus block value={openInput} onChange={(event) => setOpenInput(event.target.value)} placeholder="https://github.com/owner/repo/pull/123" />
+        <Button type="submit" disabled={busy || openInput.trim().length === 0}>{busy ? "Fetching…" : "Open"}</Button>
       </form>
     </section>
     {prs.length === 0 ? <section className="panel start-empty"><p className="muted">No previous reviews yet. Paste a PR above to get started.</p></section> : <>
@@ -1407,7 +1417,7 @@ function StartPage({ prs, openPr, cleanupPr, cleanupPrs, openInput, setOpenInput
         </nav>
         <div className="start-bulk-actions">
           {selecting ? <>
-            <label className={`start-select-visible${visiblePrs.length === 0 ? " disabled" : ""}`}><input type="checkbox" checked={allVisibleSelected} onChange={toggleVisible} disabled={visiblePrs.length === 0} /> Select visible</label>
+            <label className={`start-select-visible${visiblePrs.length === 0 ? " disabled" : ""}`}><Checkbox checked={allVisibleSelected} onChange={toggleVisible} disabled={visiblePrs.length === 0} /> Select visible</label>
             <span className="muted">{selectedPrs.length} selected</span>
             <Button variant="muted" className="bulk-delete-button" onClick={() => void deleteSelected()} disabled={selectedPrs.length === 0 || deleting}>{deleting ? "Deleting…" : `Delete selected${selectedPrs.length > 0 ? ` (${selectedPrs.length})` : ""}`}</Button>
             <Button variant="muted" onClick={cancelSelection} disabled={deleting}>Cancel</Button>
@@ -1446,7 +1456,7 @@ function groupPrsByStatus(prs: StoredPullRequest[]): { needsReview: StoredPullRe
 function PrCard({ pr, openPr, cleanupPr, selecting, selected, toggleSelected }: { pr: StoredPullRequest; openPr: (input: string) => Promise<void>; cleanupPr: (pr: StoredPullRequest) => Promise<void>; selecting: boolean; selected: boolean; toggleSelected: (key: string) => void }) {
   const status = reviewStatus(pr);
   return <article className={`pr-card status-${status.tone}${selecting ? " selecting" : ""}${selected ? " selected" : ""}`}>
-    {selecting && <label className="pr-card-select"><input type="checkbox" checked={selected} onChange={() => toggleSelected(pr.key)} aria-label={`Select ${pr.key}`} /></label>}
+    {selecting && <label className="pr-card-select"><Checkbox checked={selected} onChange={() => toggleSelected(pr.key)} aria-label={`Select ${pr.key}`} /></label>}
     <a className="pr-card-body" href={reviewHash(pr.url)} onClick={(event) => { if (!isPlainLeftClick(event)) return; event.preventDefault(); if (selecting) toggleSelected(pr.key); else void openPr(pr.url); }}>
       <div className="pr-card-head">
         <strong className="pr-card-title">{pr.title}</strong>
@@ -1592,18 +1602,22 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { d
   const sidePanel = sideCollapsed ? null : <>
     {!sideFocused && <div className="resize-handle" role="separator" aria-label="Resize side panel" onMouseDown={(event) => startResizeSidePanel(event, props.sideWidth, props.setSideWidth)} />}
     <aside className="side">
-      <nav className="side-tabs" role="tablist" aria-label="Review side panel">
-        <button role="tab" aria-selected={sideTab === "review"} className={`side-tab${sideTab === "review" ? " active" : ""}`} onClick={() => setSideTab("review")}><span>Review</span>{draftCount > 0 && <span className="side-tab-badge">{draftCount}</span>}</button>
-        <button role="tab" aria-selected={sideTab === "pi"} className={`side-tab${sideTab === "pi" ? " active" : ""}`} onClick={() => setSideTab("pi")}><span>Pi</span>{piBadge != null && <span className="side-tab-badge">{piBadge}</span>}</button>
-        <button role="tab" aria-selected={sideTab === "comments"} className={`side-tab${sideTab === "comments" ? " active" : ""}`} onClick={() => setSideTab("comments")}><span>Comments</span>{commentCount > 0 && <span className="side-tab-badge">{commentCount}</span>}</button>
-        <button type="button" className="side-panel-button" title={sideFocused ? "Restore panel" : "Focus panel"} aria-label={sideFocused ? "Restore review panel" : "Focus review panel"} aria-pressed={sideFocused} onClick={() => setSideFocused(!sideFocused)}>{sideFocused ? <ScreenNormalIcon size={16} /> : <ScreenFullIcon size={16} />}</button>
-        <button type="button" className="side-panel-button" title="Hide review panel" aria-label="Hide review panel" onClick={() => { setSideFocused(false); setSideCollapsed(true); }}><ChevronRightIcon size={16} /></button>
+      <Tabs value={sideTab} onValueChange={({ value }) => setSideTab(value as typeof sideTab)}>
+      <nav className="side-tabs">
+        <TabList className="side-tab-list" aria-label="Review side panel">
+          <Tab value="review" className={`side-tab${sideTab === "review" ? " active" : ""}`}><span>Review</span>{draftCount > 0 && <span className="side-tab-badge">{draftCount}</span>}</Tab>
+          <Tab value="pi" className={`side-tab${sideTab === "pi" ? " active" : ""}`}><span>Pi</span>{piBadge != null && <span className="side-tab-badge">{piBadge}</span>}</Tab>
+          <Tab value="comments" className={`side-tab${sideTab === "comments" ? " active" : ""}`}><span>Comments</span>{commentCount > 0 && <span className="side-tab-badge">{commentCount}</span>}</Tab>
+        </TabList>
+        <Button variant="icon" className="side-panel-button" title={sideFocused ? "Restore panel" : "Focus panel"} aria-label={sideFocused ? "Restore review panel" : "Focus review panel"} aria-pressed={sideFocused} onClick={() => setSideFocused(!sideFocused)}>{sideFocused ? <ScreenNormalIcon size={16} /> : <ScreenFullIcon size={16} />}</Button>
+        <Button variant="icon" className="side-panel-button" title="Hide review panel" aria-label="Hide review panel" onClick={() => { setSideFocused(false); setSideCollapsed(true); }}><ChevronRightIcon size={16} /></Button>
       </nav>
-      <div className={`side-tab-panels ${sideTab}-tab-panel`}>
-        {sideTab === "review" && <ReviewSummary pr={props.review.pr} files={props.review.files} drafts={props.drafts} setDrafts={props.setDrafts} event={props.reviewEvent} setEvent={props.setReviewEvent} body={props.reviewBody} setBody={props.setReviewBody} draftSaveStatus={props.draftSaveStatus} draftSaveError={props.draftSaveError} retryDraftSave={props.retryDraftSave} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} submitReview={props.submitReview} submitting={props.submitting} invalidDraftIds={props.invalidDraftIds} copyFeedbackPrompt={props.piPanel.copyFeedbackPrompt} onJumpToTarget={jumpToComment} />}
-        {sideTab === "pi" && <InlineSnippetsProvider value={{ headSha: props.review.pr.headSha, snippets: true }}><AiReviewPanel key={props.review.pr.url} prUrl={props.review.pr.url} {...props.piPanel} focusAreas={props.focusAreas} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={props.collapsedFocusAreaIds} setCollapsedFocusAreaIds={props.setCollapsedFocusAreaIds} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} /></InlineSnippetsProvider>}
-        {sideTab === "comments" && <ExistingComments prUrl={props.review.pr.url} comments={props.review.comments} issueComments={props.review.issueComments} reviewSummaries={props.review.reviewSummaries} refreshGithubActivity={props.refreshGithubActivity} collapseSignal={props.commentCollapseSignal} commentsCollapsed={props.commentsCollapsed} toggleAllComments={props.toggleAllComments} onJumpToComment={jumpToComment} />}
+      <div className="side-tab-panels">
+        <TabPanel value="review" className="side-tab-panel review-tab-panel">{sideTab === "review" && <ReviewSummary pr={props.review.pr} files={props.review.files} drafts={props.drafts} setDrafts={props.setDrafts} event={props.reviewEvent} setEvent={props.setReviewEvent} body={props.reviewBody} setBody={props.setReviewBody} draftSaveStatus={props.draftSaveStatus} draftSaveError={props.draftSaveError} retryDraftSave={props.retryDraftSave} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} submitReview={props.submitReview} submitting={props.submitting} invalidDraftIds={props.invalidDraftIds} copyFeedbackPrompt={props.piPanel.copyFeedbackPrompt} onJumpToTarget={jumpToComment} />}</TabPanel>
+        <TabPanel value="pi" className="side-tab-panel pi-tab-panel">{sideTab === "pi" && <InlineSnippetsProvider value={{ headSha: props.review.pr.headSha, snippets: true }}><AiReviewPanel key={props.review.pr.url} prUrl={props.review.pr.url} {...props.piPanel} focusAreas={props.focusAreas} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={props.collapsedFocusAreaIds} setCollapsedFocusAreaIds={props.setCollapsedFocusAreaIds} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} /></InlineSnippetsProvider>}</TabPanel>
+        <TabPanel value="comments" className="side-tab-panel comments-tab-panel">{sideTab === "comments" && <ExistingComments prUrl={props.review.pr.url} comments={props.review.comments} issueComments={props.review.issueComments} reviewSummaries={props.review.reviewSummaries} refreshGithubActivity={props.refreshGithubActivity} collapseSignal={props.commentCollapseSignal} commentsCollapsed={props.commentsCollapsed} toggleAllComments={props.toggleAllComments} onJumpToComment={jumpToComment} />}</TabPanel>
       </div>
+      </Tabs>
     </aside>
   </>;
   const gridTemplateColumns = sideCollapsed || sideFocused ? "minmax(0, 1fr)" : `minmax(0, 1fr) 12px ${props.sideWidth}px`;
@@ -1615,9 +1629,9 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { d
         <div className="files-toolbar">
           <FileNavigator files={props.review.files} fileReviews={props.review.fileReviews} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} />
           <div className="files-toolbar-actions">
-            <button className="small-muted-button" onClick={() => props.setDiffViewMode(props.diffViewMode === "unified" ? "split" : "unified")}>{diffViewLabel}</button>
-            <button className="small-muted-button panel-launch-button" onClick={() => openSidePanel("comments")}>Comments{commentCount > 0 ? ` ${commentCount}` : ""}</button>
-            <button className="small-muted-button panel-launch-button" onClick={() => openSidePanel("pi")}>Pi review{piBadge != null ? ` ${piBadge}` : ""}</button>
+            <Button variant="muted" className="small-muted-button" onClick={() => props.setDiffViewMode(props.diffViewMode === "unified" ? "split" : "unified")}>{diffViewLabel}</Button>
+            <Button variant="muted" className="small-muted-button panel-launch-button" onClick={() => openSidePanel("comments")}>Comments{commentCount > 0 ? ` ${commentCount}` : ""}</Button>
+            <Button variant="muted" className="small-muted-button panel-launch-button" onClick={() => openSidePanel("pi")}>Pi review{piBadge != null ? ` ${piBadge}` : ""}</Button>
             <Button className="review-changes-button panel-launch-button" onClick={() => openSidePanel("review")}>Review changes{draftCount > 0 ? ` (${draftCount})` : ""}</Button>
           </div>
         </div>
@@ -1647,7 +1661,7 @@ function PrHeaderStrip({ pr, refreshGithubActivity, refreshingActivity }: { pr: 
     </div>
     <div className="pr-header-actions">
       <a href={pr.url} target="_blank" rel="noreferrer">Open on GitHub</a>
-      <button onClick={() => void refreshGithubActivity()} disabled={refreshingActivity}>{refreshingActivity ? "Refreshing…" : "Refresh"}</button>
+      <Button onClick={() => void refreshGithubActivity()} disabled={refreshingActivity}>{refreshingActivity ? "Refreshing…" : "Refresh"}</Button>
     </div>
   </section>;
 }
@@ -1788,7 +1802,7 @@ function FileDiff({ file, review, openFiles, setOpenFiles, expandedContext, setE
     : rows.length === 0
       ? <DiffRowView row={{ kind: "meta", oldLine: null, newLine: null, text: "Patch unavailable. Click to attach a file-level note.", hunk: "" }} target={{ path: file.filename, line: null, side: "RIGHT", hunk: "" }} setThreads={setThreads} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} prUrl={review.pr.url} refreshGithubActivity={refreshGithubActivity} collapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} diffViewMode={diffViewMode} activeFocusAreaId={activeFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} />
       : <FoldedRows file={file} rows={rows} setThreads={setThreads} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} prUrl={review.pr.url} refreshGithubActivity={refreshGithubActivity} collapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} diffViewMode={diffViewMode} activeFocusAreaId={activeFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} />;
-  return <section className="file" id={`file-${file.filename}`}><div className="file-summary"><button className="file-summary-left" onClick={() => setOpenFiles({ ...openFiles, [file.filename]: !open })}><span className="collapse-chevron">{open ? <ChevronDownIcon size={16} /> : <ChevronRightIcon size={16} />}</span><span className="file-change-count">{file.changes.toLocaleString()}</span><span className="file-diffstat" aria-label={`${file.additions} additions and ${file.deletions} deletions`}><span className="file-diffstat-add" style={{ flexGrow: file.additions }} /><span className="file-diffstat-del" style={{ flexGrow: file.deletions }} /></span><strong className="file-path">{file.filename}</strong>{file.generated && <span className="generated-badge">Generated</span>}</button><label className="viewed-toggle" onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={fileReview?.viewed ?? false} onChange={(event) => { const viewed = event.target.checked; if (viewed) setOpenFiles({ ...openFiles, [file.filename]: false }); void setViewed(file, viewed); }} /> Viewed</label></div>{open && <><div className="patch">{diffBody}{commentAnchorRows.length > 0 && <CommentAnchorRows file={file} rows={commentAnchorRows} setThreads={setThreads} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} prUrl={review.pr.url} refreshGithubActivity={refreshGithubActivity} collapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} diffViewMode={diffViewMode} activeFocusAreaId={activeFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} />}{focusAnchorRows.length > 0 && <FocusAnchorRows file={file} rows={focusAnchorRows} setThreads={setThreads} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} prUrl={review.pr.url} refreshGithubActivity={refreshGithubActivity} collapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} diffViewMode={diffViewMode} activeFocusAreaId={activeFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} />}{unrenderedCommentThreads.length > 0 && <UnrenderedCommentThreads threads={unrenderedCommentThreads} prUrl={review.pr.url} refreshGithubActivity={refreshGithubActivity} collapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} />}</div></>}</section>;
+  return <section className="file" id={`file-${file.filename}`}><div className="file-summary"><button className="file-summary-left" onClick={() => setOpenFiles({ ...openFiles, [file.filename]: !open })}><span className="collapse-chevron">{open ? <ChevronDownIcon size={16} /> : <ChevronRightIcon size={16} />}</span><span className="file-change-count">{file.changes.toLocaleString()}</span><span className="file-diffstat" aria-label={`${file.additions} additions and ${file.deletions} deletions`}><span className="file-diffstat-add" style={{ flexGrow: file.additions }} /><span className="file-diffstat-del" style={{ flexGrow: file.deletions }} /></span><strong className="file-path">{file.filename}</strong>{file.generated && <span className="generated-badge">Generated</span>}</button><label className="viewed-toggle" onClick={(event) => event.stopPropagation()}><Checkbox checked={fileReview?.viewed ?? false} onChange={(event) => { const viewed = event.target.checked; if (viewed) setOpenFiles({ ...openFiles, [file.filename]: false }); void setViewed(file, viewed); }} /> Viewed</label></div>{open && <><div className="patch">{diffBody}{commentAnchorRows.length > 0 && <CommentAnchorRows file={file} rows={commentAnchorRows} setThreads={setThreads} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} prUrl={review.pr.url} refreshGithubActivity={refreshGithubActivity} collapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} diffViewMode={diffViewMode} activeFocusAreaId={activeFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} />}{focusAnchorRows.length > 0 && <FocusAnchorRows file={file} rows={focusAnchorRows} setThreads={setThreads} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} askThread={askThread} askFocusArea={askFocusArea} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} prUrl={review.pr.url} refreshGithubActivity={refreshGithubActivity} collapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} diffViewMode={diffViewMode} activeFocusAreaId={activeFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} />}{unrenderedCommentThreads.length > 0 && <UnrenderedCommentThreads threads={unrenderedCommentThreads} prUrl={review.pr.url} refreshGithubActivity={refreshGithubActivity} collapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} />}</div></>}</section>;
 }
 
 function patchSetSectionKey(file: PullFile, title: string, firstLine: number | null | undefined): string {
@@ -1896,7 +1910,7 @@ function DraftView({ draft, index, invalid = false, drafts, setDrafts, editingDr
         <Button variant="icon" className="close-thread-button" aria-label="Remove draft" onClick={removeDraft} disabled={removing}><XIcon size={14} /></Button>
       </div>
     </div>
-    <div className="draft-card-body">{editing ? <textarea autoFocus rows={1} value={draft.body} onChange={(event) => updateDraft(drafts, setDrafts, draft.id, event.target.value)} onInput={(event) => autoGrowTextarea(event.currentTarget)} ref={(element) => autoGrowTextarea(element)} /> : <p>{draft.body}</p>}</div>
+    <div className="draft-card-body">{editing ? <Textarea autoFocus block resize="none" rows={1} value={draft.body} onChange={(event) => updateDraft(drafts, setDrafts, draft.id, event.target.value)} onInput={(event) => autoGrowTextarea(event.currentTarget)} ref={(element) => autoGrowTextarea(element)} /> : <p>{draft.body}</p>}</div>
   </div>;
 }
 
@@ -1954,7 +1968,7 @@ function FocusAreaInline({ prUrl, area, active, collapsedFocusAreaIds, setCollap
     }
   }
   if (collapsed) return <button type="button" id={`focus-area-${area.id}`} className="inline-thread review-thread focus-area-inline focus-area-minimized focus-area-collapsed minimized" onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: false }))}><div className="thread-head"><div className="thread-title"><ChevronRightIcon size={16} /><div><strong>Focus area</strong><span>{area.title}</span></div></div></div></button>;
-  return <div id={`focus-area-${area.id}`} className={`inline-thread review-thread focus-area-inline${active ? " active" : ""}`}><div className="thread-head"><div className="thread-title"><strong>Focus area</strong><span>{area.path}:{area.startLine === area.endLine ? area.startLine : `${area.startLine}-${area.endLine}`}</span></div><div className="actions"><Button variant="icon" aria-label="Collapse focus area" onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: true }))}><ChevronDownIcon size={16} /></Button></div></div><div className="thread-messages inline-pi-chat"><article className="pi-session-message pi"><div className="pi-session-message-role">Pi focus</div><MarkdownText text={area.body} fileLinks={{ prUrl }} /></article>{messages.map((message, index) => <PiSessionEntry key={index} message={message} prUrl={prUrl} />)}</div><div className="composer"><textarea rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onInput={(event) => autoGrowTextarea(event.currentTarget)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey) { event.preventDefault(); void ask(); } }} placeholder="Write a draft comment or ask Pi about this focus area" />{asking && <AgentActivityLine activity={activity} />}<div className="actions"><button className="pi-chat-action" onClick={() => void ask()} disabled={asking || draft.trim().length === 0}>{asking ? "Asking" : "Ask Pi"}</button><button className="composer-primary" onClick={saveDraftComment} disabled={draft.trim().length === 0}>Add draft comment</button></div></div></div>;
+  return <div id={`focus-area-${area.id}`} className={`inline-thread review-thread focus-area-inline${active ? " active" : ""}`}><div className="thread-head"><div className="thread-title"><strong>Focus area</strong><span>{area.path}:{area.startLine === area.endLine ? area.startLine : `${area.startLine}-${area.endLine}`}</span></div><div className="actions"><Button variant="icon" aria-label="Collapse focus area" onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: true }))}><ChevronDownIcon size={16} /></Button></div></div><div className="thread-messages inline-pi-chat"><article className="pi-session-message pi"><div className="pi-session-message-role">Pi focus</div><MarkdownText text={area.body} fileLinks={{ prUrl }} /></article>{messages.map((message, index) => <PiSessionEntry key={index} message={message} prUrl={prUrl} />)}</div><div className="composer"><Textarea block resize="none" rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onInput={(event) => autoGrowTextarea(event.currentTarget)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey) { event.preventDefault(); void ask(); } }} placeholder="Write a draft comment or ask Pi about this focus area" />{asking && <AgentActivityLine activity={activity} />}<div className="actions"><Button variant="muted" className="pi-chat-action" onClick={() => void ask()} disabled={asking || draft.trim().length === 0}>{asking ? "Asking" : "Ask Pi"}</Button><Button className="composer-primary" onClick={saveDraftComment} disabled={draft.trim().length === 0}>Add draft comment</Button></div></div></div>;
 }
 
 function ThreadMessageTimeline({ prUrl, messages }: { prUrl: string; messages: ThreadMessage[] }) {
@@ -1965,7 +1979,7 @@ function ThreadBox({ prUrl, thread, setThread, closeThread, addDraft, askThread 
   const githubDrafts = useContext(GitHubDraftContext);
   const savingToGitHub = githubDrafts.savingTarget === thread.key;
   if (thread.collapsed) return <button className="inline-thread collapsed" onClick={() => setThread({ ...thread, collapsed: false })}><ChevronRightIcon size={14} /><span className="collapsed-pill-label">{thread.target.line == null ? "Draft thread on file" : targetLabel(thread.target)}</span></button>;
-  return <div className="inline-thread review-thread local-thread" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeThread(); } }}><div className="thread-head"><div className="thread-title"><strong>Line thread</strong><span>{targetLabel(thread.target)}</span></div><div className="actions">{(thread.draft.trim().length > 0 || thread.messages.length > 0) && <Button variant="icon" aria-label="Collapse thread" onClick={() => setThread({ ...thread, collapsed: true })}><ChevronDownIcon size={16} /></Button>}<Button variant="icon" className="close-thread-button" aria-label="Close thread" onClick={closeThread}><XIcon size={16} /></Button></div></div>{thread.messages.length > 0 && <ThreadMessageTimeline prUrl={prUrl} messages={thread.messages} />}{githubDrafts.error != null && <p className="operation-error" role="alert">GitHub draft failed: {githubDrafts.error}</p>}<div className="composer"><textarea rows={1} value={thread.draft} onChange={(event) => setThread({ ...thread, draft: event.target.value })} onInput={(event) => autoGrowTextarea(event.currentTarget)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey && thread.draft.trim().length > 0 && !thread.asking) { event.preventDefault(); void askThread(thread); } }} placeholder="Write a draft comment or ask Pi about this line" />{thread.asking && <AgentActivityLine activity={thread.activity} />}<div className="actions"><button className="pi-chat-action" onClick={() => void askThread(thread)} disabled={thread.asking || savingToGitHub || thread.draft.trim().length === 0}>{thread.asking ? "Asking" : "Ask Pi"}</button><button onClick={() => void githubDrafts.saveComment(thread)} disabled={thread.asking || savingToGitHub || thread.draft.trim().length === 0}>{savingToGitHub ? "Saving…" : "Save private on GitHub"}</button><button className="composer-primary" onClick={addDraft} disabled={savingToGitHub || thread.draft.trim().length === 0}>Add draft comment</button></div></div></div>;
+  return <div className="inline-thread review-thread local-thread" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeThread(); } }}><div className="thread-head"><div className="thread-title"><strong>Line thread</strong><span>{targetLabel(thread.target)}</span></div><div className="actions">{(thread.draft.trim().length > 0 || thread.messages.length > 0) && <Button variant="icon" aria-label="Collapse thread" onClick={() => setThread({ ...thread, collapsed: true })}><ChevronDownIcon size={16} /></Button>}<Button variant="icon" className="close-thread-button" aria-label="Close thread" onClick={closeThread}><XIcon size={16} /></Button></div></div>{thread.messages.length > 0 && <ThreadMessageTimeline prUrl={prUrl} messages={thread.messages} />}{githubDrafts.error != null && <Flash variant="danger" className="operation-error" role="alert">GitHub draft failed: {githubDrafts.error}</Flash>}<div className="composer"><Textarea block resize="none" rows={1} value={thread.draft} onChange={(event) => setThread({ ...thread, draft: event.target.value })} onInput={(event) => autoGrowTextarea(event.currentTarget)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey && thread.draft.trim().length > 0 && !thread.asking) { event.preventDefault(); void askThread(thread); } }} placeholder="Write a draft comment or ask Pi about this line" />{thread.asking && <AgentActivityLine activity={thread.activity} />}<div className="actions"><Button variant="muted" className="pi-chat-action" onClick={() => void askThread(thread)} disabled={thread.asking || savingToGitHub || thread.draft.trim().length === 0}>{thread.asking ? "Asking" : "Ask Pi"}</Button><Button onClick={() => void githubDrafts.saveComment(thread)} disabled={thread.asking || savingToGitHub || thread.draft.trim().length === 0}>{savingToGitHub ? "Saving…" : "Save private on GitHub"}</Button><Button className="composer-primary" onClick={addDraft} disabled={savingToGitHub || thread.draft.trim().length === 0}>Add draft comment</Button></div></div></div>;
 }
 
 function reviewStatus(pr: StoredPullRequest): { label: string; tone: string } {
@@ -2000,9 +2014,9 @@ function GitHubDraftReviewPanel({ files, onJumpToTarget }: { files: PullFile[]; 
   }
   return <section className="github-draft-review">
     <div className="github-draft-review-head"><div><strong>Private GitHub review</strong><span>{comments.length > 0 ? `${comments.length} private ${comments.length === 1 ? "comment" : "comments"}` : githubDrafts.loaded ? "No pending comments" : "Not pulled yet"}</span></div><span className="muted">Visible only to you until submitted</span></div>
-    <div className="github-draft-review-actions"><button className="small-muted-button" onClick={() => void githubDrafts.pull()} disabled={githubDrafts.loading}>{githubDrafts.loading ? "Pulling…" : githubDrafts.loaded ? "Refresh private comments" : "Pull private GitHub comments"}</button><button className="small-muted-button" onClick={() => void copyHandoff()} disabled={copying || comments.length === 0}>{copying ? "Copying…" : copied ? "Copied agent handoff" : "Copy agent handoff"}</button></div>
-    {githubDrafts.error != null && <p className="operation-error" role="alert">GitHub draft failed: {githubDrafts.error}</p>}
-    {copyError != null && <p className="muted copy-feedback-error" role="alert">Copy failed: {copyError}</p>}
+    <div className="github-draft-review-actions"><Button variant="muted" className="small-muted-button" onClick={() => void githubDrafts.pull()} disabled={githubDrafts.loading}>{githubDrafts.loading ? "Pulling…" : githubDrafts.loaded ? "Refresh private comments" : "Pull private GitHub comments"}</Button><Button variant="muted" className="small-muted-button" onClick={() => void copyHandoff()} disabled={copying || comments.length === 0}>{copying ? "Copying…" : copied ? "Copied agent handoff" : "Copy agent handoff"}</Button></div>
+    {githubDrafts.error != null && <Flash variant="danger" className="operation-error" role="alert">GitHub draft failed: {githubDrafts.error}</Flash>}
+    {copyError != null && <Flash variant="danger" className="copy-feedback-error" role="alert">Copy failed: {copyError}</Flash>}
     {comments.length > 0 && <div className="github-draft-list">{comments.map((comment, index) => <article className="github-draft-card" key={comment.id}><button className="github-draft-location" onClick={onJumpToTarget == null ? undefined : () => onJumpToTarget(githubDraftTarget(files, comment))}><span>#{index + 1}</span><strong>{githubDraftLocation(comment)}</strong></button><p>{comment.body}</p></article>)}</div>}
   </section>;
 }
@@ -2050,11 +2064,11 @@ function ReviewSummary({ pr, files, drafts, setDrafts, event, setEvent, body, se
       setCopyingFeedback(false);
     }
   }
-  const copyFeedbackButton = <button className="small-muted-button pi-copy-feedback" onClick={() => void copyFeedback()} disabled={copyingFeedback}>{copyingFeedback ? "Copying…" : feedbackCopied ? "Copied feedback prompt" : "Copy feedback prompt"}</button>;
+  const copyFeedbackButton = <Button variant="muted" className="small-muted-button pi-copy-feedback" onClick={() => void copyFeedback()} disabled={copyingFeedback}>{copyingFeedback ? "Copying…" : feedbackCopied ? "Copied feedback prompt" : "Copy feedback prompt"}</Button>;
   const saveStatus = draftSaveStatus !== "idle" && <span className={`draft-save-status is-${draftSaveStatus}`} role={draftSaveStatus === "error" ? "alert" : "status"}>{draftSaveStatus === "saving" ? "Saving draft…" : draftSaveStatus === "saved" ? "Draft saved" : <>Draft not saved: {draftSaveError}<button type="button" onClick={retryDraftSave}>Retry</button></>}</span>;
   const githubDraftPanel = <GitHubDraftReviewPanel files={files} onJumpToTarget={onJumpToTarget} />;
-  if (!composing && !hasReviewContent) return <section className="panel review-summary review-summary-empty"><div className="review-summary-head"><div><h2>Review changes</h2><p className="muted">{showSubmitted ? "Review submitted." : draftDescription}</p>{feedbackCopyError != null && <p className="muted copy-feedback-error" role="alert">Copy failed: {feedbackCopyError}</p>}</div></div>{githubDraftPanel}<div className="review-summary-empty-actions">{copyFeedbackButton}<button className="review-start-button" onClick={() => setComposing(true)}>Start review</button></div></section>;
-  return <section className="panel review-summary"><div className="review-summary-head"><div><h2>Review changes</h2><p className="muted">{draftDescription}</p>{saveStatus}</div>{copyFeedbackButton}</div>{feedbackCopyError != null && <p className="muted copy-feedback-error" role="alert">Copy failed: {feedbackCopyError}</p>}{githubDraftPanel}<label className="review-event-field"><span>Review outcome</span><select className={`review-event ${event.toLowerCase().replace("_", "-")}`} value={event} onChange={(change) => { setEvent(change.target.value as typeof event); setSubmitted(false); }}><option value="COMMENT">Comment</option><option value="APPROVE">Approve</option><option value="REQUEST_CHANGES">Request changes</option></select></label><textarea className="review-body" rows={2} value={body} onChange={(change) => { setBody(change.target.value); setSubmitted(false); autoGrowTextarea(change.currentTarget); }} placeholder="Overall review body" aria-label="Overall review body" /><div className="review-actions"><button className="small-muted-button" disabled={!hasReviewContent} onClick={() => void copyDraftContext()}>{copied ? "Copied context" : "Copy draft context"}</button><button className={`review-submit ${event.toLowerCase().replace("_", "-")}`} disabled={submitting || !hasReviewContent} onClick={() => void handleSubmit()}>{submitting ? "Submitting…" : `Submit review (${drafts.length})`}</button></div>{hasDrafts ? <div className="review-draft-list">{drafts.map((draft, index) => <DraftView key={draft.id} draft={draft} index={index} invalid={invalidDraftIds[draft.id] === true} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} onJump={onJumpToTarget != null ? () => onJumpToTarget({ ...draft, hunk: "" }) : undefined} />)}</div> : <p className="muted review-no-drafts">No draft comments yet.</p>}</section>;
+  if (!composing && !hasReviewContent) return <section className="panel review-summary review-summary-empty"><div className="review-summary-head"><div><h2>Review changes</h2><p className="muted">{showSubmitted ? "Review submitted." : draftDescription}</p>{feedbackCopyError != null && <Flash variant="danger" className="copy-feedback-error" role="alert">Copy failed: {feedbackCopyError}</Flash>}</div></div>{githubDraftPanel}<div className="review-summary-empty-actions">{copyFeedbackButton}<Button className="review-start-button" onClick={() => setComposing(true)}>Start review</Button></div></section>;
+  return <section className="panel review-summary"><div className="review-summary-head"><div><h2>Review changes</h2><p className="muted">{draftDescription}</p>{saveStatus}</div>{copyFeedbackButton}</div>{feedbackCopyError != null && <Flash variant="danger" className="copy-feedback-error" role="alert">Copy failed: {feedbackCopyError}</Flash>}{githubDraftPanel}<label className="review-event-field"><span>Review outcome</span><Select className={`review-event ${event.toLowerCase().replace("_", "-")}`} value={event} onChange={(change) => { setEvent(change.target.value as typeof event); setSubmitted(false); }}><option value="COMMENT">Comment</option><option value="APPROVE">Approve</option><option value="REQUEST_CHANGES">Request changes</option></Select></label><Textarea block resize="none" className="review-body" rows={2} value={body} onChange={(change) => { setBody(change.target.value); setSubmitted(false); autoGrowTextarea(change.currentTarget); }} placeholder="Overall review body" aria-label="Overall review body" /><div className="review-actions"><Button variant="muted" className="small-muted-button" disabled={!hasReviewContent} onClick={() => void copyDraftContext()}>{copied ? "Copied context" : "Copy draft context"}</Button><Button className={`review-submit ${event.toLowerCase().replace("_", "-")}`} disabled={submitting || !hasReviewContent} onClick={() => void handleSubmit()}>{submitting ? "Submitting…" : `Submit review (${drafts.length})`}</Button></div>{hasDrafts ? <div className="review-draft-list">{drafts.map((draft, index) => <DraftView key={draft.id} draft={draft} index={index} invalid={invalidDraftIds[draft.id] === true} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} onJump={onJumpToTarget != null ? () => onJumpToTarget({ ...draft, hunk: "" }) : undefined} />)}</div> : <p className="muted review-no-drafts">No draft comments yet.</p>}</section>;
 }
 
 function AgentActivityLine({ activity }: { activity: PiAgentActivity | null | undefined }) {
@@ -2176,7 +2190,7 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
     void saveFocusScan(focusReview.text, nextViewedIds, nextCollapsedIds);
   }
   const composer = <div className="pi-session-composer">
-    <textarea ref={composerRef} rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onInput={(event) => autoGrowTextarea(event.currentTarget)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submitChat(); } }} placeholder="Message Pi…" />
+    <Textarea ref={composerRef} block resize="none" rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onInput={(event) => autoGrowTextarea(event.currentTarget)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submitChat(); } }} placeholder="Message Pi…" />
     <div className="pi-session-composer-foot">
       <span className="pi-session-input-hint">Enter to send · Shift+Enter for newline</span>
       {chatSending && <AgentActivityLine activity={review.activity} />}
@@ -2234,7 +2248,7 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
       const viewed = viewedFocusIds[area.id] ?? false;
       return <div key={area.id} className={`focus-area-link-row${viewed ? " viewed" : ""}`}>
         <label className="focus-area-check" title="Mark as reviewed" onClick={(event) => event.stopPropagation()}>
-          <input type="checkbox" checked={viewed} onChange={() => toggleFocusViewed(area)} />
+          <Checkbox checked={viewed} onChange={() => toggleFocusViewed(area)} />
         </label>
         <button type="button" onClick={() => jumpToFocusArea(area)}>
           <strong>{index + 1}. {area.title}</strong>
@@ -2245,21 +2259,21 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
   </div>;
   return <section className={`panel ai-review${viewingHistory ? " viewing-history" : ""}${chatFocused ? " chat-focused" : ""}`}>
     <div className="section-head pi-panel-head"><h2>Pi session{viewingHistory && <span className="pi-history-flag" role="status">Viewing earlier run</span>}</h2><Button type="button" variant="muted" className="small-muted-button pi-copy-feedback" onClick={() => void copyFeedback()} disabled={copyingFeedback}>{copyingFeedback ? "Copying…" : feedbackCopied ? "Copied feedback prompt" : "Copy feedback prompt"}</Button></div>
-    {feedbackCopyError != null && <p className="muted copy-feedback-error" role="alert">Copy failed: {feedbackCopyError}</p>}
+    {feedbackCopyError != null && <Flash variant="danger" className="copy-feedback-error" role="alert">Copy failed: {feedbackCopyError}</Flash>}
     <div className="pi-actions">
       <div className="pi-action">
         <Button className="focus-review-run" onClick={() => void runFocusReview()} disabled={focusReview.running}>{focusReview.running ? "Scanning…" : focusReview.text.length > 0 ? "Refresh focus scan" : "Focus scan"}</Button>
         {focusReview.running ? <AgentActivityLine activity={focusReview.activity} /> : <span className="muted">Find specific lines worth deeper review. Refresh saves each pass to quiet history.</span>}
-        {focusScanHistory.length > 1 && <details className="pi-history-compact"><summary><span className="disclosure-chevron" aria-hidden="true">›</span>Focus scan history ({focusScanHistory.length})</summary><div className="pi-history-picker"><select aria-label="Focus scan history" value={selectedFocusScanId} onChange={(event) => showFocusScanRecord(focusScanHistory.find((record) => record.id === event.target.value))}>{focusHistoryOptions}</select>{viewingOlderFocusScan && <Button variant="muted" className="pi-history-back" onClick={() => showFocusScanRecord(focusScanHistory[0])}>Latest</Button>}</div></details>}
+        {focusScanHistory.length > 1 && <details className="pi-history-compact"><summary><span className="disclosure-chevron" aria-hidden="true">›</span>Focus scan history ({focusScanHistory.length})</summary><div className="pi-history-picker"><Select aria-label="Focus scan history" value={selectedFocusScanId} onChange={(event) => showFocusScanRecord(focusScanHistory.find((record) => record.id === event.target.value))}>{focusHistoryOptions}</Select>{viewingOlderFocusScan && <Button variant="muted" className="pi-history-back" onClick={() => showFocusScanRecord(focusScanHistory[0])}>Latest</Button>}</div></details>}
       </div>
       <div className="pi-action">
         <Button onClick={() => void runReview()} disabled={review.running}>{review.running ? "Reviewing…" : hasMessages ? "Refresh findings" : "Full review"}</Button>
         {review.running ? <AgentActivityLine activity={review.activity} /> : <span className="muted">Run a general code review. Follow-up chat stays with this run.</span>}
-        {aiReviewHistory.length > 1 && <details className="pi-history-compact"><summary><span className="disclosure-chevron" aria-hidden="true">›</span>Review/chat history ({aiReviewHistory.length})</summary><div className="pi-history-picker"><select aria-label="Review chat history" value={selectedAiReviewId} onChange={(event) => showAiReviewRecord(aiReviewHistory.find((record) => record.id === event.target.value))}>{aiHistoryOptions}</select>{viewingOlderAiReview && <Button variant="muted" className="pi-history-back" onClick={() => showAiReviewRecord(aiReviewHistory[0])}>Latest</Button>}</div></details>}
+        {aiReviewHistory.length > 1 && <details className="pi-history-compact"><summary><span className="disclosure-chevron" aria-hidden="true">›</span>Review/chat history ({aiReviewHistory.length})</summary><div className="pi-history-picker"><Select aria-label="Review chat history" value={selectedAiReviewId} onChange={(event) => showAiReviewRecord(aiReviewHistory.find((record) => record.id === event.target.value))}>{aiHistoryOptions}</Select>{viewingOlderAiReview && <Button variant="muted" className="pi-history-back" onClick={() => showAiReviewRecord(aiReviewHistory[0])}>Latest</Button>}</div></details>}
       </div>
     </div>
     <div className="pi-review-findings">
-      {focusReviewHasNoFindings(focusReview.text) && <div className="focus-review-note clean" role="status"><strong>✓ Focus scan clean.</strong><span>All scanned up for this pass.</span></div>}
+      {focusReviewHasNoFindings(focusReview.text) && <Flash variant="success" className="focus-review-note clean" role="status"><strong>✓ Focus scan clean.</strong><span>All scanned up for this pass.</span></Flash>}
       {focusAreaLinks}
       {reviewMessages.length > 0 && <div className="ai-chat-messages ai-review-response">{reviewMessages.map((message, index) => <GeneralReviewEntry key={index} message={message} prUrl={prUrl} />)}</div>}
     </div>
@@ -2363,28 +2377,28 @@ function GpuWorkspaceModal({ review, close, refreshLogs }: { review: OpenRespons
     <div className="pi-modal-body gpu-workspace-body">
       <PiCard title="Allocate fast workspace">
         <div className="gpu-workspace-form">
-          <label>Hardware<select value={gpuType} onChange={(event) => setGpuType(event.target.value)}>{(contract?.gpuTypes ?? []).map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
+          <label>Hardware<Select block value={gpuType} onChange={(event) => setGpuType(event.target.value)}>{(contract?.gpuTypes ?? []).map((type) => <option key={type} value={type}>{type}</option>)}</Select></label>
           <div className="gpu-workspace-defaults"><span>{contract?.defaults.gpuCount ?? "—"} GPU</span><span>{contract == null ? "—" : contract.defaults.persistentDisk ? "persistent disk" : "no persistent disk"}</span><span>{contract == null ? "—" : `${Math.round(contract.defaults.ttlHours * 60)}m TTL`}</span><span>{contract == null ? "—" : contract.defaults.autoConnect ? "auto-connect" : "no auto-connect"}</span></div>
           <Button onClick={() => void createWorkspace()} disabled={creating || workspace != null || !supported || gpuType.trim().length === 0}>{creating ? "Allocating…" : workspace != null ? "Workspace open" : "Open GPU workspace"}</Button>
         </div>
         <p className="muted">{supported ? "Use this when you want Pi or a local agent to write a repro, run it on specific hardware, then attach if needed. The reservation stays on the warm-pool path; PR checkout is a follow-up command." : contract == null ? "Loading GPU workspace support contract…" : `This first MVP only supports ${supportedRepositoryLabel} PR checkouts. The flow is intentionally narrow so repo setup can become a later profile layer.`}</p>
       </PiCard>
-      {error != null && <p className="error">{error}</p>}
+      {error != null && <Flash variant="danger" className="error" role="alert">{error}</Flash>}
       {workspace != null && <PiCard title="Workspace ready" count={workspace.id ?? workspace.gpuType}>
         <div className="gpu-workspace-ready-actions"><Button variant="muted" className="small-muted-button" onClick={() => void deleteWorkspace()} disabled={deleting}>{deleting ? "Deleting…" : "Delete workspace"}</Button></div>
         <dl className="pi-kv">
           <dt>Workspace</dt><dd><code>{workspace.uri ?? "ID not detected from gpu-dev output"}</code></dd>
-          <dt>Attach</dt><dd>{workspace.attachCommand == null ? "Run gpu-dev list/show to find the reservation." : <><code>{workspace.attachCommand}</code><button type="button" className="small-muted-button" onClick={() => void copy(workspace.attachCommand)}>Copy</button></>}</dd>
-          <dt>Inspect</dt><dd>{workspace.showCommand == null ? "—" : <><code>{workspace.showCommand}</code><button type="button" className="small-muted-button" onClick={() => void copy(workspace.showCommand)}>Copy</button></>}</dd>
+          <dt>Attach</dt><dd>{workspace.attachCommand == null ? "Run gpu-dev list/show to find the reservation." : <><code>{workspace.attachCommand}</code><Button variant="muted" className="small-muted-button" onClick={() => void copy(workspace.attachCommand)}>Copy</Button></>}</dd>
+          <dt>Inspect</dt><dd>{workspace.showCommand == null ? "—" : <><code>{workspace.showCommand}</code><Button variant="muted" className="small-muted-button" onClick={() => void copy(workspace.showCommand)}>Copy</Button></>}</dd>
           <dt>SSH host</dt><dd>{workspace.sshHost ?? "—"}</dd>
-          <dt>Setup</dt><dd><code>{workspace.setupCommand}</code><button type="button" className="small-muted-button" onClick={() => void copy(workspace.setupCommand)}>Copy</button></dd>
+          <dt>Setup</dt><dd><code>{workspace.setupCommand}</code><Button variant="muted" className="small-muted-button" onClick={() => void copy(workspace.setupCommand)}>Copy</Button></dd>
           <dt>Profile</dt><dd>{workspace.setupProfile}</dd>
           <dt>Ref</dt><dd>{workspace.prRef}</dd>
           <dt>GPU</dt><dd>{workspace.gpuCount}× {workspace.gpuType}</dd>
           <dt>TTL</dt><dd>{Math.round(workspace.ttlHours * 60)} minutes</dd>
         </dl>
         <div className="gpu-workspace-exec">
-          <label>Run command<textarea value={execCommand} onChange={(event) => setExecCommand(event.target.value)} /></label>
+          <label>Run command<Textarea block value={execCommand} onChange={(event) => setExecCommand(event.target.value)} /></label>
           <Button onClick={() => void runWorkspaceCommand()} disabled={executing || workspace.id == null || execCommand.trim().length === 0}>{executing ? "Running…" : "Run on workspace"}</Button>
         </div>
         {execResult != null && <details className="gpu-workspace-output" open><summary><span className="disclosure-chevron" aria-hidden="true">›</span>Command result · exit {execResult.exitCode ?? execResult.signal ?? "unknown"}</summary><pre>{[execResult.stdout, execResult.stderr].filter((text) => text.trim().length > 0).join("\n") || "No output"}</pre></details>}
@@ -2428,11 +2442,11 @@ function GpuWorkspaceAgentPanel({ review, supported }: { review: OpenResponse; s
   return <PiCard title="Workspace agent">
     <p className="muted">Dedicated Pi thread with the shared gpu_workspace tool. It can allocate, inspect, delete, and run commands without queueing behind the main review chat.</p>
     <div className="gpu-workspace-agent">
-      <label>Ask workspace agent<textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} /></label>
+      <label>Ask workspace agent<Textarea block value={prompt} onChange={(event) => setPrompt(event.target.value)} /></label>
       <Button onClick={() => void askGpuAgent()} disabled={!supported || running || prompt.trim().length === 0}>{running ? "Asking…" : "Ask workspace agent"}</Button>
     </div>
     {running && <AgentActivityLine activity={activity} />}
-    {error != null && <p className="error">{error}</p>}
+    {error != null && <Flash variant="danger" className="error" role="alert">{error}</Flash>}
     {answer.trim().length > 0 && <div className="gpu-workspace-agent-answer"><MarkdownText text={answer} /></div>}
   </PiCard>;
 }
@@ -2683,25 +2697,25 @@ function PiSettingsModal({ prKey, diagnostics, setDiagnostics, openDiagnostics, 
       <section className="pi-settings-section">
         <div className="pi-settings-section-head">
           <h3>Model</h3>
-          <input className="pi-settings-search" type="search" placeholder="Filter models…" value={filter} onChange={(event) => setFilter(event.target.value)} />
+          <TextInput className="pi-settings-search" type="search" placeholder="Filter models…" value={filter} onChange={(event) => setFilter(event.target.value)} />
         </div>
-        {providers.length === 0 ? <p className="muted">No models reported by this Pi session yet.</p> : <>
-          <div className="pi-provider-tabs" role="tablist" aria-label="Provider">
+        {providers.length === 0 ? <p className="muted">No models reported by this Pi session yet.</p> : <Tabs value={provider} onValueChange={({ value }) => { setProvider(value); setModelId(value === currentProvider ? currentModelId : ""); }}>
+          <TabList className="pi-provider-tabs" aria-label="Provider">
             {providers.map((entry) => {
               const count = models.filter((model) => model.provider === entry).length;
               const isActive = entry === provider;
               const isCurrent = entry === currentProvider;
-              return <button key={entry} type="button" role="tab" aria-selected={isActive} className={`pi-provider-tab${isActive ? " active" : ""}${isCurrent ? " current" : ""}`} onClick={() => { setProvider(entry); setModelId(entry === currentProvider ? currentModelId : ""); }}>{PROVIDER_LABELS[entry] ?? entry}<span className="pi-count">{count}</span></button>;
+              return <Tab key={entry} value={entry} className={`pi-provider-tab${isActive ? " active" : ""}${isCurrent ? " current" : ""}`}>{PROVIDER_LABELS[entry] ?? entry}<span className="pi-count">{count}</span></Tab>;
             })}
-          </div>
-          <div className="pi-model-options" role="radiogroup" aria-label="Model">
+          </TabList>
+          {providers.map((entry) => <TabPanel value={entry} key={entry}>{entry === provider && <div className="pi-model-options" role="radiogroup" aria-label="Model">
             {filteredModels.length === 0 ? <p className="muted pi-empty">No models match this filter.</p> : filteredModels.map((model) => {
               const id = model.id ?? "";
               const value = `${model.provider}/${id}`;
               const isSelected = modelId === id;
               const isCurrent = value === currentModel;
               return <label key={value} className={`pi-model-option${isSelected ? " selected" : ""}${isCurrent ? " current" : ""}`}>
-                <input type="radio" name="pi-model" checked={isSelected} onChange={() => setModelId(id)} />
+                <Radio name="pi-model" value={id} checked={isSelected} onChange={() => setModelId(id)} />
                 <div className="pi-model-meta">
                   <span className="pi-model-id">{id}</span>
                   {model.name != null && model.name !== id && <span className="pi-model-name muted">{model.name}</span>}
@@ -2709,8 +2723,8 @@ function PiSettingsModal({ prKey, diagnostics, setDiagnostics, openDiagnostics, 
                 {isCurrent && <span className="pi-tag">Current</span>}
               </label>;
             })}
-          </div>
-        </>}
+          </div>}</TabPanel>)}
+        </Tabs>}
       </section>
 
       <section className="pi-settings-section">
@@ -2722,7 +2736,7 @@ function PiSettingsModal({ prKey, diagnostics, setDiagnostics, openDiagnostics, 
             const isSelected = thinking === level;
             const isCurrent = level === currentThinking;
             return <label key={level} className={`pi-thinking-option${isSelected ? " selected" : ""}${isCurrent ? " current" : ""}`}>
-              <input type="radio" name="pi-thinking" checked={isSelected} onChange={() => setThinking(level)} />
+              <Radio name="pi-thinking" value={level} checked={isSelected} onChange={() => setThinking(level)} />
               <div className="pi-thinking-meta">
                 <span className="pi-thinking-label">{level}</span>
                 <span className="muted">{THINKING_DESCRIPTIONS[level] ?? ""}</span>
@@ -2740,8 +2754,8 @@ function PiSettingsModal({ prKey, diagnostics, setDiagnostics, openDiagnostics, 
         {applyError != null && <span className="pi-settings-error">{applyError}</span>}
         {savedAt != null && applyError == null && !hasChanges && !saving && <span className="pi-settings-saved muted">Saved</span>}
         {hasChanges && !saving && <span className="pi-settings-pending muted">Unsaved changes</span>}
-        <button type="button" onClick={close}>Cancel</button>
-        <button type="button" className="pi-primary" onClick={() => void apply()} disabled={!hasChanges || saving || modelId.length === 0}>{saving ? "Applying…" : "Apply"}</button>
+        <Button variant="muted" onClick={close}>Cancel</Button>
+        <Button className="pi-primary" onClick={() => void apply()} disabled={!hasChanges || saving || modelId.length === 0}>{saving ? "Applying…" : "Apply"}</Button>
       </div>
     </footer>
   </ModalShell>;
@@ -2780,7 +2794,7 @@ function ReviewMemoryModal({ memory, loading, distilling, refresh, distill, clos
       </div>
       <div className="pi-modal-head-actions">
         <Button variant="muted" onClick={refresh} disabled={loading || distilling}>{loading ? "Refreshing…" : "Refresh"}</Button>
-        <button type="button" className="pi-primary" onClick={distill} disabled={loading || distilling || (memory?.stats.recordCount ?? 0) === 0}>{distilling ? "Distilling…" : "Distill profile"}</button>
+        <Button className="pi-primary" onClick={distill} disabled={loading || distilling || (memory?.stats.recordCount ?? 0) === 0}>{distilling ? "Distilling…" : "Distill profile"}</Button>
       </div>
     </header>
     {memory == null ? <div className="pi-modal-body"><p className="muted">{loading ? "Loading review memory…" : "No review memory loaded yet."}</p></div> : <>
@@ -2791,11 +2805,12 @@ function ReviewMemoryModal({ memory, loading, distilling, refresh, distill, clos
         <div><span>Profile</span><strong>{memory.profile == null ? "not distilled" : relativeTime(memory.profile.updatedAt)}</strong></div>
         <div><span>Profile records</span><strong>{memory.profile?.sourceRecordCount ?? "—"}</strong></div>
       </div>
-      <nav className="memory-tabs" role="tablist" aria-label="Review memory sections">
-        {(["profile", "examples", "prompt"] as const).map((id) => <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? "active" : ""} onClick={() => setTab(id)}>{id === "profile" ? "Distilled profile" : id === "examples" ? "Raw examples" : "Prompt context"}</button>)}
-      </nav>
+      <Tabs value={tab} onValueChange={({ value }) => setTab(value as ReviewMemoryTab)}>
+      <TabList className="memory-tabs" aria-label="Review memory sections">
+        {(["profile", "examples", "prompt"] as const).map((id) => <Tab key={id} value={id} className={tab === id ? "active" : ""}>{id === "profile" ? "Distilled profile" : id === "examples" ? "Raw examples" : "Prompt context"}</Tab>)}
+      </TabList>
       <div className="pi-modal-body review-memory-body">
-        {tab === "profile" && <section className="memory-section">
+        <TabPanel value="profile"><section className="memory-section">
           {profileText.length === 0 ? <div className="memory-empty"><h3>No distilled profile yet</h3><p className="muted">Capture a few reviews, then run distillation to turn them into actionable review rules.</p></div> : <>
             <div className="memory-distillation-map">
               <h3>Current distillation</h3>
@@ -2804,20 +2819,21 @@ function ReviewMemoryModal({ memory, loading, distilling, refresh, distill, clos
             </div>
             <MarkdownText text={profileText} />
           </>}
-        </section>}
-        {tab === "examples" && <section className="memory-section memory-examples">
+        </section></TabPanel>
+        <TabPanel value="examples"><section className="memory-section memory-examples">
           {memory.records.length === 0 ? <p className="muted">No raw examples captured yet.</p> : memory.records.map((record) => <details className="memory-record" key={record.id}>
             <summary><span className="disclosure-chevron" aria-hidden="true">›</span><strong>{reviewMemoryRecordTitle(record)}</strong><span>{record.comments.length} inline · head {shortSha(record.headSha)}</span></summary>
             {record.body.trim().length > 0 && <div className="memory-record-block"><h4>Overall</h4><MarkdownText text={record.body} /></div>}
             <div className="memory-record-block"><h4>Inline comments</h4>{record.comments.length === 0 ? <p className="muted">No inline comments.</p> : record.comments.map((comment, index) => <div className="memory-comment" key={index}><span>{reviewMemoryLocation(comment)}</span><p>{comment.body}</p></div>)}</div>
             <div className="memory-record-block"><h4>Change-set context</h4>{record.changeSet == null ? <p className="muted">No change-set snapshot stored for this record.</p> : <><p className="muted">{record.changeSet.title ?? record.changeSet.source ?? "Stored diff context"} · {reviewMemoryChangeSetSummary(record)}</p>{record.changeSet.files.map((file) => <details className="memory-file" key={file.path}><summary><span className="disclosure-chevron" aria-hidden="true">›</span>{file.path}<span>{file.status ?? ""} {file.additions == null ? "" : `+${file.additions}`} {file.deletions == null ? "" : `-${file.deletions}`}</span></summary><pre className="prompt-preview memory-file-patch">{file.patch ?? "Patch unavailable."}</pre></details>)}</>}</div>
           </details>)}
-        </section>}
-        {tab === "prompt" && <section className="memory-section">
+        </section></TabPanel>
+        <TabPanel value="prompt"><section className="memory-section">
           <p className="muted">This is the exact review memory context sent to Pi Review prompts and exposed to the `/review` workflow.</p>
           <pre className="prompt-preview memory-prompt-preview">{memory.prompt}</pre>
-        </section>}
+        </section></TabPanel>
       </div>
+      </Tabs>
     </>}
   </ModalShell>;
 }

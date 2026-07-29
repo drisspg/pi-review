@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import { api } from "../api";
 import { highlightedHtml } from "../lib/highlight";
 import { prUrlForNumber } from "../lib/pr";
+import { Button } from "./Button";
 import { InlineSnippetsContext, type FileLinkContext } from "./MarkdownContext";
 import { Mermaid } from "./Mermaid";
 
@@ -158,7 +159,7 @@ function MarkdownPre({ children, ...props }: MarkdownPreProps) {
     window.setTimeout(() => setCopied(false), 1400);
   }
 
-  return <div className="markdown-code-block"><button className="markdown-copy-button" type="button" onClick={() => void copyCode()} aria-label={copied ? "Copied code" : "Copy code"} title={copied ? "Copied" : "Copy"}>{copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}</button><pre {...props}>{children}</pre></div>;
+  return <div className="markdown-code-block"><Button variant="icon" className="markdown-copy-button" onClick={() => void copyCode()} aria-label={copied ? "Copied code" : "Copy code"} title={copied ? "Copied" : "Copy"}>{copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}</Button><pre {...props}>{children}</pre></div>;
 }
 
 function preBlockLanguage(children: React.ReactNode): string | null {

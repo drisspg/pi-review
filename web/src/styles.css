@@ -110,6 +110,25 @@
   --syntax-meta: #6cb6ff;
 }
 
+[data-component="ThemeProvider"] {
+  --bg: var(--bgColor-default);
+  --panel: var(--bgColor-default);
+  --panel2: var(--bgColor-muted);
+  --border: var(--borderColor-default);
+  --muted: var(--fgColor-muted);
+  --text: var(--fgColor-default);
+  --accent: var(--fgColor-accent);
+  --danger: var(--fgColor-danger);
+  --danger-text: var(--fgColor-danger);
+  --success: var(--fgColor-success);
+  --attention: var(--fgColor-attention);
+  --link: var(--fgColor-accent);
+  --add: var(--bgColor-success-muted);
+  --del: var(--bgColor-danger-muted);
+  --code-bg: var(--bgColor-muted);
+  --radius: var(--borderRadius-medium);
+}
+
 * { box-sizing: border-box; }
 
 body {
@@ -147,23 +166,23 @@ body {
   background: transparent;
 }
 
-button, input, textarea, select {
+:where(button, input, textarea, select):not([data-component]) {
   font: inherit;
   color: inherit;
   background: var(--panel2);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
 }
 
-button, select { min-height: 32px; }
+:where(button, select):not([data-component]) { min-height: 32px; }
 
-button {
+button:not([data-component]) {
   cursor: pointer;
   padding: 0.38rem 0.62rem;
 }
 
-button:hover { border-color: var(--muted); }
-button:disabled { cursor: not-allowed; opacity: 0.55; }
+button:not([data-component]):hover { border-color: var(--muted); }
+button:not([data-component]):disabled { cursor: not-allowed; opacity: 0.55; }
 
 button:focus-visible,
 a:focus-visible,
@@ -389,17 +408,12 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .error {
-  border: 1px solid var(--danger);
-  color: var(--danger-text);
-  background: rgba(248, 81, 73, 0.1);
-  border-radius: var(--radius);
-  padding: 10px;
   white-space: pre-wrap;
 }
 
 .operation-error {
   margin: 0;
-  color: var(--danger-text);
+  padding: 6px 8px;
   font-size: 0.78rem;
   overflow-wrap: anywhere;
 }
@@ -501,6 +515,12 @@ a { color: var(--link); text-decoration: none; }
   background: var(--panel);
 }
 
+.side-tab-list {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .side-tab {
   position: relative;
   flex: 1 1 0;
@@ -571,28 +591,39 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .side-tab-panels {
-  overflow: auto;
-  display: grid;
-  align-content: start;
-  gap: 10px;
+  display: flex;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   padding: 8px;
 }
 
-.side-tab-panels.pi-tab-panel,
-.side-tab-panels.review-tab-panel {
+.side-tab-panel {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.side-tab-panel[hidden] {
+  display: none;
+}
+
+.side-tab-panel.pi-tab-panel,
+.side-tab-panel.review-tab-panel {
   display: flex;
   align-content: normal;
+  min-height: 0;
   overflow: hidden;
 }
 
-.side-tab-panels.pi-tab-panel > .ai-review,
-.side-tab-panels.review-tab-panel > .review-summary {
+.side-tab-panel.pi-tab-panel > .ai-review,
+.side-tab-panel.review-tab-panel > .review-summary {
   flex: 1 1 auto;
   min-height: 0;
 }
 
-.side-tab-panels.pi-tab-panel > .ai-review {
+.side-tab-panel.pi-tab-panel > .ai-review {
   overflow-y: auto;
 }
 
@@ -841,7 +872,7 @@ a { color: var(--link); text-decoration: none; }
 
 .file-summary {
   position: sticky;
-  top: 91px;
+  top: 92px;
   z-index: 20;
   width: 100%;
   height: 40px;
@@ -1440,66 +1471,38 @@ a { color: var(--link); text-decoration: none; }
   background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
-.ui-button {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-  justify-content: center;
-}
-
-.ui-button-muted {
-  color: var(--muted);
-  background: transparent;
+.ui-button:disabled {
+  opacity: 0.55;
 }
 
 .ui-button-icon {
-  display: inline-grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  min-height: 28px;
-  padding: 0;
-  color: var(--muted);
-  background: transparent;
-  border-color: transparent;
-}
-
-.ui-button-icon:hover {
-  color: var(--text);
-  background: var(--panel);
-  border-color: var(--border);
+  flex-shrink: 0;
 }
 
 .action-menu-popover {
-  z-index: 120;
+  z-index: var(--stacking-overlay-zIndex);
   display: grid;
   min-width: 180px;
-  padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--panel);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  padding: var(--base-size-4);
+  border: var(--borderWidth-thin) solid var(--borderColor-default);
+  border-radius: var(--borderRadius-medium);
+  background: var(--overlay-bgColor);
+  box-shadow: var(--shadow-floating-medium);
 }
 
-.action-menu-popover a,
 .action-menu-popover button {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: flex-start;
   width: 100%;
-  min-height: 32px;
+  min-height: var(--control-medium-size);
   padding: 6px 8px;
-  color: var(--text);
+  color: var(--fgColor-default);
   background: transparent;
   border: 0;
   text-align: left;
-  text-decoration: none;
 }
 
-.action-menu-popover a:hover,
-.action-menu-popover button:hover {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+.action-menu-popover button:hover,
+.action-menu-popover button:focus-visible {
+  background: var(--control-transparent-bgColor-hover);
 }
 
 .github-comment-timeline {
@@ -2852,7 +2855,7 @@ button.fold:hover {
 }
 
 .copy-feedback-error {
-  color: var(--danger-text);
+  margin: 0;
 }
 
 .pi-actions {
@@ -2872,6 +2875,7 @@ button.fold:hover {
 .pi-action > button {
   justify-self: start;
   width: fit-content;
+  height: 28px;
   min-height: 28px;
   padding: 4px 8px;
   font-size: 0.78rem;
@@ -3000,11 +3004,6 @@ button.fold:hover {
 .focus-review-note.clean {
   display: grid;
   gap: 2px;
-  padding: 8px 10px;
-  border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border));
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--success) 10%, var(--panel));
-  color: var(--success);
 }
 
 .focus-review-note.clean span {
@@ -3159,7 +3158,7 @@ button.focus-area-collapsed {
   background: color-mix(in srgb, var(--attention) 8%, var(--panel));
 }
 
-.panel textarea.review-body {
+.panel .review-body textarea {
   min-height: 0;
   height: auto;
   resize: none;
@@ -3767,9 +3766,10 @@ button.focus-area-collapsed {
 }
 
 .pi-settings-search {
-  min-height: 30px;
-  padding: 4px 10px;
   width: min(260px, 60%);
+}
+
+.pi-settings-search input {
   font-size: 13px;
 }
 

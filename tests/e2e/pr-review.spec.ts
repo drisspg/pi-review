@@ -592,9 +592,42 @@ test("collapses and focuses existing comment threads", async ({ page }) => {
   await expect(thread.locator(".markdown").first()).toBeVisible();
 });
 
-test("switches GitHub-style themes", async ({ page }) => {
-  await page.getByLabel("Theme").selectOption("github-light");
+test("switches and persists Primer-backed GitHub themes", async ({ page }) => {
+  const theme = page.getByLabel("Theme");
+  const provider = page.locator('[data-component="ThemeProvider"]');
+
+  await theme.selectOption("github-light");
   await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe("github-light");
+  await expect(provider).toHaveAttribute("data-color-mode", "light");
+
+  await theme.selectOption("github-dimmed");
+  await expect(provider).toHaveAttribute("data-color-mode", "dark");
+  await expect(provider).toHaveAttribute("data-dark-theme", "dark_dimmed");
+
+  await theme.selectOption("github-dark");
+  await expect(provider).toHaveAttribute("data-dark-theme", "dark");
+  await page.reload();
+  await expect(page.getByLabel("Theme")).toHaveValue("github-dark");
+});
+
+test("supports keyboard navigation across review tabs", async ({ page }) => {
+  await openSideTab(page, "Review");
+  const reviewTab = page.getByRole("tab", { name: /^Review/ });
+  await reviewTab.focus();
+  await page.keyboard.press("ArrowRight");
+
+  await expect(page.getByRole("tab", { name: /^Pi/ })).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(".pi-session-chat")).toBeVisible();
+});
+
+test("opens and dismisses the Tools menu from the keyboard", async ({ page }) => {
+  const trigger = page.getByRole("button", { name: /Tools/ });
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("menuitem", { name: "Code walk" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menuitem", { name: "Code walk" })).toHaveCount(0);
+  await expect(trigger).toBeFocused();
 });
 
 test("keeps the Pi composer usable on a short mobile viewport", async ({ page }) => {
@@ -1064,7 +1097,7 @@ test("copies local draft comments in a feedback prompt from the Review tab", asy
   await rows.first().click();
   await page.locator(".inline-thread textarea").first().fill("Keep this local feedback out of GitHub.");
   await page.getByRole("button", { name: "Add draft comment" }).first().click();
-  await expect(page.locator(".inline-thread.draft")).toContainText("Keep this local feedback out of GitHub.");
+  await expect(page.locator(".inline-thread.draft", { hasText: "Keep this local feedback out of GitHub." })).toBeVisible();
 
   await openSideTab(page, "Pi");
   const panel = page.locator(".ai-review");
@@ -1083,7 +1116,7 @@ test("copies local draft comments in a feedback prompt from the Review tab", asy
   await reviewPanel.getByRole("button", { name: "Copy feedback prompt" }).click();
 
   await expect(reviewPanel.getByRole("button", { name: "Copied feedback prompt" })).toBeVisible();
-  await expect(reviewPanel.locator(".draft-card")).toContainText("Keep this local feedback out of GitHub.");
+  await expect(reviewPanel.locator(".draft-card", { hasText: "Keep this local feedback out of GitHub." })).toBeVisible();
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("COPIED REVIEW FEEDBACK PROMPT");
   await expect.poll(() => feedbackPayload?.mode).toBe("review-feedback");
   const userComments = feedbackPayload?.userComments as Array<{ body?: string }> | undefined;
