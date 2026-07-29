@@ -933,6 +933,7 @@ The walk is separate from review chat.`;
 });
 
 test("runs the right-sidebar Pi review panel and continues the chat with Enter", async ({ page }) => {
+  await page.setViewportSize({ width: 2000, height: 1000 });
   let openedFile: unknown = null;
   await page.route(/\/api\/file\/open$/, async (route) => {
     openedFile = route.request().postDataJSON();
@@ -990,6 +991,12 @@ test("runs the right-sidebar Pi review panel and continues the chat with Enter",
   await dialog.getByRole("button", { name: "Show review context" }).click();
   await expect(dialog).not.toHaveClass(/chat-focused/);
   await page.getByRole("button", { name: "Focus review panel" }).click();
+  const focusedPiMessage = await dialog.locator(".pi-session-message.pi").last().boundingBox();
+  const focusedComposer = await dialog.getByPlaceholder("Message Pi…").boundingBox();
+  if (focusedPiMessage == null || focusedComposer == null) throw new Error("Missing focused Pi chat layout");
+  expect(focusedPiMessage.width).toBeGreaterThan(1200);
+  expect(focusedPiMessage.width).toBeLessThanOrEqual(1600);
+  expect(focusedComposer.width).toBeGreaterThan(1200);
   await expect(dialog.getByPlaceholder("Message Pi…")).toBeInViewport();
 });
 
