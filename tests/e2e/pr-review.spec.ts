@@ -495,13 +495,14 @@ test("shows local draft save failures and retries them", async ({ page }) => {
   await expect(page.locator(".draft-save-status.is-saved")).toContainText("Draft saved");
 });
 
-test("clears empty line threads when clicking elsewhere", async ({ page }) => {
+test("clears empty chat threads when clicking elsewhere", async ({ page }) => {
   await openFirstFile(page);
   await page.locator(".file").first().locator(".diff-row.added").first().click();
-  await expect(page.locator(".inline-thread.local-thread")).toHaveCount(1);
+  const thread = page.locator(".inline-thread.local-thread");
+  await thread.getByRole("button", { name: "Use chat" }).click();
 
   await page.locator(".pr-header-strip").click();
-  await expect(page.locator(".inline-thread.local-thread")).toHaveCount(0);
+  await expect(thread).toHaveCount(0);
 });
 
 test("supports multiline draft ranges", async ({ page }) => {
@@ -701,7 +702,8 @@ test("collapses and focuses existing comment threads", async ({ page }) => {
   await expect(thread.locator(".markdown").first()).toBeVisible();
   await thread.getByLabel("Collapse thread").click();
   await expect(thread.locator(".markdown")).toHaveCount(0);
-  await thread.getByLabel("Expand thread").click();
+  await expect(thread.getByLabel("Expand thread")).toBeVisible();
+  await thread.getByRole("button", { name: /Conversation thread|Review summary|Review thread/ }).click();
   await expect(thread.locator(".markdown").first()).toBeVisible();
 });
 
@@ -781,6 +783,13 @@ test("opens a line thread as an inline native Pi terminal by default", async ({ 
   await expect(thread.locator(".xterm-rows")).toContainText("Native Pi ready");
   await page.keyboard.press("Escape");
   await expect(thread).toBeVisible();
+
+  await page.locator(".pr-header-strip").click();
+  const marker = page.getByRole("button", { name: /Pi terminal ·/ });
+  await expect(thread).toHaveCount(0);
+  await expect(marker).toBeVisible();
+  await marker.click();
+  await expect(thread.locator(".pi-native-terminal.compact")).toBeVisible();
 
   await useThreadChat(thread);
   const composer = thread.getByPlaceholder("Write a draft comment or ask Pi about this line");

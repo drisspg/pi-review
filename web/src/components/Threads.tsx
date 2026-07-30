@@ -115,15 +115,16 @@ function GitHubThreadCard({ id, className = "comment", title, subtitle, status, 
     if (collapseSignal > 0) setCollapsed(collapseComments);
   }, [collapseSignal, collapseComments]);
   const body = <><ReviewCommentTimeline comments={comments} commentKind={commentKind} prUrl={prUrl} refreshGithubActivity={refreshGithubActivity} />{reply}</>;
-  const jumpProps = onJump == null ? {} : { onClick: onJump, role: "button", tabIndex: 0, onKeyDown: (event: React.KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onJump(); } } };
+  const titleAction = collapsed ? () => setCollapsed(false) : onJump;
+  const titleActionProps = titleAction == null ? {} : { onClick: titleAction, role: "button", tabIndex: 0, onKeyDown: (event: React.KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); titleAction(); } } };
   return <div id={id} className={`${className} github-thread ${collapsed ? "minimized" : ""}`}>
-    <div className={`thread-head${onJump != null ? " jumpable" : ""}`}>
+    <div className={`thread-head${titleAction != null ? " jumpable" : ""}`}>
       <div className="thread-title">
-        <Button variant="icon" aria-label={collapsed ? "Expand thread" : "Collapse thread"} onClick={(event) => { event.stopPropagation(); setCollapsed(!collapsed); }}>{collapsed ? <ChevronRightIcon size={16} /> : <ChevronDownIcon size={16} />}</Button>
-        <div className={onJump != null ? "thread-title-link" : undefined} {...jumpProps}><strong>{title}</strong><span>{subtitle}</span>{status != null && <span className={`thread-status ${status.toLowerCase()}`}>{status}</span>}</div>
+        <Button variant="icon" aria-label={collapsed ? "Expand thread" : "Collapse thread"} aria-expanded={!collapsed} title={collapsed ? "Expand GitHub thread" : "Collapse GitHub thread"} onClick={(event) => { event.stopPropagation(); setCollapsed(!collapsed); }}>{collapsed ? <ChevronRightIcon size={16} /> : <ChevronDownIcon size={16} />}</Button>
+        <div className={titleAction != null ? "thread-title-link" : undefined} {...titleActionProps}><strong>{title}</strong><span>{subtitle}</span>{status != null && <span className={`thread-status ${status.toLowerCase()}`}>{status}</span>}</div>
       </div>
       <div className="actions">
-        <a href={href} target="_blank" rel="noreferrer" className="thread-github-link" onClick={(event) => event.stopPropagation()}><LinkExternalIcon size={14} /></a>
+        <a href={href} target="_blank" rel="noreferrer" className="thread-github-link" aria-label="Open thread on GitHub" title="Open thread on GitHub" onClick={(event) => event.stopPropagation()}><LinkExternalIcon size={14} /></a>
       </div>
     </div>
     {!collapsed && body}

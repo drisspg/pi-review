@@ -850,9 +850,18 @@ function App() {
 
   function pruneEmptyThreads() {
     setThreads((current) => {
-      const entries = Object.entries(current);
-      const retained = entries.filter(([, thread]) => thread.draft.trim().length > 0 || thread.messages.length > 0);
-      return retained.length === entries.length ? current : Object.fromEntries(retained);
+      let changed = false;
+      const retained = Object.entries(current).flatMap(([key, thread]) => {
+        if ((thread.mode ?? "terminal") === "terminal") {
+          if (thread.collapsed) return [[key, thread] as const];
+          changed = true;
+          return [[key, { ...thread, collapsed: true }] as const];
+        }
+        if (thread.draft.trim().length > 0 || thread.messages.length > 0) return [[key, thread] as const];
+        changed = true;
+        return [];
+      });
+      return changed ? Object.fromEntries(retained) : current;
     });
     setActiveTarget(null);
   }
@@ -860,14 +869,14 @@ function App() {
   function openThread(target: Target) {
     const key = targetKey(target);
     const existing = threads[key];
-    const nextThreads = Object.fromEntries(Object.entries(threads).filter(([threadKey, thread]) => threadKey === key || thread.draft.trim().length > 0 || thread.messages.length > 0));
+    const nextThreads = Object.fromEntries(Object.entries(threads).filter(([threadKey, thread]) => threadKey === key || thread.draft.trim().length > 0 || thread.messages.length > 0 || (thread.mode ?? "terminal") === "terminal"));
     if (existing != null && existing.draft.trim().length === 0 && existing.messages.length === 0) {
       delete nextThreads[key];
       setThreads(nextThreads);
       setActiveTarget(target);
       return;
     }
-    nextThreads[key] = existing == null ? { key, target, collapsed: false, draft: "", messages: [] } : { ...existing, collapsed: !existing.collapsed };
+    nextThreads[key] = existing == null ? { key, target, collapsed: false, mode: "terminal", draft: "", messages: [] } : { ...existing, collapsed: !existing.collapsed };
     setThreads(nextThreads);
     setActiveTarget(target);
   }
@@ -2013,9 +2022,9 @@ function ThreadMessageTimeline({ prUrl, messages }: { prUrl: string; messages: T
 
 function ThreadBox({ prUrl, thread, setThread, closeThread, addDraft, askThread }: { prUrl: string; thread: Thread; setThread: (thread: Thread) => void; closeThread: () => void; addDraft: () => void; askThread: (thread: Thread) => Promise<void> }) {
   const githubDrafts = useContext(GitHubDraftContext);
-  const [terminalOpen, setTerminalOpen] = useState(true);
+  const terminalOpen = (thread.mode ?? "terminal") === "terminal";
   const savingToGitHub = githubDrafts.savingTarget === thread.key;
-  if (thread.collapsed) return <button className="inline-thread collapsed" onClick={() => setThread({ ...thread, collapsed: false })}><ChevronRightIcon size={14} /><span className="collapsed-pill-label">{thread.target.line == null ? "Draft thread on file" : targetLabel(thread.target)}</span></button>;
+  if (thread.collapsed) return <button className={`inline-thread collapsed${terminalOpen ? " terminal-marker" : ""}`} onClick={() => setThread({ ...thread, collapsed: false })}><ChevronRightIcon size={14} /><span className="collapsed-pill-label">{terminalOpen ? `Pi terminal · ${targetLabel(thread.target)}` : thread.target.line == null ? "Draft thread on file" : targetLabel(thread.target)}</span></button>;
   const location = targetLabel(thread.target);
   const terminalContext = `You are discussing ${location} in this pull request. Keep investigation and edits grounded in this line thread.
 
@@ -2025,8 +2034,8 @@ ${thread.target.hunk.slice(0, 4_000)}`;
     <div className="thread-head">
       <div className="thread-title"><strong>Line thread</strong><span>{location}</span></div>
       <div className="actions">
-        <Button variant="muted" className="small-muted-button" onClick={() => setTerminalOpen(!terminalOpen)}>{terminalOpen ? "Use chat" : "Use terminal"}</Button>
-        {(thread.draft.trim().length > 0 || thread.messages.length > 0) && <Button variant="icon" aria-label="Collapse thread" onClick={() => setThread({ ...thread, collapsed: true })}><ChevronDownIcon size={16} /></Button>}
+        <Button variant="muted" className="small-muted-button" onClick={() => setThread({ ...thread, mode: terminalOpen ? "chat" : "terminal" })}>{terminalOpen ? "Use chat" : "Use terminal"}</Button>
+        {(terminalOpen || thread.draft.trim().length > 0 || thread.messages.length > 0) && <Button variant="icon" aria-label="Collapse thread" onClick={() => setThread({ ...thread, collapsed: true })}><ChevronDownIcon size={16} /></Button>}
         <Button variant="icon" className="close-thread-button" aria-label="Close thread" onClick={closeThread}><XIcon size={16} /></Button>
       </div>
     </div>
