@@ -1431,20 +1431,22 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { d
   const gridTemplateColumns = sideCollapsed || sideFocused ? "minmax(0, 1fr)" : `minmax(0, 1fr) 12px ${props.sideWidth}px`;
   return <PiTerminalPrContext.Provider value={{ prKey: props.review.pr.key, headSha: props.review.pr.headSha, onDraftReview: (draftReview) => props.setDrafts(draftReview.comments) }}><GitHubDraftContext.Provider value={props.githubDrafts}><div className={`review-page${sideFocused ? " panel-focused" : ""}`}>
     <div className={`review-layout${sideCollapsed ? " side-collapsed" : ""}${sideFocused ? " side-focused" : ""}`} style={{ gridTemplateColumns }}>
-      <PrHeaderStrip pr={props.review.pr} refreshGithubActivity={props.refreshGithubActivity} refreshingActivity={props.refreshingActivity} />
-      <main className="files">
-        <PrSummary pr={props.review.pr} />
-        <div className="files-toolbar">
-          <FileNavigator files={props.review.files} fileReviews={props.review.fileReviews} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} />
-          <div className="files-toolbar-actions">
-            <Button variant="muted" className="small-muted-button" onClick={() => props.setDiffViewMode(props.diffViewMode === "unified" ? "split" : "unified")}>{diffViewLabel}</Button>
-            <Button variant="muted" className="small-muted-button panel-launch-button" onClick={() => openSidePanel("comments")}>Comments{commentCount > 0 ? ` ${commentCount}` : ""}</Button>
-            <Button variant="muted" className="small-muted-button panel-launch-button" onClick={() => openSidePanel("pi")}>Pi review{piBadge != null ? ` ${piBadge}` : ""}</Button>
-            <Button className="review-changes-button panel-launch-button" onClick={() => openSidePanel("review")}>Review changes{draftCount > 0 ? ` (${draftCount})` : ""}</Button>
+      <div className="review-main">
+        <PrHeaderStrip pr={props.review.pr} refreshGithubActivity={props.refreshGithubActivity} refreshingActivity={props.refreshingActivity} />
+        <main className="files">
+          <PrSummary pr={props.review.pr} />
+          <div className="files-toolbar">
+            <FileNavigator files={props.review.files} fileReviews={props.review.fileReviews} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} />
+            <div className="files-toolbar-actions">
+              <Button variant="muted" className="small-muted-button" onClick={() => props.setDiffViewMode(props.diffViewMode === "unified" ? "split" : "unified")}>{diffViewLabel}</Button>
+              <Button variant="muted" className="small-muted-button panel-launch-button" onClick={() => openSidePanel("comments")}>Comments{commentCount > 0 ? ` ${commentCount}` : ""}</Button>
+              <Button variant="muted" className="small-muted-button panel-launch-button" onClick={() => openSidePanel("pi")}>Pi review{piBadge != null ? ` ${piBadge}` : ""}</Button>
+              <Button className="review-changes-button panel-launch-button" onClick={() => openSidePanel("review")}>Review changes{draftCount > 0 ? ` (${draftCount})` : ""}</Button>
+            </div>
           </div>
-        </div>
-        <DiffAnnotationsContext.Provider value={annotations}>{props.review.files.map((file) => <FileDiff key={file.filename} file={file} {...props} />)}</DiffAnnotationsContext.Provider>
-      </main>
+          <DiffAnnotationsContext.Provider value={annotations}>{props.review.files.map((file) => <FileDiff key={file.filename} file={file} {...props} />)}</DiffAnnotationsContext.Provider>
+        </main>
+      </div>
       {sidePanel}
     </div>
     {draftCount > 0 && (sideCollapsed || sideTab !== "review") && <Button className="floating-submit" onClick={() => openSidePanel("review")}>Review draft ({draftCount}) →</Button>}

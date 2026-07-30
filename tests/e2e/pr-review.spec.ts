@@ -311,6 +311,25 @@ test("uses a compact files toolbar and collapsible review panel", async ({ page 
   await expect(toolbar.locator(".file-navigator-list")).toBeVisible();
 });
 
+test("keeps collapsed files attached to the header beside a tall side panel", async ({ page }) => {
+  await page.setViewportSize({ width: 2000, height: 1000 });
+  const files = page.locator(".file");
+  for (let index = 0; index < await files.count(); index += 1) {
+    const file = files.nth(index);
+    if (await file.locator(".diff-row").count() > 0) await file.locator(".file-summary-left").click();
+  }
+  await openSideTab(page, "Review");
+
+  const geometry = await page.evaluate(() => {
+    const header = document.querySelector(".pr-header-strip")!.getBoundingClientRect();
+    const fileList = document.querySelector(".files")!.getBoundingClientRect();
+    const side = document.querySelector(".side")!.getBoundingClientRect();
+    return { contentGap: fileList.top - header.bottom, sideHeight: side.height };
+  });
+  expect(geometry.contentGap).toBeLessThanOrEqual(24);
+  expect(geometry.sideHeight).toBeGreaterThan(800);
+});
+
 test("keeps the diff and files toolbar within a mobile viewport", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 667 });
   const toolbar = page.locator(".files-toolbar");
@@ -528,8 +547,7 @@ test("keeps draft cards compact in the focused Review panel", async ({ page }) =
 
 test("keeps review submission reachable on a short mobile viewport", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 480 });
-  await openSideTab(page, "Review");
-  await page.getByRole("button", { name: "Start review" }).click();
+  await openReviewForm(page);
   await page.getByPlaceholder("Overall review body").fill("mobile review");
 
   await expect(page.getByRole("button", { name: "Submit review (0)" })).toBeInViewport();
@@ -794,7 +812,7 @@ test("selects diff code text without opening a thread", async ({ page }) => {
   await expect(code).toBeVisible();
   await code.selectText();
   await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? "")).not.toEqual("");
-  await expect(page.locator(".inline-thread")).toHaveCount(0);
+  await expect(page.locator(".local-thread")).toHaveCount(0);
 });
 
 test("runs a separate focus areas review and opens native focus terminals", async ({ page }) => {
