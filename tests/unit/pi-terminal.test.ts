@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
 import test from "node:test";
 
-import { createPiTerminalManager, parsePiTerminalClientMessage, parsePiTerminalRequest, type PiTerminalPeer, type PiTerminalServerMessage } from "../../src/pi-terminal.js";
+import { createPiTerminalManager, parsePiTerminalClientMessage, parsePiTerminalRequest, resolvePiTerminalCommand, type PiTerminalPeer, type PiTerminalServerMessage } from "../../src/pi-terminal.js";
 
 class FakeProcess {
   pid = 42;
@@ -46,6 +49,24 @@ test("bounds terminal resize and input messages", () => {
   assert.equal(parsePiTerminalClientMessage(JSON.stringify({ type: "input", data: "x".repeat(64_001) })), null);
 });
 
+test("resolves Pi outside npm-injected project binaries", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-review-command-"));
+  const projectBin = join(root, "project", "node_modules", ".bin");
+  const userBin = join(root, "user-bin");
+  const executable = process.platform === "win32" ? "pi.cmd" : "pi";
+  try {
+    await Promise.all([mkdir(projectBin, { recursive: true }), mkdir(userBin, { recursive: true })]);
+    await Promise.all([
+      writeFile(join(projectBin, executable), "#!/bin/sh\n"),
+      writeFile(join(userBin, executable), "#!/bin/sh\n"),
+    ]);
+    await Promise.all([chmod(join(projectBin, executable), 0o755), chmod(join(userBin, executable), 0o755)]);
+    assert.equal(resolvePiTerminalCommand([projectBin, userBin].join(delimiter)), join(userBin, executable));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("attaches a peer to one persistent Pi PTY", async () => {
   const process = new FakeProcess();
   const spawns: Array<{ command: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv }> = [];
@@ -53,6 +74,7 @@ test("attaches a peer to one persistent Pi PTY", async () => {
     apiUrl: "http://127.0.0.1:43133",
     cwdForPr: () => "/tmp/pr-worktree",
     extensionPath: "/tmp/pi-review-extension.ts",
+    piCommand: "/usr/local/bin/pi",
     sessionRoot: "/tmp/pi-review-terminal-test",
     spawn: (command, args, options) => {
       spawns.push({ command, args, cwd: options.cwd, env: options.env });
@@ -63,7 +85,7 @@ test("attaches a peer to one persistent Pi PTY", async () => {
   await manager.attach(first, { prKey: "github.com/org/repo#1", session: "main", headSha: "abcdef1234567", target: { path: "src/a.ts", line: 9, side: "RIGHT" }, context: "Review line 7" });
   assert.deepEqual(first.messages, [{ type: "ready", pid: 42 }]);
   assert.equal(spawns.length, 1);
-  assert.equal(spawns[0].command, "pi");
+  assert.equal(spawns[0].command, "/usr/local/bin/pi");
   assert.equal(spawns[0].cwd, "/tmp/pr-worktree");
   assert.deepEqual(spawns[0].args.slice(0, -1), ["--session-dir", "/tmp/pi-review-terminal-test/github.com-org-repo-1/main", "--continue", "--name", "Pi Review · main", "--extension", "/tmp/pi-review-extension.ts", "--append-system-prompt"]);
   assert.match(spawns[0].args.at(-1) ?? "", /gh pr view <number-or-url>.*gh pr diff <number-or-url>/);

@@ -1,8 +1,9 @@
 /** Own interactive Pi processes behind a bounded browser-terminal protocol. */
 
+import { accessSync, constants } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { delimiter, resolve } from "node:path";
 
 import type { IPty } from "node-pty";
 
@@ -79,6 +80,24 @@ function boundedDimension(value: unknown, fallback: number, max: number): number
   return Math.max(2, Math.min(max, Math.round(value)));
 }
 
+/** Resolve the user-installed Pi CLI without selecting an npm-injected project binary. */
+export function resolvePiTerminalCommand(pathValue = process.env.PATH): string {
+  const names = process.platform === "win32" ? ["pi.cmd", "pi.exe", "pi"] : ["pi"];
+  for (const directory of pathValue?.split(delimiter) ?? []) {
+    if (directory.length === 0 || /(^|[\\/])node_modules[\\/]\.bin$/.test(directory)) continue;
+    for (const name of names) {
+      const candidate = resolve(directory, name);
+      try {
+        accessSync(candidate, constants.X_OK);
+        return candidate;
+      } catch {
+        // Continue through PATH until the first executable user installation.
+      }
+    }
+  }
+  return "pi";
+}
+
 /** Parse and validate a browser terminal connection URL. */
 export function parsePiTerminalRequest(url: string, host = "127.0.0.1"): PiTerminalRequest | null {
   const parsed = new URL(url, `http://${host}`);
@@ -128,6 +147,7 @@ export function parsePiTerminalClientMessage(raw: string): PiTerminalClientMessa
 /** Own persistent interactive Pi processes and attach browser terminal peers. */
 export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
   const sessions = new Map<string, Promise<TerminalSession>>();
+  const piCommand = deps.piCommand ?? resolvePiTerminalCommand();
   const sessionRoot = deps.sessionRoot ?? resolve(homedir(), ".pi", "agent", "state", "pi-pr-review", "terminal-sessions");
   async function createSession(request: PiTerminalRequest): Promise<TerminalSession> {
     const cwd = deps.cwdForPr(request.prKey);
@@ -151,8 +171,8 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
     args.push("--append-system-prompt", [ghstackWorkspaceInstructions(request.prKey), request.context].filter(Boolean).join("\n\n"));
     const options = { cwd, cols: DEFAULT_COLS, rows: DEFAULT_ROWS, env, name: "xterm-256color" };
     const processHandle = deps.spawn == null
-      ? (await import("node-pty")).spawn(deps.piCommand ?? "pi", args, options)
-      : deps.spawn(deps.piCommand ?? "pi", args, options);
+      ? (await import("node-pty")).spawn(piCommand, args, options)
+      : deps.spawn(piCommand, args, options);
     const terminalSession: TerminalSession = { process: processHandle, peers: new Set(), buffer: "" };
     processHandle.onData((data) => {
       terminalSession.buffer = `${terminalSession.buffer}${data}`.slice(-MAX_BUFFER_CHARS);
@@ -164,7 +184,7 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
       if (sessions.get(key) != null) sessions.delete(key);
       deps.logger?.info("pi-terminal", "process exited", { prKey: request.prKey, session: request.session, exitCode, signal });
     });
-    deps.logger?.info("pi-terminal", "process started", { prKey: request.prKey, session: request.session, cwd, pid: processHandle.pid });
+    deps.logger?.info("pi-terminal", "process started", { prKey: request.prKey, session: request.session, cwd, command: piCommand, pid: processHandle.pid });
     return terminalSession;
   }
 
