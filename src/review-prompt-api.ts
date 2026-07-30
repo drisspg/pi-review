@@ -1,3 +1,5 @@
+import { ghstackWorkspaceInstructions } from "./ghstack-guidance.js";
+
 type ReviewPromptMode = "code-walk" | "main-review" | "focus-review" | "test-pr" | "ai-chat" | "inline-chat" | "focus-chat" | "review-feedback" | "github-draft-handoff";
 
 type PromptFile = {
@@ -285,7 +287,7 @@ function aiChatPrompt(payload: Record<string, unknown>): ReviewPromptResponse {
   const previousDialogue = optionalString(payload, "previousDialogue", "(none)");
   return {
     purpose: "chat",
-    prompt: `Continue discussing PR ${prKey}. Answer the user's latest question using the checked-out PR worktree. Be concise and cite files/lines when useful.\n\n${reviewDraftToolInstructions}\n\nPrevious dialogue:\n${previousDialogue}\n\nUser: ${question}`,
+    prompt: `Continue discussing PR ${prKey}. Answer the user's latest question using the checked-out PR worktree. Be concise and cite files/lines when useful.\n\n${ghstackWorkspaceInstructions(prKey)}\n\n${reviewDraftToolInstructions}\n\nPrevious dialogue:\n${previousDialogue}\n\nUser: ${question}`,
   };
 }
 
@@ -308,6 +310,8 @@ ${previousDialogue}
 
 Use the diff hunk as context for the question and keep the answer concise. The hunk includes removed (-), added (+), and unchanged context lines. Do not start with a formulaic preface like "From the hunk". Use inspection tools only if the question cannot be answered from the hunk or asks for broader context.
 
+${ghstackWorkspaceInstructions(prKey)}
+
 ${reviewDraftToolInstructions}
 
 Question: ${question}`,
@@ -321,7 +325,7 @@ function focusChatPrompt(payload: Record<string, unknown>): ReviewPromptResponse
   const question = requiredString(payload, "question");
   return {
     purpose: "focus-chat",
-    prompt: `Review PR ${prKey}. Focus area: ${path}:${focusRange(payload)}\n\nFocus finding:\n${body}\n\n${reviewDraftToolInstructions}\n\nQuestion: ${question}`,
+    prompt: `Review PR ${prKey}. Focus area: ${path}:${focusRange(payload)}\n\nFocus finding:\n${body}\n\n${ghstackWorkspaceInstructions(prKey)}\n\n${reviewDraftToolInstructions}\n\nQuestion: ${question}`,
   };
 }
 

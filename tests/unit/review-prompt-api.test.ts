@@ -66,12 +66,15 @@ test("review prompt API builds chat prompts with typed purposes", async () => {
   assert.equal(inline.purpose, "inline-chat");
   assert.match(inline.prompt, /File: src\/a\.ts\. Lines: 10-12\. Side: RIGHT/);
   assert.match(inline.prompt, /draft_review_comment tool/);
+  assert.match(inline.prompt, /gh pr view <number-or-url>/);
   assert.match(inline.prompt, /Question: why\?/);
   assert.equal(focus.purpose, "focus-chat");
   assert.match(focus.prompt, /Focus area: src\/a\.ts:4-6/);
   assert.match(focus.prompt, /draft_review_comment tool/);
+  assert.match(focus.prompt, /Do not check out, rebase, push, or modify ghstack's synthetic branches/);
   assert.equal(chat.purpose, "chat");
   assert.match(chat.prompt, /Previous dialogue:\nUser: hi/);
+  assert.match(chat.prompt, /git log --format=full/);
   assert.match(chat.prompt, /Do not create drafts for ordinary questions/);
 });
 

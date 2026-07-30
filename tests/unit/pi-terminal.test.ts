@@ -65,7 +65,9 @@ test("attaches a peer to one persistent Pi PTY", async () => {
   assert.equal(spawns.length, 1);
   assert.equal(spawns[0].command, "pi");
   assert.equal(spawns[0].cwd, "/tmp/pr-worktree");
-  assert.deepEqual(spawns[0].args, ["--session-dir", "/tmp/pi-review-terminal-test/github.com-org-repo-1/main", "--continue", "--name", "Pi Review · main", "--extension", "/tmp/pi-review-extension.ts", "--append-system-prompt", "Review line 7"]);
+  assert.deepEqual(spawns[0].args.slice(0, -1), ["--session-dir", "/tmp/pi-review-terminal-test/github.com-org-repo-1/main", "--continue", "--name", "Pi Review · main", "--extension", "/tmp/pi-review-extension.ts", "--append-system-prompt"]);
+  assert.match(spawns[0].args.at(-1) ?? "", /gh pr view <number-or-url>.*gh pr diff <number-or-url>/);
+  assert.match(spawns[0].args.at(-1) ?? "", /Review line 7$/);
   assert.equal(spawns[0].env.PI_REVIEW_API_URL, "http://127.0.0.1:43133");
   assert.equal(spawns[0].env.PI_REVIEW_PR_KEY, "github.com/org/repo#1");
   assert.equal(spawns[0].env.PI_REVIEW_HEAD_SHA, "abcdef1234567");

@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 
 import type { IPty } from "node-pty";
 
+import { ghstackWorkspaceInstructions } from "./ghstack-guidance.js";
 import type { DraftReview } from "./types.js";
 
 const DEFAULT_COLS = 100;
@@ -147,7 +148,7 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
     delete env.PI_SESSION_ID;
     const args = ["--session-dir", sessionDir, "--continue", "--name", `Pi Review · ${request.session}`];
     if (deps.extensionPath != null) args.push("--extension", deps.extensionPath);
-    if (request.context != null) args.push("--append-system-prompt", request.context);
+    args.push("--append-system-prompt", [ghstackWorkspaceInstructions(request.prKey), request.context].filter(Boolean).join("\n\n"));
     const options = { cwd, cols: DEFAULT_COLS, rows: DEFAULT_ROWS, env, name: "xterm-256color" };
     const processHandle = deps.spawn == null
       ? (await import("node-pty")).spawn(deps.piCommand ?? "pi", args, options)

@@ -44,7 +44,7 @@ const PI_THINKING_LEVEL_BY_PURPOSE: Record<string, ThinkingLevel> = {
 
 const REVIEW_TOOLS = ["read", "grep", "find", "bash"];
 const CHAT_TOOLS = ["read", "grep", "find", "bash", "web_search"];
-const INLINE_TOOLS = ["read", "grep", "find", "web_search"];
+const INLINE_TOOLS = ["read", "grep", "find", "bash", "web_search"];
 const DRAFT_TOOL_PURPOSES = new Set(["chat", "inline-chat", "focus-chat"]);
 
 const PI_TOOLS_BY_PURPOSE: Record<string, string[]> = {

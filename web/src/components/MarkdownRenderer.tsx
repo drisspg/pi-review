@@ -176,7 +176,7 @@ function preBlockLanguage(children: React.ReactNode): string | null {
   return match == null ? null : match[1];
 }
 
-function MarkdownAnchor({ href, children, fileLinks, ...props }: MarkdownAnchorProps) {
+function MarkdownAnchor({ href, children, fileLinks, target, rel, ...props }: MarkdownAnchorProps) {
   if (fileLinks != null) {
     const reference = referenceFromUrl(href);
     if (reference != null) return <FileReferenceAnchor context={fileLinks} reference={reference}>{children}</FileReferenceAnchor>;
@@ -184,7 +184,8 @@ function MarkdownAnchor({ href, children, fileLinks, ...props }: MarkdownAnchorP
     const pullRequestUrl = pullRequestNumber == null ? null : prUrlForNumber(fileLinks.prUrl, pullRequestNumber);
     if (pullRequestUrl != null) return <a className="pull-request-reference-link" href={pullRequestUrl} target="_blank" rel="noreferrer" title="Open on GitHub">{children}</a>;
   }
-  return <a href={href} {...props}>{children}</a>;
+  if (href != null && /^https?:\/\//i.test(href)) return <a href={href} target="_blank" rel="noreferrer" {...props}>{children}</a>;
+  return <a href={href} target={target} rel={rel} {...props}>{children}</a>;
 }
 
 function FileReferenceAnchor({ context, reference, children }: { context: FileLinkContext; reference: FileReference; children: React.ReactNode }) {

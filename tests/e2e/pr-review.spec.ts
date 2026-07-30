@@ -213,22 +213,31 @@ test("opens a PR and renders GitHub-style file diffs", async ({ page }) => {
   await expect(page.locator(".diff-row.added").first()).toBeVisible();
 });
 
-test("opens PR description references on GitHub", async ({ page }) => {
+test("opens PR description references on GitHub in new tabs", async ({ page, context }) => {
   const sourceResponse = await page.request.post("/api/pr/open", { data: { input: prUrl } });
   const sourceReview = await sourceResponse.json() as { pr: Record<string, unknown> } & Record<string, unknown>;
   const linkedPrUrl = "https://github.com/example/stack/pull/190596";
   await page.getByRole("link", { name: "Home" }).click();
   await page.route("**/api/pr/open", async (route) => {
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ ...sourceReview, pr: { ...sourceReview.pr, key: "github.com/example/stack#190596", url: linkedPrUrl, body: "Stack from ghstack (oldest at bottom):\n\n* #190594\n* #190595\n* -> #190596" } }) });
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ ...sourceReview, pr: { ...sourceReview.pr, key: "github.com/example/stack#190596", url: linkedPrUrl, body: "Stack from ghstack (oldest at bottom):\n\n* #190594\n* [#190595](https://github.com/example/stack/pull/190595)\n* -> #190596" } }) });
   });
   await page.locator("input").first().fill(linkedPrUrl);
   await page.getByRole("button", { name: "Open" }).click();
   await expect(page.locator(".review-layout")).toBeVisible();
   await page.getByRole("button", { name: "Expand PR summary" }).click();
 
-  const reference = page.getByRole("link", { name: "#190594" });
-  await expect(reference).toHaveAttribute("href", "https://github.com/example/stack/pull/190594");
-  await expect(reference).toHaveAttribute("target", "_blank");
+  for (const number of [190594, 190595]) {
+    const url = `https://github.com/example/stack/pull/${number}`;
+    await context.route(url, (route) => route.fulfill({ contentType: "text/html", body: `<title>PR ${number}</title>` }));
+    const reference = page.getByRole("link", { name: `#${number}` });
+    await expect(reference).toHaveAttribute("href", url);
+    await expect(reference).toHaveAttribute("target", "_blank");
+    const popupPromise = page.waitForEvent("popup");
+    await reference.click();
+    const popup = await popupPromise;
+    await expect(popup).toHaveURL(url);
+    await popup.close();
+  }
 });
 
 test("shows GPU workspace MVP constraints for unsupported repos", async ({ page }) => {

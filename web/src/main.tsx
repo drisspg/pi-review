@@ -849,7 +849,11 @@ function App() {
   }
 
   function pruneEmptyThreads() {
-    setThreads((current) => Object.fromEntries(Object.entries(current).filter(([, thread]) => thread.draft.trim().length > 0 || thread.messages.length > 0)));
+    setThreads((current) => {
+      const entries = Object.entries(current);
+      const retained = entries.filter(([, thread]) => thread.draft.trim().length > 0 || thread.messages.length > 0);
+      return retained.length === entries.length ? current : Object.fromEntries(retained);
+    });
     setActiveTarget(null);
   }
 
