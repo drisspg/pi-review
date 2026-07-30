@@ -131,12 +131,14 @@ test("removes a previous PR from local history", async ({ page }) => {
 
 test("selects and removes multiple previous PRs", async ({ page }) => {
   const savedPrs = [
-    { key: "github.com/example/one#1", title: "First saved PR", url: "https://github.com/example/one/pull/1", headSha: "111111111111", lastOpenedAt: "2026-07-23T03:00:00.000Z", filesChanged: 1, existingCommentCount: 0 },
-    { key: "github.com/example/two#2", title: "Second saved PR", url: "https://github.com/example/two/pull/2", headSha: "222222222222", lastOpenedAt: "2026-07-23T02:00:00.000Z", filesChanged: 2, existingCommentCount: 1 },
-    { key: "github.com/example/three#3", title: "Keep this PR", url: "https://github.com/example/three/pull/3", headSha: "333333333333", lastOpenedAt: "2026-07-23T01:00:00.000Z", filesChanged: 3, existingCommentCount: 2 },
+    { key: "github.com/example/repo#1", title: "First saved PR", url: "https://github.com/example/repo/pull/1", headSha: "111111111111", lastOpenedAt: "2026-07-23T03:00:00.000Z", filesChanged: 1, existingCommentCount: 0 },
+    { key: "github.com/example/repo#2", title: "Second saved PR", url: "https://github.com/example/repo/pull/2", headSha: "222222222222", lastOpenedAt: "2026-07-23T02:00:00.000Z", filesChanged: 2, existingCommentCount: 1 },
+    { key: "github.com/example/repo#3", title: "Keep this PR", url: "https://github.com/example/repo/pull/3", headSha: "333333333333", lastOpenedAt: "2026-07-23T01:00:00.000Z", filesChanged: 3, existingCommentCount: 2 },
   ];
   const cleanupInputs: string[] = [];
   const dialogs: string[] = [];
+  let activeCleanups = 0;
+  let maxActiveCleanups = 0;
   page.on("dialog", async (dialog) => {
     dialogs.push(dialog.message());
     await dialog.accept();
@@ -146,20 +148,25 @@ test("selects and removes multiple previous PRs", async ({ page }) => {
   });
   await page.route("**/api/pr/cleanup", async (route) => {
     cleanupInputs.push((route.request().postDataJSON() as { input: string }).input);
+    activeCleanups += 1;
+    maxActiveCleanups = Math.max(maxActiveCleanups, activeCleanups);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    activeCleanups -= 1;
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true }) });
   });
 
-  await page.getByRole("link", { name: "Home" }).click();
+  await page.goto("/");
   await expect(page.locator(".pr-card")).toHaveCount(3);
   await page.getByRole("button", { name: "Select", exact: true }).click();
-  await page.getByLabel("Select github.com/example/one#1").check();
-  await page.getByLabel("Select github.com/example/two#2").check();
+  await page.getByLabel("Select github.com/example/repo#1").check();
+  await page.getByLabel("Select github.com/example/repo#2").check();
   await page.getByRole("button", { name: "Delete selected (2)" }).click();
 
   await expect(page.locator(".pr-card")).toHaveCount(1);
   await expect(page.locator(".pr-card")).toContainText("Keep this PR");
   await expect(page.getByRole("button", { name: "Select", exact: true })).toBeVisible();
-  expect(cleanupInputs.sort()).toEqual(savedPrs.slice(0, 2).map((pr) => pr.url).sort());
+  expect(cleanupInputs).toEqual(savedPrs.slice(0, 2).map((pr) => pr.url));
+  expect(maxActiveCleanups).toBe(1);
   expect(dialogs).toEqual(["Remove 2 saved PRs from history and delete their local worktree/session caches?"]);
 });
 

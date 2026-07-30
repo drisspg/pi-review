@@ -1048,15 +1048,22 @@ function App() {
       : `Remove ${targets.length} saved PRs from history and delete their local worktree/session caches?`;
     if (!confirm(prompt)) return [];
     setError(null);
-    const results = await Promise.allSettled(targets.map((pr) => api("/api/pr/cleanup", { method: "POST", body: JSON.stringify({ input: pr.url || prUrlFromKey(pr.key) }) })));
-    const removedKeys = targets.filter((_, index) => results[index].status === "fulfilled").map((pr) => pr.key);
+    const removedKeys: string[] = [];
+    const failures: string[] = [];
+    for (const pr of targets) {
+      try {
+        await api("/api/pr/cleanup", { method: "POST", body: JSON.stringify({ input: pr.url || prUrlFromKey(pr.key) }) });
+        removedKeys.push(pr.key);
+      } catch (error) {
+        failures.push(`${pr.key}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
     const removedKeySet = new Set(removedKeys);
     setPrs((current) => current.filter((item) => !removedKeySet.has(item.key)));
     if (review != null && removedKeySet.has(review.pr.key)) {
       activeReviewKeyRef.current = null;
       setReview(null);
     }
-    const failures = results.flatMap((result, index) => result.status === "rejected" ? [`${targets[index].key}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`] : []);
     if (failures.length > 0) setError(`Cleanup failed for ${failures.join("; ")}`);
     await refreshLogs().catch(() => undefined);
     return removedKeys;
