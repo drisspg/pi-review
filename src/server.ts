@@ -1,7 +1,9 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer, type ServerResponse } from "node:http";
 import { extname, join, normalize, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import { createAskStreamApi } from "./ask-stream-api.js";
@@ -14,9 +16,10 @@ import { addIssueComment, addPendingPullRequestReviewThread, createPendingPullRe
 import { logger } from "./logger.js";
 import { createPiApi } from "./pi-api.js";
 import { createPiJobRunner } from "./pi-jobs.js";
+import { createPiTerminalDraftApi } from "./pi-terminal-draft-api.js";
 import { createPiTerminalManager } from "./pi-terminal.js";
 import { attachPiTerminalWebSocketServer } from "./pi-terminal-websocket.js";
-import { askPi, disposePiSession, disposePiSessions, piActivity, piDiagnostics, piSessionCwd, prewarmPiSession, registerPiSessionContext, setPiModel } from "./pi-session.js";
+import { askPi, disposePiSession, disposePiSessions, piActivity, piDiagnostics, piSessionCwd, piSessionReviewContext, prewarmPiSession, registerPiSessionContext, setPiModel } from "./pi-session.js";
 import { createPrApi, defaultPrApiDeps } from "./pr-api.js";
 import { createReviewMemoryApi } from "./review-memory-api.js";
 import { createReviewPromptApi } from "./review-prompt-api.js";
@@ -24,15 +27,23 @@ import { createReviewSubmitRouteApi, defaultReviewSubmitRouteApiDeps } from "./r
 import { createSavedAnalysisApi } from "./saved-analysis-api.js";
 import { createServerRoute, createRequestListener } from "./server-router.js";
 import { createShellApi } from "./shell-api.js";
-import { clearDraftReview, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, getDraftReview, listAiReviews, listFocusScans, listRecentPullRequests, listReviewMemoryRecords, markPullRequestReviewed, removePullRequest, reviewMemoryStats, saveAiReview, saveDraftReview, saveFocusScan, saveReviewMemory, saveReviewProfile, setFileViewed, upsertPullRequest } from "./state.js";
+import { appendDraftReviewComment, clearDraftReview, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, getDraftReview, listAiReviews, listFocusScans, listRecentPullRequests, listReviewMemoryRecords, markPullRequestReviewed, removePullRequest, reviewMemoryStats, saveAiReview, saveDraftReview, saveFocusScan, saveReviewMemory, saveReviewProfile, setFileViewed, upsertPullRequest } from "./state.js";
 import { cleanupPrWorktree, preparePrWorktree } from "./worktrees.js";
 
 const DEFAULT_PORT = 43133;
 const WEB_ROOT = resolve(process.cwd(), "dist-web");
 const execFileAsync = promisify(execFile);
+const port = Number.parseInt(process.env.PI_PR_REVIEW_PORT ?? "", 10) || DEFAULT_PORT;
+const compiledTerminalExtension = fileURLToPath(new URL("./pi-review-terminal-extension.js", import.meta.url));
+const sourceTerminalExtension = fileURLToPath(new URL("./pi-review-terminal-extension.ts", import.meta.url));
 
 const piJobRunner = createPiJobRunner(askPi);
-const piTerminalManager = createPiTerminalManager({ cwdForPr: piSessionCwd, logger });
+const piTerminalManager = createPiTerminalManager({
+  apiUrl: `http://127.0.0.1:${port}`,
+  cwdForPr: piSessionCwd,
+  extensionPath: existsSync(compiledTerminalExtension) ? compiledTerminalExtension : sourceTerminalExtension,
+  logger,
+});
 const askStreamApi = createAskStreamApi({ askPi, logger });
 const commentApi = createCommentApi(defaultCommentApiDeps({ addIssueComment, editIssueComment, editReviewComment, editReviewSummary, replyToReviewComment }));
 const draftReviewApi = createDraftReviewApi({ getDraftReview, now: () => new Date().toISOString(), saveDraftReview });
@@ -41,6 +52,7 @@ const fileApi = createFileApi(defaultFileApiDeps(fetchFileText, setFileViewed, a
 }));
 const githubDraftReviewApi = createGitHubDraftReviewApi(defaultGitHubDraftReviewApiDeps({ addPendingPullRequestReviewThread, createPendingPullRequestReview, fetchPendingPullRequestReview }));
 const piApi = createPiApi({ askPi, piActivity, piDiagnostics, piJobRunner, setPiModel });
+const piTerminalDraftApi = createPiTerminalDraftApi({ appendDraftReviewComment, contextForPr: piSessionReviewContext, notifyDraftReview: piTerminalManager.broadcastDraftReview });
 const prApi = createPrApi(defaultPrApiDeps({
   cleanupPrWorktree,
   disposePiSession: async (prKey) => {
@@ -92,6 +104,7 @@ const route = createServerRoute({
   gpuWorkspaceStatusResponse,
   logger,
   piApi,
+  piTerminalDraftApi,
   prApi,
   reviewMemoryApi,
   reviewPromptApi,
@@ -123,7 +136,6 @@ async function shutdown(signal: string): Promise<void> {
 process.once("SIGINT", () => void shutdown("SIGINT"));
 process.once("SIGTERM", () => void shutdown("SIGTERM"));
 
-const port = Number.parseInt(process.env.PI_PR_REVIEW_PORT ?? "", 10) || DEFAULT_PORT;
 server.listen(port, "127.0.0.1", () => {
   logger.info("server", "listening", { url: `http://127.0.0.1:${port}`, webRoot: WEB_ROOT });
 });

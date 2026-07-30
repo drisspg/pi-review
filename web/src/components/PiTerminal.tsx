@@ -3,9 +3,19 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 
+import type { DraftReview } from "../types";
+
+export type PiTerminalTarget = {
+  path: string;
+  line: number;
+  startLine?: number;
+  side: "RIGHT" | "LEFT";
+};
+
 type PiTerminalServerMessage =
   | { type: "ready"; pid: number }
   | { type: "output"; data: string }
+  | { type: "draftReview"; draftReview: DraftReview }
   | { type: "exit"; exitCode: number; signal: number }
   | { type: "error"; message: string };
 
@@ -30,21 +40,30 @@ function terminalTheme(): NonNullable<ConstructorParameters<typeof Terminal>[0]>
   };
 }
 
-function terminalWebSocketUrl(prKey: string, session: string, context?: string): string {
+function terminalWebSocketUrl(prKey: string, session: string, headSha: string, context?: string, target?: PiTerminalTarget): string {
   const url = new URL("/api/pi/terminal", window.location.href);
   url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   url.searchParams.set("prKey", prKey);
   url.searchParams.set("session", session);
+  url.searchParams.set("headSha", headSha);
   if (context != null) url.searchParams.set("context", context);
+  if (target != null) {
+    url.searchParams.set("path", target.path);
+    url.searchParams.set("line", String(target.line));
+    if (target.startLine != null) url.searchParams.set("startLine", String(target.startLine));
+    url.searchParams.set("side", target.side);
+  }
   return url.toString();
 }
 
 /** Render a real interactive Pi TUI connected to a server-owned pseudoterminal. */
-export function PiTerminal({ prKey, session = "main", context, compact = false }: { prKey: string; session?: string; context?: string; compact?: boolean }) {
+export function PiTerminal({ prKey, headSha, session = "main", context, target, compact = false, onDraftReview }: { prKey: string; headSha: string; session?: string; context?: string; target?: PiTerminalTarget; compact?: boolean; onDraftReview?: (draftReview: DraftReview) => void }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const onDraftReviewRef = useRef(onDraftReview);
   const [status, setStatus] = useState<TerminalStatus>("connecting");
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => { onDraftReviewRef.current = onDraftReview; }, [onDraftReview]);
   useEffect(() => {
     if (containerRef.current == null) return;
     const container: HTMLDivElement = containerRef.current;
@@ -61,7 +80,7 @@ export function PiTerminal({ prKey, session = "main", context, compact = false }
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     terminal.open(container);
-    const socket = new WebSocket(terminalWebSocketUrl(prKey, session, context));
+    const socket = new WebSocket(terminalWebSocketUrl(prKey, session, headSha, context, target));
     let ready = false;
 
     function send(message: Record<string, unknown>): void {
@@ -98,6 +117,8 @@ export function PiTerminal({ prKey, session = "main", context, compact = false }
         });
       } else if (message.type === "output") {
         terminal.write(message.data);
+      } else if (message.type === "draftReview") {
+        onDraftReviewRef.current?.(message.draftReview);
       } else if (message.type === "exit") {
         setStatus("closed");
         terminal.write(`\r\n\x1b[2mPi exited (${message.exitCode}). Reopen the terminal to continue this session.\x1b[0m\r\n`);
@@ -120,7 +141,7 @@ export function PiTerminal({ prKey, session = "main", context, compact = false }
       socket.close();
       terminal.dispose();
     };
-  }, [context, prKey, session]);
+  }, [context, headSha, prKey, session, target?.line, target?.path, target?.side, target?.startLine]);
 
   return <div className={`pi-native-terminal${compact ? " compact" : ""}`}>
     <div ref={containerRef} className="pi-native-terminal-surface" aria-label="Interactive Pi terminal" />

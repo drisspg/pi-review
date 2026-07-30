@@ -7,6 +7,7 @@ import type { DraftReviewApi } from "./draft-review-api.js";
 import type { FileApi } from "./file-api.js";
 import type { GitHubDraftReviewApi } from "./github-draft-review-api.js";
 import type { PiApi } from "./pi-api.js";
+import type { PiTerminalDraftApi } from "./pi-terminal-draft-api.js";
 import type { PrApi } from "./pr-api.js";
 import type { ReviewMemoryApi } from "./review-memory-api.js";
 import type { ReviewPromptApi } from "./review-prompt-api.js";
@@ -32,6 +33,7 @@ export type ServerRouteDeps = {
   gpuWorkspaceStatusResponse: (payload: Record<string, unknown>) => Promise<Record<string, unknown>>;
   logger: ServerLogger;
   piApi: PiApi;
+  piTerminalDraftApi: PiTerminalDraftApi;
   prApi: PrApi;
   reviewMemoryApi: ReviewMemoryApi;
   reviewPromptApi: ReviewPromptApi;
@@ -65,6 +67,7 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
     "/api/focus-scan/save": (payload) => deps.savedAnalysisApi.saveFocusScan(payload),
     "/api/gpu/workspaces/status": (payload) => deps.gpuWorkspaceStatusResponse(payload),
     "/api/pi/diagnostics": (payload) => deps.piApi.diagnostics(payload),
+    "/api/pi/draft-comment": (payload) => deps.piTerminalDraftApi.add(payload),
     "/api/pi/focus-review/status": (payload) => deps.piApi.jobStatus(payload),
     "/api/pi/model": (payload) => deps.piApi.setModel(payload),
     "/api/pi/prompt": (payload) => deps.reviewPromptApi.build(payload),

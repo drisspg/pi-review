@@ -74,6 +74,7 @@ async function mockNativeTerminal(page: Page): Promise<() => Promise<string[]>> 
       readyState = MockTerminalWebSocket.CONNECTING;
       constructor() {
         super();
+        Object.assign(window, { __terminalSocket: this });
         window.setTimeout(() => {
           this.readyState = MockTerminalWebSocket.OPEN;
           this.dispatchEvent(new Event("open"));
@@ -90,6 +91,13 @@ async function mockNativeTerminal(page: Page): Promise<() => Promise<string[]>> 
     Object.defineProperty(window, "WebSocket", { configurable: true, value: MockTerminalWebSocket });
   });
   return () => page.evaluate(() => (window as unknown as { __terminalMessages: string[] }).__terminalMessages);
+}
+
+async function emitNativeTerminalMessage(page: Page, message: Record<string, unknown>) {
+  await page.evaluate((payload) => {
+    const socket = (window as unknown as { __terminalSocket: EventTarget }).__terminalSocket;
+    socket.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(payload) }));
+  }, message);
 }
 
 test.beforeEach(async ({ page }) => {
@@ -771,6 +779,14 @@ test("opens a line thread as an inline native Pi terminal by default", async ({ 
   await thread.getByRole("button", { name: "Use terminal" }).click();
   await useThreadChat(thread);
   await expect(composer).toHaveValue("preserve this draft");
+
+  const path = await rows.first().getAttribute("data-path");
+  const line = Number.parseInt(await rows.first().getAttribute("data-line") ?? "", 10);
+  if (path == null || !Number.isInteger(line) || openedPr == null) throw new Error("Missing terminal draft target");
+  const body = "Terminal-created review draft.";
+  await emitNativeTerminalMessage(page, { type: "draftReview", draftReview: { prKey: openedPr.key, headSha: openedPr.headSha, event: "COMMENT", body: "", comments: [{ id: "terminal-draft", path, line, side: "RIGHT", body }], updatedAt: "now" } });
+  await openSideTab(page, "Review");
+  await expect(page.locator(".review-summary .draft-card", { hasText: body })).toBeVisible();
 });
 
 test("describes shared dialogs for assistive technology", async ({ page }) => {

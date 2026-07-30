@@ -130,6 +130,11 @@ function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
         return { job: { id: `job:${purpose}:${payload.prKey}`, prKey: String(payload.prKey), startedAt: "now", status: "running" } };
       },
     },
+    piTerminalDraftApi: {
+      async add(payload) {
+        return { created: true, comment: { id: "draft", path: String(payload.path), line: Number(payload.line), side: "RIGHT", body: String(payload.body) }, draftReview: { prKey: String(payload.prKey), headSha: String(payload.headSha), event: "COMMENT", body: "", comments: [], updatedAt: "now" } };
+      },
+    },
     prApi: {
       async activity() {
         return { pr: { existingCommentCount: 0, filesChanged: 0, key: "pr" }, draftReview: null, focusScan: null, focusScans: [], aiReview: null, aiReviews: [] };
@@ -248,6 +253,24 @@ test("server route gets local draft reviews", async () => {
   }));
 
   assert.deepEqual(jsonBody(await routeRequest(route, "POST", "/api/draft-review/get", { prKey: "pr" })), { draftReview });
+});
+
+test("server route creates Pi terminal review drafts", async () => {
+  const payloads: Record<string, unknown>[] = [];
+  const route = createServerRoute(baseDeps({
+    piTerminalDraftApi: {
+      async add(payload) {
+        payloads.push(payload);
+        return { created: true, comment: { id: "draft", path: "src/a.ts", line: 5, side: "RIGHT" as const, body: "note" }, draftReview: { prKey: "pr", headSha: "abcdef1", event: "COMMENT" as const, body: "", comments: [], updatedAt: "now" } };
+      },
+    },
+  }));
+
+  const payload = { prKey: "pr", headSha: "abcdef1", path: "src/a.ts", line: 5, body: "note" };
+  const response = await routeRequest(route, "POST", "/api/pi/draft-comment", payload);
+  assert.equal(response.statusCode, 200);
+  assert.equal((jsonBody(response) as { created: boolean }).created, true);
+  assert.deepEqual(payloads, [payload]);
 });
 
 test("server route saves draft reviews", async () => {

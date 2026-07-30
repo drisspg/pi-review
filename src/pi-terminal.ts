@@ -6,6 +6,8 @@ import { resolve } from "node:path";
 
 import type { IPty } from "node-pty";
 
+import type { DraftReview } from "./types.js";
+
 const DEFAULT_COLS = 100;
 const DEFAULT_ROWS = 30;
 const MAX_BUFFER_CHARS = 1_000_000;
@@ -13,6 +15,7 @@ const MAX_BUFFER_CHARS = 1_000_000;
 export type PiTerminalServerMessage =
   | { type: "ready"; pid: number }
   | { type: "output"; data: string }
+  | { type: "draftReview"; draftReview: DraftReview }
   | { type: "exit"; exitCode: number; signal: number }
   | { type: "error"; message: string };
 
@@ -20,10 +23,19 @@ export type PiTerminalClientMessage =
   | { type: "input"; data: string }
   | { type: "resize"; cols: number; rows: number };
 
+export type PiTerminalTarget = {
+  path: string;
+  line: number;
+  startLine?: number;
+  side: "RIGHT" | "LEFT";
+};
+
 export type PiTerminalRequest = {
   prKey: string;
   session: string;
   context?: string;
+  headSha?: string;
+  target?: PiTerminalTarget;
 };
 
 export type PiTerminalPeer = {
@@ -50,6 +62,8 @@ export type PiTerminalManagerDeps = {
     error: (scope: string, message: string, data?: Record<string, unknown>) => void;
     info: (scope: string, message: string, data?: Record<string, unknown>) => void;
   };
+  apiUrl?: string;
+  extensionPath?: string;
   piCommand?: string;
   sessionRoot?: string;
   spawn?: (command: string, args: string[], options: { cols: number; cwd: string; env: NodeJS.ProcessEnv; name: string; rows: number }) => TerminalProcess;
@@ -71,10 +85,21 @@ export function parsePiTerminalRequest(url: string, host = "127.0.0.1"): PiTermi
   const prKey = parsed.searchParams.get("prKey")?.trim() ?? "";
   const session = parsed.searchParams.get("session")?.trim() || "main";
   const context = parsed.searchParams.get("context")?.trim() || undefined;
+  const headSha = parsed.searchParams.get("headSha")?.trim() || undefined;
+  const path = parsed.searchParams.get("path")?.trim() || undefined;
+  const line = Number.parseInt(parsed.searchParams.get("line") ?? "", 10);
+  const startLine = Number.parseInt(parsed.searchParams.get("startLine") ?? "", 10);
+  const side = parsed.searchParams.get("side");
   if (prKey.length === 0 || prKey.length > 300 || !/^[a-zA-Z0-9._:/#-]+$/.test(prKey) || prKey.split(/[/:#]/).includes("..")) return null;
   if (session.length > 160 || !/^[a-zA-Z0-9._:-]+$/.test(session)) return null;
   if (context != null && (context.length > 6_000 || context.includes("\0"))) return null;
-  return { prKey, session, ...(context == null ? {} : { context }) };
+  if (headSha != null && !/^[a-fA-F0-9]{7,64}$/.test(headSha)) return null;
+  if (path != null && (path.length > 1_000 || path.includes("\0"))) return null;
+  if (path != null && (!Number.isInteger(line) || line < 1 || (side !== "RIGHT" && side !== "LEFT"))) return null;
+  if (path == null && (Number.isInteger(line) || Number.isInteger(startLine) || side != null)) return null;
+  if (Number.isInteger(startLine) && (startLine < 1 || startLine > line)) return null;
+  const target = path == null ? undefined : { path, line, ...(Number.isInteger(startLine) ? { startLine } : {}), side: side as "RIGHT" | "LEFT" };
+  return { prKey, session, ...(context == null ? {} : { context }), ...(headSha == null ? {} : { headSha }), ...(target == null ? {} : { target }) };
 }
 
 /** Decode a bounded terminal input or resize message. */
@@ -109,10 +134,19 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
     const key = `${request.prKey}\0${request.session}`;
     const sessionDir = resolve(sessionRoot, safe(request.prKey), safe(request.session));
     await mkdir(sessionDir, { recursive: true });
-    const env: NodeJS.ProcessEnv = { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor" };
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      TERM: "xterm-256color",
+      COLORTERM: "truecolor",
+      ...(deps.apiUrl == null ? {} : { PI_REVIEW_API_URL: deps.apiUrl }),
+      PI_REVIEW_PR_KEY: request.prKey,
+      ...(request.headSha == null ? {} : { PI_REVIEW_HEAD_SHA: request.headSha }),
+      ...(request.target == null ? {} : { PI_REVIEW_TARGET: JSON.stringify(request.target) }),
+    };
     delete env.PI_SESSION_FILE;
     delete env.PI_SESSION_ID;
     const args = ["--session-dir", sessionDir, "--continue", "--name", `Pi Review · ${request.session}`];
+    if (deps.extensionPath != null) args.push("--extension", deps.extensionPath);
     if (request.context != null) args.push("--append-system-prompt", request.context);
     const options = { cwd, cols: DEFAULT_COLS, rows: DEFAULT_ROWS, env, name: "xterm-256color" };
     const processHandle = deps.spawn == null
@@ -183,6 +217,15 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
     }
   }
 
+  async function broadcastDraftReview(prKey: string, draftReview: DraftReview): Promise<void> {
+    const matching = [...sessions.entries()].filter(([key]) => key.startsWith(`${prKey}\0`));
+    const settled = await Promise.allSettled(matching.map(([, session]) => session));
+    for (const result of settled) {
+      if (result.status !== "fulfilled") continue;
+      for (const peer of result.value.peers) peer.send({ type: "draftReview", draftReview });
+    }
+  }
+
   async function disposePr(prKey: string): Promise<void> {
     const matching = [...sessions.entries()].filter(([key]) => key.startsWith(`${prKey}\0`));
     for (const [key] of matching) sessions.delete(key);
@@ -195,7 +238,7 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
     await stopSessions(active, "Server shutting down");
   }
 
-  return { attach, dispose, disposePr };
+  return { attach, broadcastDraftReview, dispose, disposePr };
 }
 
 export type PiTerminalManager = ReturnType<typeof createPiTerminalManager>;

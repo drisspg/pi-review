@@ -13,7 +13,7 @@ export type ReviewDraftToolDeps = {
   appendDraftReviewComment: (prKey: string, headSha: string, comment: Omit<DraftReview["comments"][number], "id">) => Promise<{ draftReview: DraftReview; comment: DraftReview["comments"][number]; created: boolean }>;
 };
 
-type ReviewDraftToolParams = {
+export type ReviewDraftToolParams = {
   path: string;
   line: number;
   startLine?: number;
@@ -55,7 +55,7 @@ function hunkForLine(patch: string, side: "RIGHT" | "LEFT", targetLine: number):
 }
 
 /** Normalize a requested draft and reject locations GitHub cannot anchor in this diff. */
-function validateTarget(context: ReviewDraftToolContext, params: ReviewDraftToolParams): Omit<DraftReview["comments"][number], "id"> {
+export function validateReviewDraftTarget(context: ReviewDraftToolContext, params: ReviewDraftToolParams): Omit<DraftReview["comments"][number], "id"> {
   const path = params.path.trim();
   const body = params.body.trim();
   const side = params.side ?? "RIGHT";
@@ -68,7 +68,7 @@ function validateTarget(context: ReviewDraftToolContext, params: ReviewDraftTool
   const endHunk = hunkForLine(file.patch, side, params.line);
   if (endHunk == null) throw new Error(`${path}:${params.line} is not reviewable on the ${side} side of the current diff.`);
   if (params.startLine != null && hunkForLine(file.patch, side, params.startLine) !== endHunk) throw new Error("startLine and line must be reviewable within the same diff hunk.");
-  return { path, line: params.line, startLine: params.startLine, side, body };
+  return { path, line: params.line, ...(params.startLine == null ? {} : { startLine: params.startLine }), side, body };
 }
 
 /** Create the conversation-only tool that persists editable local review drafts. */
@@ -76,7 +76,9 @@ export function createReviewDraftTool(prKey: string, context: ReviewDraftToolCon
   return defineTool({
     name: "draft_review_comment",
     label: "Draft Review Comment",
-    description: "Create a private local Pi Review draft comment when the user explicitly asks to draft, add, or turn feedback into a review comment. The draft is editable in the UI and is not published to GitHub.",
+    description: "Create a private local Pi Review draft comment when the user asks to add, leave, post, write, or put a comment on the PR or current line. The draft is editable in the UI and is not published to GitHub.",
+    promptSnippet: "Create editable PR review comments without modifying source files",
+    promptGuidelines: ["Use draft_review_comment for PR comment requests instead of editing repository files; only edit code when the user explicitly requests a source-code change."],
     parameters: Type.Object({
       path: Type.String({ description: "Exact changed-file path from the repository root." }),
       line: Type.Integer({ minimum: 1, description: "Absolute ending line number on the selected diff side." }),
@@ -85,7 +87,7 @@ export function createReviewDraftTool(prKey: string, context: ReviewDraftToolCon
       body: Type.String({ minLength: 1, description: "Concise review comment text written in the user's voice." }),
     }),
     async execute(_toolCallId, rawParams) {
-      const result = await deps.appendDraftReviewComment(prKey, context.headSha, validateTarget(context, rawParams as ReviewDraftToolParams));
+      const result = await deps.appendDraftReviewComment(prKey, context.headSha, validateReviewDraftTarget(context, rawParams as ReviewDraftToolParams));
       const range = result.comment.startLine != null && result.comment.startLine !== result.comment.line ? `${result.comment.startLine}-${result.comment.line}` : String(result.comment.line);
       const message = result.created ? "Created private editable draft" : "Private editable draft already exists";
       return {

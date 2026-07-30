@@ -124,6 +124,11 @@ export function piSessionCwd(prKey: string): string | null {
   return existsSync(persisted) ? persisted : null;
 }
 
+/** Return the current diff contract used by PR-scoped review tools. */
+export function piSessionReviewContext(prKey: string): ReviewDraftToolContext | null {
+  return reviewContextByPr.get(prKey) ?? null;
+}
+
 /** Register the checkout and current diff used by PR-scoped conversational tools. */
 export async function registerPiSessionContext(prKey: string, cwd: string, context: ReviewDraftToolContext): Promise<void> {
   const existingCwd = cwdByPr.get(prKey);

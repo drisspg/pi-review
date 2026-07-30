@@ -9,13 +9,14 @@ import { CodeText, InlineSnippetsProvider, MarkdownText } from "./components/Mar
 import { ModalShell } from "./components/Modal";
 import { Tab, TabList, TabPanel, Tabs } from "./components/Tabs";
 import { ExistingComments, ExistingReviewThread } from "./components/Threads";
+import type { PiTerminalTarget } from "./components/PiTerminal";
 import { buildDiffAnnotationIndex, commentTarget, commentThreadDomId, diffAnnotationTargetKey, targetKey, targetLabel, type DiffAnnotationIndex } from "./lib/comments";
 import { contextRowsFromText, hunkNewStart, isTargetInSelection, lastNewLine, parsePatchRows, parsePatchSetSections, targetFromPoint, targetFromRow } from "./lib/diff";
 import { autoGrowTextarea } from "./lib/dom";
 import { parseFocusAreas } from "./lib/focus";
 import { languageForPath } from "./lib/highlight";
 import { newId, prUrlFromKey, relativeTime, shortSha } from "./lib/pr";
-import type { AiReview, AiReviewMessage, AiReviewRecord, DiffRow, DraftComment, DragSelection, FileReviewState, FlowDag, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, GitHubDraftComment, GitHubPendingReview, GpuWorkspace, GpuWorkspaceContract, GpuWorkspaceExecResult, LogEntry, OpenResponse, PiAgentActivity, PiSessionEvent, PullFile, PullIssueComment, PullRequestReviewSummary, PullReviewComment, ReviewMemoryRecord, ReviewMemoryResponse, StoredPullRequest, Target, ThemeName, Thread, ThreadMessage } from "./types";
+import type { AiReview, AiReviewMessage, AiReviewRecord, DiffRow, DraftComment, DraftReview, DragSelection, FileReviewState, FlowDag, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, GitHubDraftComment, GitHubPendingReview, GpuWorkspace, GpuWorkspaceContract, GpuWorkspaceExecResult, LogEntry, OpenResponse, PiAgentActivity, PiSessionEvent, PullFile, PullIssueComment, PullRequestReviewSummary, PullReviewComment, ReviewMemoryRecord, ReviewMemoryResponse, StoredPullRequest, Target, ThemeName, Thread, ThreadMessage } from "./types";
 import "@primer/primitives/dist/css/primitives.css";
 import "@primer/primitives/dist/css/functional/themes/dark.css";
 import "@primer/primitives/dist/css/functional/themes/dark-dimmed.css";
@@ -29,7 +30,7 @@ type OpenPrOptions = {
 };
 
 const PiTerminal = React.lazy(async () => ({ default: (await import("./components/PiTerminal")).PiTerminal }));
-const PiTerminalPrContext = createContext<string | null>(null);
+const PiTerminalPrContext = createContext<{ prKey: string; headSha: string; onDraftReview: (draftReview: DraftReview) => void } | null>(null);
 
 function terminalSessionId(prefix: string, value: string): string {
   let hash = 2166136261;
@@ -37,10 +38,10 @@ function terminalSessionId(prefix: string, value: string): string {
   return `${prefix}-${(hash >>> 0).toString(36)}`;
 }
 
-function InlinePiTerminal({ session, context }: { session: string; context: string }) {
-  const prKey = useContext(PiTerminalPrContext);
-  if (prKey == null) return <Flash variant="danger">Open the pull request before starting its terminal.</Flash>;
-  return <React.Suspense fallback={<div className="pi-native-terminal-loading" role="status">Loading terminal…</div>}><PiTerminal compact prKey={prKey} session={session} context={context} /></React.Suspense>;
+function InlinePiTerminal({ session, context, target }: { session: string; context: string; target?: PiTerminalTarget }) {
+  const review = useContext(PiTerminalPrContext);
+  if (review == null) return <Flash variant="danger">Open the pull request before starting its terminal.</Flash>;
+  return <React.Suspense fallback={<div className="pi-native-terminal-loading" role="status">Loading terminal…</div>}><PiTerminal compact prKey={review.prKey} headSha={review.headSha} session={session} context={context} target={target} onDraftReview={review.onDraftReview} /></React.Suspense>;
 }
 
 const homeHash = "#/";
@@ -1636,7 +1637,7 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { d
     </aside>
   </>;
   const gridTemplateColumns = sideCollapsed || sideFocused ? "minmax(0, 1fr)" : `minmax(0, 1fr) 12px ${props.sideWidth}px`;
-  return <PiTerminalPrContext.Provider value={props.review.pr.key}><GitHubDraftContext.Provider value={props.githubDrafts}><div className={`review-page${sideFocused ? " panel-focused" : ""}`}>
+  return <PiTerminalPrContext.Provider value={{ prKey: props.review.pr.key, headSha: props.review.pr.headSha, onDraftReview: (draftReview) => props.setDrafts(draftReview.comments) }}><GitHubDraftContext.Provider value={props.githubDrafts}><div className={`review-page${sideFocused ? " panel-focused" : ""}`}>
     <div className={`review-layout${sideCollapsed ? " side-collapsed" : ""}${sideFocused ? " side-focused" : ""}`} style={{ gridTemplateColumns }}>
       <PrHeaderStrip pr={props.review.pr} refreshGithubActivity={props.refreshGithubActivity} refreshingActivity={props.refreshingActivity} />
       <main className="files">
@@ -1994,7 +1995,7 @@ function FocusAreaInline({ prUrl, area, active, collapsedFocusAreaIds, setCollap
       </div>
     </div>
     {terminalOpen
-      ? <><div className="focus-area-terminal-context"><MarkdownText text={area.body} fileLinks={{ prUrl }} /></div><InlinePiTerminal session={terminalSessionId("focus", area.id)} context={`You are discussing the focus area at ${location} in this pull request. Keep investigation and edits grounded in this location.
+      ? <><div className="focus-area-terminal-context"><MarkdownText text={area.body} fileLinks={{ prUrl }} /></div><InlinePiTerminal session={terminalSessionId("focus", area.id)} target={{ path: area.path, line: area.endLine, ...(area.startLine === area.endLine ? {} : { startLine: area.startLine }), side: "RIGHT" }} context={`You are discussing the focus area at ${location} in this pull request. Keep investigation and edits grounded in this location.
 
 Focus finding:
 ${area.body}`} /></>
@@ -2026,7 +2027,7 @@ ${thread.target.hunk.slice(0, 4_000)}`;
       </div>
     </div>
     {terminalOpen
-      ? <InlinePiTerminal session={terminalSessionId("inline", thread.key)} context={terminalContext} />
+      ? <InlinePiTerminal session={terminalSessionId("inline", thread.key)} target={thread.target.line == null ? undefined : { path: thread.target.path, line: thread.target.line, ...(thread.target.startLine == null ? {} : { startLine: thread.target.startLine }), side: thread.target.side }} context={terminalContext} />
       : <>{thread.messages.length > 0 && <ThreadMessageTimeline prUrl={prUrl} messages={thread.messages} />}{githubDrafts.error != null && <Flash variant="danger" className="operation-error" role="alert">GitHub draft failed: {githubDrafts.error}</Flash>}<div className="composer"><Textarea autoFocus block resize="none" rows={1} value={thread.draft} onChange={(event) => setThread({ ...thread, draft: event.target.value })} onInput={(event) => autoGrowTextarea(event.currentTarget)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey && thread.draft.trim().length > 0 && !thread.asking) { event.preventDefault(); void askThread(thread); } }} placeholder="Write a draft comment or ask Pi about this line" />{thread.asking && <AgentActivityLine activity={thread.activity} />}<div className="actions"><Button variant="muted" className="pi-chat-action" onClick={() => void askThread(thread)} disabled={thread.asking || savingToGitHub || thread.draft.trim().length === 0}>{thread.asking ? "Asking" : "Ask Pi"}</Button><Button onClick={() => void githubDrafts.saveComment(thread)} disabled={thread.asking || savingToGitHub || thread.draft.trim().length === 0}>{savingToGitHub ? "Saving…" : "Save private on GitHub"}</Button><Button className="composer-primary" onClick={addDraft} disabled={savingToGitHub || thread.draft.trim().length === 0}>Add draft comment</Button></div></div></>}
   </div>;
 }
@@ -2161,6 +2162,7 @@ function PiSessionEntry({ message, prUrl }: { message: AiReviewMessage; prUrl: s
 }
 
 function AiReviewPanel({ prKey, prUrl, focusPanel, review, aiReviewHistory, aiReviewId, showAiReviewRecord, runReview, sendMessage, chatSending, clearFollowUp, copyFeedbackPrompt, focusReview, focusScanHistory, focusScanId, showFocusScanRecord, runFocusReview, focusAreas, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds, viewedFocusIds, setViewedFocusIds, saveFocusScan, openFiles, setOpenFiles }: PiPanelProps & { prKey: string; prUrl: string; focusPanel: () => void; focusAreas: FocusArea[]; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"]; openFiles: Record<string, boolean>; setOpenFiles: (open: Record<string, boolean>) => void }) {
+  const terminalReview = useContext(PiTerminalPrContext);
   const [draftsByRecord, setDraftsByRecord] = useState<Record<string, string>>({});
   const [copyingFeedback, setCopyingFeedback] = useState(false);
   const [feedbackCopied, setFeedbackCopied] = useState(false);
@@ -2264,7 +2266,7 @@ function AiReviewPanel({ prKey, prUrl, focusPanel, review, aiReviewHistory, aiRe
       }} aria-pressed={chatFocused}>{chatFocused ? "Show review context" : terminalOpen ? "Focus terminal" : "Focus chat"}</Button>
       {!terminalOpen && chatMessages.length > 0 && <Button variant="muted" className="small-muted-button" onClick={clearFollowUp} disabled={chatSending} aria-label="Clear chat">Clear</Button>}
     </div>
-    {terminalOpen ? <React.Suspense fallback={<div className="pi-native-terminal-loading" role="status">Loading terminal…</div>}><PiTerminal prKey={prKey} /></React.Suspense> : <><div ref={transcriptRef} className="pi-session-transcript"
+    {terminalOpen ? terminalReview == null ? <Flash variant="danger">Open the pull request before starting its terminal.</Flash> : <React.Suspense fallback={<div className="pi-native-terminal-loading" role="status">Loading terminal…</div>}><PiTerminal prKey={prKey} headSha={terminalReview.headSha} onDraftReview={terminalReview.onDraftReview} /></React.Suspense> : <><div ref={transcriptRef} className="pi-session-transcript"
       onWheel={() => { transcriptUserScrollRef.current = true; }}
       onTouchMove={() => { transcriptUserScrollRef.current = true; }}
       onPointerMove={(event) => { if (event.buttons !== 0) transcriptUserScrollRef.current = true; }}
