@@ -111,6 +111,11 @@ function sessionDirForPr(prKey: string, purpose = "chat"): string {
   return resolve(homedir(), ".pi", "agent", "state", "pi-pr-review", "pi-sessions", sessionKeyForPr(prKey, purpose));
 }
 
+/** Return the registered checkout used by PR-scoped Pi sessions. */
+export function piSessionCwd(prKey: string): string | null {
+  return cwdByPr.get(prKey) ?? null;
+}
+
 /** Register the checkout and current diff used by PR-scoped conversational tools. */
 export async function registerPiSessionContext(prKey: string, cwd: string, context: ReviewDraftToolContext): Promise<void> {
   const existingCwd = cwdByPr.get(prKey);

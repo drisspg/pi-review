@@ -28,6 +28,21 @@ type OpenPrOptions = {
   syncLocation?: boolean;
 };
 
+const PiTerminal = React.lazy(async () => ({ default: (await import("./components/PiTerminal")).PiTerminal }));
+const PiTerminalPrContext = createContext<string | null>(null);
+
+function terminalSessionId(prefix: string, value: string): string {
+  let hash = 2166136261;
+  for (const character of value) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
+  return `${prefix}-${(hash >>> 0).toString(36)}`;
+}
+
+function InlinePiTerminal({ session, context }: { session: string; context: string }) {
+  const prKey = useContext(PiTerminalPrContext);
+  if (prKey == null) return <Flash variant="danger">Open the pull request before starting its terminal.</Flash>;
+  return <React.Suspense fallback={<div className="pi-native-terminal-loading" role="status">Loading terminal…</div>}><PiTerminal compact prKey={prKey} session={session} context={context} /></React.Suspense>;
+}
+
 const homeHash = "#/";
 
 function reviewHash(input: string): string {
@@ -1614,14 +1629,14 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { d
       </nav>
       <div className="side-tab-panels">
         <TabPanel value="review" className="side-tab-panel review-tab-panel">{sideTab === "review" && <ReviewSummary pr={props.review.pr} files={props.review.files} drafts={props.drafts} setDrafts={props.setDrafts} event={props.reviewEvent} setEvent={props.setReviewEvent} body={props.reviewBody} setBody={props.setReviewBody} draftSaveStatus={props.draftSaveStatus} draftSaveError={props.draftSaveError} retryDraftSave={props.retryDraftSave} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} submitReview={props.submitReview} submitting={props.submitting} invalidDraftIds={props.invalidDraftIds} copyFeedbackPrompt={props.piPanel.copyFeedbackPrompt} onJumpToTarget={jumpToComment} />}</TabPanel>
-        <TabPanel value="pi" className="side-tab-panel pi-tab-panel">{sideTab === "pi" && <InlineSnippetsProvider value={{ headSha: props.review.pr.headSha, snippets: true }}><AiReviewPanel key={props.review.pr.url} prUrl={props.review.pr.url} {...props.piPanel} focusAreas={props.focusAreas} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={props.collapsedFocusAreaIds} setCollapsedFocusAreaIds={props.setCollapsedFocusAreaIds} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} /></InlineSnippetsProvider>}</TabPanel>
+        <TabPanel value="pi" className="side-tab-panel pi-tab-panel">{sideTab === "pi" && <InlineSnippetsProvider value={{ headSha: props.review.pr.headSha, snippets: true }}><AiReviewPanel key={props.review.pr.url} prKey={props.review.pr.key} prUrl={props.review.pr.url} focusPanel={() => setSideFocused(true)} {...props.piPanel} focusAreas={props.focusAreas} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={props.collapsedFocusAreaIds} setCollapsedFocusAreaIds={props.setCollapsedFocusAreaIds} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} /></InlineSnippetsProvider>}</TabPanel>
         <TabPanel value="comments" className="side-tab-panel comments-tab-panel">{sideTab === "comments" && <ExistingComments prUrl={props.review.pr.url} comments={props.review.comments} issueComments={props.review.issueComments} reviewSummaries={props.review.reviewSummaries} refreshGithubActivity={props.refreshGithubActivity} collapseSignal={props.commentCollapseSignal} commentsCollapsed={props.commentsCollapsed} toggleAllComments={props.toggleAllComments} onJumpToComment={jumpToComment} />}</TabPanel>
       </div>
       </Tabs>
     </aside>
   </>;
   const gridTemplateColumns = sideCollapsed || sideFocused ? "minmax(0, 1fr)" : `minmax(0, 1fr) 12px ${props.sideWidth}px`;
-  return <GitHubDraftContext.Provider value={props.githubDrafts}><div className={`review-page${sideFocused ? " panel-focused" : ""}`}>
+  return <PiTerminalPrContext.Provider value={props.review.pr.key}><GitHubDraftContext.Provider value={props.githubDrafts}><div className={`review-page${sideFocused ? " panel-focused" : ""}`}>
     <div className={`review-layout${sideCollapsed ? " side-collapsed" : ""}${sideFocused ? " side-focused" : ""}`} style={{ gridTemplateColumns }}>
       <PrHeaderStrip pr={props.review.pr} refreshGithubActivity={props.refreshGithubActivity} refreshingActivity={props.refreshingActivity} />
       <main className="files">
@@ -1640,7 +1655,7 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { d
       {sidePanel}
     </div>
     {draftCount > 0 && (sideCollapsed || sideTab !== "review") && <Button className="floating-submit" onClick={() => openSidePanel("review")}>Review draft ({draftCount}) →</Button>}
-  </div></GitHubDraftContext.Provider>;
+  </div></GitHubDraftContext.Provider></PiTerminalPrContext.Provider>;
 }
 
 function PrHeaderStrip({ pr, refreshGithubActivity, refreshingActivity }: { pr: StoredPullRequest; refreshGithubActivity: () => Promise<void>; refreshingActivity: boolean }) {
@@ -1940,6 +1955,7 @@ function FocusAreaInline({ prUrl, area, active, collapsedFocusAreaIds, setCollap
   const [asking, setAsking] = useState(false);
   const [activity, setActivity] = useState<PiAgentActivity | null>(null);
   const [messages, setMessages] = useState<Array<{ role: "user" | "pi"; text: string }>>([]);
+  const [terminalOpen, setTerminalOpen] = useState(false);
   function saveDraftComment() {
     const body = draft.trim();
     if (body.length === 0) return;
@@ -1968,7 +1984,22 @@ function FocusAreaInline({ prUrl, area, active, collapsedFocusAreaIds, setCollap
     }
   }
   if (collapsed) return <button type="button" id={`focus-area-${area.id}`} className="inline-thread review-thread focus-area-inline focus-area-minimized focus-area-collapsed minimized" onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: false }))}><div className="thread-head"><div className="thread-title"><ChevronRightIcon size={16} /><div><strong>Focus area</strong><span>{area.title}</span></div></div></div></button>;
-  return <div id={`focus-area-${area.id}`} className={`inline-thread review-thread focus-area-inline${active ? " active" : ""}`}><div className="thread-head"><div className="thread-title"><strong>Focus area</strong><span>{area.path}:{area.startLine === area.endLine ? area.startLine : `${area.startLine}-${area.endLine}`}</span></div><div className="actions"><Button variant="icon" aria-label="Collapse focus area" onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: true }))}><ChevronDownIcon size={16} /></Button></div></div><div className="thread-messages inline-pi-chat"><article className="pi-session-message pi"><div className="pi-session-message-role">Pi focus</div><MarkdownText text={area.body} fileLinks={{ prUrl }} /></article>{messages.map((message, index) => <PiSessionEntry key={index} message={message} prUrl={prUrl} />)}</div><div className="composer"><Textarea block resize="none" rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onInput={(event) => autoGrowTextarea(event.currentTarget)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey) { event.preventDefault(); void ask(); } }} placeholder="Write a draft comment or ask Pi about this focus area" />{asking && <AgentActivityLine activity={activity} />}<div className="actions"><Button variant="muted" className="pi-chat-action" onClick={() => void ask()} disabled={asking || draft.trim().length === 0}>{asking ? "Asking" : "Ask Pi"}</Button><Button className="composer-primary" onClick={saveDraftComment} disabled={draft.trim().length === 0}>Add draft comment</Button></div></div></div>;
+  const location = `${area.path}:${area.startLine === area.endLine ? area.startLine : `${area.startLine}-${area.endLine}`}`;
+  return <div id={`focus-area-${area.id}`} className={`inline-thread review-thread focus-area-inline${active ? " active" : ""}${terminalOpen ? " terminal-open" : ""}`}>
+    <div className="thread-head">
+      <div className="thread-title"><strong>Focus area</strong><span>{location}</span></div>
+      <div className="actions">
+        <Button variant="muted" className="small-muted-button" onClick={() => setTerminalOpen(!terminalOpen)}>{terminalOpen ? "Back to chat" : "Open terminal"}</Button>
+        <Button variant="icon" aria-label="Collapse focus area" onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: true }))}><ChevronDownIcon size={16} /></Button>
+      </div>
+    </div>
+    {terminalOpen
+      ? <InlinePiTerminal session={terminalSessionId("focus", area.id)} context={`You are discussing the focus area at ${location} in this pull request. Keep investigation and edits grounded in this location.
+
+Focus finding:
+${area.body}`} />
+      : <><div className="thread-messages inline-pi-chat"><article className="pi-session-message pi"><div className="pi-session-message-role">Pi focus</div><MarkdownText text={area.body} fileLinks={{ prUrl }} /></article>{messages.map((message, index) => <PiSessionEntry key={index} message={message} prUrl={prUrl} />)}</div><div className="composer"><Textarea block resize="none" rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onInput={(event) => autoGrowTextarea(event.currentTarget)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey) { event.preventDefault(); void ask(); } }} placeholder="Write a draft comment or ask Pi about this focus area" />{asking && <AgentActivityLine activity={activity} />}<div className="actions"><Button variant="muted" className="pi-chat-action" onClick={() => void ask()} disabled={asking || draft.trim().length === 0}>{asking ? "Asking" : "Ask Pi"}</Button><Button className="composer-primary" onClick={saveDraftComment} disabled={draft.trim().length === 0}>Add draft comment</Button></div></div></>}
+  </div>;
 }
 
 function ThreadMessageTimeline({ prUrl, messages }: { prUrl: string; messages: ThreadMessage[] }) {
@@ -1977,9 +2008,27 @@ function ThreadMessageTimeline({ prUrl, messages }: { prUrl: string; messages: T
 
 function ThreadBox({ prUrl, thread, setThread, closeThread, addDraft, askThread }: { prUrl: string; thread: Thread; setThread: (thread: Thread) => void; closeThread: () => void; addDraft: () => void; askThread: (thread: Thread) => Promise<void> }) {
   const githubDrafts = useContext(GitHubDraftContext);
+  const [terminalOpen, setTerminalOpen] = useState(false);
   const savingToGitHub = githubDrafts.savingTarget === thread.key;
   if (thread.collapsed) return <button className="inline-thread collapsed" onClick={() => setThread({ ...thread, collapsed: false })}><ChevronRightIcon size={14} /><span className="collapsed-pill-label">{thread.target.line == null ? "Draft thread on file" : targetLabel(thread.target)}</span></button>;
-  return <div className="inline-thread review-thread local-thread" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeThread(); } }}><div className="thread-head"><div className="thread-title"><strong>Line thread</strong><span>{targetLabel(thread.target)}</span></div><div className="actions">{(thread.draft.trim().length > 0 || thread.messages.length > 0) && <Button variant="icon" aria-label="Collapse thread" onClick={() => setThread({ ...thread, collapsed: true })}><ChevronDownIcon size={16} /></Button>}<Button variant="icon" className="close-thread-button" aria-label="Close thread" onClick={closeThread}><XIcon size={16} /></Button></div></div>{thread.messages.length > 0 && <ThreadMessageTimeline prUrl={prUrl} messages={thread.messages} />}{githubDrafts.error != null && <Flash variant="danger" className="operation-error" role="alert">GitHub draft failed: {githubDrafts.error}</Flash>}<div className="composer"><Textarea autoFocus block resize="none" rows={1} value={thread.draft} onChange={(event) => setThread({ ...thread, draft: event.target.value })} onInput={(event) => autoGrowTextarea(event.currentTarget)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey && thread.draft.trim().length > 0 && !thread.asking) { event.preventDefault(); void askThread(thread); } }} placeholder="Write a draft comment or ask Pi about this line" />{thread.asking && <AgentActivityLine activity={thread.activity} />}<div className="actions"><Button variant="muted" className="pi-chat-action" onClick={() => void askThread(thread)} disabled={thread.asking || savingToGitHub || thread.draft.trim().length === 0}>{thread.asking ? "Asking" : "Ask Pi"}</Button><Button onClick={() => void githubDrafts.saveComment(thread)} disabled={thread.asking || savingToGitHub || thread.draft.trim().length === 0}>{savingToGitHub ? "Saving…" : "Save private on GitHub"}</Button><Button className="composer-primary" onClick={addDraft} disabled={savingToGitHub || thread.draft.trim().length === 0}>Add draft comment</Button></div></div></div>;
+  const location = targetLabel(thread.target);
+  const terminalContext = `You are discussing ${location} in this pull request. Keep investigation and edits grounded in this line thread.
+
+Diff hunk:
+${thread.target.hunk.slice(0, 4_000)}`;
+  return <div className={`inline-thread review-thread local-thread${terminalOpen ? " terminal-open" : ""}`} onKeyDown={(event) => { if (!terminalOpen && event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeThread(); } }}>
+    <div className="thread-head">
+      <div className="thread-title"><strong>Line thread</strong><span>{location}</span></div>
+      <div className="actions">
+        <Button variant="muted" className="small-muted-button" onClick={() => setTerminalOpen(!terminalOpen)}>{terminalOpen ? "Back to chat" : "Open terminal"}</Button>
+        {(thread.draft.trim().length > 0 || thread.messages.length > 0) && <Button variant="icon" aria-label="Collapse thread" onClick={() => setThread({ ...thread, collapsed: true })}><ChevronDownIcon size={16} /></Button>}
+        <Button variant="icon" className="close-thread-button" aria-label="Close thread" onClick={closeThread}><XIcon size={16} /></Button>
+      </div>
+    </div>
+    {terminalOpen
+      ? <InlinePiTerminal session={terminalSessionId("inline", thread.key)} context={terminalContext} />
+      : <>{thread.messages.length > 0 && <ThreadMessageTimeline prUrl={prUrl} messages={thread.messages} />}{githubDrafts.error != null && <Flash variant="danger" className="operation-error" role="alert">GitHub draft failed: {githubDrafts.error}</Flash>}<div className="composer"><Textarea autoFocus block resize="none" rows={1} value={thread.draft} onChange={(event) => setThread({ ...thread, draft: event.target.value })} onInput={(event) => autoGrowTextarea(event.currentTarget)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey && thread.draft.trim().length > 0 && !thread.asking) { event.preventDefault(); void askThread(thread); } }} placeholder="Write a draft comment or ask Pi about this line" />{thread.asking && <AgentActivityLine activity={thread.activity} />}<div className="actions"><Button variant="muted" className="pi-chat-action" onClick={() => void askThread(thread)} disabled={thread.asking || savingToGitHub || thread.draft.trim().length === 0}>{thread.asking ? "Asking" : "Ask Pi"}</Button><Button onClick={() => void githubDrafts.saveComment(thread)} disabled={thread.asking || savingToGitHub || thread.draft.trim().length === 0}>{savingToGitHub ? "Saving…" : "Save private on GitHub"}</Button><Button className="composer-primary" onClick={addDraft} disabled={savingToGitHub || thread.draft.trim().length === 0}>Add draft comment</Button></div></div></>}
+  </div>;
 }
 
 function reviewStatus(pr: StoredPullRequest): { label: string; tone: string } {
@@ -2111,12 +2160,13 @@ function PiSessionEntry({ message, prUrl }: { message: AiReviewMessage; prUrl: s
   </article>;
 }
 
-function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiReviewRecord, runReview, sendMessage, chatSending, clearFollowUp, copyFeedbackPrompt, focusReview, focusScanHistory, focusScanId, showFocusScanRecord, runFocusReview, focusAreas, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds, viewedFocusIds, setViewedFocusIds, saveFocusScan, openFiles, setOpenFiles }: PiPanelProps & { prUrl: string; focusAreas: FocusArea[]; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"]; openFiles: Record<string, boolean>; setOpenFiles: (open: Record<string, boolean>) => void }) {
+function AiReviewPanel({ prKey, prUrl, focusPanel, review, aiReviewHistory, aiReviewId, showAiReviewRecord, runReview, sendMessage, chatSending, clearFollowUp, copyFeedbackPrompt, focusReview, focusScanHistory, focusScanId, showFocusScanRecord, runFocusReview, focusAreas, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds, viewedFocusIds, setViewedFocusIds, saveFocusScan, openFiles, setOpenFiles }: PiPanelProps & { prKey: string; prUrl: string; focusPanel: () => void; focusAreas: FocusArea[]; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"]; openFiles: Record<string, boolean>; setOpenFiles: (open: Record<string, boolean>) => void }) {
   const [draftsByRecord, setDraftsByRecord] = useState<Record<string, string>>({});
   const [copyingFeedback, setCopyingFeedback] = useState(false);
   const [feedbackCopied, setFeedbackCopied] = useState(false);
   const [feedbackCopyError, setFeedbackCopyError] = useState<string | null>(null);
   const [chatFocused, setChatFocused] = useState(false);
+  const [terminalOpen, setTerminalOpen] = useState(false);
   const draftKey = aiReviewId ?? "__pending__";
   const draft = draftsByRecord[draftKey] ?? "";
   const setDraft = (text: string) => setDraftsByRecord((current) => ({ ...current, [draftKey]: text }));
@@ -2197,13 +2247,20 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
       <Button variant="muted" onClick={submitChat} disabled={chatSending || draft.trim().length === 0}>{chatSending ? "Running…" : "Send"}</Button>
     </div>
   </div>;
-  const sessionChat = <section className="pi-session-chat" aria-label="Pi session chat">
+  const sessionChat = <section className={`pi-session-chat${terminalOpen ? " native-terminal" : ""}`} aria-label={terminalOpen ? "Pi terminal session" : "Pi session chat"}>
     <div className="pi-session-chat-head">
-      <strong>{chatFocused ? "Chat" : "Session"}</strong>
-      <Button variant="muted" className="small-muted-button" onClick={() => setChatFocused(!chatFocused)} aria-pressed={chatFocused}>{chatFocused ? "Show review context" : "Focus chat"}</Button>
-      {chatMessages.length > 0 && <Button variant="muted" className="small-muted-button" onClick={clearFollowUp} disabled={chatSending} aria-label="Clear chat">Clear</Button>}
+      <strong>{terminalOpen ? "Native Pi terminal" : chatFocused ? "Chat" : "Session"}</strong>
+      <Button variant="muted" className="small-muted-button" onClick={() => {
+        setTerminalOpen(!terminalOpen);
+        if (!terminalOpen) {
+          setChatFocused(true);
+          focusPanel();
+        }
+      }}>{terminalOpen ? "Back to chat" : "Open terminal"}</Button>
+      <Button variant="muted" className="small-muted-button" onClick={() => setChatFocused(!chatFocused)} aria-pressed={chatFocused}>{chatFocused ? "Show review context" : terminalOpen ? "Focus terminal" : "Focus chat"}</Button>
+      {!terminalOpen && chatMessages.length > 0 && <Button variant="muted" className="small-muted-button" onClick={clearFollowUp} disabled={chatSending} aria-label="Clear chat">Clear</Button>}
     </div>
-    <div ref={transcriptRef} className="pi-session-transcript"
+    {terminalOpen ? <React.Suspense fallback={<div className="pi-native-terminal-loading" role="status">Loading terminal…</div>}><PiTerminal prKey={prKey} /></React.Suspense> : <><div ref={transcriptRef} className="pi-session-transcript"
       onWheel={() => { transcriptUserScrollRef.current = true; }}
       onTouchMove={() => { transcriptUserScrollRef.current = true; }}
       onPointerMove={(event) => { if (event.buttons !== 0) transcriptUserScrollRef.current = true; }}
@@ -2221,7 +2278,7 @@ function AiReviewPanel({ prUrl, review, aiReviewHistory, aiReviewId, showAiRevie
         ? chatMessages.map((message, index) => <PiSessionEntry key={index} message={message} prUrl={prUrl} />)
         : <div className="pi-session-empty"><strong>Start a Pi session</strong><span>Ask about the PR, investigate the checkout, or request editable review drafts.</span></div>}
     </div>
-    {composer}
+    {composer}</>}
   </section>;
   const selectedAiReviewId = aiReviewId ?? "";
   const selectedFocusScanId = focusScanId ?? "";

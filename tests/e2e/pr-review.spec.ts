@@ -54,6 +54,36 @@ async function mockAskPi(page: Page, answerForPrompt: (body: { prompt?: string }
   });
 }
 
+async function mockNativeTerminal(page: Page): Promise<() => Promise<string[]>> {
+  await page.evaluate(() => {
+    const terminalMessages: string[] = [];
+    Object.assign(window, { __terminalMessages: terminalMessages });
+    class MockTerminalWebSocket extends EventTarget {
+      static CONNECTING = 0;
+      static OPEN = 1;
+      static CLOSING = 2;
+      static CLOSED = 3;
+      readyState = MockTerminalWebSocket.CONNECTING;
+      constructor() {
+        super();
+        window.setTimeout(() => {
+          this.readyState = MockTerminalWebSocket.OPEN;
+          this.dispatchEvent(new Event("open"));
+          this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "ready", pid: 42 }) }));
+          window.setTimeout(() => this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ type: "output", data: "\u001b[32mNative Pi ready\u001b[0m\r\n" }) })), 50);
+        }, 50);
+      }
+      send(message: string) { terminalMessages.push(message); }
+      close() {
+        this.readyState = MockTerminalWebSocket.CLOSED;
+        this.dispatchEvent(new CloseEvent("close"));
+      }
+    }
+    Object.defineProperty(window, "WebSocket", { configurable: true, value: MockTerminalWebSocket });
+  });
+  return () => page.evaluate(() => (window as unknown as { __terminalMessages: string[] }).__terminalMessages);
+}
+
 test.beforeEach(async ({ page }) => {
   openedPr = null;
   await page.goto("/");
@@ -691,6 +721,40 @@ test("keeps the Pi composer usable on a short mobile viewport", async ({ page })
 
   await expect(composer).toBeInViewport();
   await expect(page.getByRole("button", { name: "Send" })).toBeInViewport();
+});
+
+test("opens the native Pi terminal as a focused interactive session", async ({ page }) => {
+  const terminalMessages = await mockNativeTerminal(page);
+  await openSideTab(page, "Pi");
+  await page.locator(".pi-session-chat").getByRole("button", { name: "Open terminal" }).click();
+
+  await expect(page.locator(".review-layout")).toHaveClass(/side-focused/);
+  await expect(page.getByRole("region", { name: "Pi terminal session" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Terminal input" })).toBeFocused();
+  await expect(page.locator(".xterm-rows")).toContainText("Native Pi ready");
+  await page.keyboard.type("x");
+  await expect.poll(async () => (await terminalMessages()).some((message) => message.includes('"type":"input"') && message.includes('"data":"x"'))).toBe(true);
+  await expect.poll(async () => (await terminalMessages()).some((message) => message.includes('"type":"resize"'))).toBe(true);
+});
+
+test("opens a line thread as an inline native Pi terminal", async ({ page }) => {
+  await mockNativeTerminal(page);
+  const rows = await openFileWithAddedRows(page, 1);
+  await rows.first().click();
+  const thread = page.locator(".local-thread");
+  const composer = thread.getByPlaceholder("Write a draft comment or ask Pi about this line");
+  await composer.fill("preserve this draft");
+
+  await thread.getByRole("button", { name: "Open terminal" }).click();
+  await expect(thread).toHaveClass(/terminal-open/);
+  await expect(thread.locator(".pi-native-terminal.compact")).toBeVisible();
+  await expect(thread.getByRole("textbox", { name: "Terminal input" })).toBeFocused();
+  await expect(thread.locator(".xterm-rows")).toContainText("Native Pi ready");
+  await page.keyboard.press("Escape");
+  await expect(thread).toBeVisible();
+
+  await thread.getByRole("button", { name: "Back to chat" }).click();
+  await expect(composer).toHaveValue("preserve this draft");
 });
 
 test("describes shared dialogs for assistive technology", async ({ page }) => {

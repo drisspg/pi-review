@@ -14,7 +14,9 @@ import { addIssueComment, addPendingPullRequestReviewThread, createPendingPullRe
 import { logger } from "./logger.js";
 import { createPiApi } from "./pi-api.js";
 import { createPiJobRunner } from "./pi-jobs.js";
-import { askPi, disposePiSession, disposePiSessions, piActivity, piDiagnostics, prewarmPiSession, registerPiSessionContext, setPiModel } from "./pi-session.js";
+import { createPiTerminalManager } from "./pi-terminal.js";
+import { attachPiTerminalWebSocketServer } from "./pi-terminal-websocket.js";
+import { askPi, disposePiSession, disposePiSessions, piActivity, piDiagnostics, piSessionCwd, prewarmPiSession, registerPiSessionContext, setPiModel } from "./pi-session.js";
 import { createPrApi, defaultPrApiDeps } from "./pr-api.js";
 import { createReviewMemoryApi } from "./review-memory-api.js";
 import { createReviewPromptApi } from "./review-prompt-api.js";
@@ -30,6 +32,7 @@ const WEB_ROOT = resolve(process.cwd(), "dist-web");
 const execFileAsync = promisify(execFile);
 
 const piJobRunner = createPiJobRunner(askPi);
+const piTerminalManager = createPiTerminalManager({ cwdForPr: piSessionCwd, logger });
 const askStreamApi = createAskStreamApi({ askPi, logger });
 const commentApi = createCommentApi(defaultCommentApiDeps({ addIssueComment, editIssueComment, editReviewComment, editReviewSummary, replyToReviewComment }));
 const draftReviewApi = createDraftReviewApi({ getDraftReview, now: () => new Date().toISOString(), saveDraftReview });
@@ -38,7 +41,21 @@ const fileApi = createFileApi(defaultFileApiDeps(fetchFileText, setFileViewed, a
 }));
 const githubDraftReviewApi = createGitHubDraftReviewApi(defaultGitHubDraftReviewApiDeps({ addPendingPullRequestReviewThread, createPendingPullRequestReview, fetchPendingPullRequestReview }));
 const piApi = createPiApi({ askPi, piActivity, piDiagnostics, piJobRunner, setPiModel });
-const prApi = createPrApi(defaultPrApiDeps({ cleanupPrWorktree, disposePiSession, fetchPullRequestReviewData, getDraftReview, listAiReviews, listFocusScans, preparePrWorktree, prewarmPiSession, registerPiSessionContext, removePullRequest, upsertPullRequest }));
+const prApi = createPrApi(defaultPrApiDeps({
+  cleanupPrWorktree,
+  disposePiSession: async (prKey) => {
+    await Promise.all([disposePiSession(prKey), piTerminalManager.disposePr(prKey)]);
+  },
+  fetchPullRequestReviewData,
+  getDraftReview,
+  listAiReviews,
+  listFocusScans,
+  preparePrWorktree,
+  prewarmPiSession,
+  registerPiSessionContext,
+  removePullRequest,
+  upsertPullRequest,
+}));
 const reviewMemoryApi = createReviewMemoryApi({ askPi, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewMemory, saveReviewProfile });
 const reviewPromptApi = createReviewPromptApi({ currentReviewMemoryPrompt });
 const reviewSubmitRouteApi = createReviewSubmitRouteApi(defaultReviewSubmitRouteApiDeps({ clearDraftReview, fetchPullRequestReviewData, markPullRequestReviewed, saveReviewMemory, submitPullRequestReview }));
@@ -85,6 +102,7 @@ const route = createServerRoute({
 });
 
 const server = createServer(createRequestListener(route, logger));
+const detachPiTerminalWebSocketServer = attachPiTerminalWebSocketServer(server, piTerminalManager, logger);
 
 let shuttingDown = false;
 
@@ -92,9 +110,13 @@ async function shutdown(signal: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   logger.info("server", "shutdown", { signal });
+  detachPiTerminalWebSocketServer();
   server.closeAllConnections();
-  await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
-  await disposePiSessions();
+  await Promise.all([
+    new Promise<void>((resolveClose) => server.close(() => resolveClose())),
+    piTerminalManager.dispose(),
+    disposePiSessions(),
+  ]);
   process.exit(0);
 }
 

@@ -14,7 +14,7 @@ export default defineConfig({
     port: webPort,
     strictPort: true,
     proxy: {
-      "/api": `http://127.0.0.1:${apiPort}`,
+      "/api": { target: `http://127.0.0.1:${apiPort}`, ws: true },
     },
   },
 });
