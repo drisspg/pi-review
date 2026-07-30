@@ -1,12 +1,15 @@
 import { AuthStorage, createAgentSession, type AgentSession, type AgentSessionEvent, ModelRegistry, SessionManager } from "@earendil-works/pi-coding-agent";
+import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 
 import { createGpuWorkspaceTool } from "./gpu-workspace-tool.js";
 import { logger } from "./logger.js";
+import { parsePullRequestKey } from "./pr.js";
 import { createReviewDraftTool, type ReviewDraftToolContext } from "./review-draft-tool.js";
 import type { PiPromptEvent } from "./types.js";
+import { worktreeDirForRef } from "./worktrees.js";
 
 export type { PiPromptEvent } from "./types.js";
 
@@ -111,9 +114,14 @@ function sessionDirForPr(prKey: string, purpose = "chat"): string {
   return resolve(homedir(), ".pi", "agent", "state", "pi-pr-review", "pi-sessions", sessionKeyForPr(prKey, purpose));
 }
 
-/** Return the registered checkout used by PR-scoped Pi sessions. */
+/** Return the registered checkout, or an existing persisted worktree after a server restart. */
 export function piSessionCwd(prKey: string): string | null {
-  return cwdByPr.get(prKey) ?? null;
+  const registered = cwdByPr.get(prKey);
+  if (registered != null) return registered;
+  const ref = parsePullRequestKey(prKey);
+  if (ref == null) return null;
+  const persisted = worktreeDirForRef(ref);
+  return existsSync(persisted) ? persisted : null;
 }
 
 /** Register the checkout and current diff used by PR-scoped conversational tools. */

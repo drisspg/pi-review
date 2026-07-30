@@ -1955,7 +1955,7 @@ function FocusAreaInline({ prUrl, area, active, collapsedFocusAreaIds, setCollap
   const [asking, setAsking] = useState(false);
   const [activity, setActivity] = useState<PiAgentActivity | null>(null);
   const [messages, setMessages] = useState<Array<{ role: "user" | "pi"; text: string }>>([]);
-  const [terminalOpen, setTerminalOpen] = useState(false);
+  const [terminalOpen, setTerminalOpen] = useState(true);
   function saveDraftComment() {
     const body = draft.trim();
     if (body.length === 0) return;
@@ -1989,15 +1989,15 @@ function FocusAreaInline({ prUrl, area, active, collapsedFocusAreaIds, setCollap
     <div className="thread-head">
       <div className="thread-title"><strong>Focus area</strong><span>{location}</span></div>
       <div className="actions">
-        <Button variant="muted" className="small-muted-button" onClick={() => setTerminalOpen(!terminalOpen)}>{terminalOpen ? "Back to chat" : "Open terminal"}</Button>
+        <Button variant="muted" className="small-muted-button" onClick={() => setTerminalOpen(!terminalOpen)}>{terminalOpen ? "Use chat" : "Use terminal"}</Button>
         <Button variant="icon" aria-label="Collapse focus area" onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: true }))}><ChevronDownIcon size={16} /></Button>
       </div>
     </div>
     {terminalOpen
-      ? <InlinePiTerminal session={terminalSessionId("focus", area.id)} context={`You are discussing the focus area at ${location} in this pull request. Keep investigation and edits grounded in this location.
+      ? <><div className="focus-area-terminal-context"><MarkdownText text={area.body} fileLinks={{ prUrl }} /></div><InlinePiTerminal session={terminalSessionId("focus", area.id)} context={`You are discussing the focus area at ${location} in this pull request. Keep investigation and edits grounded in this location.
 
 Focus finding:
-${area.body}`} />
+${area.body}`} /></>
       : <><div className="thread-messages inline-pi-chat"><article className="pi-session-message pi"><div className="pi-session-message-role">Pi focus</div><MarkdownText text={area.body} fileLinks={{ prUrl }} /></article>{messages.map((message, index) => <PiSessionEntry key={index} message={message} prUrl={prUrl} />)}</div><div className="composer"><Textarea block resize="none" rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onInput={(event) => autoGrowTextarea(event.currentTarget)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey) { event.preventDefault(); void ask(); } }} placeholder="Write a draft comment or ask Pi about this focus area" />{asking && <AgentActivityLine activity={activity} />}<div className="actions"><Button variant="muted" className="pi-chat-action" onClick={() => void ask()} disabled={asking || draft.trim().length === 0}>{asking ? "Asking" : "Ask Pi"}</Button><Button className="composer-primary" onClick={saveDraftComment} disabled={draft.trim().length === 0}>Add draft comment</Button></div></div></>}
   </div>;
 }
@@ -2008,7 +2008,7 @@ function ThreadMessageTimeline({ prUrl, messages }: { prUrl: string; messages: T
 
 function ThreadBox({ prUrl, thread, setThread, closeThread, addDraft, askThread }: { prUrl: string; thread: Thread; setThread: (thread: Thread) => void; closeThread: () => void; addDraft: () => void; askThread: (thread: Thread) => Promise<void> }) {
   const githubDrafts = useContext(GitHubDraftContext);
-  const [terminalOpen, setTerminalOpen] = useState(false);
+  const [terminalOpen, setTerminalOpen] = useState(true);
   const savingToGitHub = githubDrafts.savingTarget === thread.key;
   if (thread.collapsed) return <button className="inline-thread collapsed" onClick={() => setThread({ ...thread, collapsed: false })}><ChevronRightIcon size={14} /><span className="collapsed-pill-label">{thread.target.line == null ? "Draft thread on file" : targetLabel(thread.target)}</span></button>;
   const location = targetLabel(thread.target);
@@ -2020,7 +2020,7 @@ ${thread.target.hunk.slice(0, 4_000)}`;
     <div className="thread-head">
       <div className="thread-title"><strong>Line thread</strong><span>{location}</span></div>
       <div className="actions">
-        <Button variant="muted" className="small-muted-button" onClick={() => setTerminalOpen(!terminalOpen)}>{terminalOpen ? "Back to chat" : "Open terminal"}</Button>
+        <Button variant="muted" className="small-muted-button" onClick={() => setTerminalOpen(!terminalOpen)}>{terminalOpen ? "Use chat" : "Use terminal"}</Button>
         {(thread.draft.trim().length > 0 || thread.messages.length > 0) && <Button variant="icon" aria-label="Collapse thread" onClick={() => setThread({ ...thread, collapsed: true })}><ChevronDownIcon size={16} /></Button>}
         <Button variant="icon" className="close-thread-button" aria-label="Close thread" onClick={closeThread}><XIcon size={16} /></Button>
       </div>
@@ -2166,7 +2166,7 @@ function AiReviewPanel({ prKey, prUrl, focusPanel, review, aiReviewHistory, aiRe
   const [feedbackCopied, setFeedbackCopied] = useState(false);
   const [feedbackCopyError, setFeedbackCopyError] = useState<string | null>(null);
   const [chatFocused, setChatFocused] = useState(false);
-  const [terminalOpen, setTerminalOpen] = useState(false);
+  const [terminalOpen, setTerminalOpen] = useState(true);
   const draftKey = aiReviewId ?? "__pending__";
   const draft = draftsByRecord[draftKey] ?? "";
   const setDraft = (text: string) => setDraftsByRecord((current) => ({ ...current, [draftKey]: text }));
@@ -2256,8 +2256,12 @@ function AiReviewPanel({ prKey, prUrl, focusPanel, review, aiReviewHistory, aiRe
           setChatFocused(true);
           focusPanel();
         }
-      }}>{terminalOpen ? "Back to chat" : "Open terminal"}</Button>
-      <Button variant="muted" className="small-muted-button" onClick={() => setChatFocused(!chatFocused)} aria-pressed={chatFocused}>{chatFocused ? "Show review context" : terminalOpen ? "Focus terminal" : "Focus chat"}</Button>
+      }}>{terminalOpen ? "Use chat" : "Use terminal"}</Button>
+      <Button variant="muted" className="small-muted-button" onClick={() => {
+        const focused = !chatFocused;
+        setChatFocused(focused);
+        if (terminalOpen && focused) focusPanel();
+      }} aria-pressed={chatFocused}>{chatFocused ? "Show review context" : terminalOpen ? "Focus terminal" : "Focus chat"}</Button>
       {!terminalOpen && chatMessages.length > 0 && <Button variant="muted" className="small-muted-button" onClick={clearFollowUp} disabled={chatSending} aria-label="Clear chat">Clear</Button>}
     </div>
     {terminalOpen ? <React.Suspense fallback={<div className="pi-native-terminal-loading" role="status">Loading terminal…</div>}><PiTerminal prKey={prKey} /></React.Suspense> : <><div ref={transcriptRef} className="pi-session-transcript"

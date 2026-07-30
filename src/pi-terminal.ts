@@ -116,7 +116,7 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
     if (request.context != null) args.push("--append-system-prompt", request.context);
     const options = { cwd, cols: DEFAULT_COLS, rows: DEFAULT_ROWS, env, name: "xterm-256color" };
     const processHandle = deps.spawn == null
-      ? (await import("node-pty")).default.spawn(deps.piCommand ?? "pi", args, options)
+      ? (await import("node-pty")).spawn(deps.piCommand ?? "pi", args, options)
       : deps.spawn(deps.piCommand ?? "pi", args, options);
     const terminalSession: TerminalSession = { process: processHandle, peers: new Set(), buffer: "" };
     processHandle.onData((data) => {

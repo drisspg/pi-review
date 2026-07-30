@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 test.describe.configure({ mode: "serial" });
 
@@ -33,6 +33,14 @@ async function openSideTab(page: Page, tab: "Review" | "Pi" | "Comments") {
   }
   const tabButton = page.getByRole("tab", { name: new RegExp(`^${tab}`) });
   if (await tabButton.getAttribute("aria-selected") !== "true") await tabButton.click();
+}
+
+async function useStructuredPiChat(page: Page) {
+  await page.locator(".pi-session-chat").getByRole("button", { name: "Use chat" }).click();
+}
+
+async function useThreadChat(thread: Locator) {
+  await thread.getByRole("button", { name: "Use chat" }).click();
 }
 
 async function openReviewForm(page: Page) {
@@ -281,7 +289,7 @@ test("uses a compact files toolbar and collapsible review panel", async ({ page 
   await expect(page.locator(".side")).toHaveCount(0);
   await toolbar.getByRole("button", { name: /Pi review/ }).click();
   await expect(page.locator(".side")).toBeVisible();
-  await expect(page.getByPlaceholder("Message Pi…")).toBeInViewport();
+  await expect(page.getByRole("region", { name: "Pi terminal session" })).toBeVisible();
 
   await toolbar.locator(".file-navigator > summary").click();
   await expect(toolbar.locator(".file-navigator-list")).toBeVisible();
@@ -342,12 +350,13 @@ test("opens a line thread from the keyboard", async ({ page }) => {
   await expect(row).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page.locator(".inline-thread.local-thread")).toBeVisible();
-  await expect(page.locator(".inline-thread.local-thread textarea")).toBeFocused();
+  await expect(page.locator(".inline-thread.local-thread .pi-native-terminal.compact")).toBeVisible();
 });
 
 test("creates, edits, and removes draft comments", async ({ page }) => {
   await openFirstFile(page);
   await page.locator(".file").first().locator(".diff-row.added").first().click();
+  await useThreadChat(page.locator(".local-thread"));
   await page.locator(".inline-thread textarea").first().fill("first draft");
   await page.getByRole("button", { name: "Add draft comment" }).first().click();
 
@@ -407,6 +416,7 @@ test("saves a line comment immediately to a private GitHub review", async ({ pag
   });
 
   await row.click();
+  await useThreadChat(page.locator(".local-thread"));
   await page.locator(".inline-thread textarea").first().fill("private implementation note");
   await page.getByRole("button", { name: "Save private on GitHub" }).click();
 
@@ -424,6 +434,7 @@ test("keeps a failed private GitHub line comment retryable", async ({ page }) =>
 
   await row.click();
   const thread = page.locator(".inline-thread.local-thread").first();
+  await useThreadChat(thread);
   await thread.locator("textarea").fill("keep this private draft");
   await thread.getByRole("button", { name: "Save private on GitHub" }).click();
 
@@ -436,6 +447,7 @@ test("copies all draft comments with diff context", async ({ page, context }) =>
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await openFirstFile(page);
   await page.locator(".file").first().locator(".diff-row.added").first().click();
+  await useThreadChat(page.locator(".local-thread"));
   await page.locator(".inline-thread textarea").first().fill("send this to another agent");
   await page.getByRole("button", { name: "Add draft comment" }).first().click();
   await openSideTab(page, "Review");
@@ -487,6 +499,7 @@ test("supports multiline draft ranges", async ({ page }) => {
   await page.mouse.down();
   await page.mouse.move(end.x + end.width / 2, end.y + end.height / 2, { steps: 8 });
   await page.mouse.up();
+  await useThreadChat(page.locator(".local-thread"));
   await page.locator(".inline-thread textarea").first().fill("range draft");
   await page.getByRole("button", { name: "Add draft comment" }).first().click();
 
@@ -586,6 +599,7 @@ test("shows failed review inline draft diagnostics", async ({ page }) => {
 
   await openFirstFile(page);
   await page.locator(".file").first().locator(".diff-row.added").first().click();
+  await useThreadChat(page.locator(".local-thread"));
   await page.locator(".inline-thread textarea").first().fill("stale line draft");
   await page.getByRole("button", { name: "Add draft comment" }).first().click();
   await openSideTab(page, "Review");
@@ -715,6 +729,7 @@ test("opens and dismisses the Tools menu from the keyboard", async ({ page }) =>
 test("keeps the Pi composer usable on a short mobile viewport", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 480 });
   await openSideTab(page, "Pi");
+  await useStructuredPiChat(page);
   await page.getByRole("button", { name: "Focus chat" }).click();
   const composer = page.getByPlaceholder("Message Pi…");
   await composer.fill("line one\nline two\nline three\nline four");
@@ -723,11 +738,12 @@ test("keeps the Pi composer usable on a short mobile viewport", async ({ page })
   await expect(page.getByRole("button", { name: "Send" })).toBeInViewport();
 });
 
-test("opens the native Pi terminal as a focused interactive session", async ({ page }) => {
+test("opens the native Pi terminal by default and focuses it on demand", async ({ page }) => {
   const terminalMessages = await mockNativeTerminal(page);
   await openSideTab(page, "Pi");
-  await page.locator(".pi-session-chat").getByRole("button", { name: "Open terminal" }).click();
 
+  await expect(page.locator(".review-layout")).not.toHaveClass(/side-focused/);
+  await page.locator(".pi-session-chat").getByRole("button", { name: "Focus terminal" }).click();
   await expect(page.locator(".review-layout")).toHaveClass(/side-focused/);
   await expect(page.getByRole("region", { name: "Pi terminal session" })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Terminal input" })).toBeFocused();
@@ -737,15 +753,11 @@ test("opens the native Pi terminal as a focused interactive session", async ({ p
   await expect.poll(async () => (await terminalMessages()).some((message) => message.includes('"type":"resize"'))).toBe(true);
 });
 
-test("opens a line thread as an inline native Pi terminal", async ({ page }) => {
+test("opens a line thread as an inline native Pi terminal by default", async ({ page }) => {
   await mockNativeTerminal(page);
   const rows = await openFileWithAddedRows(page, 1);
   await rows.first().click();
   const thread = page.locator(".local-thread");
-  const composer = thread.getByPlaceholder("Write a draft comment or ask Pi about this line");
-  await composer.fill("preserve this draft");
-
-  await thread.getByRole("button", { name: "Open terminal" }).click();
   await expect(thread).toHaveClass(/terminal-open/);
   await expect(thread.locator(".pi-native-terminal.compact")).toBeVisible();
   await expect(thread.getByRole("textbox", { name: "Terminal input" })).toBeFocused();
@@ -753,7 +765,11 @@ test("opens a line thread as an inline native Pi terminal", async ({ page }) => 
   await page.keyboard.press("Escape");
   await expect(thread).toBeVisible();
 
-  await thread.getByRole("button", { name: "Back to chat" }).click();
+  await useThreadChat(thread);
+  const composer = thread.getByPlaceholder("Write a draft comment or ask Pi about this line");
+  await composer.fill("preserve this draft");
+  await thread.getByRole("button", { name: "Use terminal" }).click();
+  await useThreadChat(thread);
   await expect(composer).toHaveValue("preserve this draft");
 });
 
@@ -796,6 +812,7 @@ test("renders inline Ask Pi responses as a compact chat", async ({ page }) => {
 
   await openFirstFile(page);
   await page.locator(".file").first().locator(".diff-row.added").first().click();
+  await useThreadChat(page.locator(".local-thread"));
   await page.locator(".inline-thread textarea").first().fill("review this line");
   await page.getByRole("button", { name: "Ask Pi" }).first().click();
 
@@ -824,6 +841,7 @@ test("keeps inline draft actions visible after a long Pi response", async ({ pag
   await row.scrollIntoViewIfNeeded();
   await row.click();
   const localThread = page.locator(".local-thread").first();
+  await useThreadChat(localThread);
   await localThread.locator("textarea").fill("review this thoroughly");
   await localThread.getByRole("button", { name: "Ask Pi" }).click();
 
@@ -857,6 +875,7 @@ test("opens code-wrapped file references in VS Code", async ({ page }) => {
   });
 
   await row.click();
+  await useThreadChat(page.locator(".local-thread"));
   await page.locator(".inline-thread textarea").first().fill("where is this?");
   await page.getByRole("button", { name: "Ask Pi" }).first().click();
   await page.locator(".local-comment-timeline .file-reference-link").first().click();
@@ -890,6 +909,8 @@ test("runs a separate focus areas review and highlights referenced lines", async
   await expect(collapsedFocusArea).toBeVisible();
   await collapsedFocusArea.focus();
   await page.keyboard.press("Enter");
+  await expect(focusArea.getByRole("button", { name: "Use chat" })).toBeVisible();
+  await useThreadChat(focusArea);
   await expect(focusArea).toContainText("tiling conventions");
   await focusArea.getByPlaceholder("Write a draft comment or ask Pi about this focus area").fill("please check this tradeoff");
   await focusArea.getByRole("button", { name: "Add draft comment" }).click();
@@ -1021,6 +1042,7 @@ test("persists Pi review chat across page reloads", async ({ page }) => {
   await mockAskPi(page, () => "Persisted answer about `cu_seqlens_q`.");
 
   await openSideTab(page, "Pi");
+  await useStructuredPiChat(page);
   await page.locator(".ai-review").getByPlaceholder("Message Pi…").fill("remember this conversation");
   await expect(page.locator(".ai-review").getByRole("button", { name: "Send" })).toBeEnabled();
   await Promise.all([
@@ -1033,6 +1055,7 @@ test("persists Pi review chat across page reloads", async ({ page }) => {
   await page.reload();
   await expect(page.locator(".review-layout")).toBeVisible({ timeout: 60_000 });
   await openSideTab(page, "Pi");
+  await useStructuredPiChat(page);
 
   await expect(page.locator(".ai-review")).toContainText("remember this conversation");
   await expect(page.locator(".ai-review")).toContainText("Persisted answer");
@@ -1133,6 +1156,7 @@ test("runs the right-sidebar Pi review panel and continues the chat with Enter",
   await expect(dialog.getByText("CUDA smoke test")).toBeVisible();
   await expect(dialog).not.toContainText("Correctness:");
   await expect(dialog.getByText("General review")).toHaveCount(1);
+  await useStructuredPiChat(page);
   await dialog.getByPlaceholder("Message Pi…").fill("what should I test?");
   await dialog.getByPlaceholder("Message Pi…").press("Enter");
   await expect(dialog).toContainText("Follow-up answer");
@@ -1176,6 +1200,7 @@ test("shows Pi-created review comments as editable local drafts", async ({ page 
   await page.getByRole("button", { name: "Focus review panel" }).click();
   await expect(page.locator(".files")).toBeHidden();
   const panel = page.locator(".ai-review");
+  await useStructuredPiChat(page);
   await panel.getByPlaceholder("Message Pi…").fill("Draft a review comment for the empty-input concern.");
   await panel.getByPlaceholder("Message Pi…").press("Enter");
 
@@ -1222,6 +1247,7 @@ test("copies local draft comments in a feedback prompt from the Review tab", asy
   await mockAskPi(page, () => "AI chat answer.");
 
   await rows.first().click();
+  await useThreadChat(page.locator(".local-thread"));
   await page.locator(".inline-thread textarea").first().fill("Keep this local feedback out of GitHub.");
   await page.getByRole("button", { name: "Add draft comment" }).first().click();
   await expect(page.locator(".inline-thread.draft", { hasText: "Keep this local feedback out of GitHub." })).toBeVisible();
@@ -1231,7 +1257,9 @@ test("copies local draft comments in a feedback prompt from the Review tab", asy
   await panel.getByRole("button", { name: /Full review|Refresh findings/ }).click();
   await expect(panel).toContainText("Global feedback from Pi");
   await panel.getByRole("button", { name: /Focus scan|Refresh focus scan/ }).click();
+  await useThreadChat(page.locator(".focus-area-inline"));
   await expect(panel).toContainText("copied focus area");
+  await useStructuredPiChat(page);
   await panel.getByPlaceholder("Message Pi…").fill("What should I prioritize?");
   await panel.getByPlaceholder("Message Pi…").press("Enter");
   await expect(panel).toContainText("AI chat answer");

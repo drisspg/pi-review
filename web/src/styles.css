@@ -3274,6 +3274,17 @@ button.focus-area-collapsed {
   padding: 10px 12px;
 }
 
+.focus-area-terminal-context {
+  max-height: 132px;
+  overflow: auto;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  font-size: 0.84rem;
+}
+
+.focus-area-terminal-context .markdown > :first-child { margin-top: 0; }
+.focus-area-terminal-context .markdown > :last-child { margin-bottom: 0; }
+
 .inline-thread.terminal-open {
   width: min(1180px, calc(100vw - 32px));
   max-width: 100%;

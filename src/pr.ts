@@ -4,6 +4,12 @@ export function prKey(ref: PullRequestRef): string {
   return `${ref.host}/${ref.owner}/${ref.repo}#${ref.number}`;
 }
 
+export function parsePullRequestKey(key: string): PullRequestRef | null {
+  const match = key.match(/^([^/]+)\/([^/]+)\/([^/#]+)#(\d+)$/);
+  if (match == null) return null;
+  return { host: match[1], owner: match[2], repo: match[3], number: Number.parseInt(match[4], 10) };
+}
+
 export function parsePullRequestRef(raw: string): PullRequestRef {
   const input = raw.trim();
   const shorthand = input.match(/^([^\s/#]+)\/([^\s/#]+)#(\d+)$/);
