@@ -44,6 +44,8 @@ function safe(value: string): string {
 }
 
 export function createWorktreeService(runtime: WorktreeRuntime = defaultRuntime, stateRoot = STATE_ROOT): WorktreeService {
+  const preparations = new Map<string, Promise<string>>();
+
   function worktreeDirForRef(ref: PullRequestRef): string {
     return resolve(stateRoot, "worktrees", safe(ref.host), safe(ref.owner), safe(ref.repo), `pr-${ref.number}`);
   }
@@ -63,14 +65,21 @@ export function createWorktreeService(runtime: WorktreeRuntime = defaultRuntime,
   async function currentWorktreeHead(worktreeDir: string): Promise<string | null> {
     if (!runtime.exists(worktreeDir)) return null;
     try {
-      return await runtime.git(["rev-parse", "HEAD"], worktreeDir);
+      const head = await runtime.git(["rev-parse", "HEAD"], worktreeDir);
+      const indexPath = await runtime.git(["rev-parse", "--git-path", "index"], worktreeDir);
+      if (!runtime.exists(indexPath)) {
+        logger.warn("worktree", "existing worktree is missing its Git index", { worktreeDir, indexPath });
+        return null;
+      }
+      return head;
     } catch (error) {
       logger.debug("worktree", "failed to read existing worktree head", { worktreeDir, error: error instanceof Error ? error.message : String(error) });
       return null;
     }
   }
 
-  async function preparePrWorktree(ref: PullRequestRef, cloneUrl: string, headSha: string): Promise<string> {
+  /** Prepare one PR worktree after earlier operations for the same path settle. */
+  async function preparePrWorktreeOnce(ref: PullRequestRef, cloneUrl: string, headSha: string): Promise<string> {
     const startedAt = performance.now();
     const repoDir = repoDirForRef(ref);
     const worktreeDir = worktreeDirForRef(ref);
@@ -85,6 +94,7 @@ export function createWorktreeService(runtime: WorktreeRuntime = defaultRuntime,
       logger.info("worktree", "prepare skipped; existing worktree is current", { worktreeDir, ms: Math.round(performance.now() - startedAt) });
       return worktreeDir;
     }
+    await gitAllowFailure(["worktree", "unlock", worktreeDir], repoDir);
     await gitAllowFailure(["worktree", "remove", "--force", worktreeDir], repoDir);
     await runtime.rm(worktreeDir);
     await runtime.git(["worktree", "prune"], repoDir);
@@ -94,10 +104,24 @@ export function createWorktreeService(runtime: WorktreeRuntime = defaultRuntime,
     return worktreeDir;
   }
 
+  async function preparePrWorktree(ref: PullRequestRef, cloneUrl: string, headSha: string): Promise<string> {
+    const worktreeDir = worktreeDirForRef(ref);
+    const previous = preparations.get(worktreeDir);
+    const preparation = (previous == null ? Promise.resolve() : previous.then(() => undefined, () => undefined))
+      .then(() => preparePrWorktreeOnce(ref, cloneUrl, headSha));
+    preparations.set(worktreeDir, preparation);
+    try {
+      return await preparation;
+    } finally {
+      if (preparations.get(worktreeDir) === preparation) preparations.delete(worktreeDir);
+    }
+  }
+
   async function cleanupPrWorktree(ref: PullRequestRef): Promise<string> {
     const repoDir = repoDirForRef(ref);
     const worktreeDir = worktreeDirForRef(ref);
     if (runtime.exists(resolve(repoDir, ".git"))) {
+      await gitAllowFailure(["worktree", "unlock", worktreeDir], repoDir);
       await gitAllowFailure(["worktree", "remove", "--force", worktreeDir], repoDir);
       await gitAllowFailure(["worktree", "prune"], repoDir);
     }
