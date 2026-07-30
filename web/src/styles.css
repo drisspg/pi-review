@@ -123,7 +123,7 @@
   --success: var(--fgColor-success);
   --attention: var(--fgColor-attention);
   --link: var(--fgColor-accent);
-  --add: var(--bgColor-success-muted);
+  --add: color-mix(in srgb, var(--success) 7%, transparent);
   --del: var(--bgColor-danger-muted);
   --code-bg: var(--bgColor-muted);
   --radius: var(--borderRadius-medium);
