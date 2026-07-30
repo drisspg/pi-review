@@ -1,5 +1,3 @@
-import type { PiSessionEvent } from "./types";
-
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { ...init, headers: { "content-type": "application/json", ...init?.headers } });
   const body = await response.json();
@@ -9,9 +7,9 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 type AskPiPayload = { prKey: string; prompt: string; purpose?: string };
 
-export async function askPi(payload: AskPiPayload, onDelta?: (answer: string) => void, onEvent?: (event: PiSessionEvent) => void): Promise<string> {
+export async function askPi(payload: AskPiPayload, onDelta?: (answer: string) => void): Promise<string> {
   try {
-    const streamed = await streamAskPi(payload, onDelta, onEvent);
+    const streamed = await streamAskPi(payload, onDelta);
     if (streamed != null) return streamed;
   } catch (error) {
     if (!(error instanceof TypeError)) throw error;
@@ -21,7 +19,7 @@ export async function askPi(payload: AskPiPayload, onDelta?: (answer: string) =>
   return answer;
 }
 
-async function streamAskPi(payload: AskPiPayload, onDelta?: (answer: string) => void, onEvent?: (event: PiSessionEvent) => void): Promise<string | null> {
+async function streamAskPi(payload: AskPiPayload, onDelta?: (answer: string) => void): Promise<string | null> {
   if (onDelta == null) return null;
   const response = await fetch("/api/ask/stream", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
   if (!response.ok || response.body == null) return null;
@@ -41,8 +39,6 @@ async function streamAskPi(payload: AskPiPayload, onDelta?: (answer: string) => 
       if (event.event === "delta" && typeof event.data.delta === "string") {
         answer += event.data.delta;
         onDelta(answer);
-      } else if (event.event === "session") {
-        onEvent?.(event.data as PiSessionEvent);
       } else if (event.event === "done" && typeof event.data.answer === "string") {
         return event.data.answer;
       } else if (event.event === "error") {

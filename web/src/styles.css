@@ -400,7 +400,6 @@ a { color: var(--link); text-decoration: none; }
   border-color: var(--muted);
 }
 
-.composer .actions button.composer-primary,
 .panel > button:last-child:not(.review-submit) {
   background: var(--accent);
   border-color: var(--accent);
@@ -1292,9 +1291,7 @@ a { color: var(--link); text-decoration: none; }
 
 .inline-thread > .markdown,
 .inline-thread > a,
-.inline-thread > .draft-card,
-.review-thread > .thread-messages,
-.review-thread > .composer {
+.inline-thread > .draft-card {
   margin: 10px 12px;
 }
 
@@ -1545,9 +1542,7 @@ a { color: var(--link); text-decoration: none; }
   padding: 12px 12px 8px;
 }
 
-.github-thread > .github-comment-timeline,
-.local-thread > .local-comment-timeline,
-.focus-area-inline > .thread-messages {
+.github-thread > .github-comment-timeline {
   max-height: min(420px, 50vh);
   overflow-y: auto;
 }
@@ -1688,38 +1683,28 @@ a { color: var(--link); text-decoration: none; }
   white-space: nowrap;
 }
 
-.local-thread > .composer {
-  margin: 0;
-  padding: 8px 10px;
+.line-comment-composer {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--attention) 5%, var(--panel));
 }
 
-.local-thread .composer textarea,
-.focus-area-inline .composer textarea {
-  min-height: 34px;
+.line-comment-composer textarea {
+  min-height: 58px;
+  overflow: hidden;
 }
 
-.local-thread .composer .actions {
-  flex-wrap: wrap;
+.line-comment-composer .actions {
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
 }
 
-.local-thread .composer .actions button,
-.focus-area-inline .composer .actions button {
-  min-height: 28px;
-  padding: 0 0.7rem;
-  font-size: 0.82rem;
-}
-
-.local-thread .composer .pi-chat-action,
-.focus-area-inline .composer .pi-chat-action {
-  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
-  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
-  color: var(--accent);
-}
-
-.local-thread .composer .pi-chat-action:hover,
-.focus-area-inline .composer .pi-chat-action:hover {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 18%, var(--panel));
+.line-comment-composer .actions .muted {
+  margin-right: auto;
+  font-size: 0.72rem;
 }
 
 .thread-reply {
@@ -1844,48 +1829,6 @@ a { color: var(--link); text-decoration: none; }
   overflow-wrap: anywhere;
 }
 
-.thread-messages {
-  display: grid;
-  gap: 0;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-.inline-pi-chat {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px;
-  background: color-mix(in srgb, var(--panel2) 56%, var(--bg));
-}
-
-.local-comment-timeline.inline-pi-chat {
-  border-bottom: 1px solid var(--border);
-}
-
-.thread-messages.inline-pi-chat {
-  overflow-y: auto;
-}
-
-.inline-pi-chat .pi-session-message {
-  width: min(100%, 900px);
-  margin-bottom: 0;
-  padding: 10px 12px;
-}
-
-.inline-pi-chat .pi-session-message.user {
-  width: fit-content;
-  min-width: min(240px, 82%);
-  max-width: min(82%, 720px);
-}
-
-.inline-pi-chat .pi-session-message p,
-.inline-pi-chat .pi-session-message .markdown {
-  font-size: 0.88rem;
-  line-height: 1.5;
-}
-
 .message-role {
   color: var(--muted);
   font-size: 0.72rem;
@@ -1994,34 +1937,6 @@ a { color: var(--link); text-decoration: none; }
   padding-left: 10px;
   border-left: 3px solid var(--border);
   color: var(--muted);
-}
-
-.composer {
-  display: grid;
-  gap: 8px;
-  padding: 8px;
-  border-top: 1px solid var(--border);
-  background: color-mix(in srgb, var(--panel2) 72%, var(--panel));
-  border-radius: 0 0 6px 6px;
-}
-
-.composer textarea {
-  min-height: 0;
-  height: auto;
-  padding: 6px 8px;
-  background: var(--panel);
-  border-color: color-mix(in srgb, var(--accent) 22%, var(--border));
-  line-height: 1.45;
-  overflow: hidden;
-}
-
-.composer textarea:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
-}
-
-.composer .actions {
-  justify-content: flex-end;
 }
 
 .actions {
@@ -3217,7 +3132,7 @@ button.focus-area-collapsed {
   display: none;
 }
 
-.pi-session-chat {
+.pi-terminal-session {
   display: flex;
   flex: 1 1 300px;
   flex-direction: column;
@@ -3229,20 +3144,20 @@ button.focus-area-collapsed {
   background: var(--panel2);
 }
 
-.ai-review.chat-focused {
+.ai-review.terminal-focused {
   overflow: hidden;
 }
 
-.ai-review.chat-focused > :not(.pi-session-chat) {
+.ai-review.terminal-focused > :not(.pi-terminal-session) {
   display: none;
 }
 
-.ai-review.chat-focused .pi-session-chat {
+.ai-review.terminal-focused .pi-terminal-session {
   flex-basis: 100%;
   min-height: 0;
 }
 
-.pi-session-chat-head {
+.pi-terminal-session-head {
   display: flex;
   min-height: 34px;
   align-items: center;
@@ -3256,12 +3171,8 @@ button.focus-area-collapsed {
   letter-spacing: 0.04em;
 }
 
-.pi-session-chat-head strong {
+.pi-terminal-session-head strong {
   flex: 1;
-}
-
-.pi-session-chat.native-terminal {
-  background: var(--panel2);
 }
 
 .pi-native-terminal,
@@ -3331,185 +3242,6 @@ button.focus-area-collapsed {
 
 .pi-native-terminal-status.error {
   color: var(--danger);
-}
-
-.pi-session-transcript {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: auto;
-  padding: 20px max(14px, calc((100% - 880px) / 2));
-}
-
-.review-layout.side-focused .pi-session-transcript {
-  padding-inline: clamp(20px, 2vw, 48px);
-}
-
-.pi-session-empty {
-  display: grid;
-  place-content: center;
-  gap: 4px;
-  min-height: 100%;
-  color: var(--muted);
-  text-align: center;
-}
-
-.pi-session-empty strong {
-  color: var(--text);
-  font-size: 0.95rem;
-}
-
-.pi-session-message {
-  display: grid;
-  gap: 6px;
-  padding: 12px 14px;
-  margin-bottom: 16px;
-  border-radius: var(--radius);
-}
-
-.pi-session-message.user {
-  max-width: 82%;
-  margin-left: auto;
-  border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--border));
-  background: color-mix(in srgb, var(--accent) 13%, var(--panel));
-}
-
-.pi-session-message.pi {
-  padding: 15px 17px;
-  border: 1px solid var(--border);
-  background: var(--panel);
-  box-shadow: inset 3px 0 color-mix(in srgb, var(--accent) 65%, var(--border));
-}
-
-.pi-session-message-role {
-  color: color-mix(in srgb, var(--text) 72%, var(--muted));
-  font-size: 0.7rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.pi-session-message.pi .pi-session-message-role {
-  color: var(--accent);
-}
-
-.pi-session-message p {
-  margin: 0;
-  font-size: 0.95rem;
-  line-height: 1.6;
-  white-space: pre-wrap;
-}
-
-.pi-session-message .markdown {
-  max-height: none;
-  overflow: visible;
-  font-size: 0.95rem;
-  line-height: 1.6;
-}
-
-.pi-session-message .markdown p,
-.pi-session-message .markdown ul,
-.pi-session-message .markdown ol,
-.pi-session-message .markdown .markdown-code-block,
-.pi-session-message .markdown blockquote {
-  margin-bottom: 0.9rem;
-}
-
-.pi-session-entry {
-  margin: 6px 0 10px;
-  color: var(--muted);
-  font-size: 0.78rem;
-}
-
-.pi-session-entry summary {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-height: 28px;
-  cursor: pointer;
-}
-
-.pi-session-entry-icon {
-  width: 14px;
-  color: var(--muted);
-  text-align: center;
-}
-
-.pi-session-entry.thinking p,
-.pi-session-entry.tool pre {
-  margin: 4px 0 8px 21px;
-  padding: 8px 10px;
-  border-left: 2px solid var(--border);
-  color: var(--muted);
-  white-space: pre-wrap;
-}
-
-.pi-session-entry.thinking p {
-  font-style: italic;
-}
-
-.pi-session-entry.tool.running .pi-session-entry-icon {
-  color: var(--attention);
-}
-
-.pi-session-entry.tool.success .pi-session-entry-icon {
-  color: var(--success);
-}
-
-.pi-session-entry.tool.error .pi-session-entry-icon {
-  color: var(--danger);
-}
-
-.pi-session-entry.tool pre {
-  max-height: 260px;
-  overflow: auto;
-  background: color-mix(in srgb, var(--panel) 70%, transparent);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.74rem;
-  font-style: normal;
-}
-
-.pi-session-composer {
-  flex: 0 0 auto;
-  display: grid;
-  gap: 6px;
-  padding: 12px max(10px, calc((100% - 900px) / 2));
-  border-top: 1px solid var(--border);
-  background: var(--panel);
-}
-
-.review-layout.side-focused .pi-session-composer {
-  padding-inline: clamp(20px, 2vw, 48px);
-}
-
-.pi-session-composer textarea {
-  min-height: 42px;
-  max-height: 180px;
-  resize: none;
-  overflow-y: auto;
-  border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
-  background: var(--panel2);
-}
-
-.pi-session-composer textarea:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
-}
-
-.pi-session-composer-foot {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 8px;
-}
-
-.pi-session-input-hint {
-  flex: 1;
-  color: var(--muted);
-  font-size: 0.7rem;
-}
-
-.pi-session-composer-foot .agent-activity {
-  flex: 1;
 }
 
 .review-modal {
@@ -4245,32 +3977,6 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
   white-space: pre-wrap;
   max-height: 240px;
   overflow: auto;
-}
-
-.gpu-workspace-agent {
-  display: grid;
-  gap: 8px;
-  margin: 10px 0;
-}
-
-.gpu-workspace-agent label {
-  display: grid;
-  gap: 4px;
-  color: var(--muted);
-  font-size: 0.78rem;
-}
-
-.gpu-workspace-agent textarea {
-  min-height: 92px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-}
-
-.gpu-workspace-agent-answer {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 10px 12px;
-  background: var(--panel2);
 }
 
 .pi-session-list { display: grid; gap: 8px; margin: 6px 0; }
