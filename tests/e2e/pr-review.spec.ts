@@ -829,7 +829,13 @@ test("selects diff code text without opening a thread", async ({ page }) => {
   await openFirstFile(page);
   const code = page.locator(".file").first().locator(".diff-row.added code").first();
   await expect(code).toBeVisible();
-  await code.selectText();
+  const box = await code.boundingBox();
+  if (box == null) throw new Error("Diff code has no bounding box");
+  const y = box.y + box.height / 2;
+  await page.mouse.move(box.x + 4, y);
+  await page.mouse.down();
+  await page.mouse.move(Math.min(box.x + box.width - 4, box.x + 160), y, { steps: 8 });
+  await page.mouse.up();
   await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? "")).not.toEqual("");
   await expect(page.locator(".local-thread")).toHaveCount(0);
 });
