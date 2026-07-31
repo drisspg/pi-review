@@ -45,6 +45,7 @@ test("validates Pi terminal connection URLs", () => {
 test("bounds terminal resize and input messages", () => {
   assert.deepEqual(parsePiTerminalClientMessage(JSON.stringify({ type: "resize", cols: 0, rows: 900 })), { type: "resize", cols: 2, rows: 500 });
   assert.deepEqual(parsePiTerminalClientMessage(JSON.stringify({ type: "input", data: "hello" })), { type: "input", data: "hello" });
+  assert.deepEqual(parsePiTerminalClientMessage(JSON.stringify({ type: "stop" })), { type: "stop" });
   assert.equal(parsePiTerminalClientMessage("not-json"), null);
   assert.equal(parsePiTerminalClientMessage(JSON.stringify({ type: "input", data: "x".repeat(64_001) })), null);
 });
@@ -115,6 +116,71 @@ test("attaches a peer to one persistent Pi PTY", async () => {
   await manager.disposePr("github.com/org/repo#1");
   assert.equal(process.killed, true);
   assert.deepEqual(first.closed, [1001, "Pull request closed"]);
+});
+
+test("stops an explicitly closed terminal and resumes it from the persisted session", async () => {
+  const processes: FakeProcess[] = [];
+  const manager = createPiTerminalManager({
+    cwdForPr: () => "/tmp/pr-worktree",
+    piCommand: "/usr/local/bin/pi",
+    sessionRoot: "/tmp/pi-review-terminal-test",
+    spawn: () => {
+      const process = new FakeProcess();
+      processes.push(process);
+      return process as never;
+    },
+  });
+  const first = new FakePeer();
+  await manager.attach(first, { prKey: "github.com/org/repo#1", session: "line-1" });
+  first.messageListener(JSON.stringify({ type: "stop" }));
+  assert.equal(processes[0].killed, true);
+  assert.deepEqual(first.closed, [1001, "Terminal stopped"]);
+
+  await manager.attach(new FakePeer(), { prKey: "github.com/org/repo#1", session: "line-1" });
+  assert.equal(processes.length, 2);
+  await manager.dispose();
+});
+
+test("stops detached terminals after the idle timeout", async () => {
+  const process = new FakeProcess();
+  const manager = createPiTerminalManager({
+    cwdForPr: () => "/tmp/pr-worktree",
+    idleTimeoutMs: 5,
+    piCommand: "/usr/local/bin/pi",
+    sessionRoot: "/tmp/pi-review-terminal-test",
+    spawn: () => process as never,
+  });
+  const peer = new FakePeer();
+  await manager.attach(peer, { prKey: "github.com/org/repo#1", session: "line-1" });
+  peer.closeListener();
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  assert.equal(process.killed, true);
+});
+
+test("evicts the oldest detached terminal at the session cap", async () => {
+  const processes: FakeProcess[] = [];
+  const manager = createPiTerminalManager({
+    cwdForPr: () => "/tmp/pr-worktree",
+    idleTimeoutMs: 60_000,
+    maxSessions: 2,
+    piCommand: "/usr/local/bin/pi",
+    sessionRoot: "/tmp/pi-review-terminal-test",
+    spawn: () => {
+      const process = new FakeProcess();
+      processes.push(process);
+      return process as never;
+    },
+  });
+  const first = new FakePeer();
+  const second = new FakePeer();
+  await manager.attach(first, { prKey: "github.com/org/repo#1", session: "line-1" });
+  first.closeListener();
+  await manager.attach(second, { prKey: "github.com/org/repo#1", session: "line-2" });
+  second.closeListener();
+  await manager.attach(new FakePeer(), { prKey: "github.com/org/repo#1", session: "line-3" });
+  assert.equal(processes.length, 3);
+  assert.equal(processes[0].killed, true);
+  await manager.dispose();
 });
 
 test("reports a missing PR checkout without spawning", async () => {

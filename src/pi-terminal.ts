@@ -13,6 +13,8 @@ import type { DraftReview } from "./types.js";
 const DEFAULT_COLS = 100;
 const DEFAULT_ROWS = 30;
 const MAX_BUFFER_CHARS = 1_000_000;
+const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60_000;
+const DEFAULT_MAX_SESSIONS = 15;
 
 export type PiTerminalServerMessage =
   | { type: "ready"; pid: number }
@@ -23,7 +25,8 @@ export type PiTerminalServerMessage =
 
 export type PiTerminalClientMessage =
   | { type: "input"; data: string }
-  | { type: "resize"; cols: number; rows: number };
+  | { type: "resize"; cols: number; rows: number }
+  | { type: "stop" };
 
 export type PiTerminalTarget = {
   path: string;
@@ -56,6 +59,8 @@ type TerminalSession = {
   process: TerminalProcess;
   peers: Set<PiTerminalPeer>;
   buffer: string;
+  idleTimer: NodeJS.Timeout | null;
+  lastActivityAt: number;
 };
 
 export type PiTerminalManagerDeps = {
@@ -68,6 +73,8 @@ export type PiTerminalManagerDeps = {
   extensionPath?: string;
   piCommand?: string;
   sessionRoot?: string;
+  idleTimeoutMs?: number;
+  maxSessions?: number;
   spawn?: (command: string, args: string[], options: { cols: number; cwd: string; env: NodeJS.ProcessEnv; name: string; rows: number }) => TerminalProcess;
 };
 
@@ -141,7 +148,7 @@ export function parsePiTerminalClientMessage(raw: string): PiTerminalClientMessa
       rows: boundedDimension(parsed.rows, DEFAULT_ROWS, 500),
     };
   }
-  return null;
+  return parsed.type === "stop" ? { type: "stop" } : null;
 }
 
 /** Own persistent interactive Pi processes and attach browser terminal peers. */
@@ -149,6 +156,32 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
   const sessions = new Map<string, Promise<TerminalSession>>();
   const piCommand = deps.piCommand ?? resolvePiTerminalCommand();
   const sessionRoot = deps.sessionRoot ?? resolve(homedir(), ".pi", "agent", "state", "pi-pr-review", "terminal-sessions");
+  const idleTimeoutMs = deps.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+  const maxSessions = deps.maxSessions ?? DEFAULT_MAX_SESSIONS;
+
+  function stopSession(key: string, session: TerminalSession, reason: string): void {
+    if (sessions.get(key) == null) return;
+    sessions.delete(key);
+    if (session.idleTimer != null) clearTimeout(session.idleTimer);
+    for (const peer of session.peers) peer.close(1001, reason);
+    session.peers.clear();
+    session.process.kill();
+  }
+
+  function scheduleIdleStop(key: string, session: TerminalSession): void {
+    if (session.idleTimer != null) clearTimeout(session.idleTimer);
+    if (session.peers.size > 0) return;
+    session.idleTimer = setTimeout(() => stopSession(key, session, "Terminal stopped after being inactive"), idleTimeoutMs);
+  }
+
+  async function enforceSessionLimit(): Promise<void> {
+    if (sessions.size < maxSessions) return;
+    const settled = await Promise.all([...sessions.entries()].map(async ([key, session]) => [key, await session] as const));
+    const candidate = settled.filter(([, session]) => session.peers.size === 0).sort((a, b) => a[1].lastActivityAt - b[1].lastActivityAt)[0];
+    if (candidate == null) throw new Error(`Pi Review already has ${maxSessions} active terminals. Collapse or stop one before opening another.`);
+    stopSession(candidate[0], candidate[1], "Terminal stopped to enforce the session limit");
+  }
+
   async function createSession(request: PiTerminalRequest): Promise<TerminalSession> {
     const cwd = deps.cwdForPr(request.prKey);
     if (cwd == null) throw new Error("Open this pull request before starting its terminal.");
@@ -173,14 +206,16 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
     const processHandle = deps.spawn == null
       ? (await import("node-pty")).spawn(piCommand, args, options)
       : deps.spawn(piCommand, args, options);
-    const terminalSession: TerminalSession = { process: processHandle, peers: new Set(), buffer: "" };
+    const terminalSession: TerminalSession = { process: processHandle, peers: new Set(), buffer: "", idleTimer: null, lastActivityAt: Date.now() };
     processHandle.onData((data) => {
+      terminalSession.lastActivityAt = Date.now();
       terminalSession.buffer = `${terminalSession.buffer}${data}`.slice(-MAX_BUFFER_CHARS);
       for (const peer of terminalSession.peers) peer.send({ type: "output", data });
     });
     processHandle.onExit(({ exitCode, signal }) => {
       for (const peer of terminalSession.peers) peer.send({ type: "exit", exitCode, signal: signal ?? 0 });
       terminalSession.peers.clear();
+      if (terminalSession.idleTimer != null) clearTimeout(terminalSession.idleTimer);
       if (sessions.get(key) != null) sessions.delete(key);
       deps.logger?.info("pi-terminal", "process exited", { prKey: request.prKey, session: request.session, exitCode, signal });
     });
@@ -192,6 +227,7 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
     const key = `${request.prKey}\0${request.session}`;
     const existing = sessions.get(key);
     if (existing != null) return existing;
+    await enforceSessionLimit();
     const created = createSession(request);
     sessions.set(key, created);
     try {
@@ -207,19 +243,28 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
     let closed = false;
     peer.onClose(() => {
       closed = true;
-      attachedSession?.peers.delete(peer);
+      if (attachedSession == null) return;
+      attachedSession.peers.delete(peer);
+      attachedSession.lastActivityAt = Date.now();
+      scheduleIdleStop(`${request.prKey}\0${request.session}`, attachedSession);
     });
     try {
       const session = await getSession(request);
       if (closed) return;
       attachedSession = session;
       session.peers.add(peer);
+      session.lastActivityAt = Date.now();
+      if (session.idleTimer != null) clearTimeout(session.idleTimer);
+      session.idleTimer = null;
       peer.send({ type: "ready", pid: session.process.pid });
       if (session.buffer.length > 0) peer.send({ type: "output", data: session.buffer });
       peer.onMessage((raw) => {
         const message = parsePiTerminalClientMessage(raw);
-        if (message?.type === "input") session.process.write(message.data);
-        else if (message?.type === "resize") session.process.resize(message.cols, message.rows);
+        if (message == null) return;
+        session.lastActivityAt = Date.now();
+        if (message.type === "input") session.process.write(message.data);
+        else if (message.type === "resize") session.process.resize(message.cols, message.rows);
+        else stopSession(`${request.prKey}\0${request.session}`, session, "Terminal stopped");
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -233,6 +278,7 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
     const settled = await Promise.allSettled(sessionPromises);
     for (const result of settled) {
       if (result.status !== "fulfilled") continue;
+      if (result.value.idleTimer != null) clearTimeout(result.value.idleTimer);
       for (const peer of result.value.peers) peer.close(1001, reason);
       result.value.process.kill();
     }
