@@ -1683,6 +1683,58 @@ a { color: var(--link); text-decoration: none; }
   white-space: nowrap;
 }
 
+.markdown-editor {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.markdown-editor-tabs {
+  display: flex;
+  gap: 14px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel2);
+}
+
+.markdown-editor-tabs button {
+  padding: 6px 2px 5px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.markdown-editor-tabs button.active {
+  color: var(--text);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.markdown-editor-tabs button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.markdown-editor textarea {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none !important;
+}
+
+.markdown-editor-preview {
+  min-height: 72px;
+  padding: 12px;
+  background: var(--bg);
+}
+
+.markdown-editor-preview > .markdown > :first-child,
+.markdown-editor-preview > p:first-child { margin-top: 0; }
+.markdown-editor-preview > .markdown > :last-child,
+.markdown-editor-preview > p:last-child { margin-bottom: 0; }
+
 .line-comment-composer {
   display: grid;
   gap: 8px;
@@ -1871,6 +1923,18 @@ a { color: var(--link); text-decoration: none; }
 }
 .markdown-code-block {
   position: relative;
+}
+
+.markdown-code-language {
+  position: absolute;
+  top: 7px;
+  right: 42px;
+  z-index: 1;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.68rem;
+  text-transform: lowercase;
+  opacity: 0.8;
 }
 
 .markdown-code-block .markdown-copy-button {
@@ -2082,7 +2146,7 @@ button.fold:hover {
 }
 
 .review-summary {
-  gap: 12px;
+  gap: 8px;
 }
 
 .review-summary-head {
@@ -2090,7 +2154,7 @@ button.fold:hover {
   align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
-  padding-bottom: 10px;
+  padding-bottom: 6px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -2151,10 +2215,17 @@ button.fold:hover {
 
 .review-event-field {
   display: grid;
-  gap: 4px;
+  grid-template-columns: auto minmax(180px, 1fr);
+  gap: 10px;
+  align-items: center;
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 600;
+}
+
+.review-event-field select {
+  min-height: 34px;
+  padding-block: 0.25rem;
 }
 
 .review-draft-list {
@@ -2170,15 +2241,17 @@ button.fold:hover {
 
 .github-draft-review {
   display: grid;
-  gap: 8px;
-  padding: 10px 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 12px;
+  align-items: center;
+  padding: 7px 12px;
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--attention) 5%, var(--panel));
 }
 
 .github-draft-review-head {
   display: grid;
-  gap: 3px;
+  gap: 1px;
 }
 
 .github-draft-review-head > div {
@@ -2198,9 +2271,14 @@ button.fold:hover {
 }
 
 .github-draft-review-actions {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 8px;
+  display: flex;
+  gap: 6px;
+}
+
+.github-draft-review > .operation-error,
+.github-draft-review > .copy-feedback-error,
+.github-draft-review > .github-draft-list {
+  grid-column: 1 / -1;
 }
 
 .github-draft-list {
@@ -2210,8 +2288,8 @@ button.fold:hover {
 
 .github-draft-card {
   display: grid;
-  gap: 6px;
-  padding: 8px 9px;
+  gap: 4px;
+  padding: 6px 8px;
   border: 1px solid color-mix(in srgb, var(--attention) 32%, var(--border));
   border-radius: 6px;
   background: var(--panel);
@@ -2239,12 +2317,13 @@ button.fold:hover {
   color: var(--accent);
 }
 
-.github-draft-card p {
-  margin: 0;
-  white-space: pre-wrap;
+.github-draft-card .markdown {
   font-size: 0.82rem;
-  line-height: 1.45;
+  line-height: 1.35;
 }
+
+.github-draft-card .markdown > :first-child { margin-top: 0; }
+.github-draft-card .markdown > :last-child { margin-bottom: 0; }
 
 .review-actions {
   display: grid;
@@ -2300,8 +2379,19 @@ button.fold:hover {
 .side .review-summary .review-body {
   margin-top: 12px;
   margin-bottom: 12px;
-  border-color: var(--border);
-  background: var(--bg);
+}
+
+.review-summary .review-body textarea,
+.review-summary .review-body .markdown-editor-preview {
+  min-height: 320px;
+  max-height: 55vh;
+  overflow-y: auto !important;
+}
+
+.side .review-summary .review-body textarea,
+.side .review-summary .review-body .markdown-editor-preview {
+  min-height: 220px;
+  max-height: min(48vh, 520px);
 }
 
 .side .review-summary .review-draft-list {
@@ -2309,6 +2399,15 @@ button.fold:hover {
   min-height: 0;
   padding-bottom: 12px;
   overflow-y: auto;
+}
+
+.side .github-draft-review {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.side .github-draft-review-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 
 .side .github-draft-list {
@@ -2363,9 +2462,9 @@ button.fold:hover {
   border: 1px solid color-mix(in srgb, var(--thread-accent) 30%, var(--border));
   border-radius: 6px;
   background: color-mix(in srgb, var(--thread-accent) 5%, var(--panel2));
-  padding: 8px 10px;
+  padding: 6px 8px;
   display: grid;
-  gap: 6px;
+  gap: 4px;
   animation: pending-draft-enter 140ms ease-out;
   transition: opacity 160ms ease, transform 160ms ease;
 }
@@ -2450,11 +2549,14 @@ button.fold:hover {
   min-width: 0;
 }
 
-.draft-card-body p {
-  margin: 0;
-  font-size: 0.88rem;
+.draft-card-body .markdown {
+  font-size: 0.86rem;
+  line-height: 1.35;
   overflow-wrap: anywhere;
 }
+
+.draft-card-body .markdown > :first-child { margin-top: 0; }
+.draft-card-body .markdown > :last-child { margin-bottom: 0; }
 
 .draft-card-body textarea {
   min-height: 42px;
@@ -4156,7 +4258,23 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
     height: auto;
     max-height: none;
   }
-  .side .review-summary .review-actions { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .side .review-summary {
+    position: relative;
+    padding-bottom: 51px;
+  }
+  .side .review-summary .review-body textarea,
+  .side .review-summary .review-body .markdown-editor-preview {
+    min-height: 52px;
+    max-height: 18vh;
+  }
+  .side .review-summary .review-actions {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 1;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
   .github-draft-review-actions { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .github-draft-review-actions button { width: 100%; min-width: 0; padding-inline: 4px; font-size: 0.75rem; white-space: normal; }
   .side .review-summary .review-actions .small-muted-button,

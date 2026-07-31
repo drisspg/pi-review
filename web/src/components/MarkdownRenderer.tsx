@@ -159,7 +159,7 @@ function MarkdownPre({ children, ...props }: MarkdownPreProps) {
     window.setTimeout(() => setCopied(false), 1400);
   }
 
-  return <div className="markdown-code-block"><Button variant="icon" className="markdown-copy-button" onClick={() => void copyCode()} aria-label={copied ? "Copied code" : "Copy code"} title={copied ? "Copied" : "Copy"}>{copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}</Button><pre {...props}>{children}</pre></div>;
+  return <div className="markdown-code-block">{language != null && <span className="markdown-code-language">{language}</span>}<Button variant="icon" className="markdown-copy-button" onClick={() => void copyCode()} aria-label={copied ? "Copied code" : "Copy code"} title={copied ? "Copied" : "Copy"}>{copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}</Button><pre {...props}>{children}</pre></div>;
 }
 
 function preBlockLanguage(children: React.ReactNode): string | null {

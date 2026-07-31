@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import { ChevronDownIcon, ChevronRightIcon, LinkExternalIcon } from "@primer/octicons-react";
-import { Flash, Textarea, TextInput } from "@primer/react";
+import { Flash, TextInput } from "@primer/react";
 
 import { api } from "../api";
 import { Button } from "./Button";
-import { autoGrowTextarea } from "../lib/dom";
 import { relativeTime } from "../lib/pr";
 import { commentTarget, commentThreadDomId, groupReviewComments, targetLabel } from "../lib/comments";
 import type { PullIssueComment, PullRequestReviewSummary, PullReviewComment } from "../types";
 import { MarkdownText } from "./Markdown";
+import { MarkdownEditor } from "./MarkdownEditor";
 
 function commenterHash(login: string): number {
   let hash = 0;
@@ -72,7 +72,7 @@ function ReviewCommentTimeline({ comments, commentKind, prUrl, refreshGithubActi
 }
 
 function CommentEditor({ body, submitting, error, onChange, onCancel, onSave }: { body: string; submitting: boolean; error: string | null; onChange: (body: string) => void; onCancel: () => void; onSave: () => void }) {
-  return <div className="github-comment-edit"><Textarea block resize="none" rows={1} value={body} onChange={(event) => onChange(event.target.value)} onInput={(event) => autoGrowTextarea(event.currentTarget)} ref={(element) => autoGrowTextarea(element)} aria-label="Edit comment" />{error != null && <Flash variant="danger" className="operation-error" role="alert">Edit failed: {error}</Flash>}<div className="github-comment-edit-actions"><Button variant="muted" onClick={onCancel} disabled={submitting}>Cancel</Button><Button onClick={onSave} disabled={submitting || body.trim().length === 0}>{submitting ? "Saving…" : error == null ? "Save" : "Retry"}</Button></div></div>;
+  return <div className="github-comment-edit"><MarkdownEditor value={body} onChange={onChange} ariaLabel="Edit comment" autoFocus />{error != null && <Flash variant="danger" className="operation-error" role="alert">Edit failed: {error}</Flash>}<div className="github-comment-edit-actions"><Button variant="muted" onClick={onCancel} disabled={submitting}>Cancel</Button><Button onClick={onSave} disabled={submitting || body.trim().length === 0}>{submitting ? "Saving…" : error == null ? "Save" : "Retry"}</Button></div></div>;
 }
 
 function GitHubCommentView({ comment, commentKind, prUrl, refreshGithubActivity }: { comment: GitHubComment; commentKind: CommentKind; prUrl: string; refreshGithubActivity: () => Promise<void> }) {
@@ -149,7 +149,7 @@ function ThreadReplyBox({ prUrl, kind, commentId, refreshGithubActivity }: { prU
       setSubmitting(false);
     }
   }
-  return <div className="thread-reply thread-reply-box"><Textarea block resize="none" rows={1} value={body} onChange={(event) => setBody(event.target.value)} onInput={(event) => autoGrowTextarea(event.currentTarget)} placeholder="Reply…" aria-label="Reply to thread" />{error != null && <Flash variant="danger" className="operation-error" role="alert">Reply failed: {error}</Flash>}<Button variant="muted" onClick={() => void submitReply()} disabled={submitting || body.trim().length === 0}>{submitting ? "Replying…" : error == null ? "Reply" : "Retry"}</Button></div>;
+  return <div className="thread-reply thread-reply-box"><MarkdownEditor value={body} onChange={setBody} placeholder="Reply…" ariaLabel="Reply to thread" />{error != null && <Flash variant="danger" className="operation-error" role="alert">Reply failed: {error}</Flash>}<Button variant="muted" onClick={() => void submitReply()} disabled={submitting || body.trim().length === 0}>{submitting ? "Replying…" : error == null ? "Reply" : "Retry"}</Button></div>;
 }
 
 export function ExistingComments({ prUrl, comments, issueComments, reviewSummaries, refreshGithubActivity, collapseSignal, commentsCollapsed, toggleAllComments, onJumpToComment }: { prUrl: string; comments: PullReviewComment[]; issueComments: PullIssueComment[]; reviewSummaries: PullRequestReviewSummary[]; refreshGithubActivity: () => Promise<void>; collapseSignal: number; commentsCollapsed: boolean; toggleAllComments: () => void; onJumpToComment?: (target: ReturnType<typeof commentTarget>) => void }) {
