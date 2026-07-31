@@ -290,7 +290,7 @@ a { color: var(--link); text-decoration: none; }
   padding: 0.22rem 0.58rem;
   color: var(--muted);
   font-size: 0.82rem;
-  background: transparent;
+  background: var(--panel2);
 }
 
 .review-changes-button {
@@ -1502,8 +1502,26 @@ a { color: var(--link); text-decoration: none; }
   background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
-.ui-button:disabled {
-  opacity: 0.55;
+.ui-button-muted {
+  color: var(--text);
+  background: var(--panel2);
+  border-color: var(--border);
+  box-shadow: none;
+}
+
+.ui-button-muted:hover:not(:disabled) {
+  color: var(--text);
+  background: color-mix(in srgb, var(--muted) 10%, var(--panel2));
+  border-color: var(--muted);
+}
+
+.ui-button.ui-button-default:disabled,
+.ui-button.ui-button-muted:disabled {
+  color: var(--muted);
+  background: color-mix(in srgb, var(--muted) 6%, var(--panel2));
+  border-color: var(--border);
+  box-shadow: none;
+  opacity: 0.68;
 }
 
 .ui-button-icon {
