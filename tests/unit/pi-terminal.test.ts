@@ -138,6 +138,9 @@ test("stops an explicitly closed terminal and resumes it from the persisted sess
 
   await manager.attach(new FakePeer(), { prKey: "github.com/org/repo#1", session: "line-1" });
   assert.equal(processes.length, 2);
+  processes[0].exitListener({ exitCode: 0 });
+  await manager.attach(new FakePeer(), { prKey: "github.com/org/repo#1", session: "line-1" });
+  assert.equal(processes.length, 2);
   await manager.dispose();
 });
 

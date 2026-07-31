@@ -216,7 +216,10 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
       for (const peer of terminalSession.peers) peer.send({ type: "exit", exitCode, signal: signal ?? 0 });
       terminalSession.peers.clear();
       if (terminalSession.idleTimer != null) clearTimeout(terminalSession.idleTimer);
-      if (sessions.get(key) != null) sessions.delete(key);
+      const sessionPromise = sessions.get(key);
+      if (sessionPromise != null) void sessionPromise.then((current) => {
+        if (current === terminalSession && sessions.get(key) === sessionPromise) sessions.delete(key);
+      });
       deps.logger?.info("pi-terminal", "process exited", { prKey: request.prKey, session: request.session, exitCode, signal });
     });
     deps.logger?.info("pi-terminal", "process started", { prKey: request.prKey, session: request.session, cwd, command: piCommand, pid: processHandle.pid });

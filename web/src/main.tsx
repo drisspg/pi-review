@@ -1775,7 +1775,10 @@ function ThreadBox({ thread, setThread, addDraft }: { thread: Thread; setThread:
   const [stopping, setStopping] = useState(false);
   useEffect(() => {
     if (!stopping) return;
-    const timeout = window.setTimeout(() => setThread({ ...thread, collapsed: true, stopSignal: (thread.stopSignal ?? 0) + 1 }), 50);
+    const timeout = window.setTimeout(() => {
+      setStopping(false);
+      setThread({ ...thread, collapsed: true, stopSignal: (thread.stopSignal ?? 0) + 1 });
+    }, 50);
     return () => window.clearTimeout(timeout);
   }, [setThread, stopping, thread]);
   if (thread.collapsed) return <button className="inline-thread collapsed terminal-marker" onClick={() => setThread({ ...thread, collapsed: false })}><ChevronRightIcon size={14} /><span className="collapsed-pill-label">Pi terminal · {targetLabel(thread.target)}</span></button>;
