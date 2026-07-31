@@ -1208,9 +1208,9 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .inline-thread.existing.github-thread {
-  border-color: color-mix(in srgb, var(--thread-accent) 36%, var(--border));
+  border-color: var(--border);
   background: var(--panel);
-  box-shadow: inset 4px 0 var(--thread-accent);
+  box-shadow: none;
 }
 
 .inline-thread.collapsed {
@@ -1280,12 +1280,12 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .inline-thread.existing.github-thread > .thread-head {
-  border-bottom-color: color-mix(in srgb, var(--thread-accent) 24%, var(--border));
-  background: color-mix(in srgb, var(--thread-accent) 7%, var(--panel2));
+  border-bottom-color: var(--border);
+  background: var(--panel2);
 }
 
 .inline-thread.existing.github-thread .thread-title strong {
-  color: color-mix(in srgb, var(--thread-accent) 48%, var(--text));
+  color: var(--text);
 }
 
 .inline-thread > .markdown,
@@ -1326,11 +1326,11 @@ a { color: var(--link); text-decoration: none; }
   top: 0;
   min-height: 0;
   padding: 2px 8px;
-  background: color-mix(in srgb, var(--thread-accent) 18%, var(--panel));
-  border: 1px solid color-mix(in srgb, var(--thread-accent) 32%, var(--border));
+  background: var(--panel2);
+  border: 1px solid var(--border);
   border-top: none;
   border-radius: 0 0 6px 6px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.18);
 }
 
 .inline-thread.existing.github-thread.minimized .thread-title {
@@ -1393,14 +1393,15 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .github-thread.minimized .thread-title > .ui-button-icon {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, var(--panel));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 32%, var(--border));
+  color: var(--muted);
+  background: transparent;
+  box-shadow: none;
 }
 
 .github-thread.minimized .thread-title > .ui-button-icon:hover,
 .github-thread.minimized .thread-title > .ui-button-icon:focus-visible {
-  background: color-mix(in srgb, var(--accent) 24%, var(--panel));
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 
 .github-thread .thread-head {

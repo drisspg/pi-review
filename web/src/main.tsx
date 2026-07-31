@@ -1445,6 +1445,7 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { d
           <div className="files-toolbar">
             <FileNavigator files={props.review.files} fileReviews={props.review.fileReviews} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} />
             <div className="files-toolbar-actions">
+              {commentCount > 0 && <Button variant="muted" className="small-muted-button" onClick={props.toggleAllComments}>{props.commentsCollapsed ? "Expand review threads" : "Collapse review threads"}</Button>}
               <Button variant="muted" className="small-muted-button" onClick={() => props.setDiffViewMode(props.diffViewMode === "unified" ? "split" : "unified")}>{diffViewLabel}</Button>
               <Button variant="muted" className="small-muted-button panel-launch-button" onClick={() => openSidePanel("comments")}>Comments{commentCount > 0 ? ` ${commentCount}` : ""}</Button>
               <Button variant="muted" className="small-muted-button panel-launch-button" onClick={() => openSidePanel("pi")}>Pi review{piBadge != null ? ` ${piBadge}` : ""}</Button>

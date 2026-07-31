@@ -683,6 +683,18 @@ test("collapses and focuses existing comment threads", async ({ page }) => {
   await expect(thread.locator(".markdown").first()).toBeVisible();
 });
 
+test("collapses all review threads from the files toolbar", async ({ page }) => {
+  await page.getByRole("button", { name: "Collapse review threads" }).click();
+  await expect(page.getByRole("button", { name: "Expand review threads" })).toBeVisible();
+
+  await openSideTab(page, "Comments");
+  const thread = page.locator(".side .github-thread").first();
+  await expect(thread).toHaveClass(/minimized/);
+
+  await page.getByRole("button", { name: "Expand review threads" }).click();
+  await expect(thread).not.toHaveClass(/minimized/);
+});
+
 test("switches and persists Primer-backed GitHub themes", async ({ page }) => {
   const theme = page.getByLabel("Theme");
   const provider = page.locator('[data-component="ThemeProvider"]');
