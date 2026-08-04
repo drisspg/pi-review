@@ -209,6 +209,7 @@ export type ReviewMemoryRecord = {
   body: string;
   comments: ReviewMemoryComment[];
   changeSet?: ReviewMemoryChangeSet;
+  disposition?: "published" | "archived";
   createdAt: string;
 };
 

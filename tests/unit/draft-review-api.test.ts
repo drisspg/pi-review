@@ -9,6 +9,10 @@ function fakeDeps() {
   return {
     saved,
     deps: {
+      async clearDraftReview(prKey: string) {
+        const index = saved.findIndex((review) => review.prKey === prKey);
+        if (index !== -1) saved.splice(index, 1);
+      },
       async getDraftReview(prKey: string) {
         return saved.find((review) => review.prKey === prKey) ?? null;
       },
@@ -50,9 +54,18 @@ test("draft review API gets the current PR draft", async () => {
   assert.deepEqual(await createDraftReviewApi(deps).get({ prKey: "github.com/o/r#2" }), { draftReview: null });
 });
 
+test("draft review API discards the current PR draft", async () => {
+  const { deps, saved } = fakeDeps();
+  saved.push({ prKey: "github.com/o/r#1", headSha: "head", event: "COMMENT", body: "", comments: [], updatedAt: "now" });
+
+  assert.deepEqual(await createDraftReviewApi(deps).discard({ prKey: " github.com/o/r#1 " }), { ok: true });
+  assert.deepEqual(saved, []);
+});
+
 test("draft review API rejects malformed drafts", async () => {
   const api = createDraftReviewApi(fakeDeps().deps);
 
+  await assert.rejects(api.discard({}), /Expected prKey/);
   await assert.rejects(api.get({}), /Expected prKey/);
   await assert.rejects(api.save({ prKey: "pr", headSha: "head", event: "BAD", body: "", comments: [] }), /Expected draft review payload/);
   await assert.rejects(api.save({ prKey: "pr", headSha: "head", event: "COMMENT", body: "", comments: [{ id: "x" }] }), /Expected draft comment fields/);

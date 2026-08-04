@@ -22,6 +22,7 @@ import { createPiTerminalManager } from "./pi-terminal.js";
 import { attachPiTerminalWebSocketServer } from "./pi-terminal-websocket.js";
 import { askPi, disposePiSession, disposePiSessions, piActivity, piDiagnostics, piSessionCwd, piSessionReviewContext, prewarmPiSession, registerPiSessionContext, setPiModel } from "./pi-session.js";
 import { createPrApi, defaultPrApiDeps } from "./pr-api.js";
+import { createReviewArchiveApi, defaultReviewArchiveApiDeps } from "./review-archive-api.js";
 import { createReviewMemoryApi } from "./review-memory-api.js";
 import { createReviewPromptApi } from "./review-prompt-api.js";
 import { createReviewSubmitRouteApi, defaultReviewSubmitRouteApiDeps } from "./review-submit-route-api.js";
@@ -47,7 +48,7 @@ const piTerminalManager = createPiTerminalManager({
 });
 const askStreamApi = createAskStreamApi({ askPi, logger });
 const commentApi = createCommentApi(defaultCommentApiDeps({ addIssueComment, editIssueComment, editReviewComment, editReviewSummary, replyToReviewComment }));
-const draftReviewApi = createDraftReviewApi({ getDraftReview, now: () => new Date().toISOString(), saveDraftReview });
+const draftReviewApi = createDraftReviewApi({ clearDraftReview, getDraftReview, now: () => new Date().toISOString(), saveDraftReview });
 const fileApi = createFileApi(defaultFileApiDeps(fetchFileText, setFileViewed, async (url) => {
   await execFileAsync("open", [url]);
 }));
@@ -70,6 +71,7 @@ const prApi = createPrApi(defaultPrApiDeps({
   removePullRequest,
   upsertPullRequest,
 }));
+const reviewArchiveApi = createReviewArchiveApi(defaultReviewArchiveApiDeps({ clearDraftReview, fetchPullRequestReviewData, saveReviewMemory }));
 const reviewMemoryApi = createReviewMemoryApi({ askPi, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewMemory, saveReviewProfile });
 const reviewPromptApi = createReviewPromptApi({ currentReviewMemoryPrompt });
 const reviewSubmitRouteApi = createReviewSubmitRouteApi(defaultReviewSubmitRouteApiDeps({ clearDraftReview, fetchPullRequestReviewData, markPullRequestReviewed, saveReviewMemory, submitPullRequestReview }));
@@ -109,6 +111,7 @@ const route = createServerRoute({
   piTerminalApi,
   piTerminalDraftApi,
   prApi,
+  reviewArchiveApi,
   reviewMemoryApi,
   reviewPromptApi,
   reviewSubmitRouteApi,

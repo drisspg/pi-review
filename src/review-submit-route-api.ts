@@ -32,7 +32,7 @@ export function createReviewSubmitRouteApi(deps: ReviewSubmitRouteApiDeps): Revi
     const prKey = prKeyForRef(ref);
     await deps.clearDraftReview(prKey);
     const reviewData = await deps.fetchPullRequestReviewData(ref);
-    await deps.saveReviewMemory(reviewSubmitMemoryRecord(payload, reviewData, prKey));
+    await deps.saveReviewMemory({ ...reviewSubmitMemoryRecord(payload, reviewData, prKey), disposition: "published" });
     return { result, pr: await deps.markPullRequestReviewed(prKey, typeof payload.headSha === "string" ? payload.headSha : "", payload.event) };
   }
 

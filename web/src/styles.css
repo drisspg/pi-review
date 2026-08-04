@@ -1252,6 +1252,9 @@ a { color: var(--link); text-decoration: none; }
 
 .inline-thread.collapsed.terminal-marker {
   color: var(--text);
+}
+
+.inline-thread.collapsed.terminal-marker.terminal-active {
   border-color: color-mix(in srgb, var(--thread-accent) 44%, var(--border));
   box-shadow: inset 3px 0 color-mix(in srgb, var(--thread-accent) 72%, var(--border));
 }
@@ -1285,6 +1288,13 @@ a { color: var(--link); text-decoration: none; }
 .terminal-marker-delete.ui-button-icon:hover,
 .terminal-marker-delete.ui-button-icon:focus-visible {
   color: var(--danger);
+}
+
+.terminal-delete-error {
+  width: fit-content;
+  max-width: min(520px, calc(100% - 32px));
+  margin: 4px 16px 8px auto;
+  font-size: 0.78rem;
 }
 
 .inline-thread p { margin: 0; white-space: pre-wrap; }
@@ -1560,29 +1570,30 @@ a { color: var(--link); text-decoration: none; }
 }
 
 .action-menu-popover {
-  z-index: var(--stacking-overlay-zIndex);
+  z-index: 130;
   display: grid;
   min-width: 180px;
-  padding: var(--base-size-4);
-  border: var(--borderWidth-thin) solid var(--borderColor-default);
-  border-radius: var(--borderRadius-medium);
-  background: var(--overlay-bgColor);
-  box-shadow: var(--shadow-floating-medium);
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
 }
 
 .action-menu-popover button {
   width: 100%;
-  min-height: var(--control-medium-size);
+  min-height: 30px;
   padding: 6px 8px;
-  color: var(--fgColor-default);
+  color: var(--text);
   background: transparent;
   border: 0;
+  border-radius: 4px;
   text-align: left;
 }
 
 .action-menu-popover button:hover,
 .action-menu-popover button:focus-visible {
-  background: var(--control-transparent-bgColor-hover);
+  background: var(--panel2);
 }
 
 .github-comment-timeline {
@@ -2195,15 +2206,15 @@ button.fold:hover {
 }
 
 .review-summary {
-  gap: 8px;
+  gap: 6px;
 }
 
 .review-summary-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 10px;
-  padding-bottom: 6px;
+  gap: 8px;
+  padding-bottom: 4px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -2262,19 +2273,24 @@ button.fold:hover {
   font-weight: 650;
 }
 
+.review-compose {
+  display: grid;
+  gap: 8px;
+}
+
 .review-event-field {
   display: grid;
-  grid-template-columns: auto minmax(180px, 1fr);
-  gap: 10px;
+  grid-template-columns: auto minmax(160px, 1fr);
+  gap: 8px;
   align-items: center;
   color: var(--muted);
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   font-weight: 600;
 }
 
 .review-event-field select {
-  min-height: 34px;
-  padding-block: 0.25rem;
+  min-height: 30px;
+  padding-block: 0.15rem;
 }
 
 .review-draft-list {
@@ -2289,10 +2305,6 @@ button.fold:hover {
 }
 
 .github-draft-review {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px 12px;
-  align-items: center;
   padding: 7px 12px;
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--attention) 5%, var(--panel));
@@ -2300,7 +2312,15 @@ button.fold:hover {
 
 .github-draft-review-head {
   display: grid;
-  gap: 1px;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  cursor: pointer;
+  list-style: none;
+}
+
+.github-draft-review-head::-webkit-details-marker {
+  display: none;
 }
 
 .github-draft-review-head > div {
@@ -2319,6 +2339,13 @@ button.fold:hover {
   font-size: 0.74rem;
 }
 
+.github-draft-review-note {
+  margin: 8px 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
 .github-draft-review-actions {
   display: flex;
   gap: 6px;
@@ -2327,7 +2354,7 @@ button.fold:hover {
 .github-draft-review > .operation-error,
 .github-draft-review > .copy-feedback-error,
 .github-draft-review > .github-draft-list {
-  grid-column: 1 / -1;
+  margin-top: 8px;
 }
 
 .github-draft-list {
@@ -2375,13 +2402,32 @@ button.fold:hover {
 .github-draft-card .markdown > :last-child { margin-bottom: 0; }
 
 .review-actions {
-  display: grid;
-  gap: 8px;
+  display: flex;
+  justify-content: flex-end;
 }
 
-.review-actions .small-muted-button,
-.review-actions .review-submit {
-  width: 100%;
+.review-publish-group {
+  display: flex;
+  align-items: stretch;
+}
+
+.review-publish-group .review-submit {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.review-submit-menu.ui-button {
+  min-width: 30px;
+  padding: 0 7px;
+  border-left-color: color-mix(in srgb, currentColor 22%, transparent);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  background: var(--accent);
+  color: #fff;
+}
+
+.review-submit-menu.ui-button:not(:disabled):hover {
+  filter: brightness(1.08);
 }
 
 .side .review-summary {
@@ -2400,7 +2446,7 @@ button.fold:hover {
 
 .side .review-summary-head {
   align-items: center;
-  padding: 10px 12px;
+  padding: 8px 10px;
   background: var(--panel2);
 }
 
@@ -2412,46 +2458,31 @@ button.fold:hover {
   max-width: 30ch;
 }
 
-.side .review-summary .review-event-field,
-.side .review-summary .review-body,
+.side .review-summary .review-compose,
 .side .review-summary .review-draft-list,
 .side .review-summary .review-no-drafts,
 .side .review-summary .copy-feedback-error {
-  margin-right: 12px;
-  margin-left: 12px;
+  margin-right: 10px;
+  margin-left: 10px;
 }
 
-.side .review-summary .review-event-field {
-  margin-top: 12px;
-}
-
-.side .review-summary .review-body {
-  margin-top: 12px;
-  margin-bottom: 12px;
+.side .review-summary .review-compose {
+  margin-top: 8px;
+  margin-bottom: 8px;
 }
 
 .review-summary .review-body textarea,
 .review-summary .review-body .markdown-editor-preview {
-  min-height: 320px;
-  max-height: 55vh;
+  min-height: 84px;
+  max-height: min(28vh, 220px);
   overflow-y: auto !important;
-}
-
-.side .review-summary .review-body textarea,
-.side .review-summary .review-body .markdown-editor-preview {
-  min-height: 220px;
-  max-height: min(48vh, 520px);
 }
 
 .side .review-summary .review-draft-list {
   flex: 1 1 auto;
   min-height: 0;
-  padding-bottom: 12px;
+  padding-bottom: 8px;
   overflow-y: auto;
-}
-
-.side .github-draft-review {
-  grid-template-columns: minmax(0, 1fr);
 }
 
 .side .github-draft-review-actions {
@@ -2470,16 +2501,10 @@ button.fold:hover {
 
 .side .review-summary .review-actions {
   flex: 0 0 auto;
-  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  padding: 10px 12px;
+  padding: 8px 10px;
   border-top: 1px solid var(--border);
   background: var(--panel2);
-}
-
-.side .review-summary .review-actions .small-muted-button,
-.side .review-summary .review-actions .review-submit {
-  width: auto;
 }
 
 .side .review-summary .review-submit {
@@ -4322,12 +4347,11 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
     bottom: 0;
     left: 0;
     z-index: 1;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
+  .side .review-summary .review-publish-group { width: 100%; }
+  .side .review-summary .review-submit { flex: 1 1 auto; white-space: normal; }
   .github-draft-review-actions { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .github-draft-review-actions button { width: 100%; min-width: 0; padding-inline: 4px; font-size: 0.75rem; white-space: normal; }
-  .side .review-summary .review-actions .small-muted-button,
-  .side .review-summary .review-actions .review-submit { width: 100%; white-space: normal; }
   .toolbar-actions > .toolbar-link { display: none; }
   .pr-header-strip { display: grid; }
   .pr-header-actions { justify-content: flex-start; }

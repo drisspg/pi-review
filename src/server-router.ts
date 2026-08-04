@@ -10,6 +10,7 @@ import type { PiApi } from "./pi-api.js";
 import type { PiTerminalApi } from "./pi-terminal-api.js";
 import type { PiTerminalDraftApi } from "./pi-terminal-draft-api.js";
 import type { PrApi } from "./pr-api.js";
+import type { ReviewArchiveApi } from "./review-archive-api.js";
 import type { ReviewMemoryApi } from "./review-memory-api.js";
 import type { ReviewPromptApi } from "./review-prompt-api.js";
 import type { ReviewSubmitRouteApi } from "./review-submit-route-api.js";
@@ -37,6 +38,7 @@ export type ServerRouteDeps = {
   piTerminalApi: PiTerminalApi;
   piTerminalDraftApi: PiTerminalDraftApi;
   prApi: PrApi;
+  reviewArchiveApi: ReviewArchiveApi;
   reviewMemoryApi: ReviewMemoryApi;
   reviewPromptApi: ReviewPromptApi;
   reviewSubmitRouteApi: ReviewSubmitRouteApi;
@@ -63,6 +65,7 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
     "/api/ask": (payload) => deps.piApi.ask(payload),
     "/api/comment/edit": (payload) => deps.commentApi.edit(payload),
     "/api/comment/reply": (payload) => deps.commentApi.reply(payload),
+    "/api/draft-review/discard": (payload) => deps.draftReviewApi.discard(payload),
     "/api/draft-review/get": (payload) => deps.draftReviewApi.get(payload),
     "/api/file/open": (payload) => deps.fileApi.open(payload),
     "/api/file/text": (payload) => deps.fileApi.text(payload),
@@ -75,6 +78,7 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
     "/api/pi/prompt": (payload) => deps.reviewPromptApi.build(payload),
     "/api/pi/review/status": (payload) => deps.piApi.jobStatus(payload),
     "/api/pi/terminal/delete": (payload) => deps.piTerminalApi.remove(payload),
+    "/api/review/archive": (payload) => deps.reviewArchiveApi.archive(payload),
   };
 
   return async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {

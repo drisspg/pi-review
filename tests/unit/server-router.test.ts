@@ -74,6 +74,9 @@ function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
       },
     },
     draftReviewApi: {
+      async discard() {
+        return { ok: true };
+      },
       async get() {
         return { draftReview: null };
       },
@@ -152,6 +155,11 @@ function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
       },
       parse(input) {
         return { ref: { host: "github.com", owner: "o", repo: "r", number: Number(input) || 1 } };
+      },
+    },
+    reviewArchiveApi: {
+      async archive() {
+        return { memory: { body: "", changeSet: { files: [] }, comments: [], createdAt: "now", disposition: "archived", event: "COMMENT", headSha: "head", id: "archive", prKey: "pr" } };
       },
     },
     reviewMemoryApi: {
@@ -248,6 +256,9 @@ test("server route gets local draft reviews", async () => {
   const draftReview = { prKey: "pr", headSha: "head", event: "COMMENT" as const, body: "", comments: [], updatedAt: "now" };
   const route = createServerRoute(baseDeps({
     draftReviewApi: {
+      async discard() {
+        return { ok: true };
+      },
       async get(payload) {
         return { draftReview: payload.prKey === "pr" ? draftReview : null };
       },
@@ -258,6 +269,10 @@ test("server route gets local draft reviews", async () => {
   }));
 
   assert.deepEqual(jsonBody(await routeRequest(route, "POST", "/api/draft-review/get", { prKey: "pr" })), { draftReview });
+});
+
+test("server route discards local draft reviews", async () => {
+  assert.deepEqual(jsonBody(await routeRequest(createServerRoute(baseDeps()), "POST", "/api/draft-review/discard", { prKey: "pr" })), { ok: true });
 });
 
 test("server route creates Pi terminal review drafts", async () => {
@@ -285,10 +300,29 @@ test("server route deletes persisted Pi terminal sessions", async () => {
   assert.deepEqual(jsonBody(response), { ok: true });
 });
 
+test("server route archives local reviews", async () => {
+  const payloads: Record<string, unknown>[] = [];
+  const route = createServerRoute(baseDeps({
+    reviewArchiveApi: {
+      async archive(payload) {
+        payloads.push(payload);
+        return { memory: { body: "local", comments: [], createdAt: "now", disposition: "archived", event: "COMMENT", headSha: "head", id: "archive", prKey: "pr" } };
+      },
+    },
+  }));
+
+  const payload = { prUrl: "url", event: "COMMENT", comments: [] };
+  assert.deepEqual(jsonBody(await routeRequest(route, "POST", "/api/review/archive", payload)), { memory: { body: "local", comments: [], createdAt: "now", disposition: "archived", event: "COMMENT", headSha: "head", id: "archive", prKey: "pr" } });
+  assert.deepEqual(payloads, [payload]);
+});
+
 test("server route saves draft reviews", async () => {
   const payloads: Record<string, unknown>[] = [];
   const route = createServerRoute(baseDeps({
     draftReviewApi: {
+      async discard() {
+        return { ok: true };
+      },
       async get() {
         return { draftReview: null };
       },

@@ -328,6 +328,16 @@ function draftIdsFromSubmitError(message: string, drafts: DraftComment[]): Recor
   return Object.fromEntries(drafts.filter((draft) => message.includes(draftLocation(draft)) || message.includes(draft.body.trim().slice(0, 80))).map((draft) => [draft.id, true]));
 }
 
+function reviewActionPayload(pr: StoredPullRequest, drafts: DraftComment[], event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string): Record<string, unknown> {
+  return {
+    prUrl: pr.url,
+    headSha: pr.headSha,
+    event,
+    body,
+    comments: drafts.filter((draft) => draft.line != null).map(({ id, path, line, startLine, side, body: commentBody }) => ({ draft_id: id, path, line, side, body: commentBody, ...(startLine != null && startLine !== line ? { start_line: startLine, start_side: side } : {}) })),
+  };
+}
+
 function focusAreaKey(area: FocusArea): string {
   return `${area.path}:${area.startLine}-${area.endLine}`;
 }
@@ -770,7 +780,7 @@ function App() {
   function openThread(target: Target) {
     const key = targetKey(target);
     const existing = threads[key];
-    setThreads({ ...Object.fromEntries(Object.entries(threads).map(([threadKey, thread]) => [threadKey, threadKey === key ? thread : { ...thread, collapsed: true }])), [key]: existing == null ? { key, target, collapsed: false } : { ...existing, collapsed: !existing.collapsed } });
+    setThreads({ ...Object.fromEntries(Object.entries(threads).map(([threadKey, thread]) => [threadKey, threadKey === key ? thread : { ...thread, collapsed: true }])), [key]: existing == null ? { key, target, collapsed: false, terminalOpen: false } : { ...existing, collapsed: !existing.collapsed } });
     setActiveTarget(target);
   }
 
@@ -820,6 +830,42 @@ function App() {
     toggleThread(target, extend);
   }
 
+  function clearActiveDraftReview(prKey: string): void {
+    draftSaveAbortRef.current?.abort();
+    draftSaveRequestIdRef.current += 1;
+    updateCachedReview(prKey, (current) => ({ ...current, draftReview: null }));
+    setDrafts([]);
+    setReviewBody("");
+    setReviewEvent("COMMENT");
+    setDraftSaveStatus("idle");
+    setDraftSaveError(null);
+    setInvalidDraftIds({});
+  }
+
+  async function archiveReview(event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string): Promise<boolean> {
+    if (review == null) return false;
+    try {
+      await api("/api/review/archive", { method: "POST", body: JSON.stringify(reviewActionPayload(review.pr, drafts, event, body)) });
+      clearActiveDraftReview(review.pr.key);
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      return false;
+    }
+  }
+
+  async function discardReview(): Promise<boolean> {
+    if (review == null) return false;
+    try {
+      await api("/api/draft-review/discard", { method: "POST", body: JSON.stringify({ prKey: review.pr.key }) });
+      clearActiveDraftReview(review.pr.key);
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      return false;
+    }
+  }
+
   async function submitReview(event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string): Promise<boolean> {
     if (review == null || submitting) return false;
     const invalidDrafts = invalidDraftDetails(review.files, drafts);
@@ -831,10 +877,8 @@ function App() {
     setInvalidDraftIds({});
     setSubmitting(true);
     try {
-      const { pr } = await api<{ pr: StoredPullRequest | null }>("/api/review/submit", { method: "POST", body: JSON.stringify({ prUrl: review.pr.url, headSha: review.pr.headSha, event, body, comments: drafts.filter((draft) => draft.line != null).map(({ id, path, line, startLine, side, body }) => ({ draft_id: id, path, line, side, body, ...(startLine != null && startLine !== line ? { start_line: startLine, start_side: side } : {}) })) }) });
-      setDrafts([]);
-      setReviewBody("");
-      setReviewEvent("COMMENT");
+      const { pr } = await api<{ pr: StoredPullRequest | null }>("/api/review/submit", { method: "POST", body: JSON.stringify(reviewActionPayload(review.pr, drafts, event, body)) });
+      clearActiveDraftReview(review.pr.key);
       const nextReview = updateCachedReview(review.pr.key, (current) => ({ ...current, pr: pr ?? current.pr, draftReview: null }));
       if (nextReview != null) setReview(nextReview);
       await refreshGithubActivity();
@@ -1113,7 +1157,7 @@ function App() {
       openLogs={() => { setLogsOpen(true); void refreshLogs(); }}
     />
     {error != null && <Flash variant="danger" className="error" role="alert">{error}</Flash>}
-    {busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p><Button variant="muted" onClick={cancelOpen}>Cancel</Button></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} cleanupPrs={cleanupPrs} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} draftRevealId={draftRevealId} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, copyFeedbackPrompt: copyReviewFeedbackPrompt, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} reviewEvent={reviewEvent} setReviewEvent={setReviewEvent} reviewBody={reviewBody} setReviewBody={setReviewBody} draftSaveStatus={draftSaveStatus} draftSaveError={draftSaveError} retryDraftSave={() => setDraftSaveRetry((retry) => retry + 1)} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} githubDrafts={{ review: githubDraftReview, loaded: githubDraftLoaded, loading: githubDraftLoading, error: githubDraftError, pull: pullGithubDraftReview, copyHandoff: copyGithubDraftHandoff }} />}
+    {busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p><Button variant="muted" onClick={cancelOpen}>Cancel</Button></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} cleanupPrs={cleanupPrs} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} draftRevealId={draftRevealId} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, copyFeedbackPrompt: copyReviewFeedbackPrompt, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} reviewEvent={reviewEvent} setReviewEvent={setReviewEvent} reviewBody={reviewBody} setReviewBody={setReviewBody} draftSaveStatus={draftSaveStatus} draftSaveError={draftSaveError} retryDraftSave={() => setDraftSaveRetry((retry) => retry + 1)} archiveReview={archiveReview} discardReview={discardReview} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} githubDrafts={{ review: githubDraftReview, loaded: githubDraftLoaded, loading: githubDraftLoading, error: githubDraftError, pull: pullGithubDraftReview, copyHandoff: copyGithubDraftHandoff }} />}
     {diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}
     {review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} openDiagnostics={() => { setSettingsOpen(false); void showDiagnostics(); }} close={() => setSettingsOpen(false)} />}
     {memoryOpen && <ReviewMemoryModal memory={reviewMemory} loading={memoryLoading} distilling={memoryDistilling} refresh={() => void loadReviewMemory()} distill={() => void distillReviewMemory()} close={() => setMemoryOpen(false)} />}
@@ -1355,7 +1399,7 @@ function clampSidePanelWidth(width: number): number {
   return Math.min(maxSidePanelWidth(), Math.max(300, width));
 }
 
-function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { draftRevealId: string | null; piPanel: PiPanelProps; reviewEvent: "COMMENT" | "APPROVE" | "REQUEST_CHANGES"; setReviewEvent: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES") => void; reviewBody: string; setReviewBody: (body: string) => void; draftSaveStatus: "idle" | "saving" | "saved" | "error"; draftSaveError: string | null; retryDraftSave: () => void; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; submitting: boolean; invalidDraftIds: Record<string, boolean>; refreshingActivity: boolean; githubDrafts: GitHubDraftControls }) {
+function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { draftRevealId: string | null; piPanel: PiPanelProps; reviewEvent: "COMMENT" | "APPROVE" | "REQUEST_CHANGES"; setReviewEvent: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES") => void; reviewBody: string; setReviewBody: (body: string) => void; draftSaveStatus: "idle" | "saving" | "saved" | "error"; draftSaveError: string | null; retryDraftSave: () => void; archiveReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; discardReview: () => Promise<boolean>; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; submitting: boolean; invalidDraftIds: Record<string, boolean>; refreshingActivity: boolean; githubDrafts: GitHubDraftControls }) {
   const diffViewLabel = props.diffViewMode === "unified" ? "Split view" : "Unified view";
   const [sideTab, setSideTab] = useState<"review" | "pi" | "comments">("review");
   const [sideCollapsed, setSideCollapsed] = useState(true);
@@ -1429,7 +1473,7 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { d
         <Button variant="icon" className="side-panel-button" title="Hide review panel" aria-label="Hide review panel" onClick={() => { setSideFocused(false); setSideCollapsed(true); }}><ChevronRightIcon size={16} /></Button>
       </nav>
       <div className="side-tab-panels">
-        <TabPanel value="review" className="side-tab-panel review-tab-panel">{sideTab === "review" && <ReviewSummary pr={props.review.pr} files={props.review.files} drafts={props.drafts} setDrafts={props.setDrafts} event={props.reviewEvent} setEvent={props.setReviewEvent} body={props.reviewBody} setBody={props.setReviewBody} draftSaveStatus={props.draftSaveStatus} draftSaveError={props.draftSaveError} retryDraftSave={props.retryDraftSave} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} submitReview={props.submitReview} submitting={props.submitting} invalidDraftIds={props.invalidDraftIds} copyFeedbackPrompt={props.piPanel.copyFeedbackPrompt} onJumpToTarget={jumpToComment} />}</TabPanel>
+        <TabPanel value="review" className="side-tab-panel review-tab-panel">{sideTab === "review" && <ReviewSummary pr={props.review.pr} files={props.review.files} drafts={props.drafts} setDrafts={props.setDrafts} event={props.reviewEvent} setEvent={props.setReviewEvent} body={props.reviewBody} setBody={props.setReviewBody} draftSaveStatus={props.draftSaveStatus} draftSaveError={props.draftSaveError} retryDraftSave={props.retryDraftSave} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} archiveReview={props.archiveReview} discardReview={props.discardReview} submitReview={props.submitReview} submitting={props.submitting} invalidDraftIds={props.invalidDraftIds} copyFeedbackPrompt={props.piPanel.copyFeedbackPrompt} onJumpToTarget={jumpToComment} />}</TabPanel>
         <TabPanel value="pi" className="side-tab-panel pi-tab-panel">{sideTab === "pi" && <InlineSnippetsProvider value={{ headSha: props.review.pr.headSha, snippets: true }}><AiReviewPanel key={props.review.pr.url} prKey={props.review.pr.key} prUrl={props.review.pr.url} focusPanel={() => setSideFocused(true)} {...props.piPanel} focusAreas={props.focusAreas} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={props.collapsedFocusAreaIds} setCollapsedFocusAreaIds={props.setCollapsedFocusAreaIds} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} /></InlineSnippetsProvider>}</TabPanel>
         <TabPanel value="comments" className="side-tab-panel comments-tab-panel">{sideTab === "comments" && <ExistingComments prUrl={props.review.pr.url} comments={props.review.comments} issueComments={props.review.issueComments} reviewSummaries={props.review.reviewSummaries} refreshGithubActivity={props.refreshGithubActivity} collapseSignal={props.commentCollapseSignal} commentsCollapsed={props.commentsCollapsed} toggleAllComments={props.toggleAllComments} onJumpToComment={jumpToComment} />}</TabPanel>
       </div>
@@ -1772,20 +1816,16 @@ ${area.body}`} />
 
 function ThreadBox({ thread, setThread, removeThread, addDraft }: { thread: Thread; setThread: (thread: Thread) => void; removeThread: () => void; addDraft: (body: string) => void }) {
   const review = useContext(PiTerminalPrContext);
-  const [composing, setComposing] = useState(false);
+  const terminalOpen = thread.terminalOpen === true;
+  const [composing, setComposing] = useState(!terminalOpen);
   const [draft, setDraft] = useState("");
-  const [stopping, setStopping] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  useEffect(() => {
-    if (!stopping) return;
-    const timeout = window.setTimeout(() => {
-      setStopping(false);
-      setThread({ ...thread, collapsed: true, stopSignal: (thread.stopSignal ?? 0) + 1 });
-    }, 50);
-    return () => window.clearTimeout(timeout);
-  }, [setThread, stopping, thread]);
-  async function deleteTerminal(): Promise<void> {
+  async function deleteThread(): Promise<void> {
+    if (!terminalOpen) {
+      removeThread();
+      return;
+    }
     if (review == null || deleting) return;
     setDeleting(true);
     setDeleteError(null);
@@ -1797,7 +1837,7 @@ function ThreadBox({ thread, setThread, removeThread, addDraft }: { thread: Thre
       setDeleting(false);
     }
   }
-  if (thread.collapsed) return <div className="inline-thread collapsed terminal-marker"><button type="button" className="terminal-marker-open" onClick={() => setThread({ ...thread, collapsed: false })}><ChevronRightIcon size={14} /><span className="collapsed-pill-label">Pi terminal · {targetLabel(thread.target)}</span></button><Button variant="icon" className="terminal-marker-delete" aria-label="Delete terminal" title={deleteError ?? "Stop and permanently remove terminal"} onClick={() => void deleteTerminal()} disabled={deleting}><XIcon size={14} /></Button></div>;
+  if (thread.collapsed) return <><div className={`inline-thread collapsed terminal-marker${terminalOpen ? " terminal-active" : ""}`}><button type="button" className="terminal-marker-open" onClick={() => setThread({ ...thread, collapsed: false })}><ChevronRightIcon size={14} /><span className="collapsed-pill-label">{terminalOpen ? "Pi terminal" : "Comment"} · {targetLabel(thread.target)}</span></button><Button variant="icon" className="terminal-marker-delete" aria-label={terminalOpen ? "Delete terminal" : "Discard comment"} title={terminalOpen ? "Stop and permanently remove terminal" : "Discard this empty comment"} onClick={() => void deleteThread()} disabled={deleting}><XIcon size={14} /></Button></div>{deleteError != null && <Flash variant="danger" className="terminal-delete-error" role="alert">Could not delete terminal: {deleteError}</Flash>}</>;
   const location = targetLabel(thread.target);
   const terminalContext = `You are discussing ${location} in this pull request. Keep investigation and edits grounded in this line thread.
 
@@ -1810,20 +1850,21 @@ ${thread.target.hunk.slice(0, 4_000)}`;
     setDraft("");
     setComposing(false);
   }
-  return <div className="inline-thread review-thread local-thread terminal-open">
+  return <div className={`inline-thread review-thread local-thread${terminalOpen ? " terminal-open" : " comment-open"}`}>
     <div className="thread-head">
-      <div className="thread-title"><strong>Line terminal</strong><span>{location}</span></div>
+      <div className="thread-title"><strong>{terminalOpen ? "Line review" : "Add review comment"}</strong><span>{location}</span></div>
       <div className="actions">
-        <Button variant="muted" className="small-muted-button" onClick={() => setComposing((current) => !current)} aria-expanded={composing}>{composing ? "Hide comment" : "Add comment"}</Button>
+        {terminalOpen ? <Button variant="muted" className="small-muted-button" onClick={() => setComposing((current) => !current)} aria-expanded={composing}>{composing ? "Hide comment" : "Add comment"}</Button> : <Button variant="muted" className="small-muted-button" onClick={() => { setThread({ ...thread, terminalOpen: true }); setComposing(false); }}>Open Pi terminal</Button>}
         <Button variant="icon" aria-label="Collapse thread" onClick={() => setThread({ ...thread, collapsed: true })}><ChevronDownIcon size={16} /></Button>
-        <Button variant="icon" className="close-thread-button" aria-label="Stop and collapse terminal" onClick={() => setStopping(true)}><XIcon size={16} /></Button>
+        <Button variant="icon" className="close-thread-button" aria-label={terminalOpen ? "Delete terminal" : "Discard comment"} onClick={() => void deleteThread()} disabled={deleting}><XIcon size={16} /></Button>
       </div>
     </div>
     {composing && <div className="line-comment-composer">
       <MarkdownEditor autoFocus rows={2} value={draft} ariaLabel="Review comment" placeholder="Leave a review comment on this line" onChange={setDraft} onKeyDown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); saveDraft(); } else if (event.key === "Escape") { event.preventDefault(); setComposing(false); } }} />
       <div className="actions"><span className="muted">⌘Enter to add</span><Button variant="muted" onClick={() => { setDraft(""); setComposing(false); }}>Cancel</Button><Button onClick={saveDraft} disabled={draft.trim().length === 0}>Add draft comment</Button></div>
     </div>}
-    <InlinePiTerminal session={terminalSessionId("inline", thread.key)} target={thread.target.line == null ? undefined : { path: thread.target.path, line: thread.target.line, ...(thread.target.startLine == null ? {} : { startLine: thread.target.startLine }), side: thread.target.side }} context={terminalContext} stopSignal={stopping ? (thread.stopSignal ?? 0) + 1 : thread.stopSignal} />
+    {deleteError != null && <Flash variant="danger" className="terminal-delete-error" role="alert">Could not delete terminal: {deleteError}</Flash>}
+    {terminalOpen && <InlinePiTerminal session={terminalSessionId("inline", thread.key)} target={thread.target.line == null ? undefined : { path: thread.target.path, line: thread.target.line, ...(thread.target.startLine == null ? {} : { startLine: thread.target.startLine }), side: thread.target.side }} context={terminalContext} />}
   </div>;
 }
 
@@ -1859,45 +1900,69 @@ function GitHubDraftReviewPanel({ files, onJumpToTarget }: { files: PullFile[]; 
       setCopying(false);
     }
   }
-  return <section className="github-draft-review">
-    <div className="github-draft-review-head"><div><strong>Private GitHub review</strong><span>{comments.length > 0 ? `${comments.length} private ${comments.length === 1 ? "comment" : "comments"}` : githubDrafts.loaded ? "No pending comments" : "Not pulled yet"}</span></div><span className="muted">Visible only to you until submitted</span></div>
-    <div className="github-draft-review-actions"><Button variant="muted" className="small-muted-button" onClick={() => void githubDrafts.pull()} disabled={githubDrafts.loading}>{githubDrafts.loading ? "Pulling…" : githubDrafts.loaded ? "Refresh private comments" : "Pull private GitHub comments"}</Button><Button variant="muted" className="small-muted-button" onClick={() => void copyHandoff()} disabled={copying || comments.length === 0}>{copying ? "Copying…" : copied ? "Copied agent handoff" : "Copy agent handoff"}</Button></div>
+  return <details className="github-draft-review">
+    <summary className="github-draft-review-head"><span className="disclosure-chevron" aria-hidden="true">›</span><div><strong>GitHub private drafts <span className="muted">(optional)</span></strong><span>{comments.length > 0 ? `${comments.length} private ${comments.length === 1 ? "comment" : "comments"}` : githubDrafts.loaded ? "No pending comments" : "Separate from your local drafts below"}</span></div></summary>
+    <p className="github-draft-review-note">This only shows comments already stored in your private pending review on GitHub. The local drafts below are published by <strong>Publish to GitHub</strong>; you do not need to move them here.</p>
+    <div className="github-draft-review-actions"><Button variant="muted" className="small-muted-button" onClick={() => void githubDrafts.pull()} disabled={githubDrafts.loading}>{githubDrafts.loading ? "Pulling…" : githubDrafts.loaded ? "Refresh GitHub private drafts" : "Pull GitHub private drafts"}</Button><Button variant="muted" className="small-muted-button" onClick={() => void copyHandoff()} disabled={copying || comments.length === 0}>{copying ? "Copying…" : copied ? "Copied agent handoff" : "Copy agent handoff"}</Button></div>
     {githubDrafts.error != null && <Flash variant="danger" className="operation-error" role="alert">GitHub draft failed: {githubDrafts.error}</Flash>}
     {copyError != null && <Flash variant="danger" className="copy-feedback-error" role="alert">Copy failed: {copyError}</Flash>}
     {comments.length > 0 && <div className="github-draft-list">{comments.map((comment, index) => <article className="github-draft-card" key={comment.id}><button className="github-draft-location" onClick={onJumpToTarget == null ? undefined : () => onJumpToTarget(githubDraftTarget(files, comment))}><span>#{index + 1}</span><strong>{githubDraftLocation(comment)}</strong></button><MarkdownText text={comment.body} /></article>)}</div>}
-  </section>;
+  </details>;
 }
 
-function ReviewSummary({ pr, files, drafts, setDrafts, event, setEvent, body, setBody, draftSaveStatus, draftSaveError, retryDraftSave, editingDraftId, setEditingDraftId, submitReview, submitting, invalidDraftIds, copyFeedbackPrompt, onJumpToTarget }: { pr: StoredPullRequest; files: PullFile[]; drafts: DraftComment[]; setDrafts: (drafts: DraftComment[]) => void; event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES"; setEvent: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES") => void; body: string; setBody: (body: string) => void; draftSaveStatus: "idle" | "saving" | "saved" | "error"; draftSaveError: string | null; retryDraftSave: () => void; editingDraftId: string | null; setEditingDraftId: (id: string | null) => void; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; submitting: boolean; invalidDraftIds: Record<string, boolean>; copyFeedbackPrompt: (overallBody?: string) => Promise<void>; onJumpToTarget?: (target: Target) => void }) {
-  const [submitted, setSubmitted] = useState(false);
+function ReviewSummary({ pr, files, drafts, setDrafts, event, setEvent, body, setBody, draftSaveStatus, draftSaveError, retryDraftSave, editingDraftId, setEditingDraftId, archiveReview, discardReview, submitReview, submitting, invalidDraftIds, copyFeedbackPrompt, onJumpToTarget }: { pr: StoredPullRequest; files: PullFile[]; drafts: DraftComment[]; setDrafts: (drafts: DraftComment[]) => void; event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES"; setEvent: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES") => void; body: string; setBody: (body: string) => void; draftSaveStatus: "idle" | "saving" | "saved" | "error"; draftSaveError: string | null; retryDraftSave: () => void; editingDraftId: string | null; setEditingDraftId: (id: string | null) => void; archiveReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; discardReview: () => Promise<boolean>; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; submitting: boolean; invalidDraftIds: Record<string, boolean>; copyFeedbackPrompt: (overallBody?: string) => Promise<void>; onJumpToTarget?: (target: Target) => void }) {
+  const [finished, setFinished] = useState<"archived" | "published" | null>(null);
   const [copied, setCopied] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
   const [copyingFeedback, setCopyingFeedback] = useState(false);
   const [feedbackCopied, setFeedbackCopied] = useState(false);
   const [feedbackCopyError, setFeedbackCopyError] = useState<string | null>(null);
   const hasDrafts = drafts.length > 0;
   const hasReviewContent = body.trim().length > 0 || hasDrafts;
-  const draftDescription = hasDrafts ? `${drafts.length} draft ${drafts.length === 1 ? "comment" : "comments"} ready to submit.` : "Add an overall comment or start from a line in the diff.";
+  const canPublish = hasReviewContent || event === "APPROVE";
+  const draftDescription = hasDrafts ? `${drafts.length} local draft ${drafts.length === 1 ? "comment" : "comments"} saved. Publish, archive, or keep editing.` : "Add an optional summary or click a diff line to draft a comment.";
   const [composing, setComposing] = useState(hasReviewContent);
-  const showSubmitted = submitted && !hasReviewContent;
   useEffect(() => {
     if (hasDrafts) setComposing(true);
   }, [hasDrafts]);
-  async function handleSubmit() {
-    if (submitting || !hasReviewContent) return;
-    if (await submitReview(event, body)) {
-      setBody("");
-      setEvent("COMMENT");
-      setSubmitted(true);
-      setComposing(false);
+  function clearForm(nextFinished: "archived" | "published" | null): void {
+    setDrafts([]);
+    setBody("");
+    setEvent("COMMENT");
+    setFinished(nextFinished);
+    setComposing(false);
+  }
+  async function handlePublish(): Promise<void> {
+    if (submitting || !canPublish) return;
+    if (await submitReview(event, body)) clearForm("published");
+  }
+  async function handleArchive(): Promise<void> {
+    if (archiving || !hasReviewContent) return;
+    setArchiving(true);
+    try {
+      if (await archiveReview(event, body)) clearForm("archived");
+    } finally {
+      setArchiving(false);
     }
   }
-  async function copyDraftContext() {
+  async function handleDiscard(): Promise<void> {
+    const description = hasDrafts ? `${drafts.length} local draft ${drafts.length === 1 ? "comment" : "comments"}${body.trim().length > 0 ? " and the overall summary" : ""}` : "the local overall summary";
+    if (discarding || !hasReviewContent || !window.confirm(`Discard ${description}?`)) return;
+    setDiscarding(true);
+    try {
+      if (await discardReview()) clearForm(null);
+    } finally {
+      setDiscarding(false);
+    }
+  }
+  async function copyDraftContext(): Promise<void> {
     if (!hasReviewContent) return;
     await writeClipboard(reviewDraftContext(pr, files, body, drafts));
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1600);
   }
-  async function copyFeedback() {
+  async function copyFeedback(): Promise<void> {
     if (copyingFeedback) return;
     setCopyingFeedback(true);
     setFeedbackCopyError(null);
@@ -1912,10 +1977,31 @@ function ReviewSummary({ pr, files, drafts, setDrafts, event, setEvent, body, se
     }
   }
   const copyFeedbackButton = <Button variant="muted" className="small-muted-button pi-copy-feedback" onClick={() => void copyFeedback()} disabled={copyingFeedback}>{copyingFeedback ? "Copying…" : feedbackCopied ? "Copied feedback prompt" : "Copy feedback prompt"}</Button>;
-  const saveStatus = draftSaveStatus !== "idle" && <span className={`draft-save-status is-${draftSaveStatus}`} role={draftSaveStatus === "error" ? "alert" : "status"}>{draftSaveStatus === "saving" ? "Saving draft…" : draftSaveStatus === "saved" ? "Draft saved" : <>Draft not saved: {draftSaveError}<button type="button" onClick={retryDraftSave}>Retry</button></>}</span>;
+  const saveStatus = draftSaveStatus !== "idle" && <span className={`draft-save-status is-${draftSaveStatus}`} role={draftSaveStatus === "error" ? "alert" : "status"}>{draftSaveStatus === "saving" ? "Saving…" : draftSaveStatus === "saved" ? "Saved locally" : <>Not saved: {draftSaveError}<button type="button" onClick={retryDraftSave}>Retry</button></>}</span>;
+  const finishedDescription = finished === "published" ? "Review published to GitHub." : finished === "archived" ? "Review archived locally. You can find it in Review memory." : draftDescription;
   const githubDraftPanel = <GitHubDraftReviewPanel files={files} onJumpToTarget={onJumpToTarget} />;
-  if (!composing && !hasReviewContent) return <section className="panel review-summary review-summary-empty"><div className="review-summary-head"><div><h2>Review changes</h2><p className="muted">{showSubmitted ? "Review submitted." : draftDescription}</p>{feedbackCopyError != null && <Flash variant="danger" className="copy-feedback-error" role="alert">Copy failed: {feedbackCopyError}</Flash>}</div></div>{githubDraftPanel}<div className="review-summary-empty-actions">{copyFeedbackButton}<Button className="review-start-button" onClick={() => setComposing(true)}>Start review</Button></div></section>;
-  return <section className="panel review-summary"><div className="review-summary-head"><div><h2>Review changes</h2><p className="muted">{draftDescription}</p>{saveStatus}</div>{copyFeedbackButton}</div>{feedbackCopyError != null && <Flash variant="danger" className="copy-feedback-error" role="alert">Copy failed: {feedbackCopyError}</Flash>}{githubDraftPanel}<label className="review-event-field"><span>Review outcome</span><Select className={`review-event ${event.toLowerCase().replace("_", "-")}`} value={event} onChange={(change) => { setEvent(change.target.value as typeof event); setSubmitted(false); }}><option value="COMMENT">Comment</option><option value="APPROVE">Approve</option><option value="REQUEST_CHANGES">Request changes</option></Select></label><div className="review-body"><MarkdownEditor rows={2} value={body} onChange={(value) => { setBody(value); setSubmitted(false); }} placeholder="Overall review body" ariaLabel="Overall review body" /></div><div className="review-actions"><Button variant="muted" className="small-muted-button" disabled={!hasReviewContent} onClick={() => void copyDraftContext()}>{copied ? "Copied context" : "Copy draft context"}</Button><Button className={`review-submit ${event.toLowerCase().replace("_", "-")}`} disabled={submitting || !hasReviewContent} onClick={() => void handleSubmit()}>{submitting ? "Submitting…" : `Submit review (${drafts.length})`}</Button></div>{hasDrafts ? <div className="review-draft-list">{drafts.map((draft, index) => <DraftView key={draft.id} draft={draft} index={index} invalid={invalidDraftIds[draft.id] === true} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} onJump={onJumpToTarget != null ? () => onJumpToTarget({ ...draft, hunk: "" }) : undefined} />)}</div> : <p className="muted review-no-drafts">No draft comments yet.</p>}</section>;
+  if (!composing && !hasReviewContent) return <section className="panel review-summary review-summary-empty"><div className="review-summary-head"><div><h2>Review changes</h2><p className="muted">{finishedDescription}</p>{feedbackCopyError != null && <Flash variant="danger" className="copy-feedback-error" role="alert">Copy failed: {feedbackCopyError}</Flash>}</div></div>{githubDraftPanel}<div className="review-summary-empty-actions">{copyFeedbackButton}<Button className="review-start-button" onClick={() => { setFinished(null); setComposing(true); }}>Start review</Button></div></section>;
+  const publishLabel = submitting ? "Publishing…" : event === "APPROVE" ? "Approve on GitHub" : event === "REQUEST_CHANGES" ? "Request changes on GitHub" : `Publish to GitHub${drafts.length > 0 ? ` (${drafts.length})` : ""}`;
+  return <section className="panel review-summary">
+    <div className="review-summary-head"><div><h2>Review changes</h2><p className="muted">{draftDescription}</p>{saveStatus}</div>{copyFeedbackButton}</div>
+    {feedbackCopyError != null && <Flash variant="danger" className="copy-feedback-error" role="alert">Copy failed: {feedbackCopyError}</Flash>}
+    {githubDraftPanel}
+    <div className="review-compose">
+      <label className="review-event-field"><span>Outcome</span><Select className={`review-event ${event.toLowerCase().replace("_", "-")}`} value={event} onChange={(change) => { setEvent(change.target.value as typeof event); setFinished(null); }}><option value="COMMENT">Comment</option><option value="APPROVE">Approve</option><option value="REQUEST_CHANGES">Request changes</option></Select></label>
+      <div className="review-body"><MarkdownEditor rows={2} value={body} onChange={(value) => { setBody(value); setFinished(null); }} placeholder="Overall review body" ariaLabel="Overall review body" /></div>
+    </div>
+    {hasDrafts ? <div className="review-draft-list">{drafts.map((draft, index) => <DraftView key={draft.id} draft={draft} index={index} invalid={invalidDraftIds[draft.id] === true} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} onJump={onJumpToTarget != null ? () => onJumpToTarget({ ...draft, hunk: "" }) : undefined} />)}</div> : <p className="muted review-no-drafts">No inline draft comments.</p>}
+    <div className="review-actions">
+      <div className="review-publish-group">
+        <Button className={`review-submit ${event.toLowerCase().replace("_", "-")}`} disabled={submitting || archiving || discarding || !canPublish} onClick={() => void handlePublish()}>{publishLabel}</Button>
+        <ActionMenu trigger={<Button className="review-submit-menu" aria-label="More review actions" disabled={!hasReviewContent || submitting || archiving || discarding}><ChevronDownIcon size={14} /></Button>}>
+          <ActionMenuItem onSelect={() => void copyDraftContext()}>{copied ? "Copied draft context" : "Copy draft context"}</ActionMenuItem>
+          <ActionMenuItem onSelect={() => void handleArchive()}>{archiving ? "Archiving…" : "Archive locally"}</ActionMenuItem>
+          <ActionMenuItem onSelect={() => void handleDiscard()}>{discarding ? "Discarding…" : "Discard drafts"}</ActionMenuItem>
+        </ActionMenu>
+      </div>
+    </div>
+  </section>;
 }
 
 function AgentActivityLine({ activity }: { activity: PiAgentActivity | null | undefined }) {
@@ -2495,7 +2581,7 @@ function reviewMemoryProfileSections(text: string): string[] {
 }
 
 function reviewMemoryRecordTitle(record: ReviewMemoryRecord): string {
-  return `${record.prKey} · ${record.event} · ${relativeTime(record.createdAt)}`;
+  return `${record.prKey} · ${record.disposition === "archived" ? "archived locally" : "published"} · ${record.event} · ${relativeTime(record.createdAt)}`;
 }
 
 function reviewMemoryChangeSetSummary(record: ReviewMemoryRecord): string {
@@ -2518,7 +2604,7 @@ function ReviewMemoryModal({ memory, loading, distilling, refresh, distill, clos
     <header className="pi-modal-head">
       <div>
         <h2>Review memory</h2>
-        <p className="muted">Raw review feedback becomes examples; distillation turns it into prompt rules.</p>
+        <p className="muted">Published and locally archived reviews remain available as reusable feedback snapshots.</p>
       </div>
       <div className="pi-modal-head-actions">
         <Button variant="muted" onClick={refresh} disabled={loading || distilling}>{loading ? "Refreshing…" : "Refresh"}</Button>

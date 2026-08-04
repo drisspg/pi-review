@@ -137,12 +137,13 @@ test("saveReviewProfile trims text, records source count, and writes profile not
 test("saveReviewMemory assigns metadata, prepends records, and writes preference prompt", async () => {
   const { runtime, files } = fakeRuntime({ ...emptyState(), reviewMemory: [{ prKey: "old", event: "COMMENT", body: "old", comments: [], id: "old-id", createdAt: "then" }] });
 
-  const saved = await createStateStore(runtime, paths).saveReviewMemory({ prKey: "new", event: "APPROVE", body: "new body", comments: [{ path: "a.ts", line: 10, startLine: null, side: "RIGHT", body: "inline" }] });
+  const saved = await createStateStore(runtime, paths).saveReviewMemory({ prKey: "new", event: "APPROVE", body: "new body", comments: [{ path: "a.ts", line: 10, startLine: null, side: "RIGHT", body: "inline" }], disposition: "archived" });
   const persisted = JSON.parse(files.get(paths.statePath) ?? "{}") as AppState;
 
   assert.equal(saved.id, "uuid-1");
   assert.equal(saved.createdAt, "2026-06-04T00:00:00.000Z");
   assert.equal(persisted.reviewMemory[0]?.prKey, "new");
+  assert.match(files.get(paths.reviewMemoryNotesPath) ?? "", /archived locally/);
   assert.match(files.get(paths.reviewMemoryNotesPath) ?? "", /a\.ts:10: inline/);
 });
 

@@ -116,9 +116,9 @@ export function reviewMemoryPrompt(records: ReviewMemoryRecord[]): string {
   const examples = records.slice(0, maxReviewMemoryPromptRecords).map((record, index) => {
     const comments = record.comments.length === 0 ? "No inline comments." : record.comments.map((comment) => `- ${reviewMemoryLocation(comment)}: ${comment.body}`).join("\n");
     const body = record.body.trim().length === 0 ? "No overall body." : record.body.trim();
-    return `## Example ${index + 1}: ${record.prKey} (${record.event})\nOverall review body:\n${body}\n\nInline comments:\n${comments}\n\nChange-set context:\n${reviewMemoryChangeSetBlock(record, maxReviewMemoryPromptPatchChars)}`;
+    return `## Example ${index + 1}: ${record.prKey} (${record.disposition === "archived" ? "archived locally" : "published"}, ${record.event})\nOverall review body:\n${body}\n\nInline comments:\n${comments}\n\nChange-set context:\n${reviewMemoryChangeSetBlock(record, maxReviewMemoryPromptPatchChars)}`;
   });
-  return `# Driss review preference examples\n\nThese are examples of review comments Driss actually submitted. Use them as positive examples of what he considered worth saying. Prefer similar specificity, severity, and style. Do not copy comments verbatim unless the same issue is present. Avoid over-indexing on one example when the current diff points elsewhere.\n\n${examples.join("\n\n")}`;
+  return `# Driss review preference examples\n\nThese are review comments Driss either published or deliberately archived locally. Use them as positive examples of feedback he considered worth preserving. Prefer similar specificity, severity, and style. Do not copy comments verbatim unless the same issue is present. Avoid over-indexing on one example when the current diff points elsewhere.\n\n${examples.join("\n\n")}`;
 }
 
 function reviewMemoryDistillationSource(records: ReviewMemoryRecord[]): string {
@@ -126,7 +126,7 @@ function reviewMemoryDistillationSource(records: ReviewMemoryRecord[]): string {
   return records.slice(0, maxReviewMemoryDistillationRecords).map((record, index) => {
     const comments = record.comments.length === 0 ? "No inline comments." : record.comments.map((comment) => `- ${reviewMemoryLocation(comment)}: ${comment.body}`).join("\n");
     const body = record.body.trim().length === 0 ? "No overall body." : record.body.trim();
-    return `## Raw review ${index + 1}: ${record.prKey} (${record.event}, ${record.createdAt})\nOverall review body:\n${body}\n\nInline comments:\n${comments}\n\nChange-set context:\n${reviewMemoryChangeSetBlock(record, maxReviewMemoryDistillationPatchChars)}`;
+    return `## Raw review ${index + 1}: ${record.prKey} (${record.disposition === "archived" ? "archived locally" : "published"}, ${record.event}, ${record.createdAt})\nOverall review body:\n${body}\n\nInline comments:\n${comments}\n\nChange-set context:\n${reviewMemoryChangeSetBlock(record, maxReviewMemoryDistillationPatchChars)}`;
   }).join("\n\n");
 }
 

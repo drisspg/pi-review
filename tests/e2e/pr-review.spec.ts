@@ -364,6 +364,7 @@ test("keeps the diff and files toolbar within a mobile viewport", async ({ page 
 test("keeps compact Review actions separate on mobile", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openSideTab(page, "Review");
+  await page.locator(".github-draft-review > summary").click();
   const actions = page.locator(".github-draft-review-actions button");
   const first = await actions.nth(0).boundingBox();
   const second = await actions.nth(1).boundingBox();
@@ -383,8 +384,8 @@ test("keeps tablet Review controls reachable through panel scrolling", async ({ 
   await openReviewForm(page);
   await page.getByPlaceholder("Overall review body").fill("tablet review");
   const reviewPanel = page.locator(".review-tab-panel");
-  await page.getByRole("button", { name: "Submit review (0)" }).scrollIntoViewIfNeeded();
-  await expect(page.getByRole("button", { name: "Submit review (0)" })).toBeInViewport();
+  await page.getByRole("button", { name: "Publish to GitHub" }).scrollIntoViewIfNeeded();
+  await expect(page.getByRole("button", { name: "Publish to GitHub" })).toBeInViewport();
   expect(await reviewPanel.evaluate((element) => getComputedStyle(element).overflowY)).toBe("auto");
   expect(await reviewPanel.evaluate((element) => element.scrollHeight)).toBeGreaterThan(await reviewPanel.evaluate((element) => element.clientHeight));
 });
@@ -399,13 +400,15 @@ test("caps focused Comments content on ultrawide screens", async ({ page }) => {
   expect(comments.x).toBeGreaterThan(1500);
 });
 
-test("opens a line thread from the keyboard", async ({ page }) => {
+test("opens a line comment from the keyboard", async ({ page }) => {
   const row = (await openFileWithAddedRows(page, 1)).first();
   await row.focus();
   await expect(row).toBeFocused();
   await page.keyboard.press("Enter");
-  await expect(page.locator(".inline-thread.local-thread")).toBeVisible();
-  await expect(page.locator(".inline-thread.local-thread .pi-native-terminal.compact")).toBeVisible();
+  const thread = page.locator(".inline-thread.local-thread");
+  await expect(thread).toBeVisible();
+  await expect(thread.getByRole("textbox", { name: "Review comment" })).toBeFocused();
+  await expect(thread.locator(".pi-native-terminal.compact")).toHaveCount(0);
 });
 
 test("creates, edits, and removes draft comments", async ({ page }) => {
@@ -437,7 +440,8 @@ test("pulls private GitHub comments and copies an agent handoff", async ({ page,
   });
 
   await openSideTab(page, "Review");
-  await page.getByRole("button", { name: "Pull private GitHub comments" }).click();
+  await page.locator(".github-draft-review > summary").click();
+  await page.getByRole("button", { name: "Pull GitHub private drafts" }).click();
 
   await expect(page.locator(".github-draft-card")).toContainText(`${path}:${line}`);
   await expect(page.locator(".github-draft-card")).toContainText("send this private note to the coding agent");
@@ -455,7 +459,8 @@ test("shows private GitHub draft pull failures in the Review panel", async ({ pa
   });
 
   await openSideTab(page, "Review");
-  await page.getByRole("button", { name: "Pull private GitHub comments" }).click();
+  await page.locator(".github-draft-review > summary").click();
+  await page.getByRole("button", { name: "Pull GitHub private drafts" }).click();
 
   await expect(page.locator(".github-draft-review").getByRole("alert")).toContainText("GitHub draft failed: GitHub unavailable");
 });
@@ -468,9 +473,11 @@ test("copies all draft comments with diff context", async ({ page, context }) =>
   if (path == null || !Number.isInteger(line)) throw new Error("Missing draft target");
   await loadDraftReviewFromTerminal(page, [{ id: "handoff-draft", path, line, side: "RIGHT", body: "send this to another agent" }]);
   await openSideTab(page, "Review");
-  await page.getByRole("button", { name: "Copy draft context" }).click();
+  await page.getByRole("button", { name: "More review actions" }).click();
+  await page.getByRole("menuitem", { name: "Copy draft context" }).click();
 
-  await expect(page.getByRole("button", { name: "Copied context" })).toBeVisible();
+  await page.getByRole("button", { name: "More review actions" }).click();
+  await expect(page.getByRole("menuitem", { name: "Copied draft context" })).toBeVisible();
   const text = await page.evaluate(() => navigator.clipboard.readText());
   expect(text).toContain("# PR review draft context");
   expect(text).toContain("send this to another agent");
@@ -490,9 +497,9 @@ test("shows local draft save failures and retries them", async ({ page }) => {
 
   await openReviewForm(page);
   await page.getByPlaceholder("Overall review body").fill("keep this");
-  await expect(page.locator(".draft-save-status.is-error")).toContainText("Draft not saved: disk full");
+  await expect(page.locator(".draft-save-status.is-error")).toContainText("Not saved: disk full");
   await page.getByRole("button", { name: "Retry" }).click();
-  await expect(page.locator(".draft-save-status.is-saved")).toContainText("Draft saved");
+  await expect(page.locator(".draft-save-status.is-saved")).toContainText("Saved locally");
 });
 
 test("supports multiline draft ranges", async ({ page }) => {
@@ -513,7 +520,7 @@ test("supports multiline draft ranges", async ({ page }) => {
 
   await openSideTab(page, "Review");
   await expect(page.locator(".review-summary .draft-card", { hasText: "range draft" })).toContainText(`${firstLine}-${lastLine}`);
-  await expect(page.getByRole("button", { name: /Submit review/ })).toBeEnabled();
+  await expect(page.getByRole("button", { name: /Publish to GitHub/ })).toBeEnabled();
 });
 
 test("keeps submit visible while many draft comments scroll", async ({ page }) => {
@@ -533,7 +540,7 @@ test("keeps submit visible while many draft comments scroll", async ({ page }) =
   await expect(page.locator(".review-layout")).toBeVisible({ timeout: 60_000 });
   await openSideTab(page, "Review");
 
-  await expect(page.getByRole("button", { name: "Submit review (12)" })).toBeInViewport();
+  await expect(page.getByRole("button", { name: "Publish to GitHub (12)" })).toBeInViewport();
   await expect(page.locator(".review-draft-list")).toHaveJSProperty("scrollTop", 0);
   expect(await page.locator(".review-draft-list").evaluate((list) => list.scrollHeight > list.clientHeight)).toBe(true);
 });
@@ -562,7 +569,7 @@ test("keeps draft cards compact in the focused Review panel", async ({ page }) =
   if (summaryBox == null) throw new Error("Missing focused Review panel");
   expect(summaryBox.width).toBeLessThanOrEqual(1100);
   expect(Math.max(...cardHeights)).toBeLessThan(100);
-  await expect(page.getByRole("button", { name: "Submit review (4)" })).toBeInViewport();
+  await expect(page.getByRole("button", { name: "Publish to GitHub (4)" })).toBeInViewport();
 });
 
 test("keeps review submission reachable on a short mobile viewport", async ({ page }) => {
@@ -570,10 +577,71 @@ test("keeps review submission reachable on a short mobile viewport", async ({ pa
   await openReviewForm(page);
   await page.getByPlaceholder("Overall review body").fill("mobile review");
 
-  await expect(page.getByRole("button", { name: "Submit review (0)" })).toBeInViewport();
+  await expect(page.getByRole("button", { name: "Publish to GitHub" })).toBeInViewport();
   const sideBox = await page.locator(".side").boundingBox();
   expect(sideBox?.y).toBeLessThanOrEqual(8);
   expect((sideBox?.y ?? 0) + (sideBox?.height ?? 0)).toBeLessThanOrEqual(480);
+});
+
+test("publishes an approval without requiring comments", async ({ page }) => {
+  let submitPayload: Record<string, unknown> | null = null;
+  await page.route("**/api/review/submit", async (route) => {
+    submitPayload = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ result: { ok: true } }) });
+  });
+
+  await openReviewForm(page);
+  await page.locator(".review-event").selectOption("APPROVE");
+  const approve = page.getByRole("button", { name: "Approve on GitHub" });
+  await expect(approve).toBeEnabled();
+  await approve.click();
+
+  await expect(page.locator(".side")).toContainText("Review published to GitHub.");
+  expect(submitPayload?.event).toBe("APPROVE");
+  expect(submitPayload?.body).toBe("");
+  expect(submitPayload?.comments).toEqual([]);
+});
+
+test("archives local drafts without publishing them", async ({ page }) => {
+  const row = (await openFileWithAddedRows(page, 1)).first();
+  const path = await row.getAttribute("data-path");
+  const line = Number.parseInt(await row.getAttribute("data-line") ?? "", 10);
+  if (path == null || !Number.isInteger(line)) throw new Error("Missing archive target");
+  await loadDraftReviewFromTerminal(page, [{ id: "archive-draft", path, line, side: "RIGHT", body: "Keep this review local." }]);
+  let archivePayload: Record<string, unknown> | null = null;
+  await page.route("**/api/review/archive", async (route) => {
+    archivePayload = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ memory: { id: "archive", prKey: openedPr!.key, headSha: openedPr!.headSha, event: "COMMENT", body: "", comments: [], disposition: "archived", createdAt: "now" } }) });
+  });
+
+  await openSideTab(page, "Review");
+  await page.getByRole("button", { name: "More review actions" }).click();
+  const actionMenu = page.locator(".action-menu-popover");
+  await expect(actionMenu).toBeVisible();
+  expect(await actionMenu.evaluate((menu) => getComputedStyle(menu).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)");
+  await page.getByRole("menuitem", { name: "Archive locally" }).click();
+
+  await expect(page.locator(".side")).toContainText("Review archived locally.");
+  await expect(page.locator(".review-summary .draft-card")).toHaveCount(0);
+  expect(archivePayload?.event).toBe("COMMENT");
+  expect((archivePayload?.comments as unknown[] | undefined)?.length).toBe(1);
+});
+
+test("discards the active local review from the action menu", async ({ page }) => {
+  await openReviewForm(page);
+  await page.getByPlaceholder("Overall review body").fill("Throw this away");
+  let discardRequests = 0;
+  await page.route("**/api/draft-review/discard", async (route) => {
+    discardRequests += 1;
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true }) });
+  });
+  page.once("dialog", (dialog) => void dialog.accept());
+
+  await page.getByRole("button", { name: "More review actions" }).click();
+  await page.getByRole("menuitem", { name: "Discard drafts" }).click();
+
+  await expect(page.getByRole("button", { name: "Start review" })).toBeVisible();
+  expect(discardRequests).toBe(1);
 });
 
 test("clears the review form after submitting", async ({ page }) => {
@@ -585,9 +653,9 @@ test("clears the review form after submitting", async ({ page }) => {
 
   await openReviewForm(page);
   await page.getByPlaceholder("Overall review body").fill("looks good");
-  await page.getByRole("button", { name: /Submit review/ }).click();
+  await page.getByRole("button", { name: /Publish to GitHub/ }).click();
 
-  await expect(page.locator(".side")).toContainText("Review submitted.");
+  await expect(page.locator(".side")).toContainText("Review published to GitHub.");
   await expect(page.getByPlaceholder("Overall review body")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Start review" })).toBeVisible();
   expect(submitRequests).toBe(1);
@@ -610,7 +678,7 @@ test("shows failed review inline draft diagnostics", async ({ page }) => {
   if (path == null || !Number.isInteger(line)) throw new Error("Missing draft target");
   await loadDraftReviewFromTerminal(page, [{ id: "abc", path, line, side: "RIGHT", body: "stale line draft" }]);
   await openSideTab(page, "Review");
-  await page.getByRole("button", { name: /Submit review/ }).click();
+  await page.getByRole("button", { name: /Publish to GitHub/ }).click();
 
   await expect(page.locator(".error")).toContainText("Inline comments in the failed review payload");
   await expect(page.locator(".error")).toContainText("stale line draft");
@@ -771,24 +839,23 @@ test("opens the native Pi terminal by default and focuses it on demand", async (
   await expect.poll(async () => (await terminalMessages()).some((message) => message.includes('"type":"resize"'))).toBe(true);
 });
 
-test("opens a line thread as an inline native Pi terminal by default", async ({ page }) => {
+test("opens a line comment by default and starts Pi on demand", async ({ page }) => {
   await mockNativeTerminal(page);
   const rows = await openFileWithAddedRows(page, 1);
   await rows.first().click();
   const thread = page.locator(".local-thread");
+  await expect(thread).toHaveClass(/comment-open/);
+  await expect(thread.locator(".pi-native-terminal.compact")).toHaveCount(0);
+  await expect(thread.getByRole("textbox", { name: "Review comment" })).toBeFocused();
+  await thread.getByRole("textbox", { name: "Review comment" }).fill("Human-authored review draft.");
+  await thread.getByRole("button", { name: "Add draft comment" }).click();
+  await expect(page.locator(".inline-thread.draft", { hasText: "Human-authored review draft." })).toBeVisible();
+
+  await thread.getByRole("button", { name: "Open Pi terminal" }).click();
   await expect(thread).toHaveClass(/terminal-open/);
   await expect(thread.locator(".pi-native-terminal.compact")).toBeVisible();
   await expect(thread.getByRole("textbox", { name: "Terminal input" })).toBeFocused();
   await expect(thread.locator(".xterm-rows")).toContainText("Native Pi ready");
-
-  await thread.getByRole("button", { name: "Add comment" }).click();
-  await thread.getByRole("textbox", { name: "Review comment" }).fill("Human-authored review draft.");
-  await thread.getByRole("button", { name: "Add draft comment" }).click();
-  await expect(page.locator(".inline-thread.draft", { hasText: "Human-authored review draft." })).toBeVisible();
-  await expect(thread.locator(".pi-native-terminal.compact")).toBeVisible();
-
-  await page.keyboard.press("Escape");
-  await expect(thread).toBeVisible();
 
   await page.locator(".pr-header-strip").click();
   const marker = page.getByRole("button", { name: /Pi terminal ·/ });
@@ -813,7 +880,9 @@ test("deletes a minimized line terminal", async ({ page }) => {
   await mockNativeTerminal(page);
   const rows = await openFileWithAddedRows(page, 1);
   await rows.first().click();
-  await expect(page.locator(".local-thread")).toBeVisible();
+  const thread = page.locator(".local-thread");
+  await expect(thread).toBeVisible();
+  await thread.getByRole("button", { name: "Open Pi terminal" }).click();
 
   const deletePayloads: Record<string, unknown>[] = [];
   await page.route("**/api/pi/terminal/delete", async (route) => {
