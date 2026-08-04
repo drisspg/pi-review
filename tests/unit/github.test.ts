@@ -8,7 +8,7 @@ const ref: PullRequestRef = { host: "github.com", owner: "pytorch", repo: "pytor
 
 type ExecCall = { command: string; args: string[] };
 
-function fakeRuntime(options: { failMutations?: boolean; gitattributes?: string } = {}) {
+function fakeRuntime(options: { failMutations?: boolean; gitattributes?: string; landed?: boolean } = {}) {
   const execCalls: ExecCall[] = [];
   const writes: Array<{ path: string; data: string }> = [];
   const removals: string[] = [];
@@ -24,7 +24,7 @@ function fakeRuntime(options: { failMutations?: boolean; gitattributes?: string 
           if (options.failMutations) throw new Error("mutation failed");
           return { stdout: JSON.stringify({ ok: true }), stderr: "" };
         }
-        if (args[0] === "api" && key === "/repos/pytorch/pytorch/pulls/185924") return { stdout: JSON.stringify({ number: 185924, title: "PR title", html_url: "https://github.com/pytorch/pytorch/pull/185924", state: "open", body: null, user: { login: "alice" }, base: { ref: "main", sha: "base", repo: { full_name: "pytorch/pytorch", clone_url: "git", html_url: "repo" } }, head: { ref: "branch", sha: "head", repo: null } }), stderr: "" };
+        if (args[0] === "api" && key === "/repos/pytorch/pytorch/pulls/185924") return { stdout: JSON.stringify({ number: 185924, title: "PR title", html_url: "https://github.com/pytorch/pytorch/pull/185924", state: options.landed ? "closed" : "open", merged: false, labels: options.landed ? [{ name: "Merged" }] : [], body: null, user: { login: "alice" }, base: { ref: "main", sha: "base", repo: { full_name: "pytorch/pytorch", clone_url: "git", html_url: "repo" } }, head: { ref: "branch", sha: "head", repo: null } }), stderr: "" };
         if (args[0] === "api" && key === "/repos/pytorch/pytorch/pulls/185924/files") return { stdout: JSON.stringify([{ filename: "torch/a.py", status: "modified", additions: 1, deletions: 2, changes: 3, patch: "@@" }, { filename: "generated/model.py", status: "modified", additions: 10, deletions: 0, changes: 10, patch: "@@" }]), stderr: "" };
         if (args[0] === "api" && key === "/repos/pytorch/pytorch/pulls/185924/comments") return { stdout: JSON.stringify([{ id: 123, path: "torch/a.py", line: 7, side: "RIGHT", body: "note", html_url: "comment" }]), stderr: "" };
         if (args[0] === "api" && key === "/repos/pytorch/pytorch/issues/185924/comments") return { stdout: JSON.stringify([{ id: 456, body: "issue", html_url: "issue" }]), stderr: "" };
@@ -63,12 +63,22 @@ test("GitHub client fetches and combines PR review data", async () => {
 
   assert.equal(data.pr.key, "github.com/pytorch/pytorch#185924");
   assert.equal(data.pr.reviewDecision, "REVIEW_REQUIRED");
+  assert.equal(data.pr.merged, false);
   assert.equal(data.pr.existingCommentCount, 3);
   assert.equal(data.comments[0]?.thread_id, "thread-1");
   assert.equal(data.comments[0]?.thread_resolved, true);
   assert.equal(data.reviewSummaries.length, 1);
   assert.equal(data.fileReviews[0]?.viewed, false);
   assert.equal(data.fileReviews[0]?.updatedAt, "2026-06-04T00:00:00.000Z");
+});
+
+test("GitHub client recognizes bot-landed pull requests from their merged label", async () => {
+  const { runtime } = fakeRuntime({ landed: true });
+
+  const data = await createGitHubClient(runtime).fetchPullRequestReviewData(ref);
+
+  assert.equal(data.pr.state, "closed");
+  assert.equal(data.pr.merged, true);
 });
 
 test("GitHub client overlaps gitattributes with slower PR detail requests", async () => {

@@ -21,6 +21,8 @@ export type PullRequest = {
   state: string;
   body?: string | null;
   user?: GitHubUser;
+  merged?: boolean;
+  labels?: Array<{ name?: string }>;
   base: { ref: string; sha: string; repo: GitHubRepo };
   head: { ref: string; sha: string; repo: GitHubRepo | null };
 };
@@ -79,6 +81,7 @@ export type StoredPullRequest = {
   title: string;
   body: string | null;
   state: string;
+  merged?: boolean;
   author: string | null;
   baseSha: string;
   headSha: string;

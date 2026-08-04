@@ -98,6 +98,7 @@ function toStoredPullRequest(ref: PullRequestRef, pr: PullRequest, files: PullFi
     title: pr.title,
     body: pr.body ?? null,
     state: pr.state,
+    merged: pr.merged === true || (pr.state === "closed" && pr.labels?.some((label) => label.name?.trim().toLowerCase() === "merged") === true),
     author: pr.user?.login ?? null,
     baseSha: pr.base.sha,
     headSha: pr.head.sha,

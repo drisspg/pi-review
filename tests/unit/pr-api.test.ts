@@ -109,16 +109,26 @@ test("PR API cleanup disposes session before worktree cleanup and state removal"
   assert.deepEqual(calls, ["parse:url", "dispose:github.com/pytorch/pytorch#1", "cleanup:1", "remove:github.com/pytorch/pytorch#1"]);
 });
 
-test("PR API activity fetches, upserts, and hydrates review response", async () => {
+test("PR API activity refreshes the worktree, Pi context, and review response", async () => {
   const { deps, calls } = fakeDeps();
 
   const response = await createPrApi(deps).activity("url");
 
+  assert.equal(response.worktreeDir, "/tmp/worktree");
   assert.equal(response.pr.title, "Stored PR");
   assert.equal(response.draftReview?.body, "draft body");
   assert.equal(response.focusScan?.id, "focus");
   assert.equal(response.aiReview?.id, "ai");
-  assert.deepEqual(calls, ["parse:url", "fetch:1", "upsert:github.com/pytorch/pytorch#1", "draft:github.com/pytorch/pytorch#1", "focus:github.com/pytorch/pytorch#1", "ai:github.com/pytorch/pytorch#1"]);
+  assert.deepEqual(calls, [
+    "parse:url",
+    "fetch:1",
+    "upsert:github.com/pytorch/pytorch#1",
+    "prepare:1:git@github.com:pytorch/pytorch.git:head",
+    "context:github.com/pytorch/pytorch#1:/tmp/worktree:head:a.ts",
+    "draft:github.com/pytorch/pytorch#1",
+    "focus:github.com/pytorch/pytorch#1",
+    "ai:github.com/pytorch/pytorch#1",
+  ]);
 });
 
 test("PR API open prepares worktree, registers Pi cwd, prewarms sessions, and hydrates response", async () => {

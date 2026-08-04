@@ -1813,6 +1813,8 @@ ${thread.target.hunk.slice(0, 4_000)}`;
 }
 
 function reviewStatus(pr: StoredPullRequest): { label: string; tone: string } {
+  if (pr.merged === true) return { label: "Merged", tone: "success" };
+  if (pr.state === "closed") return { label: "Closed", tone: "danger" };
   if (pr.reviewDecision === "APPROVED") return { label: "Approved", tone: "success" };
   if (pr.reviewDecision === "CHANGES_REQUESTED") return { label: "Changes requested", tone: "danger" };
   if (pr.lastReviewedHeadSha == null) return { label: "Not reviewed", tone: "pending" };

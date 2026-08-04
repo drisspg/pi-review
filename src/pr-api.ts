@@ -49,7 +49,10 @@ export function createPrApi(deps: PrApiDeps): PrApi {
   async function activity(input: string): Promise<PullRequestReviewResponse> {
     const ref = deps.parsePullRequestRef(input);
     const data = await deps.fetchPullRequestReviewData(ref);
-    return hydrateReviewResponse(data, await deps.upsertPullRequest(data.pr));
+    const pr = await deps.upsertPullRequest(data.pr);
+    const worktreeDir = await deps.preparePrWorktree(ref, data.raw.base.repo.clone_url, data.pr.headSha);
+    await deps.registerPiSessionContext(pr.key, worktreeDir, { headSha: pr.headSha, files: data.files });
+    return hydrateReviewResponse(data, pr, { worktreeDir });
   }
 
   async function open(input: string): Promise<PullRequestReviewResponse> {

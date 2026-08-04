@@ -220,6 +220,19 @@ test("opens a PR and renders GitHub-style file diffs", async ({ page }) => {
   await expect(page.locator(".diff-row.added").first()).toBeVisible();
 });
 
+test("refresh updates pull request activity and landed status", async ({ page }) => {
+  await page.route("**/api/pr/activity", async (route) => {
+    const response = await route.fetch();
+    const review = await response.json() as { pr: Record<string, unknown> } & Record<string, unknown>;
+    await route.fulfill({ response, json: { ...review, pr: { ...review.pr, state: "closed", merged: true } } });
+  });
+
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+
+  await expect(page.locator(".pr-header-strip .review-status")).toHaveText("Merged");
+  await expect(page.locator(".pr-header-meta")).toContainText("closed");
+});
+
 test("opens PR description references on GitHub in new tabs", async ({ page, context }) => {
   const sourceResponse = await page.request.post("/api/pr/open", { data: { input: prUrl } });
   const sourceReview = await sourceResponse.json() as { pr: Record<string, unknown> } & Record<string, unknown>;
