@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import test from "node:test";
@@ -142,6 +142,31 @@ test("stops an explicitly closed terminal and resumes it from the persisted sess
   await manager.attach(new FakePeer(), { prKey: "github.com/org/repo#1", session: "line-1" });
   assert.equal(processes.length, 2);
   await manager.dispose();
+});
+
+test("deletes active terminals and their persisted session state", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-review-terminal-delete-"));
+  const process = new FakeProcess();
+  const manager = createPiTerminalManager({
+    cwdForPr: () => "/tmp/pr-worktree",
+    piCommand: "/usr/local/bin/pi",
+    sessionRoot: root,
+    spawn: () => process as never,
+  });
+  const peer = new FakePeer();
+  try {
+    await manager.attach(peer, { prKey: "github.com/org/repo#1", session: "inline-1" });
+    const sessionDir = join(root, "github.com-org-repo-1", "inline-1");
+    await writeFile(join(sessionDir, "state.json"), "{}");
+
+    await manager.deleteSession("github.com/org/repo#1", "inline-1");
+    assert.equal(process.killed, true);
+    assert.deepEqual(peer.closed, [1001, "Terminal deleted"]);
+    await assert.rejects(() => access(sessionDir));
+  } finally {
+    await manager.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("stops detached terminals after the idle timeout", async () => {

@@ -1,7 +1,7 @@
 /** Own interactive Pi processes behind a bounded browser-terminal protocol. */
 
 import { accessSync, constants } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, resolve } from "node:path";
 
@@ -296,6 +296,14 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
     }
   }
 
+  async function deleteSession(prKey: string, sessionName: string): Promise<void> {
+    const key = `${prKey}\0${sessionName}`;
+    const sessionPromise = sessions.get(key);
+    sessions.delete(key);
+    if (sessionPromise != null) await stopSessions([sessionPromise], "Terminal deleted");
+    await rm(resolve(sessionRoot, safe(prKey), safe(sessionName)), { recursive: true, force: true });
+  }
+
   async function disposePr(prKey: string): Promise<void> {
     const matching = [...sessions.entries()].filter(([key]) => key.startsWith(`${prKey}\0`));
     for (const [key] of matching) sessions.delete(key);
@@ -308,7 +316,7 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
     await stopSessions(active, "Server shutting down");
   }
 
-  return { attach, broadcastDraftReview, dispose, disposePr };
+  return { attach, broadcastDraftReview, deleteSession, dispose, disposePr };
 }
 
 export type PiTerminalManager = ReturnType<typeof createPiTerminalManager>;

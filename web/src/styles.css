@@ -1256,6 +1256,37 @@ a { color: var(--link); text-decoration: none; }
   box-shadow: inset 3px 0 color-mix(in srgb, var(--thread-accent) 72%, var(--border));
 }
 
+.terminal-marker-open {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.terminal-marker-open > svg {
+  flex-shrink: 0;
+  color: color-mix(in srgb, var(--thread-accent) 55%, var(--muted));
+}
+
+.terminal-marker-delete.ui-button-icon {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin: -2px -6px -2px 2px;
+  color: var(--muted);
+}
+
+.terminal-marker-delete.ui-button-icon:hover,
+.terminal-marker-delete.ui-button-icon:focus-visible {
+  color: var(--danger);
+}
+
 .inline-thread p { margin: 0; white-space: pre-wrap; }
 .inline-thread textarea, .panel textarea {
   width: 100%;

@@ -809,6 +809,28 @@ test("opens a line thread as an inline native Pi terminal by default", async ({ 
   await expect(page.locator(".review-summary .draft-card", { hasText: body })).toBeVisible();
 });
 
+test("deletes a minimized line terminal", async ({ page }) => {
+  await mockNativeTerminal(page);
+  const rows = await openFileWithAddedRows(page, 1);
+  await rows.first().click();
+  await expect(page.locator(".local-thread")).toBeVisible();
+
+  const deletePayloads: Record<string, unknown>[] = [];
+  await page.route("**/api/pi/terminal/delete", async (route) => {
+    deletePayloads.push(route.request().postDataJSON() as Record<string, unknown>);
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true }) });
+  });
+  await page.locator(".pr-header-strip").click();
+  const marker = page.locator(".terminal-marker");
+  await expect(marker).toBeVisible();
+  await marker.getByRole("button", { name: "Delete terminal" }).click();
+
+  await expect(marker).toHaveCount(0);
+  expect(deletePayloads).toHaveLength(1);
+  expect(deletePayloads[0]?.prKey).toBe(openedPr?.key);
+  expect(deletePayloads[0]?.session).toMatch(/^inline-/);
+});
+
 test("describes shared dialogs for assistive technology", async ({ page }) => {
   await openTools(page);
   await page.getByRole("menuitem", { name: "Session settings" }).click();

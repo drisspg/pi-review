@@ -130,6 +130,11 @@ function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
         return { job: { id: `job:${purpose}:${payload.prKey}`, prKey: String(payload.prKey), startedAt: "now", status: "running" } };
       },
     },
+    piTerminalApi: {
+      async remove() {
+        return { ok: true };
+      },
+    },
     piTerminalDraftApi: {
       async add(payload) {
         return { created: true, comment: { id: "draft", path: String(payload.path), line: Number(payload.line), side: "RIGHT", body: String(payload.body) }, draftReview: { prKey: String(payload.prKey), headSha: String(payload.headSha), event: "COMMENT", body: "", comments: [], updatedAt: "now" } };
@@ -271,6 +276,13 @@ test("server route creates Pi terminal review drafts", async () => {
   assert.equal(response.statusCode, 200);
   assert.equal((jsonBody(response) as { created: boolean }).created, true);
   assert.deepEqual(payloads, [payload]);
+});
+
+test("server route deletes persisted Pi terminal sessions", async () => {
+  const response = await routeRequest(createServerRoute(baseDeps()), "POST", "/api/pi/terminal/delete", { prKey: "pr", session: "inline-1" });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(jsonBody(response), { ok: true });
 });
 
 test("server route saves draft reviews", async () => {

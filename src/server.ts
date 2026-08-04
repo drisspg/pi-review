@@ -16,6 +16,7 @@ import { addIssueComment, addPendingPullRequestReviewThread, createPendingPullRe
 import { logger } from "./logger.js";
 import { createPiApi } from "./pi-api.js";
 import { createPiJobRunner } from "./pi-jobs.js";
+import { createPiTerminalApi } from "./pi-terminal-api.js";
 import { createPiTerminalDraftApi } from "./pi-terminal-draft-api.js";
 import { createPiTerminalManager } from "./pi-terminal.js";
 import { attachPiTerminalWebSocketServer } from "./pi-terminal-websocket.js";
@@ -52,6 +53,7 @@ const fileApi = createFileApi(defaultFileApiDeps(fetchFileText, setFileViewed, a
 }));
 const githubDraftReviewApi = createGitHubDraftReviewApi(defaultGitHubDraftReviewApiDeps({ addPendingPullRequestReviewThread, createPendingPullRequestReview, fetchPendingPullRequestReview }));
 const piApi = createPiApi({ askPi, piActivity, piDiagnostics, piJobRunner, setPiModel });
+const piTerminalApi = createPiTerminalApi({ deleteSession: piTerminalManager.deleteSession });
 const piTerminalDraftApi = createPiTerminalDraftApi({ appendDraftReviewComment, contextForPr: piSessionReviewContext, notifyDraftReview: piTerminalManager.broadcastDraftReview });
 const prApi = createPrApi(defaultPrApiDeps({
   cleanupPrWorktree,
@@ -104,6 +106,7 @@ const route = createServerRoute({
   gpuWorkspaceStatusResponse,
   logger,
   piApi,
+  piTerminalApi,
   piTerminalDraftApi,
   prApi,
   reviewMemoryApi,
