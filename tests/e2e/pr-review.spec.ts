@@ -366,12 +366,17 @@ test("keeps compact Review actions separate on mobile", async ({ page }) => {
   await openSideTab(page, "Review");
   await page.locator(".github-draft-review > summary").click();
   const actions = page.locator(".github-draft-review-actions button");
-  const first = await actions.nth(0).boundingBox();
-  const second = await actions.nth(1).boundingBox();
-  if (first == null || second == null) throw new Error("Missing private GitHub review actions");
-  expect(first.x).toBeGreaterThanOrEqual(0);
-  expect(first.x + first.width).toBeLessThanOrEqual(390);
-  expect(first.x + first.width).toBeLessThanOrEqual(second.x);
+  await expect(actions).toHaveCount(3);
+  for (let index = 0; index < await actions.count(); index += 1) {
+    const bounds = await actions.nth(index).boundingBox();
+    if (bounds == null) throw new Error("Missing private GitHub review action");
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
+  }
+  const pull = await actions.nth(1).boundingBox();
+  const copy = await actions.nth(2).boundingBox();
+  if (pull == null || copy == null) throw new Error("Missing secondary private GitHub review actions");
+  expect(pull.x + pull.width).toBeLessThanOrEqual(copy.x);
 
   await page.getByRole("button", { name: "Focus review panel" }).click();
   const focusedSide = await page.locator(".side").boundingBox();
@@ -451,6 +456,29 @@ test("pulls private GitHub comments and copies an agent handoff", async ({ page,
   expect(text).toContain("private GitHub review drafts");
   expect(text).toContain(`${path}:${line}`);
   expect(text).toContain("send this private note to the coding agent");
+});
+
+test("moves local drafts into a private GitHub review", async ({ page }) => {
+  const row = (await openFileWithAddedRows(page, 1)).first();
+  const path = await row.getAttribute("data-path");
+  const line = Number(await row.getAttribute("data-line"));
+  if (path == null || !Number.isFinite(line)) throw new Error("Missing diff target");
+  await loadDraftReviewFromTerminal(page, [{ id: "private-draft", path, line, side: "RIGHT", body: "keep this private" }]);
+  const githubReview = { id: "pending-review", body: "", updatedAt: "now", comments: [{ id: "private-comment", path, line, startLine: null, subjectType: "LINE", body: "keep this private", url: "https://github.com/comment" }] };
+  let requestBody: unknown;
+  await page.route("**/api/github-draft-review/comments", async (route) => {
+    requestBody = route.request().postDataJSON();
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ review: githubReview }) });
+  });
+
+  await openSideTab(page, "Review");
+  await page.locator(".github-draft-review > summary").click();
+  await page.getByRole("button", { name: "Move 1 local draft to GitHub privately" }).click();
+
+  expect(requestBody).toEqual({ prUrl, comments: [{ path, line, side: "RIGHT", body: "keep this private" }] });
+  await expect(page.locator(".review-draft-list .draft-card")).toHaveCount(0);
+  await expect(page.locator(".github-draft-card")).toContainText("keep this private");
+  await expect(page.getByRole("button", { name: "No local drafts to move" })).toBeDisabled();
 });
 
 test("shows private GitHub draft pull failures in the Review panel", async ({ page }) => {

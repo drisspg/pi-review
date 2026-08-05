@@ -65,6 +65,28 @@ test("GitHub draft review API appends to an existing pending review", async () =
   ]);
 });
 
+test("GitHub draft review API moves multiple comments without duplicating a partial retry", async () => {
+  const existingReview: GitHubPendingReview = {
+    ...review,
+    comments: [{ id: "existing", path: "src/a.ts", line: 12, startLine: 10, subjectType: "LINE", body: "first", url: "url" }],
+  };
+  const { deps, calls } = fakeDeps(existingReview);
+
+  await createGitHubDraftReviewApi(deps).addComments({
+    prUrl: "url",
+    comments: [
+      { path: "src/a.ts", line: 12, startLine: 10, side: "RIGHT", body: "first" },
+      { path: "src/b.ts", line: 20, side: "RIGHT", body: "second" },
+    ],
+  });
+
+  assert.deepEqual(calls, [
+    ["fetch", ref],
+    ["add", ref, "review-id", { path: "src/b.ts", line: 20, startLine: undefined, side: "RIGHT", body: "second" }],
+    ["fetch", ref],
+  ]);
+});
+
 test("GitHub draft review API validates private comment targets", async () => {
   const api = createGitHubDraftReviewApi(fakeDeps(null).deps);
 
@@ -72,4 +94,5 @@ test("GitHub draft review API validates private comment targets", async () => {
   await assert.rejects(api.addComment({ prUrl: "url", path: "a", line: 1, side: "BAD", body: "note" }), /Expected comment side/);
   await assert.rejects(api.addComment({ prUrl: "url", path: "a", line: null, startLine: 1, body: "note" }), /File comments cannot have startLine/);
   await assert.rejects(api.addComment({ prUrl: "url", path: "a", line: 1, side: "RIGHT", body: "  " }), /Expected non-empty comment body/);
+  await assert.rejects(api.addComments({ prUrl: "url", comments: [] }), /Expected private review comments/);
 });

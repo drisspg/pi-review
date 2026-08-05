@@ -99,6 +99,9 @@ function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
       async addComment() {
         return { review: { id: "review", body: "", comments: [], updatedAt: "now" } };
       },
+      async addComments() {
+        return { review: { id: "review", body: "", comments: [], updatedAt: "now" } };
+      },
       async pull() {
         return { review: null };
       },
@@ -349,6 +352,10 @@ test("server route pulls and saves private GitHub review comments", async () => 
         calls.push(["add", payload]);
         return { review };
       },
+      async addComments(payload) {
+        calls.push(["add-many", payload]);
+        return { review };
+      },
       async pull(payload) {
         calls.push(["pull", payload]);
         return { review };
@@ -358,7 +365,12 @@ test("server route pulls and saves private GitHub review comments", async () => 
 
   assert.deepEqual(jsonBody(await routeRequest(route, "POST", "/api/github-draft-review/pull", { prUrl: "url" })), { review });
   assert.deepEqual(jsonBody(await routeRequest(route, "POST", "/api/github-draft-review/comment", { prUrl: "url", body: "note" })), { review });
-  assert.deepEqual(calls, [["pull", { prUrl: "url" }], ["add", { prUrl: "url", body: "note" }]]);
+  assert.deepEqual(jsonBody(await routeRequest(route, "POST", "/api/github-draft-review/comments", { prUrl: "url", comments: [] })), { review });
+  assert.deepEqual(calls, [
+    ["pull", { prUrl: "url" }],
+    ["add", { prUrl: "url", body: "note" }],
+    ["add-many", { prUrl: "url", comments: [] }],
+  ]);
 });
 
 test("server route exposes backend prompt contracts", async () => {

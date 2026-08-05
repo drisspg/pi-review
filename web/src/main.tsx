@@ -112,8 +112,10 @@ type GitHubDraftControls = {
   review: GitHubPendingReview | null;
   loaded: boolean;
   loading: boolean;
+  moving: boolean;
   error: string | null;
   pull: () => Promise<void>;
+  moveLocalDrafts: () => Promise<void>;
   copyHandoff: () => Promise<void>;
 };
 
@@ -121,8 +123,10 @@ const GitHubDraftContext = createContext<GitHubDraftControls>({
   review: null,
   loaded: false,
   loading: false,
+  moving: false,
   error: null,
   async pull() {},
+  async moveLocalDrafts() {},
   async copyHandoff() {},
 });
 
@@ -445,6 +449,7 @@ function App() {
   const [githubDraftReview, setGithubDraftReview] = useState<GitHubPendingReview | null>(null);
   const [githubDraftLoaded, setGithubDraftLoaded] = useState(false);
   const [githubDraftLoading, setGithubDraftLoading] = useState(false);
+  const [githubDraftMoving, setGithubDraftMoving] = useState(false);
   const [githubDraftError, setGithubDraftError] = useState<string | null>(null);
   const [reviewEvent, setReviewEvent] = useState<"COMMENT" | "APPROVE" | "REQUEST_CHANGES">("COMMENT");
   const [reviewBody, setReviewBody] = useState("");
@@ -735,6 +740,23 @@ function App() {
       setGithubDraftError(err instanceof Error ? err.message : String(err));
     } finally {
       setGithubDraftLoading(false);
+    }
+  }
+
+  async function moveLocalDraftsToGithub() {
+    if (review == null || drafts.length === 0 || githubDraftMoving) return;
+    setGithubDraftMoving(true);
+    setGithubDraftError(null);
+    try {
+      const comments = drafts.map(({ path, line, startLine, side, body }) => ({ path, line, startLine, side, body }));
+      const response = await api<{ review: GitHubPendingReview }>("/api/github-draft-review/comments", { method: "POST", body: JSON.stringify({ prUrl: review.pr.url, comments }) });
+      setGithubDraftReview(response.review);
+      setGithubDraftLoaded(true);
+      setDrafts([]);
+    } catch (err) {
+      setGithubDraftError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGithubDraftMoving(false);
     }
   }
 
@@ -1157,7 +1179,7 @@ function App() {
       openLogs={() => { setLogsOpen(true); void refreshLogs(); }}
     />
     {error != null && <Flash variant="danger" className="error" role="alert">{error}</Flash>}
-    {busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p><Button variant="muted" onClick={cancelOpen}>Cancel</Button></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} cleanupPrs={cleanupPrs} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} draftRevealId={draftRevealId} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, copyFeedbackPrompt: copyReviewFeedbackPrompt, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} reviewEvent={reviewEvent} setReviewEvent={setReviewEvent} reviewBody={reviewBody} setReviewBody={setReviewBody} draftSaveStatus={draftSaveStatus} draftSaveError={draftSaveError} retryDraftSave={() => setDraftSaveRetry((retry) => retry + 1)} archiveReview={archiveReview} discardReview={discardReview} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} githubDrafts={{ review: githubDraftReview, loaded: githubDraftLoaded, loading: githubDraftLoading, error: githubDraftError, pull: pullGithubDraftReview, copyHandoff: copyGithubDraftHandoff }} />}
+    {busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p><Button variant="muted" onClick={cancelOpen}>Cancel</Button></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} cleanupPrs={cleanupPrs} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} draftRevealId={draftRevealId} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, copyFeedbackPrompt: copyReviewFeedbackPrompt, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} reviewEvent={reviewEvent} setReviewEvent={setReviewEvent} reviewBody={reviewBody} setReviewBody={setReviewBody} draftSaveStatus={draftSaveStatus} draftSaveError={draftSaveError} retryDraftSave={() => setDraftSaveRetry((retry) => retry + 1)} archiveReview={archiveReview} discardReview={discardReview} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} githubDrafts={{ review: githubDraftReview, loaded: githubDraftLoaded, loading: githubDraftLoading, moving: githubDraftMoving, error: githubDraftError, pull: pullGithubDraftReview, moveLocalDrafts: moveLocalDraftsToGithub, copyHandoff: copyGithubDraftHandoff }} />}
     {diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}
     {review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} openDiagnostics={() => { setSettingsOpen(false); void showDiagnostics(); }} close={() => setSettingsOpen(false)} />}
     {memoryOpen && <ReviewMemoryModal memory={reviewMemory} loading={memoryLoading} distilling={memoryDistilling} refresh={() => void loadReviewMemory()} distill={() => void distillReviewMemory()} close={() => setMemoryOpen(false)} />}
@@ -1880,7 +1902,7 @@ function reviewStatus(pr: StoredPullRequest): { label: string; tone: string } {
   return { label: "Reviewed", tone: "success" };
 }
 
-function GitHubDraftReviewPanel({ files, onJumpToTarget }: { files: PullFile[]; onJumpToTarget?: (target: Target) => void }) {
+function GitHubDraftReviewPanel({ files, localDraftCount, onJumpToTarget }: { files: PullFile[]; localDraftCount: number; onJumpToTarget?: (target: Target) => void }) {
   const githubDrafts = useContext(GitHubDraftContext);
   const [copied, setCopied] = useState(false);
   const [copying, setCopying] = useState(false);
@@ -1902,8 +1924,12 @@ function GitHubDraftReviewPanel({ files, onJumpToTarget }: { files: PullFile[]; 
   }
   return <details className="github-draft-review">
     <summary className="github-draft-review-head"><span className="disclosure-chevron" aria-hidden="true">›</span><div><strong>GitHub private drafts <span className="muted">(optional)</span></strong><span>{comments.length > 0 ? `${comments.length} private ${comments.length === 1 ? "comment" : "comments"}` : githubDrafts.loaded ? "No pending comments" : "Separate from your local drafts below"}</span></div></summary>
-    <p className="github-draft-review-note">This only shows comments already stored in your private pending review on GitHub. The local drafts below are published by <strong>Publish to GitHub</strong>; you do not need to move them here.</p>
-    <div className="github-draft-review-actions"><Button variant="muted" className="small-muted-button" onClick={() => void githubDrafts.pull()} disabled={githubDrafts.loading}>{githubDrafts.loading ? "Pulling…" : githubDrafts.loaded ? "Refresh GitHub private drafts" : "Pull GitHub private drafts"}</Button><Button variant="muted" className="small-muted-button" onClick={() => void copyHandoff()} disabled={copying || comments.length === 0}>{copying ? "Copying…" : copied ? "Copied agent handoff" : "Copy agent handoff"}</Button></div>
+    <p className="github-draft-review-note">Move local drafts here to store them in your pending GitHub review. They remain private until you submit that review on GitHub.</p>
+    <div className="github-draft-review-actions">
+      <Button className="github-draft-move" onClick={() => void githubDrafts.moveLocalDrafts()} disabled={localDraftCount === 0 || githubDrafts.moving}>{githubDrafts.moving ? "Moving drafts…" : localDraftCount > 0 ? `Move ${localDraftCount} local ${localDraftCount === 1 ? "draft" : "drafts"} to GitHub privately` : "No local drafts to move"}</Button>
+      <Button variant="muted" className="small-muted-button" onClick={() => void githubDrafts.pull()} disabled={githubDrafts.loading}>{githubDrafts.loading ? "Pulling…" : githubDrafts.loaded ? "Refresh GitHub private drafts" : "Pull GitHub private drafts"}</Button>
+      <Button variant="muted" className="small-muted-button" onClick={() => void copyHandoff()} disabled={copying || comments.length === 0}>{copying ? "Copying…" : copied ? "Copied agent handoff" : "Copy agent handoff"}</Button>
+    </div>
     {githubDrafts.error != null && <Flash variant="danger" className="operation-error" role="alert">GitHub draft failed: {githubDrafts.error}</Flash>}
     {copyError != null && <Flash variant="danger" className="copy-feedback-error" role="alert">Copy failed: {copyError}</Flash>}
     {comments.length > 0 && <div className="github-draft-list">{comments.map((comment, index) => <article className="github-draft-card" key={comment.id}><button className="github-draft-location" onClick={onJumpToTarget == null ? undefined : () => onJumpToTarget(githubDraftTarget(files, comment))}><span>#{index + 1}</span><strong>{githubDraftLocation(comment)}</strong></button><MarkdownText text={comment.body} /></article>)}</div>}
@@ -1979,7 +2005,7 @@ function ReviewSummary({ pr, files, drafts, setDrafts, event, setEvent, body, se
   const copyFeedbackButton = <Button variant="muted" className="small-muted-button pi-copy-feedback" onClick={() => void copyFeedback()} disabled={copyingFeedback}>{copyingFeedback ? "Copying…" : feedbackCopied ? "Copied feedback prompt" : "Copy feedback prompt"}</Button>;
   const saveStatus = draftSaveStatus !== "idle" && <span className={`draft-save-status is-${draftSaveStatus}`} role={draftSaveStatus === "error" ? "alert" : "status"}>{draftSaveStatus === "saving" ? "Saving…" : draftSaveStatus === "saved" ? "Saved locally" : <>Not saved: {draftSaveError}<button type="button" onClick={retryDraftSave}>Retry</button></>}</span>;
   const finishedDescription = finished === "published" ? "Review published to GitHub." : finished === "archived" ? "Review archived locally. You can find it in Review memory." : draftDescription;
-  const githubDraftPanel = <GitHubDraftReviewPanel files={files} onJumpToTarget={onJumpToTarget} />;
+  const githubDraftPanel = <GitHubDraftReviewPanel files={files} localDraftCount={drafts.length} onJumpToTarget={onJumpToTarget} />;
   if (!composing && !hasReviewContent) return <section className="panel review-summary review-summary-empty"><div className="review-summary-head"><div><h2>Review changes</h2><p className="muted">{finishedDescription}</p>{feedbackCopyError != null && <Flash variant="danger" className="copy-feedback-error" role="alert">Copy failed: {feedbackCopyError}</Flash>}</div></div>{githubDraftPanel}<div className="review-summary-empty-actions">{copyFeedbackButton}<Button className="review-start-button" onClick={() => { setFinished(null); setComposing(true); }}>Start review</Button></div></section>;
   const publishLabel = submitting ? "Publishing…" : event === "APPROVE" ? "Approve on GitHub" : event === "REQUEST_CHANGES" ? "Request changes on GitHub" : `Publish to GitHub${drafts.length > 0 ? ` (${drafts.length})` : ""}`;
   return <section className="panel review-summary">
@@ -1994,7 +2020,7 @@ function ReviewSummary({ pr, files, drafts, setDrafts, event, setEvent, body, se
     <div className="review-actions">
       <div className="review-publish-group">
         <Button className={`review-submit ${event.toLowerCase().replace("_", "-")}`} disabled={submitting || archiving || discarding || !canPublish} onClick={() => void handlePublish()}>{publishLabel}</Button>
-        <ActionMenu trigger={<Button className="review-submit-menu" aria-label="More review actions" disabled={!hasReviewContent || submitting || archiving || discarding}><ChevronDownIcon size={14} /></Button>}>
+        <ActionMenu trigger={<Button variant="muted" className="review-more-actions" aria-label="More review actions" disabled={!hasReviewContent || submitting || archiving || discarding}>More <ChevronDownIcon size={14} /></Button>}>
           <ActionMenuItem onSelect={() => void copyDraftContext()}>{copied ? "Copied draft context" : "Copy draft context"}</ActionMenuItem>
           <ActionMenuItem onSelect={() => void handleArchive()}>{archiving ? "Archiving…" : "Archive locally"}</ActionMenuItem>
           <ActionMenuItem onSelect={() => void handleDiscard()}>{discarding ? "Discarding…" : "Discard drafts"}</ActionMenuItem>

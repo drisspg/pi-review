@@ -2359,8 +2359,17 @@ button.fold:hover {
 }
 
 .github-draft-review-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
+}
+
+.github-draft-review-actions .github-draft-move {
+  grid-column: 1 / -1;
+}
+
+.github-draft-review-actions .ui-button {
+  width: 100%;
 }
 
 .github-draft-review > .operation-error,
@@ -2421,25 +2430,11 @@ button.fold:hover {
 .review-publish-group {
   display: flex;
   align-items: stretch;
+  gap: 6px;
 }
 
-.review-publish-group .review-submit {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-}
-
-.review-submit-menu.ui-button {
-  min-width: 30px;
-  padding: 0 7px;
-  border-left-color: color-mix(in srgb, currentColor 22%, transparent);
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
-  background: var(--accent);
-  color: #fff;
-}
-
-.review-submit-menu.ui-button:not(:disabled):hover {
-  filter: brightness(1.08);
+.review-more-actions.ui-button {
+  flex-shrink: 0;
 }
 
 .side .review-summary {

@@ -180,6 +180,14 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
       return;
     }
 
+    if (req.method === "POST" && url.pathname === "/api/github-draft-review/comments") {
+      const payload = await recordFromRequest(req);
+      const response = await deps.githubDraftReviewApi.addComments(payload);
+      deps.logger.info("api", "private GitHub comments saved", { comments: response.review.comments.length });
+      sendJson(res, 200, response);
+      return;
+    }
+
     if (req.method === "POST" && url.pathname === "/api/file/viewed") {
       const payload = await recordFromRequest(req);
       deps.logger.info("api", "set file viewed", payload);
