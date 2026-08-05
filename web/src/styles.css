@@ -2193,6 +2193,18 @@ button.fold:hover {
   color: #fff;
 }
 
+.review-submit [data-component="buttonContent"],
+.review-submit [data-component="text"] {
+  color: inherit;
+}
+
+.review-submit.ui-button:disabled {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--muted) 6%, var(--panel2));
+  color: var(--muted);
+  opacity: 1;
+}
+
 .review-submit:not(:disabled):hover {
   filter: brightness(1.08);
 }
