@@ -137,6 +137,8 @@ type PiPanelProps = {
   showAiReviewRecord: (record: AiReviewRecord | null | undefined) => void;
   runReview: () => Promise<void>;
   copyFeedbackPrompt: (overallBody?: string) => Promise<void>;
+  guideReview: FocusReview;
+  runGuideReview: () => Promise<void>;
   focusReview: FocusReview;
   focusScanHistory: FocusScanRecord[];
   focusScanId: string | null;
@@ -464,6 +466,7 @@ function App() {
   const [aiReview, setAiReview] = useState<AiReview>({ running: false, text: "", messages: [] });
   const aiReviewRef = useRef(aiReview);
   const [aiReviewId, setAiReviewId] = useState<string | null>(null);
+  const [guideReview, setGuideReview] = useState<FocusReview>({ running: false, text: "" });
   const [focusReview, setFocusReview] = useState<FocusReview>({ running: false, text: "" });
   const [focusScanId, setFocusScanId] = useState<string | null>(null);
   const [flowDag, setFlowDag] = useState<FlowDag>({ running: false, text: "", error: null });
@@ -630,6 +633,7 @@ function App() {
     setInvalidDraftIds({});
     showAiReviewRecord(data.aiReview);
     showFocusScanRecord(data.focusScan);
+    setGuideReview({ running: false, text: "" });
     setFlowDag({ running: false, text: "", error: null });
     setFlowDagOpen(false);
     setGpuWorkspaceOpen(false);
@@ -966,6 +970,32 @@ function App() {
     await runAiReviewFor(review, false);
   }
 
+  async function runGuideReview() {
+    if (review == null || guideReview.running) return;
+    const targetReview = review;
+    const initialActivity = runningAgentActivity();
+    let cancelActivityPolling: () => void = () => undefined;
+    setGuideReview({ running: true, text: "", activity: initialActivity });
+    try {
+      const { prompt, purpose } = await buildPiPrompt({ mode: "guide-review", prKey: targetReview.pr.key, prTitle: targetReview.pr.title, files: targetReview.files });
+      cancelActivityPolling = startPiAgentActivityPolling(targetReview.pr.key, purpose, (activity) => {
+        if (activeReviewKeyRef.current === targetReview.pr.key) setGuideReview((current) => ({ ...current, activity: activity ?? current.activity ?? null }));
+      }, initialActivity);
+      const setAnswer = (answer: string) => {
+        if (activeReviewKeyRef.current === targetReview.pr.key) setGuideReview((current) => ({ running: true, text: "", activity: streamingAgentActivity(current.activity, answer) }));
+      };
+      const answer = await askPiApi({ prKey: targetReview.pr.key, prompt, purpose }, setAnswer);
+      cancelActivityPolling();
+      if (activeReviewKeyRef.current !== targetReview.pr.key) return;
+      setGuideReview({ running: false, text: answer, activity: null });
+      await refreshLogs();
+    } catch (err) {
+      cancelActivityPolling();
+      if (activeReviewKeyRef.current !== targetReview.pr.key) return;
+      setGuideReview({ running: false, text: `Guide generation failed: ${err instanceof Error ? err.message : String(err)}`, activity: null });
+    }
+  }
+
   async function runFlowDag() {
     if (review == null || flowDag.running) return;
     const targetReview = review;
@@ -1179,7 +1209,7 @@ function App() {
       openLogs={() => { setLogsOpen(true); void refreshLogs(); }}
     />
     {error != null && <Flash variant="danger" className="error" role="alert">{error}</Flash>}
-    {busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p><Button variant="muted" onClick={cancelOpen}>Cancel</Button></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} cleanupPrs={cleanupPrs} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} draftRevealId={draftRevealId} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, copyFeedbackPrompt: copyReviewFeedbackPrompt, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} reviewEvent={reviewEvent} setReviewEvent={setReviewEvent} reviewBody={reviewBody} setReviewBody={setReviewBody} draftSaveStatus={draftSaveStatus} draftSaveError={draftSaveError} retryDraftSave={() => setDraftSaveRetry((retry) => retry + 1)} archiveReview={archiveReview} discardReview={discardReview} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} githubDrafts={{ review: githubDraftReview, loaded: githubDraftLoaded, loading: githubDraftLoading, moving: githubDraftMoving, error: githubDraftError, pull: pullGithubDraftReview, moveLocalDrafts: moveLocalDraftsToGithub, copyHandoff: copyGithubDraftHandoff }} />}
+    {busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p><Button variant="muted" onClick={cancelOpen}>Cancel</Button></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} cleanupPrs={cleanupPrs} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} draftRevealId={draftRevealId} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, copyFeedbackPrompt: copyReviewFeedbackPrompt, guideReview, runGuideReview, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} reviewEvent={reviewEvent} setReviewEvent={setReviewEvent} reviewBody={reviewBody} setReviewBody={setReviewBody} draftSaveStatus={draftSaveStatus} draftSaveError={draftSaveError} retryDraftSave={() => setDraftSaveRetry((retry) => retry + 1)} archiveReview={archiveReview} discardReview={discardReview} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} githubDrafts={{ review: githubDraftReview, loaded: githubDraftLoaded, loading: githubDraftLoading, moving: githubDraftMoving, error: githubDraftError, pull: pullGithubDraftReview, moveLocalDrafts: moveLocalDraftsToGithub, copyHandoff: copyGithubDraftHandoff }} />}
     {diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}
     {review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} openDiagnostics={() => { setSettingsOpen(false); void showDiagnostics(); }} close={() => setSettingsOpen(false)} />}
     {memoryOpen && <ReviewMemoryModal memory={reviewMemory} loading={memoryLoading} distilling={memoryDistilling} refresh={() => void loadReviewMemory()} distill={() => void distillReviewMemory()} close={() => setMemoryOpen(false)} />}
@@ -1423,18 +1453,32 @@ function clampSidePanelWidth(width: number): number {
 
 function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { draftRevealId: string | null; piPanel: PiPanelProps; reviewEvent: "COMMENT" | "APPROVE" | "REQUEST_CHANGES"; setReviewEvent: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES") => void; reviewBody: string; setReviewBody: (body: string) => void; draftSaveStatus: "idle" | "saving" | "saved" | "error"; draftSaveError: string | null; retryDraftSave: () => void; archiveReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; discardReview: () => Promise<boolean>; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; submitting: boolean; invalidDraftIds: Record<string, boolean>; refreshingActivity: boolean; githubDrafts: GitHubDraftControls }) {
   const diffViewLabel = props.diffViewMode === "unified" ? "Split view" : "Unified view";
+  const [reviewMode, setReviewMode] = useState<"diff" | "guide">("diff");
+  const [viewedGuideIds, setViewedGuideIds] = useState<Record<string, boolean>>({});
   const [sideTab, setSideTab] = useState<"review" | "pi" | "comments">("review");
   const [sideCollapsed, setSideCollapsed] = useState(true);
   const [sideFocused, setSideFocused] = useState(false);
   const draftCount = props.drafts.length;
   const piActivity = props.piPanel.review.messages.length + (props.piPanel.review.text.length > 0 && props.piPanel.review.messages.length === 0 ? 1 : 0);
   const focusCount = props.focusAreas.length;
+  const guideAreas = useMemo(() => parseFocusAreas(props.piPanel.guideReview.text), [props.piPanel.guideReview.text]);
   const piBadge = focusCount > 0 ? focusCount : piActivity > 0 ? piActivity : null;
   const commentCount = props.review.comments.length + props.review.issueComments.length + props.review.reviewSummaries.length;
   function openSidePanel(tab: "review" | "pi" | "comments"): void {
     setSideTab(tab);
     setSideCollapsed(false);
   }
+  function selectReviewMode(mode: "diff" | "guide"): void {
+    setReviewMode(mode);
+    if (mode === "guide") {
+      setSideFocused(false);
+      setSideCollapsed(true);
+      if (props.piPanel.guideReview.text.trim().length === 0 && !props.piPanel.guideReview.running) void props.piPanel.runGuideReview();
+    }
+  }
+  useEffect(() => {
+    setViewedGuideIds((current) => Object.fromEntries(Object.entries(current).filter(([id]) => guideAreas.some((area) => area.id === id))));
+  }, [guideAreas]);
   useEffect(() => {
     if (!sideFocused) return;
     function restorePanel(event: KeyboardEvent): void {
@@ -1481,6 +1525,14 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { d
     }
     window.setTimeout(tryScroll, 50);
   }
+  function openGuideAreaInDiff(area: FocusArea): void {
+    setReviewMode("diff");
+    if (props.openFiles[area.path] === false) props.setOpenFiles({ ...props.openFiles, [area.path]: true });
+    window.setTimeout(() => {
+      const lineRow = document.querySelector(`.diff-row[data-path="${CSS.escape(area.path)}"][data-line="${area.startLine}"]`);
+      (lineRow ?? document.getElementById(`file-${area.path}`))?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 50);
+  }
   const sidePanel = sideCollapsed ? null : <>
     {!sideFocused && <div className="resize-handle" role="separator" aria-label="Resize side panel" onMouseDown={(event) => startResizeSidePanel(event, props.sideWidth, props.setSideWidth)} />}
     <aside className="side">
@@ -1507,7 +1559,11 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { d
     <div className={`review-layout${sideCollapsed ? " side-collapsed" : ""}${sideFocused ? " side-focused" : ""}`} style={{ gridTemplateColumns }}>
       <div className="review-main">
         <PrHeaderStrip pr={props.review.pr} refreshGithubActivity={props.refreshGithubActivity} refreshingActivity={props.refreshingActivity} />
-        <main className="files">
+        <nav className="review-mode-tabs" aria-label="Review view">
+          <button type="button" className={reviewMode === "diff" ? "active" : ""} aria-pressed={reviewMode === "diff"} onClick={() => selectReviewMode("diff")}>Diff</button>
+          <button type="button" className={reviewMode === "guide" ? "active" : ""} aria-pressed={reviewMode === "guide"} onClick={() => selectReviewMode("guide")}>Guide{guideAreas.length > 0 ? ` ${guideAreas.length}` : ""}</button>
+        </nav>
+        {reviewMode === "guide" ? <GuideReview review={props.review} areas={guideAreas} viewedIds={viewedGuideIds} setViewedIds={setViewedGuideIds} guideReview={props.piPanel.guideReview} runGuideReview={props.piPanel.runGuideReview} onOpenDiff={openGuideAreaInDiff} /> : <main className="files">
           <PrSummary pr={props.review.pr} />
           <div className="files-toolbar">
             <FileNavigator files={props.review.files} fileReviews={props.review.fileReviews} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} />
@@ -1520,7 +1576,7 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { d
             </div>
           </div>
           <DiffAnnotationsContext.Provider value={annotations}>{props.review.files.map((file) => <FileDiff key={file.filename} file={file} {...props} />)}</DiffAnnotationsContext.Provider>
-        </main>
+        </main>}
       </div>
       {sidePanel}
     </div>
@@ -1563,6 +1619,73 @@ function PrSummary({ pr }: { pr: StoredPullRequest }) {
     </div>
     {!collapsed && <div className="pr-summary-body">{summary == null || summary.length === 0 ? <p className="muted">No PR summary provided.</p> : <MarkdownText text={summary} fileLinks={{ prUrl: pr.url }} />}</div>}
   </section>;
+}
+
+/** Select a bounded patch excerpt around one guided-review chapter. */
+function guideExcerptRows(file: PullFile | undefined, area: FocusArea): DiffRow[] {
+  if (file?.patch == null) return [];
+  return parsePatchRows(file.patch).filter((row) => {
+    if (rowHasKind(row, "hunk") || rowHasKind(row, "meta")) return false;
+    const line = row.newLine ?? row.oldLine;
+    return line != null && line >= area.startLine - 2 && line <= area.endLine + 2;
+  }).slice(0, 18);
+}
+
+/** Present a conceptual implementation walkthrough with contextual terminals. */
+function GuideReview({ review, areas, viewedIds, setViewedIds, guideReview, runGuideReview, onOpenDiff }: { review: OpenResponse; areas: FocusArea[]; viewedIds: Record<string, boolean>; setViewedIds: React.Dispatch<React.SetStateAction<Record<string, boolean>>>; guideReview: FocusReview; runGuideReview: () => Promise<void>; onOpenDiff: (area: FocusArea) => void }) {
+  const [openTerminals, setOpenTerminals] = useState<Record<string, boolean>>({});
+  const reviewedCount = areas.filter((area) => viewedIds[area.id]).length;
+  function toggleReviewed(area: FocusArea): void {
+    setViewedIds((current) => ({ ...current, [area.id]: !current[area.id] }));
+  }
+  if (areas.length === 0) return <main className="guide-review guide-empty" aria-label="Guided review">
+    <div className="guide-empty-card">
+      <span className="guide-kicker">Guided review</span>
+      <h2>{guideReview.running ? "Building the walkthrough…" : guideReview.text.startsWith("Guide generation failed:") ? "Could not build the walkthrough" : "Build a walkthrough of the change"}</h2>
+      <p>{guideReview.running ? "Pi is finding the implementation entry point, tracing its consequences, and separating supporting changes." : guideReview.text.startsWith("Guide generation failed:") ? guideReview.text : "Generate an ordered explanation of the core implementation, its consequences, supporting code, and tests."}</p>
+      <Button onClick={() => void runGuideReview()} disabled={guideReview.running}>{guideReview.running ? "Building walkthrough…" : "Build walkthrough"}</Button>
+      {guideReview.running && <AgentActivityLine activity={guideReview.activity} />}
+    </div>
+  </main>;
+  return <main className="guide-review" aria-label="Guided review">
+    <header className="guide-review-head">
+      <div>
+        <span className="guide-kicker">Guided review</span>
+        <h2>{review.pr.title}</h2>
+        <p>Review the change in conceptual order. Open a chapter terminal when you want Pi to investigate or edit from that exact context.</p>
+      </div>
+      <div className="guide-progress" aria-label={`${reviewedCount} of ${areas.length} chapters reviewed`}><strong>{reviewedCount}/{areas.length}</strong><span>chapters reviewed</span></div>
+    </header>
+    <div className="guide-chapters">
+      {areas.map((area, index) => {
+        const file = review.files.find((candidate) => candidate.filename === area.path);
+        const excerptRows = guideExcerptRows(file, area);
+        const reviewed = viewedIds[area.id] ?? false;
+        const terminalOpen = openTerminals[area.id] ?? false;
+        const location = `${area.path}:${area.startLine === area.endLine ? area.startLine : `${area.startLine}-${area.endLine}`}`;
+        return <article className={`guide-chapter${reviewed ? " reviewed" : ""}`} key={area.id}>
+          <div className="guide-chapter-story">
+            <span className="guide-chapter-number">{String(index + 1).padStart(2, "0")} / {String(areas.length).padStart(2, "0")}</span>
+            <h3>{area.title}</h3>
+            <MarkdownText text={area.body} fileLinks={{ prUrl: review.pr.url }} />
+            <div className="guide-chapter-actions">
+              <label className="guide-reviewed-check"><Checkbox checked={reviewed} onChange={() => toggleReviewed(area)} />Reviewed</label>
+              <Button variant="muted" className="small-muted-button" onClick={() => onOpenDiff(area)}>Open in diff</Button>
+            </div>
+          </div>
+          <div className="guide-chapter-evidence">
+            <header>
+              <button type="button" onClick={() => onOpenDiff(area)}><strong>{area.path.split("/").at(-1)}</strong><span>{area.path.includes("/") ? area.path.slice(0, area.path.lastIndexOf("/") + 1) : ""}</span></button>
+              <div><span className="stat-add">+{file?.additions ?? 0}</span><span className="stat-del">-{file?.deletions ?? 0}</span></div>
+            </header>
+            {excerptRows.length > 0 ? <div className="guide-code" aria-label={`Code excerpt for ${location}`}>{excerptRows.map((row, rowIndex) => <div className={`guide-code-row ${row.kind}`} key={`${row.oldLine}:${row.newLine}:${rowIndex}`}><span className="guide-code-line">{row.newLine ?? row.oldLine ?? ""}</span><CodeText code={diffCodeText(row)} language={languageForPath(area.path)} syntaxContext={row.syntaxContext} /></div>)}</div> : <p className="guide-code-empty">This focus area is outside the rendered patch context. Open it in the full diff to inspect surrounding lines.</p>}
+            <div className="guide-terminal-toggle"><span>{location}</span><Button variant="muted" className="small-muted-button" aria-expanded={terminalOpen} onClick={() => setOpenTerminals((current) => ({ ...current, [area.id]: !terminalOpen }))}>{terminalOpen ? "Close terminal" : "Open chapter terminal"}</Button></div>
+            {terminalOpen && <div className="guide-terminal"><InlinePiTerminal session={terminalSessionId("guide", area.id)} target={{ path: area.path, line: area.endLine, ...(area.startLine === area.endLine ? {} : { startLine: area.startLine }), side: "RIGHT" }} context={`You are reviewing chapter ${index + 1} of ${areas.length} at ${location}. Investigate or edit from this exact review context.\n\nChapter: ${area.title}\n${area.body}`} /></div>}
+          </div>
+        </article>;
+      })}
+    </div>
+  </main>;
 }
 
 function FileNavigator({ files, fileReviews, openFiles, setOpenFiles }: { files: PullFile[]; fileReviews: FileReviewState[]; openFiles: Record<string, boolean>; setOpenFiles: (open: Record<string, boolean>) => void }) {
@@ -1825,10 +1948,10 @@ function FocusAreaInline({ prUrl, area, active, collapsedFocusAreaIds, setCollap
   const location = `${area.path}:${area.startLine === area.endLine ? area.startLine : `${area.startLine}-${area.endLine}`}`;
   return <div id={`focus-area-${area.id}`} className={`inline-thread review-thread focus-area-inline terminal-open${active ? " active" : ""}`}>
     <div className="thread-head">
-      <div className="thread-title"><strong>Focus terminal</strong><span>{location}</span></div>
+      <div className="thread-title"><strong>{area.title}</strong><span>{location}</span></div>
       <Button variant="icon" aria-label="Collapse focus area" onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: true }))}><ChevronDownIcon size={16} /></Button>
     </div>
-    <div className="focus-area-terminal-context"><MarkdownText text={area.body} fileLinks={{ prUrl }} /></div>
+    {area.body.trim().length > 0 && <div className="focus-area-terminal-context"><MarkdownText text={area.body} fileLinks={{ prUrl }} /></div>}
     <InlinePiTerminal session={terminalSessionId("focus", area.id)} target={{ path: area.path, line: area.endLine, ...(area.startLine === area.endLine ? {} : { startLine: area.startLine }), side: "RIGHT" }} context={`You are discussing the focus area at ${location} in this pull request. Keep investigation and edits grounded in this location.
 
 Focus finding:

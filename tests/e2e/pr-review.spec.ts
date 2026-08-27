@@ -341,7 +341,7 @@ test("keeps collapsed files attached to the header beside a tall side panel", as
   await openSideTab(page, "Review");
 
   const geometry = await page.evaluate(() => {
-    const header = document.querySelector(".pr-header-strip")!.getBoundingClientRect();
+    const header = document.querySelector(".review-mode-tabs")!.getBoundingClientRect();
     const fileList = document.querySelector(".files")!.getBoundingClientRect();
     const side = document.querySelector(".side")!.getBoundingClientRect();
     return { contentGap: fileList.top - header.bottom, sideHeight: side.height };
@@ -1006,6 +1006,18 @@ test("runs a separate focus areas review and opens native focus terminals", asyn
 
   await expect(page.locator(".ai-review")).toContainText("0/1 focus area reviewed");
   await expect(row).toHaveClass(/focus-highlight-active/);
+
+  await mockAskPi(page, () => `## Review guide\n1. Core implementation\n- ${path}:${line}-${Number.parseInt(line, 10) + 1} — Core implementation\n  Start with the changed tiling condition and follow how it selects the implementation path.\n2. Validation path\n- ${path}:${line} — Validation path\n  Finish by checking that tests cover the intended behavior.`);
+  await page.getByRole("button", { name: "Guide" }).click();
+  const guide = page.getByRole("main", { name: "Guided review" });
+  await expect(guide.getByRole("heading", { name: "Core implementation" })).toBeVisible();
+  await expect(guide).toContainText(`${path}:${line}`);
+  await page.setViewportSize({ width: 820, height: 900 });
+  expect(await guide.locator(".guide-chapter").first().evaluate((chapter) => getComputedStyle(chapter).gridTemplateColumns.split(" ").length)).toBe(1);
+  await guide.getByRole("button", { name: "Open chapter terminal" }).first().click();
+  await expect(guide.locator(".pi-native-terminal.compact")).toBeVisible();
+  await guide.getByRole("checkbox", { name: "Reviewed" }).first().check();
+  await expect(guide).toContainText("1/2");
 });
 
 test("marking a file viewed collapses it without jumping to the active focus area", async ({ page }) => {

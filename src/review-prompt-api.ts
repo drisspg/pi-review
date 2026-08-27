@@ -1,6 +1,6 @@
 import { ghstackWorkspaceInstructions } from "./ghstack-guidance.js";
 
-type ReviewPromptMode = "code-walk" | "main-review" | "focus-review" | "test-pr" | "ai-chat" | "inline-chat" | "focus-chat" | "review-feedback" | "github-draft-handoff";
+type ReviewPromptMode = "code-walk" | "guide-review" | "main-review" | "focus-review" | "test-pr" | "ai-chat" | "inline-chat" | "focus-chat" | "review-feedback" | "github-draft-handoff";
 
 type PromptFile = {
   additions?: number;
@@ -190,6 +190,36 @@ Keep it concrete and readable. Prefer actual identifiers from the diff over vagu
 PR title: ${prTitle}
 
 ${diffSummary}`,
+  };
+}
+
+function guideReviewPrompt(payload: Record<string, unknown>): ReviewPromptResponse {
+  const prKey = requiredString(payload, "prKey");
+  const prTitle = requiredString(payload, "prTitle");
+  return {
+    purpose: "guide-review",
+    prompt: `Create a conceptual review walkthrough for PR ${prKey}. This is an orientation guide, not a risk scan and not a findings review. Always explain how the implementation fits together, even when the change appears correct.
+
+Order the walkthrough by how a reviewer should understand the change, not filesystem order:
+1. Start with the core behavioral or architectural change and its best entry point.
+2. Follow the important consequences through callers, data flow, state, or API boundaries.
+3. Separate supporting glue, compatibility work, and secondary refactors from the core path.
+4. End with tests or validation that demonstrate the intended behavior.
+
+Return only markdown in this exact parseable shape:
+## Review guide
+1. Short conceptual chapter title
+- path:startLine-endLine — Short conceptual chapter title
+  Two to four concise sentences explaining what changes here, why it exists, and how it connects to the preceding or following chapter.
+2. Next chapter title
+- path:line — Next chapter title
+  Two to four concise sentences.
+
+Use one representative changed location per chapter. Prefer 3-6 chapters; use 1-2 only for a genuinely tiny PR. Every chapter must cite a real changed file and reviewable changed line from the supplied patch. Do not report bugs, severities, praise, commands, or your investigation process. Mention risks only when they are necessary to understand the design tradeoff.
+
+PR title: ${prTitle}
+
+${statusPatchSummary(promptFiles(payload))}`,
   };
 }
 
@@ -443,6 +473,8 @@ export function createReviewPromptApi(deps: ReviewPromptApiDeps): ReviewPromptAp
     switch (mode as ReviewPromptMode) {
       case "code-walk":
         return codeWalkPrompt(payload);
+      case "guide-review":
+        return guideReviewPrompt(payload);
       case "main-review":
         return await mainReviewPrompt(payload, deps);
       case "focus-review":

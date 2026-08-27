@@ -30,6 +30,17 @@ test("review prompt API builds code walk prompts with flow-dag purpose", async (
   assert.match(result.prompt, /Status: modified, \+3\/-1/);
 });
 
+test("review prompt API builds conceptual guide walkthroughs", async () => {
+  const result = await api().build({ mode: "guide-review", prKey: "pr", prTitle: "Title", files });
+
+  assert.equal(result.purpose, "guide-review");
+  assert.match(result.prompt, /conceptual review walkthrough/);
+  assert.match(result.prompt, /not a risk scan/);
+  assert.match(result.prompt, /not filesystem order/);
+  assert.match(result.prompt, /path:startLine-endLine/);
+  assert.match(result.prompt, /Always explain how the implementation fits together/);
+});
+
 test("review prompt API injects memory for main and focus review prompts", async () => {
   const main = await api().build({ mode: "main-review", prKey: "pr", previousAiReview: "old review", previousFocusAreas: "old focus", files });
   const focus = await api().build({ mode: "focus-review", prKey: "pr", prTitle: "Title", previousFocusAreas: "old focus", files });

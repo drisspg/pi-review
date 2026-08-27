@@ -33,6 +33,7 @@ const DEFAULT_PI_THINKING_LEVEL: ThinkingLevel = "high";
 const PI_THINKING_LEVEL_BY_PURPOSE: Record<string, ThinkingLevel> = {
   "chat": "medium",
   "flow-dag": "medium",
+  "guide-review": "medium",
   "focus-chat": "medium",
   "focus-review": "medium",
   "gpu-workspace": "medium",
@@ -50,6 +51,7 @@ const DRAFT_TOOL_PURPOSES = new Set(["chat", "inline-chat", "focus-chat"]);
 const PI_TOOLS_BY_PURPOSE: Record<string, string[]> = {
   "chat": CHAT_TOOLS,
   "flow-dag": REVIEW_TOOLS,
+  "guide-review": REVIEW_TOOLS,
   "focus-chat": CHAT_TOOLS,
   "focus-review": REVIEW_TOOLS,
   "inline-chat": INLINE_TOOLS,
