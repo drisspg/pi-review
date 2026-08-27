@@ -71,6 +71,7 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
     "/api/file/text": (payload) => deps.fileApi.text(payload),
     "/api/focus-scan/save": (payload) => deps.savedAnalysisApi.saveFocusScan(payload),
     "/api/gpu/workspaces/status": (payload) => deps.gpuWorkspaceStatusResponse(payload),
+    "/api/guide-review/save": (payload) => deps.savedAnalysisApi.saveGuideReview(payload),
     "/api/pi/diagnostics": (payload) => deps.piApi.diagnostics(payload),
     "/api/pi/draft-comment": (payload) => deps.piTerminalDraftApi.add(payload),
     "/api/pi/focus-review/status": (payload) => deps.piApi.jobStatus(payload),

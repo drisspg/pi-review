@@ -38,6 +38,8 @@ test("review prompt API builds conceptual guide walkthroughs", async () => {
   assert.match(result.prompt, /not a risk scan/);
   assert.match(result.prompt, /not filesystem order/);
   assert.match(result.prompt, /path:startLine-endLine/);
+  assert.match(result.prompt, /Change flow block must be a compact call tree/);
+  assert.match(result.prompt, /Do not pad to a minimum, impose a fixed maximum/);
   assert.match(result.prompt, /Always explain how the implementation fits together/);
 });
 

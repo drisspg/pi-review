@@ -174,14 +174,17 @@ export type AiReviewMessageRecord = {
   toolStatus?: "running" | "success" | "error";
 };
 
-export type AiReviewRecord = {
+export type GuideReviewRecord = {
   id: string;
   prKey: string;
   headSha: string;
   answer: string;
-  messages?: AiReviewMessageRecord[];
   createdAt: string;
   updatedAt: string;
+};
+
+export type AiReviewRecord = GuideReviewRecord & {
+  messages?: AiReviewMessageRecord[];
 };
 
 export type ReviewMemoryComment = InlineReviewComment;
@@ -235,6 +238,7 @@ export type PullRequestReviewResponse = PullRequestReviewData & {
   focusScans: FocusScanRecord[];
   aiReview: AiReviewRecord | null;
   aiReviews: AiReviewRecord[];
+  guideReview: GuideReviewRecord | null;
   worktreeDir?: string;
 };
 
@@ -244,6 +248,7 @@ export type AppState = {
   draftReviews: DraftReview[];
   focusScans: FocusScanRecord[];
   aiReviews: AiReviewRecord[];
+  guideReviews: GuideReviewRecord[];
   reviewMemory: ReviewMemoryRecord[];
   reviewProfile: ReviewMemoryProfile | null;
 };

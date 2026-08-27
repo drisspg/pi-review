@@ -1,6 +1,6 @@
 import { prKeyForRef } from "./http.js";
 import { parsePullRequestRef } from "./pr.js";
-import type { AiReviewRecord, DraftReview, FocusScanRecord, PullRequestRef, PullRequestReviewData, PullRequestReviewResponse, StoredPullRequest } from "./types.js";
+import type { AiReviewRecord, DraftReview, FocusScanRecord, GuideReviewRecord, PullRequestRef, PullRequestReviewData, PullRequestReviewResponse, StoredPullRequest } from "./types.js";
 
 export type PrApiDeps = {
   cleanupPrWorktree: (ref: PullRequestRef) => Promise<string>;
@@ -9,6 +9,7 @@ export type PrApiDeps = {
   getDraftReview: (prKey: string) => Promise<DraftReview | null>;
   listAiReviews: (prKey: string) => Promise<AiReviewRecord[]>;
   listFocusScans: (prKey: string) => Promise<FocusScanRecord[]>;
+  listGuideReviews: (prKey: string) => Promise<GuideReviewRecord[]>;
   parsePullRequestRef: (input: string) => PullRequestRef;
   preparePrWorktree: (ref: PullRequestRef, cloneUrl: string, headSha: string) => Promise<string>;
   prewarmPiSession: (prKey: string, purposes: string[]) => void;
@@ -29,8 +30,8 @@ export const defaultPrApiDeps = (deps: Omit<PrApiDeps, "parsePullRequestRef">): 
 
 export function createPrApi(deps: PrApiDeps): PrApi {
   async function hydrateReviewResponse(data: PullRequestReviewData, pr: StoredPullRequest, extra: Partial<Pick<PullRequestReviewResponse, "worktreeDir">> = {}): Promise<PullRequestReviewResponse> {
-    const [draftReview, focusScans, aiReviews] = await Promise.all([deps.getDraftReview(pr.key), deps.listFocusScans(pr.key), deps.listAiReviews(pr.key)]);
-    return { ...data, pr, draftReview, focusScan: focusScans[0] ?? null, focusScans, aiReview: aiReviews[0] ?? null, aiReviews, ...extra };
+    const [draftReview, focusScans, aiReviews, guideReviews] = await Promise.all([deps.getDraftReview(pr.key), deps.listFocusScans(pr.key), deps.listAiReviews(pr.key), deps.listGuideReviews(pr.key)]);
+    return { ...data, pr, draftReview, focusScan: focusScans[0] ?? null, focusScans, aiReview: aiReviews[0] ?? null, aiReviews, guideReview: guideReviews.find((review) => review.headSha === pr.headSha) ?? null, ...extra };
   }
 
   function parse(input: string): { ref: PullRequestRef } {

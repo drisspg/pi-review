@@ -208,14 +208,28 @@ Order the walkthrough by how a reviewer should understand the change, not filesy
 
 Return only markdown in this exact parseable shape:
 ## Review guide
-1. Short conceptual chapter title
-- path:startLine-endLine — Short conceptual chapter title
-  Two to four concise sentences explaining what changes here, why it exists, and how it connects to the preceding or following chapter.
-2. Next chapter title
-- path:line — Next chapter title
-  Two to four concise sentences.
+## Change flow
+\`\`\`text
+public_api
+  validate_inputs
+  dispatch
+    implementation
+  return_result
+\`\`\`
+### 1. Short conceptual chapter title
+One or two sentences explaining the purpose of this chapter and how it connects to the walkthrough.
+- path:startLine-endLine — First review stop
+  One or two sentences explaining exactly what the reviewer should understand at this location.
+- another/path.py:line — Second review stop
+  One or two sentences explaining how this location advances the chapter.
+### 2. Next conceptual chapter
+One or two sentence chapter overview.
+- path:line — Next review stop
+  One or two sentence explanation.
 
-Use one representative changed location per chapter. Prefer 3-6 chapters; use 1-2 only for a genuinely tiny PR. Every chapter must cite a real changed file and reviewable changed line from the supplied patch. Do not report bugs, severities, praise, commands, or your investigation process. Mention risks only when they are necessary to understand the design tradeoff.
+The Change flow block must be a compact call tree or ownership tree using actual identifiers from the diff. Show the route from public entry points through validation, dispatch, implementation, state/data transformations, and returned results. If the PR has no meaningful runtime call stack, show the dependency or ownership path instead.
+
+Scale the walkthrough to the actual PR. A tiny local change may need one chapter and one stop; a cross-cutting change may need many chapters and stops. Do not pad to a minimum, impose a fixed maximum, or omit a meaningful part of the call path merely to fit a count. Each stop must cite a real changed file and reviewable changed line from the supplied patch. Stops should be fine-grained enough that the reviewer can inspect one focused idea at a time, but collectively cover the chapter's important control flow, data flow, or contract. Do not report bugs, severities, praise, commands, or your investigation process. Mention risks only when they are necessary to understand the design tradeoff.
 
 PR title: ${prTitle}
 

@@ -193,6 +193,9 @@ function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
       async saveFocusScan() {
         return { scan: { answer: "answer", areaStates: {}, createdAt: "now", headSha: "head", id: "scan", prKey: "pr", updatedAt: "now" } };
       },
+      async saveGuideReview() {
+        return { guide: { answer: "answer", createdAt: "now", headSha: "head", id: "guide", prKey: "pr", updatedAt: "now" } };
+      },
     },
     async sendStatic(res, pathname, head = false) {
       res.writeHead(200, { "content-type": "text/plain" });

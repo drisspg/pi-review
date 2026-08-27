@@ -1007,17 +1007,32 @@ test("runs a separate focus areas review and opens native focus terminals", asyn
   await expect(page.locator(".ai-review")).toContainText("0/1 focus area reviewed");
   await expect(row).toHaveClass(/focus-highlight-active/);
 
-  await mockAskPi(page, () => `## Review guide\n1. Core implementation\n- ${path}:${line}-${Number.parseInt(line, 10) + 1} — Core implementation\n  Start with the changed tiling condition and follow how it selects the implementation path.\n2. Validation path\n- ${path}:${line} — Validation path\n  Finish by checking that tests cover the intended behavior.`);
+  let guideRequests = 0;
+  await mockAskPi(page, () => {
+    guideRequests += 1;
+    return `## Review guide\n## Change flow\n\`\`\`text\npublic_api\n  implementation\n\`\`\`\n### 1. Core path\nFollow the implementation from selection through validation.\n- ${path}:${line}-${Number.parseInt(line, 10) + 1} — Core implementation\n  Start with the changed tiling condition and follow how it selects the implementation path.\n- ${path}:${line} — Validation path\n  Finish by checking that tests cover the intended behavior.`;
+  });
   await page.getByRole("button", { name: "Guide" }).click();
   const guide = page.getByRole("main", { name: "Guided review" });
-  await expect(guide.getByRole("heading", { name: "Core implementation" })).toBeVisible();
+  await expect(guide.locator(".guide-flow-body")).toContainText("public_api");
+  await expect(guide.getByRole("heading", { name: "Core path" })).toBeVisible();
+  await expect(guide.getByText("Core implementation", { exact: true })).toBeVisible();
   await expect(guide).toContainText(`${path}:${line}`);
+  await expect(guide.locator(".guide-code-marker").filter({ hasText: /[+-]/ }).first()).toBeVisible();
   await page.setViewportSize({ width: 820, height: 900 });
-  expect(await guide.locator(".guide-chapter").first().evaluate((chapter) => getComputedStyle(chapter).gridTemplateColumns.split(" ").length)).toBe(1);
-  await guide.getByRole("button", { name: "Open chapter terminal" }).first().click();
+  expect(await guide.locator(".guide-workspace").evaluate((workspace) => getComputedStyle(workspace).gridTemplateColumns.split(" ").length)).toBe(1);
+  await guide.getByRole("button", { name: "Open Pi terminal" }).click();
   await expect(guide.locator(".pi-native-terminal.compact")).toBeVisible();
   await guide.getByRole("checkbox", { name: "Reviewed" }).first().check();
   await expect(guide).toContainText("1/2");
+  await guide.getByRole("button", { name: /Next: Validation path/ }).click();
+  await expect(guide.getByRole("button", { name: /Validation path/ }).first()).toHaveAttribute("aria-expanded", "true");
+
+  await page.reload();
+  await expect(page.locator(".review-layout")).toBeVisible({ timeout: 60_000 });
+  await page.getByRole("button", { name: "Guide 1" }).click();
+  await expect(page.getByRole("main", { name: "Guided review" }).locator(".guide-flow-body")).toContainText("public_api");
+  expect(guideRequests).toBe(1);
 });
 
 test("marking a file viewed collapses it without jumping to the active focus area", async ({ page }) => {

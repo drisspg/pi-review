@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createPrApi } from "../../src/pr-api.js";
-import type { AiReviewRecord, DraftReview, FocusScanRecord, PullRequestRef, PullRequestReviewData, StoredPullRequest } from "../../src/types.js";
+import type { AiReviewRecord, DraftReview, FocusScanRecord, GuideReviewRecord, PullRequestRef, PullRequestReviewData, StoredPullRequest } from "../../src/types.js";
 
 const ref: PullRequestRef = { host: "github.com", owner: "pytorch", repo: "pytorch", number: 1 };
 
@@ -44,6 +44,7 @@ function fakeDeps() {
   const draftReview: DraftReview = { prKey: "github.com/pytorch/pytorch#1", headSha: "head", event: "COMMENT", body: "draft body", comments: [], updatedAt: "now" };
   const focusScan: FocusScanRecord = { id: "focus", prKey: "github.com/pytorch/pytorch#1", headSha: "head", answer: "focus", areaStates: {}, createdAt: "then", updatedAt: "now" };
   const aiReview: AiReviewRecord = { id: "ai", prKey: "github.com/pytorch/pytorch#1", headSha: "head", answer: "ai", createdAt: "then", updatedAt: "now" };
+  const guideReview: GuideReviewRecord = { id: "guide", prKey: "github.com/pytorch/pytorch#1", headSha: "head", answer: "guide", createdAt: "then", updatedAt: "now" };
   return {
     calls,
     deps: {
@@ -69,6 +70,10 @@ function fakeDeps() {
       async listFocusScans(prKey: string) {
         calls.push(`focus:${prKey}`);
         return [focusScan];
+      },
+      async listGuideReviews(prKey: string) {
+        calls.push(`guide:${prKey}`);
+        return [guideReview];
       },
       parsePullRequestRef(input: string) {
         calls.push(`parse:${input}`);
@@ -119,6 +124,7 @@ test("PR API activity refreshes the worktree, Pi context, and review response", 
   assert.equal(response.draftReview?.body, "draft body");
   assert.equal(response.focusScan?.id, "focus");
   assert.equal(response.aiReview?.id, "ai");
+  assert.equal(response.guideReview?.id, "guide");
   assert.deepEqual(calls, [
     "parse:url",
     "fetch:1",
@@ -128,6 +134,7 @@ test("PR API activity refreshes the worktree, Pi context, and review response", 
     "draft:github.com/pytorch/pytorch#1",
     "focus:github.com/pytorch/pytorch#1",
     "ai:github.com/pytorch/pytorch#1",
+    "guide:github.com/pytorch/pytorch#1",
   ]);
 });
 
@@ -148,5 +155,6 @@ test("PR API open prepares worktree, registers Pi cwd, prewarms sessions, and hy
     "draft:github.com/pytorch/pytorch#1",
     "focus:github.com/pytorch/pytorch#1",
     "ai:github.com/pytorch/pytorch#1",
+    "guide:github.com/pytorch/pytorch#1",
   ]);
 });

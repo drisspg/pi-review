@@ -796,9 +796,15 @@ a { color: var(--link); text-decoration: none; }
   line-height: 1.55;
 }
 
-.guide-progress {
+.guide-head-actions {
   display: grid;
   flex: 0 0 auto;
+  gap: 8px;
+  justify-items: end;
+}
+
+.guide-progress {
+  display: grid;
   gap: 1px;
   min-width: 116px;
   text-align: right;
@@ -814,64 +820,301 @@ a { color: var(--link); text-decoration: none; }
   font-size: 0.75rem;
 }
 
-.guide-chapters {
-  display: grid;
-  gap: 68px;
+.guide-flow {
+  margin: 0 20px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
 }
 
-.guide-chapter {
+.guide-flow > summary {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.guide-flow > summary::-webkit-details-marker { display: none; }
+
+.guide-flow > summary strong {
+  font-size: 0.82rem;
+}
+
+.guide-flow > summary > span:last-child {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.guide-flow-body {
+  padding: 0 14px 12px 34px;
+  border-top: 1px solid var(--border);
+}
+
+.guide-flow-body .markdown > :first-child { margin-top: 12px; }
+.guide-flow-body .markdown > :last-child { margin-bottom: 0; }
+.guide-flow-body pre { max-width: 900px; }
+
+.guide-workspace {
   display: grid;
-  grid-template-columns: minmax(250px, 0.72fr) minmax(460px, 1.45fr);
-  gap: clamp(28px, 5vw, 72px);
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 24px;
   align-items: start;
   padding: 0 20px;
-  scroll-margin-top: 100px;
 }
 
-.guide-chapter.reviewed .guide-chapter-number,
-.guide-chapter.reviewed .guide-chapter-story h3,
-.guide-chapter.reviewed .guide-chapter-story .markdown {
-  opacity: 0.58;
+.guide-outline {
+  position: sticky;
+  top: 78px;
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
 }
 
-.guide-chapter.reviewed .guide-reviewed-check {
+.guide-outline-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.guide-outline-head strong {
+  font-size: 0.82rem;
+}
+
+.guide-outline-head span {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.guide-outline > button {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-left: 3px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  text-align: left;
+}
+
+.guide-outline > button + button {
+  border-top: 1px solid var(--border);
+}
+
+.guide-outline > button:hover {
+  background: var(--panel2);
+  color: var(--text);
+}
+
+.guide-outline > button.active {
+  border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+  color: var(--text);
+}
+
+.guide-outline > button.complete .guide-outline-number,
+.guide-outline > button.complete small {
   color: var(--success);
 }
 
-.guide-chapter.reviewed .guide-chapter-evidence {
-  border-color: color-mix(in srgb, var(--success) 34%, var(--border));
-  box-shadow: none;
+.guide-outline-number {
+  padding-top: 1px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
 }
 
-.guide-chapter-story {
-  position: sticky;
-  top: 82px;
+.guide-outline-title {
   display: grid;
-  gap: 10px;
+  gap: 3px;
   min-width: 0;
 }
 
-.guide-chapter-story h3 {
+.guide-outline-title strong {
+  overflow: hidden;
+  color: inherit;
+  font-size: 0.79rem;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+}
+
+.guide-outline-title small {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.guide-stage {
+  min-width: 0;
+  scroll-margin-top: 76px;
+}
+
+.guide-stage-head {
+  display: grid;
+  gap: 8px;
+  padding: 2px 4px 18px;
+}
+
+.guide-stage-head h3 {
   margin: 0;
   color: var(--text);
-  font-size: 1.28rem;
-  line-height: 1.25;
+  font-size: clamp(1.3rem, 2vw, 1.7rem);
+  line-height: 1.2;
 }
 
-.guide-chapter-story .markdown {
-  color: color-mix(in srgb, var(--text) 90%, var(--muted));
-  line-height: 1.55;
+.guide-stage-head .markdown {
+  max-width: 820px;
+  color: var(--muted);
+  line-height: 1.5;
 }
 
-.guide-chapter-story .markdown > :first-child { margin-top: 0; }
-.guide-chapter-story .markdown > :last-child { margin-bottom: 0; }
+.guide-stage-head .markdown > :first-child { margin-top: 0; }
+.guide-stage-head .markdown > :last-child { margin-bottom: 0; }
 
-.guide-chapter-actions {
+.guide-stage-progress {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.guide-stop-list {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.guide-stop + .guide-stop {
+  border-top: 1px solid var(--border);
+}
+
+.guide-stop.active {
+  background: color-mix(in srgb, var(--accent) 3%, var(--panel));
+}
+
+.guide-stop-head {
   display: flex;
-  flex-wrap: wrap;
+  align-items: stretch;
+  min-height: 56px;
+}
+
+.guide-stop-head > button {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  gap: 10px;
   align-items: center;
-  gap: 8px 12px;
-  padding-top: 4px;
+  min-width: 0;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.guide-stop-head > button:hover {
+  background: var(--panel2);
+}
+
+.guide-stop.active .guide-stop-head > button {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.guide-stop.active .guide-stop-head .disclosure-chevron {
+  transform: rotate(90deg);
+}
+
+.guide-stop-number {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  text-align: center;
+}
+
+.guide-stop.reviewed .guide-stop-number,
+.guide-stop.reviewed .guide-reviewed-check {
+  color: var(--success);
+}
+
+.guide-stop-title {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.guide-stop-title strong,
+.guide-stop-title small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guide-stop-title strong {
+  font-size: 0.84rem;
+}
+
+.guide-stop-title small {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.69rem;
+}
+
+.guide-stop-head > .guide-reviewed-check {
+  flex: 0 0 auto;
+  padding: 0 14px;
+  border-left: 1px solid var(--border);
+}
+
+.guide-stop-detail {
+  display: grid;
+  gap: 12px;
+  padding: 0 12px 14px 54px;
+}
+
+.guide-stop-explanation {
+  max-width: 850px;
+  color: color-mix(in srgb, var(--text) 90%, var(--muted));
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+.guide-stop-explanation .markdown > :first-child { margin-top: 0; }
+.guide-stop-explanation .markdown > :last-child { margin-bottom: 0; }
+
+.guide-step-navigation {
+  display: grid;
+  grid-template-columns: minmax(100px, auto) 1fr minmax(180px, auto);
+  gap: 10px;
+  align-items: center;
+  margin-top: 14px;
+}
+
+.guide-step-navigation > span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-align: center;
+}
+
+.guide-step-navigation > button:last-child {
+  justify-self: end;
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .guide-reviewed-check {
@@ -903,28 +1146,23 @@ a { color: var(--link); text-decoration: none; }
   background: var(--panel2);
 }
 
-.guide-chapter-evidence > header button {
+.guide-evidence-file {
   display: flex;
   min-width: 0;
   align-items: baseline;
   gap: 7px;
-  padding: 0;
   overflow: hidden;
-  border: 0;
-  background: transparent;
   color: var(--text);
-  cursor: pointer;
-  text-align: left;
 }
 
-.guide-chapter-evidence > header button strong,
-.guide-chapter-evidence > header button span {
+.guide-evidence-file strong,
+.guide-evidence-file span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.guide-chapter-evidence > header button span {
+.guide-evidence-file span {
   color: var(--muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.76rem;
@@ -949,7 +1187,7 @@ a { color: var(--link); text-decoration: none; }
 
 .guide-code-row {
   display: grid;
-  grid-template-columns: 48px minmax(max-content, 1fr);
+  grid-template-columns: 42px 42px 18px minmax(max-content, 1fr);
   min-width: max-content;
   padding-right: 14px;
 }
@@ -958,16 +1196,29 @@ a { color: var(--link); text-decoration: none; }
   background: var(--add);
 }
 
-.guide-code-row.deleted {
+.guide-code-row.removed {
   background: var(--del);
 }
 
 .guide-code-line {
-  padding-right: 12px;
+  padding-right: 8px;
   color: var(--muted);
   text-align: right;
   user-select: none;
 }
+
+.guide-code-line.old {
+  border-right: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.guide-code-marker {
+  color: var(--muted);
+  text-align: center;
+  user-select: none;
+}
+
+.guide-code-row.added .guide-code-marker { color: var(--success); }
+.guide-code-row.removed .guide-code-marker { color: var(--danger); }
 
 .guide-code-row code {
   white-space: pre;
@@ -994,11 +1245,17 @@ a { color: var(--link); text-decoration: none; }
   font-size: 0.72rem;
 }
 
-.guide-terminal-toggle span {
+.guide-terminal-toggle > span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.guide-terminal-toggle > div {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
 }
 
 .guide-terminal {
@@ -4617,15 +4874,19 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
   .review-main > .review-mode-tabs { grid-column: 1; grid-row: 3; }
   .review-main > .files,
   .review-main > .guide-review { grid-column: 1; grid-row: 4; }
-  .guide-chapter { grid-template-columns: minmax(220px, 0.65fr) minmax(420px, 1.35fr); gap: 28px; }
 }
 
 @media (max-width: 900px) {
   .guide-review-head { display: grid; padding: 18px 8px 22px; }
+  .guide-head-actions { justify-items: start; }
   .guide-progress { text-align: left; }
-  .guide-chapters { gap: 44px; }
-  .guide-chapter { grid-template-columns: minmax(0, 1fr); gap: 18px; padding: 0; }
-  .guide-chapter-story { position: static; padding: 0 8px; }
+  .guide-flow { margin: 0; }
+  .guide-workspace { grid-template-columns: minmax(0, 1fr); padding: 0; }
+  .guide-outline { position: static; display: flex; overflow-x: auto; }
+  .guide-outline-head { display: none; }
+  .guide-outline > button { flex: 0 0 220px; border-top: 0; border-left: 0; border-bottom: 3px solid transparent; }
+  .guide-outline > button + button { border-top: 0; border-left: 1px solid var(--border); }
+  .guide-outline > button.active { border-left-color: var(--border); border-bottom-color: var(--accent); }
 }
 
 @media (min-width: 761px) and (max-width: 1100px) {
@@ -4684,7 +4945,14 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
   .files-toolbar-actions .small-muted-button { padding-inline: 4px; font-size: 0.75rem; }
   .files-toolbar-actions .review-changes-button { padding-inline: 6px; font-size: 0.75rem; }
   .diff-row { --diff-gutter: 42px; }
+  .guide-stop-head { display: grid; }
+  .guide-stop-head > .guide-reviewed-check { min-height: 36px; justify-content: flex-start; padding: 0 12px 0 54px; border-top: 1px solid var(--border); border-left: 0; }
+  .guide-stop-detail { padding: 0 8px 12px; }
   .guide-terminal-toggle { align-items: flex-start; flex-direction: column; }
+  .guide-terminal-toggle > div { flex-wrap: wrap; }
+  .guide-step-navigation { grid-template-columns: 1fr 1fr; }
+  .guide-step-navigation > span { grid-column: 1 / -1; grid-row: 1; }
+  .guide-step-navigation > button:last-child { justify-self: stretch; }
   .guide-empty-card { padding: 24px; }
   .inline-thread { margin-left: 8px; }
   .inline-thread.collapsed { width: calc(100% - 16px); }

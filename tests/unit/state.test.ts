@@ -11,7 +11,7 @@ const paths = {
 };
 
 function emptyState(): AppState {
-  return { prs: [], fileReviews: [], draftReviews: [], focusScans: [], aiReviews: [], reviewMemory: [], reviewProfile: null };
+  return { prs: [], fileReviews: [], draftReviews: [], focusScans: [], aiReviews: [], guideReviews: [], reviewMemory: [], reviewProfile: null };
 }
 
 function fakeRuntime(initialState?: Partial<AppState>) {
@@ -198,6 +198,18 @@ test("clearDraftReview removes only the submitted PR draft", async () => {
 
   assert.equal(await store.getDraftReview("first"), null);
   assert.deepEqual(await store.getDraftReview("second"), second);
+});
+
+test("saveGuideReview replaces the cached guide for the same head", async () => {
+  const { runtime } = fakeRuntime(emptyState());
+  const store = createStateStore(runtime, paths);
+
+  const first = await store.saveGuideReview({ prKey: "pr", headSha: "head", answer: "first" });
+  const second = await store.saveGuideReview({ prKey: "pr", headSha: "head", answer: "second" });
+
+  assert.equal(second.id, first.id);
+  assert.equal((await store.listGuideReviews("pr")).length, 1);
+  assert.equal((await store.listGuideReviews("pr"))[0].answer, "second");
 });
 
 test("saveFocusScan updates existing records and caps scans per PR", async () => {
