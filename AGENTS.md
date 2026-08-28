@@ -60,7 +60,9 @@ vscode-extension/       Generated artifacts only (dist/), no source here
 | `npm run validate` | typecheck + build + unit + e2e |
 
 Env vars: `PI_PR_REVIEW_PORT` (API), `PI_REVIEW_WEB_PORT` (Vite), `PI_REVIEW_STATE_PATH` (state
-JSON), `PI_REVIEW_TEST_PORT` (Playwright port override), `PI_REVIEW_FAST_TESTS=1` (fast e2e mode);
+JSON), `PI_REVIEW_TEST_PORT` (Playwright port override), `PI_REVIEW_FAST_TESTS=1` (fast e2e mode),
+`PI_REVIEW_DISABLE_AUTO_REVIEWS=1` (suppress the on-open guide/review/focus warmup — REQUIRED for
+any test or probe server, or PR opens will start real Pi jobs);
 `PI_REVIEW_API_URL` / `PI_REVIEW_PR_KEY` / `PI_REVIEW_HEAD_SHA` / `PI_REVIEW_TARGET` are injected
 into spawned Pi terminal sessions and smoke scripts, not something you set by hand.
 

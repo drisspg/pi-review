@@ -201,6 +201,9 @@ function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
       res.writeHead(200, { "content-type": "text/plain" });
       res.end(head ? undefined : `static:${pathname}`);
     },
+    serverConfig() {
+      return { autoReviews: true };
+    },
     shellApi: {
       health() {
         return { ok: true };
@@ -374,6 +377,15 @@ test("server route pulls and saves private GitHub review comments", async () => 
     ["add", { prUrl: "url", body: "note" }],
     ["add-many", { prUrl: "url", comments: [] }],
   ]);
+});
+
+test("server route exposes auto-review config", async () => {
+  const route = createServerRoute(baseDeps());
+
+  const res = await routeRequest(route, "GET", "/api/config");
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(jsonBody(res), { autoReviews: true });
 });
 
 test("server route exposes backend prompt contracts", async () => {

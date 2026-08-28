@@ -44,6 +44,7 @@ export type ServerRouteDeps = {
   reviewSubmitRouteApi: ReviewSubmitRouteApi;
   savedAnalysisApi: SavedAnalysisApi;
   sendStatic: (res: ServerResponse, pathname: string, head?: boolean) => Promise<void>;
+  serverConfig: () => { autoReviews: boolean };
   shellApi: ShellApi;
 };
 
@@ -92,6 +93,11 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
 
     if (req.method === "GET" && url.pathname === "/api/health") {
       sendJson(res, 200, deps.shellApi.health());
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/config") {
+      sendJson(res, 200, deps.serverConfig());
       return;
     }
 

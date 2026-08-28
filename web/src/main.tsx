@@ -34,6 +34,12 @@ type OpenPrOptions = {
 const PiTerminal = React.lazy(async () => ({ default: (await import("./components/PiTerminal")).PiTerminal }));
 const PiTerminalPrContext = createContext<{ prKey: string; headSha: string; onDraftReview: (draftReview: DraftReview) => void } | null>(null);
 
+let autoReviewsPromise: Promise<boolean> | null = null;
+function autoReviewsEnabled(): Promise<boolean> {
+  autoReviewsPromise ??= api<{ autoReviews: boolean }>("/api/config").then((config) => config.autoReviews).catch(() => true);
+  return autoReviewsPromise;
+}
+
 function terminalSessionId(prefix: string, value: string): string {
   let hash = 2166136261;
   for (const character of value) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
@@ -656,6 +662,7 @@ function App() {
     if (cached != null) {
       showReview(cached);
       setBusy(false);
+      void runAutomaticPiReviews(cached);
       void refreshLogs();
       return;
     }
@@ -787,10 +794,15 @@ function App() {
   }
 
   async function saveFocusScan(answer: string, viewedIds: Record<string, boolean>, collapsedIds: Record<string, boolean>, id = focusScanId): Promise<string | null> {
-    if (review == null || answer.trim().length === 0) return id;
-    const { scan } = await api<{ scan: FocusScanRecord }>("/api/focus-scan/save", { method: "POST", body: JSON.stringify({ id, prKey: review.pr.key, headSha: review.pr.headSha, answer, areaStates: statesFromFocusAreas(parseFocusAreas(answer), viewedIds, collapsedIds) }) });
-    setFocusScanId(scan.id);
-    updateCachedReview(review.pr.key, (current) => ({ ...current, focusScan: scan, focusScans: upsertHistoryRecord(current.focusScans, scan) }));
+    if (review == null) return id;
+    return await saveFocusScanFor(review, answer, viewedIds, collapsedIds, id);
+  }
+
+  async function saveFocusScanFor(targetReview: OpenResponse, answer: string, viewedIds: Record<string, boolean>, collapsedIds: Record<string, boolean>, id: string | null): Promise<string | null> {
+    if (answer.trim().length === 0) return id;
+    const { scan } = await api<{ scan: FocusScanRecord }>("/api/focus-scan/save", { method: "POST", body: JSON.stringify({ id, prKey: targetReview.pr.key, headSha: targetReview.pr.headSha, answer, areaStates: statesFromFocusAreas(parseFocusAreas(answer), viewedIds, collapsedIds) }) });
+    if (activeReviewKeyRef.current === targetReview.pr.key) setFocusScanId(scan.id);
+    updateCachedReview(targetReview.pr.key, (current) => ({ ...current, focusScan: scan, focusScans: upsertHistoryRecord(current.focusScans, scan) }));
     return scan.id;
   }
 
@@ -951,12 +963,16 @@ function App() {
     await writeClipboard(prompt);
   }
 
+  /** Warm everything a reviewer needs on open: findings, focus scan, and the guide walkthrough. */
   async function runAutomaticPiReviews(nextReview: OpenResponse) {
+    if (!(await autoReviewsEnabled())) return;
     const aiReviewUpToDate = nextReview.aiReview != null && nextReview.aiReview.headSha === nextReview.pr.headSha && nextReview.aiReview.answer.trim().length > 0;
     const focusScanUpToDate = nextReview.focusScan != null && nextReview.focusScan.headSha === nextReview.pr.headSha && nextReview.focusScan.answer.trim().length > 0;
+    const guideUpToDate = nextReview.guideReview != null && nextReview.guideReview.headSha === nextReview.pr.headSha && nextReview.guideReview.answer.trim().length > 0;
     await Promise.all([
       aiReviewUpToDate ? Promise.resolve() : runAiReviewFor(nextReview, true),
       focusScanUpToDate ? Promise.resolve() : runFocusReviewFor(nextReview, true),
+      guideUpToDate ? Promise.resolve() : runGuideReviewFor(nextReview),
     ]);
     await refreshLogs();
   }
@@ -968,7 +984,11 @@ function App() {
 
   async function runGuideReview() {
     if (review == null || guideReview.running) return;
-    const targetReview = review;
+    await runGuideReviewFor(review);
+  }
+
+  async function runGuideReviewFor(targetReview: OpenResponse) {
+    if (guideReview.running) return;
     const initialActivity = runningAgentActivity();
     let cancelActivityPolling: () => void = () => undefined;
     setGuideReview({ running: true, text: "", activity: initialActivity });
@@ -1091,8 +1111,10 @@ function App() {
         setFocusReview((current) => ({ ...current, running: false, text: answer, activity: null }));
         setViewedFocusAreaIds(nextViewedIds);
         setCollapsedFocusAreaIds(nextCollapsedIds);
-        setActiveFocusAreaId(nextAreas[0]?.id ?? null);
-        void saveFocusScan(answer, nextViewedIds, nextCollapsedIds, null);
+        // Background warms must not auto-activate an area: activation mounts its inline
+        // terminal and spawns a real Pi session the reviewer never asked for.
+        if (!background) setActiveFocusAreaId(nextAreas[0]?.id ?? null);
+        void saveFocusScanFor(targetReview, answer, nextViewedIds, nextCollapsedIds, null);
         break;
       }
     } catch (err) {
