@@ -233,7 +233,6 @@ test("refresh updates pull request activity and landed status", async ({ page })
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
 
   await expect(page.locator(".pr-header-strip .review-status")).toHaveText("Merged");
-  await expect(page.locator(".pr-header-meta")).toContainText("closed");
 });
 
 test("opens PR description references on GitHub in new tabs", async ({ page, context }) => {

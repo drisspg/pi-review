@@ -1604,7 +1604,6 @@ function PrHeaderStrip({ pr, refreshGithubActivity, refreshingActivity }: { pr: 
       <div className="pr-header-meta">
         <span className={`review-status ${status.tone}`}>{status.label}</span>
         <span>{repository}</span>
-        <span>{pr.state}</span>
         <span>{pr.filesChanged} files changed</span>
         <span>{pr.existingCommentCount} comments</span>
         <span>{shortSha(pr.headSha)}</span>

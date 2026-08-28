@@ -6,9 +6,10 @@ import { Button } from "./Button";
 type PanPoint = { x: number; y: number };
 type DragState = { pointerId: number; startX: number; startY: number; originX: number; originY: number };
 
-const MIN_ZOOM = 0.4;
-const MAX_ZOOM = 3;
+const MIN_ZOOM = 0.25;
+const MAX_ZOOM = 4;
 const ZOOM_STEP = 0.2;
+const FIT_PADDING = 24;
 
 type MermaidModule = typeof mermaidNs;
 
@@ -21,9 +22,74 @@ async function loadMermaid(): Promise<MermaidModule> {
   return modulePromise;
 }
 
-function mermaidTheme(): "dark" | "default" {
-  const theme = document.documentElement.dataset.theme ?? "github-dark";
-  return theme === "github-light" ? "default" : "dark";
+function cssVar(name: string, fallback: string): string {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value.length > 0 ? value : fallback;
+}
+
+function parseColor(value: string): [number, number, number] | null {
+  const hex = /^#([0-9a-f]{6})$/i.exec(value)?.[1];
+  if (hex != null) return [Number.parseInt(hex.slice(0, 2), 16), Number.parseInt(hex.slice(2, 4), 16), Number.parseInt(hex.slice(4, 6), 16)];
+  const rgb = /^rgba?\((\d+)[,\s]+(\d+)[,\s]+(\d+)/.exec(value);
+  if (rgb != null) return [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])];
+  return null;
+}
+
+/** Blend `amount` of fg into bg; mermaid needs concrete colors, not color-mix() strings. */
+function blend(fg: string, bg: string, amount: number): string {
+  const a = parseColor(fg);
+  const b = parseColor(bg);
+  if (a == null || b == null) return bg;
+  const channels = a.map((channel, i) => Math.round(channel * amount + (b[i] ?? 0) * (1 - amount)));
+  return `#${channels.map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** Derive a mermaid "base" theme from the app's design tokens so diagrams match all three themes. */
+function mermaidThemeVariables(): Record<string, unknown> {
+  const panel = cssVar("--panel", "#161b22");
+  const panel2 = cssVar("--panel2", "#0d1117");
+  const border = cssVar("--border", "#30363d");
+  const text = cssVar("--text", "#e6edf3");
+  const muted = cssVar("--muted", "#8b949e");
+  const accent = cssVar("--accent", "#2f81f7");
+  const threadAccent = cssVar("--thread-accent", "#a371f7");
+  const attention = cssVar("--attention", "#d29922");
+  const nodeBkg = blend(accent, panel, 0.09);
+  const nodeBorder = blend(accent, border, 0.5);
+  return {
+    darkMode: (document.documentElement.dataset.theme ?? "github-dark") !== "github-light",
+    background: panel2,
+    fontSize: "14px",
+    primaryColor: nodeBkg,
+    primaryTextColor: text,
+    primaryBorderColor: nodeBorder,
+    mainBkg: nodeBkg,
+    nodeBorder,
+    nodeTextColor: text,
+    textColor: text,
+    titleColor: text,
+    lineColor: blend(muted, border, 0.6),
+    edgeLabelBackground: panel,
+    clusterBkg: blend(text, panel2, 0.03),
+    clusterBorder: border,
+    secondaryColor: blend(threadAccent, panel, 0.12),
+    secondaryBorderColor: blend(threadAccent, border, 0.4),
+    tertiaryColor: panel2,
+    tertiaryBorderColor: border,
+    noteBkgColor: blend(attention, panel, 0.12),
+    noteTextColor: text,
+    noteBorderColor: blend(attention, border, 0.4),
+    actorBkg: nodeBkg,
+    actorBorder: nodeBorder,
+    actorTextColor: text,
+    signalColor: text,
+    signalTextColor: text,
+    labelBoxBkgColor: panel,
+    labelTextColor: text,
+    loopTextColor: muted,
+    activationBkgColor: blend(accent, panel, 0.18),
+    activationBorderColor: nodeBorder,
+  };
 }
 
 let renderCounter = 0;
@@ -41,6 +107,8 @@ export function Mermaid({ code }: { code: string }) {
   const [dragging, setDragging] = useState(false);
   const dragRef = useRef<DragState | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const zoomRef = useRef(1);
+  zoomRef.current = zoom;
   const themeRef = useRef<string>(document.documentElement.dataset.theme ?? "github-dark");
 
   useEffect(() => {
@@ -61,7 +129,14 @@ export function Mermaid({ code }: { code: string }) {
     void (async () => {
       try {
         const mermaid = await loadMermaid();
-        mermaid.initialize({ startOnLoad: false, securityLevel: "strict", fontFamily: "inherit", theme: mermaidTheme() });
+        mermaid.initialize({
+          startOnLoad: false,
+          securityLevel: "strict",
+          fontFamily: "inherit",
+          theme: "base",
+          themeVariables: mermaidThemeVariables(),
+          flowchart: { curve: "basis" },
+        });
         const renderId = nextRenderId();
         let rendered: string;
         try {
@@ -83,6 +158,27 @@ export function Mermaid({ code }: { code: string }) {
     return () => { cancelled = true; };
   }, [code, themeTick]);
 
+  function fitView() {
+    const viewport = viewportRef.current;
+    const svgEl = viewport?.querySelector("svg");
+    if (viewport == null || svgEl == null) return;
+    const rect = svgEl.getBoundingClientRect();
+    const baseWidth = rect.width / zoomRef.current;
+    const baseHeight = rect.height / zoomRef.current;
+    if (baseWidth <= 0 || baseHeight <= 0) return;
+    const fit = Math.min((viewport.clientWidth - FIT_PADDING * 2) / baseWidth, (viewport.clientHeight - FIT_PADDING * 2) / baseHeight, 1);
+    const nextZoom = Math.max(MIN_ZOOM, fit);
+    setZoom(nextZoom);
+    setPan({ x: (viewport.clientWidth - baseWidth * nextZoom) / 2, y: Math.max((viewport.clientHeight - baseHeight * nextZoom) / 2, FIT_PADDING) });
+  }
+
+  // Start each diagram fitted and centered like a canvas, instead of 100% pinned top-left.
+  useEffect(() => {
+    if (svg == null) return;
+    const frame = requestAnimationFrame(fitView);
+    return () => cancelAnimationFrame(frame);
+  }, [svg]);
+
   function applyZoom(nextZoom: number, anchor?: PanPoint) {
     const clampedZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, nextZoom));
     const viewport = viewportRef.current;
@@ -97,11 +193,6 @@ export function Mermaid({ code }: { code: string }) {
       y: cursor.y - ((cursor.y - current.y) / zoom) * clampedZoom,
     }));
     setZoom(clampedZoom);
-  }
-
-  function resetView() {
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
   }
 
   function handleWheel(event: React.WheelEvent<HTMLDivElement>) {
@@ -137,12 +228,12 @@ export function Mermaid({ code }: { code: string }) {
   if (svg == null) return <div className="mermaid-placeholder" aria-label="Rendering diagram" />;
   return <div className="mermaid-zoom-shell">
     <div className="mermaid-zoom-controls" aria-label="Diagram zoom controls">
-      <span className="mermaid-zoom-hint">Drag to pan · wheel to zoom</span>
       <Button variant="muted" onClick={() => applyZoom(zoom - ZOOM_STEP)}>−</Button>
       <span>{Math.round(zoom * 100)}%</span>
       <Button variant="muted" onClick={() => applyZoom(zoom + ZOOM_STEP)}>+</Button>
-      <Button variant="muted" onClick={resetView}>Reset</Button>
+      <Button variant="muted" onClick={fitView}>Fit</Button>
     </div>
+    <span className="mermaid-zoom-hint">Drag to pan · wheel to zoom</span>
     <div
       ref={viewportRef}
       className={`mermaid-viewport${dragging ? " dragging" : ""}`}

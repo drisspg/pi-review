@@ -531,6 +531,9 @@ kbd {
   --sticky-files-toolbar-h: 44px;
   display: grid;
   gap: var(--space-3);
+  width: 100%;
+  max-width: 2200px;
+  margin-inline: auto;
 }
 
 .review-page.panel-focused {
@@ -1692,7 +1695,11 @@ kbd {
 .split-code-cell {
   display: grid;
   grid-template-columns: 12px minmax(0, max-content);
-  min-width: max-content;
+  /* Soft-wrap long lines instead of clipping: the row track is minmax(0,1fr), so
+     min-width: max-content painted past the container with no scrollbar. */
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   padding-right: 10px;
   background: var(--diff-row-bg);
 }
@@ -2701,7 +2708,9 @@ kbd {
   color: var(--muted);
   font-size: 0.68rem;
   text-transform: lowercase;
-  opacity: 0.8;
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  background: var(--panel2);
 }
 
 .markdown-code-block .markdown-copy-button {
@@ -3865,6 +3874,7 @@ button.fold:hover {
 .pi-history-picker select {
   flex: 1;
   min-width: 0;
+  max-width: 100%;
   min-height: 28px;
   padding: 2px 6px;
   font-size: 0.78rem;
@@ -5202,45 +5212,58 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
 /* Mermaid rendering */
 .markdown-mermaid-block {
   margin: 12px 0;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--panel2) 72%, var(--panel));
-  overflow-x: auto;
 }
 
 .mermaid-zoom-shell {
-  display: grid;
-  gap: 8px;
+  position: relative;
 }
 
 .mermaid-zoom-controls {
-  position: sticky;
-  top: 0;
-  z-index: 1;
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  z-index: 2;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
+  gap: 4px;
+  padding: 3px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow-raised);
 }
 
 .mermaid-zoom-controls button {
-  min-height: 26px;
-  padding: 2px 8px;
+  min-height: 24px;
+  padding: 0 8px;
   font-size: 0.76rem;
 }
 
 .mermaid-zoom-controls span {
   color: var(--muted);
   font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
   min-width: 42px;
   text-align: center;
 }
 
-.mermaid-zoom-controls .mermaid-zoom-hint {
-  flex: 1;
-  min-width: 0;
-  text-align: left;
+.mermaid-zoom-hint {
+  position: absolute;
+  bottom: var(--space-2);
+  left: var(--space-2);
+  z-index: 2;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: var(--text-xs);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur) var(--ease);
+}
+
+.mermaid-zoom-shell:hover .mermaid-zoom-hint {
+  opacity: 1;
 }
 
 .mermaid-viewport {
@@ -5248,8 +5271,10 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
   min-height: 360px;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--panel) 70%, transparent);
+  border-radius: var(--radius-lg);
+  background-color: color-mix(in srgb, var(--panel2) 65%, var(--panel));
+  background-image: radial-gradient(color-mix(in srgb, var(--fgColor-default) 8%, transparent) 1px, transparent 1px);
+  background-size: 18px 18px;
   cursor: grab;
   touch-action: none;
 }
@@ -5260,8 +5285,8 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
 
 .mermaid-rendered {
   position: absolute;
-  top: 24px;
-  left: 24px;
+  top: 0;
+  left: 0;
   transform-origin: 0 0;
   will-change: transform;
 }
@@ -5270,6 +5295,41 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
   display: block;
   max-width: none;
   height: auto;
+}
+
+.mermaid-rendered .node rect,
+.mermaid-rendered .cluster rect {
+  rx: 8px;
+  ry: 8px;
+}
+
+.mermaid-rendered .edgePaths path {
+  stroke-width: 1.5px;
+}
+
+/* Edge labels: mermaid emits inline colors and a pre-measured foreignObject box, so
+   force readable text on every child and let the box overflow instead of clipping. */
+.mermaid-rendered .edgeLabel,
+.mermaid-rendered .edgeLabel span,
+.mermaid-rendered .edgeLabel p {
+  background: var(--panel) !important;
+  color: var(--text) !important;
+}
+
+.mermaid-rendered .edgeLabel p {
+  margin: 0 !important;
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  line-height: 1.35;
+}
+
+.mermaid-rendered .edgeLabels foreignObject,
+.mermaid-rendered .edgeLabel foreignObject {
+  overflow: visible;
+}
+
+.mermaid-rendered .cluster-label .nodeLabel {
+  color: var(--muted) !important;
 }
 
 .mermaid-placeholder {
@@ -5286,7 +5346,10 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
 
 
 .markdown table {
-  width: 100%;
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
   margin: 0 0 0.85rem;
   border-collapse: collapse;
   font-size: 0.86rem;
