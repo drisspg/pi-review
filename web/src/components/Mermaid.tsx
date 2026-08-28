@@ -17,7 +17,12 @@ let modulePromise: Promise<MermaidModule> | null = null;
 
 async function loadMermaid(): Promise<MermaidModule> {
   if (modulePromise == null) {
-    modulePromise = import("mermaid").then((module) => module.default);
+    // Cache only successful loads: a failed chunk fetch (e.g. stale hashed asset
+    // after a redeploy) must stay retryable instead of poisoning every diagram.
+    modulePromise = import("mermaid").then((module) => module.default).catch((error: unknown) => {
+      modulePromise = null;
+      throw error;
+    });
   }
   return modulePromise;
 }
@@ -232,6 +237,8 @@ export function Mermaid({ code }: { code: string }) {
   if (error != null) {
     return <div className="mermaid-error">
       <p>Mermaid render failed: {error}</p>
+      {error.includes("dynamically imported module") && <p>The app was rebuilt underneath this tab — reload the page to fetch the new assets.</p>}
+      <Button variant="muted" onClick={() => setThemeTick((tick) => tick + 1)}>Retry render</Button>
       <pre><code>{code}</code></pre>
     </div>;
   }
