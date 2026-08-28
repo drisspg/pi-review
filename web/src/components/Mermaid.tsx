@@ -62,7 +62,13 @@ export function Mermaid({ code }: { code: string }) {
       try {
         const mermaid = await loadMermaid();
         mermaid.initialize({ startOnLoad: false, securityLevel: "strict", fontFamily: "inherit", theme: mermaidTheme() });
-        const { svg: rendered } = await mermaid.render(nextRenderId(), code);
+        const renderId = nextRenderId();
+        let rendered: string;
+        try {
+          ({ svg: rendered } = await mermaid.render(renderId, code));
+        } finally {
+          document.getElementById(`d${renderId}`)?.remove();
+        }
         if (!cancelled) {
           setSvg(rendered);
           setZoom(1);

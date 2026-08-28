@@ -2,20 +2,16 @@ import { parseFocusAreas } from "./focus";
 import type { FocusArea } from "../types";
 
 export type GuideChapter = { id: string; title: string; body: string; steps: FocusArea[] };
-export type GuideDocument = { flow: string; chapters: GuideChapter[] };
 
 function chapterTitle(rawTitle: string): string {
   return rawTitle.replace(/^\d+[.)]\s*/, "").trim();
 }
 
-/** Parse a guided-review response into its change flow and ordered code stops. */
-export function parseGuideDocument(text: string): GuideDocument {
+/** Parse a guided-review response into conceptual chapters and ordered code stops. */
+export function parseGuideChapters(text: string): GuideChapter[] {
   const heading = /^###\s+(.+)$/gm;
   const matches = [...text.matchAll(heading)];
-  const flowHeading = /^##\s+Change flow\s*$/m.exec(text);
-  const flowStart = flowHeading == null ? -1 : (flowHeading.index ?? 0) + flowHeading[0].length;
-  const flow = flowStart === -1 ? "" : text.slice(flowStart, matches[0]?.index ?? text.length).trim();
-  const chapters = matches.flatMap((match, index) => {
+  return matches.flatMap((match, index) => {
     const start = (match.index ?? 0) + match[0].length;
     const section = text.slice(start, matches[index + 1]?.index ?? text.length).trim();
     const steps = parseFocusAreas(section);
@@ -28,5 +24,4 @@ export function parseGuideDocument(text: string): GuideDocument {
       steps: steps.map((step, stepIndex) => ({ ...step, id: `guide-chapter-${index}-step-${stepIndex}` })),
     }];
   });
-  return { flow, chapters };
 }

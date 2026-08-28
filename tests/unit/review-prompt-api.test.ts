@@ -25,7 +25,11 @@ test("review prompt API builds code walk prompts with flow-dag purpose", async (
   const result = await api().build({ mode: "code-walk", prKey: "pr", prTitle: "Title", files });
 
   assert.equal(result.purpose, "flow-dag");
-  assert.match(result.prompt, /Create a reviewer-friendly code walk for PR pr/);
+  assert.match(result.prompt, /Use the show-me skill style/);
+  assert.match(result.prompt, /Show me what's going on in PR pr/i);
+  assert.match(result.prompt, /sequenceDiagram/);
+  assert.match(result.prompt, /stateDiagram-v2/);
+  assert.match(result.prompt, /Do not pad a small change, force a table, or turn the answer into a multi-section report/);
   assert.match(result.prompt, /PR title: Title/);
   assert.match(result.prompt, /Status: modified, \+3\/-1/);
 });
@@ -38,7 +42,6 @@ test("review prompt API builds conceptual guide walkthroughs", async () => {
   assert.match(result.prompt, /not a risk scan/);
   assert.match(result.prompt, /not filesystem order/);
   assert.match(result.prompt, /path:startLine-endLine/);
-  assert.match(result.prompt, /Change flow block must be a compact call tree/);
   assert.match(result.prompt, /Do not pad to a minimum, impose a fixed maximum/);
   assert.match(result.prompt, /Always explain how the implementation fits together/);
 });

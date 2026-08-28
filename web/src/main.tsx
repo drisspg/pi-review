@@ -1,6 +1,6 @@
 import React, { createContext, ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, ScreenFullIcon, ScreenNormalIcon, XIcon } from "@primer/octicons-react";
+import { ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, GitPullRequestIcon, ScreenFullIcon, ScreenNormalIcon, XIcon } from "@primer/octicons-react";
 import { BaseStyles, Checkbox, Flash, Radio, Select, Textarea, TextInput, ThemeProvider } from "@primer/react";
 import { api, askPi as askPiApi } from "./api";
 import { ActionMenu, ActionMenuItem } from "./components/ActionMenu";
@@ -15,7 +15,7 @@ import { buildDiffAnnotationIndex, commentTarget, commentThreadDomId, diffAnnota
 import { contextRowsFromText, hunkNewStart, isTargetInSelection, lastNewLine, parsePatchRows, parsePatchSetSections, targetFromPoint, targetFromRow } from "./lib/diff";
 import { autoGrowTextarea } from "./lib/dom";
 import { parseFocusAreas } from "./lib/focus";
-import { parseGuideDocument, type GuideChapter } from "./lib/guide";
+import { parseGuideChapters, type GuideChapter } from "./lib/guide";
 import { languageForPath } from "./lib/highlight";
 import { newId, prUrlFromKey, relativeTime, shortSha } from "./lib/pr";
 import type { AiReview, AiReviewMessage, AiReviewRecord, DiffRow, DraftComment, DraftReview, DragSelection, FileReviewState, FlowDag, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, GitHubDraftComment, GitHubPendingReview, GpuWorkspace, GpuWorkspaceContract, GpuWorkspaceExecResult, GuideReviewRecord, LogEntry, OpenResponse, PiAgentActivity, PullFile, PullIssueComment, PullRequestReviewSummary, PullReviewComment, ReviewMemoryRecord, ReviewMemoryResponse, StoredPullRequest, Target, ThemeName, Thread } from "./types";
@@ -436,6 +436,7 @@ function App() {
   const [input, setInput] = useState("");
   const [prs, setPrs] = useState<StoredPullRequest[]>([]);
   const [review, setReview] = useState<OpenResponse | null>(null);
+  const [reviewMode, setReviewMode] = useState<"overview" | "guide" | "diff">("diff");
   const [openFiles, setOpenFiles] = useState<Record<string, boolean>>({});
   const [diffViewMode, setDiffViewMode] = useState<DiffViewMode>("unified");
   const [expandedContext, setExpandedContext] = useState<Record<string, boolean>>({});
@@ -471,7 +472,6 @@ function App() {
   const [focusReview, setFocusReview] = useState<FocusReview>({ running: false, text: "" });
   const [focusScanId, setFocusScanId] = useState<string | null>(null);
   const [flowDag, setFlowDag] = useState<FlowDag>({ running: false, text: "", error: null });
-  const [flowDagOpen, setFlowDagOpen] = useState(false);
   const [viewedFocusAreaIds, setViewedFocusAreaIds] = useState<Record<string, boolean>>({});
   const reviewCacheRef = useRef<Map<string, OpenResponse>>(new Map());
   const activeReviewKeyRef = useRef<string | null>(null);
@@ -640,7 +640,7 @@ function App() {
     showFocusScanRecord(data.focusScan);
     showGuideReviewRecord(data.guideReview);
     setFlowDag({ running: false, text: "", error: null });
-    setFlowDagOpen(false);
+    setReviewMode("diff");
     setGpuWorkspaceOpen(false);
   }
 
@@ -1013,7 +1013,6 @@ function App() {
     const targetReview = review;
     const initialActivity = runningAgentActivity();
     let cancelActivityPolling: () => void = () => undefined;
-    setFlowDagOpen(true);
     setFlowDag({ running: true, text: "", error: null, activity: initialActivity });
     try {
       const { prompt, purpose } = await buildPiPrompt({ mode: "code-walk", prKey: targetReview.pr.key, prTitle: targetReview.pr.title, files: targetReview.files });
@@ -1022,7 +1021,7 @@ function App() {
       }, initialActivity);
       const setAnswer = (answer: string) => {
         if (activeReviewKeyRef.current !== targetReview.pr.key) return;
-        setFlowDag((current) => ({ running: true, text: answer, error: null, activity: streamingAgentActivity(current.activity, answer) }));
+        setFlowDag((current) => ({ running: true, text: "", error: null, activity: streamingAgentActivity(current.activity, answer) }));
       };
       const answer = await askPiApi({ prKey: targetReview.pr.key, prompt, purpose }, setAnswer);
       cancelActivityPolling();
@@ -1213,7 +1212,7 @@ function App() {
       busy={busy}
       goHome={goHome}
       openGpuWorkspace={() => setGpuWorkspaceOpen(true)}
-      openCodeWalk={() => { setFlowDagOpen(true); if (flowDag.text.trim().length === 0 && !flowDag.running) void runFlowDag(); }}
+      openCodeWalk={() => { setReviewMode("overview"); if (flowDag.text.trim().length === 0 && !flowDag.running) void runFlowDag(); }}
       codeWalkRunning={flowDag.running}
       openSettings={() => { setSettingsOpen(true); void loadDiagnostics(); }}
       openDiagnostics={() => void showDiagnostics()}
@@ -1221,19 +1220,18 @@ function App() {
       openLogs={() => { setLogsOpen(true); void refreshLogs(); }}
     />
     {error != null && <Flash variant="danger" className="error" role="alert">{error}</Flash>}
-    {busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p><Button variant="muted" onClick={cancelOpen}>Cancel</Button></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} cleanupPrs={cleanupPrs} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} draftRevealId={draftRevealId} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, copyFeedbackPrompt: copyReviewFeedbackPrompt, guideReview, runGuideReview, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} reviewEvent={reviewEvent} setReviewEvent={setReviewEvent} reviewBody={reviewBody} setReviewBody={setReviewBody} draftSaveStatus={draftSaveStatus} draftSaveError={draftSaveError} retryDraftSave={() => setDraftSaveRetry((retry) => retry + 1)} archiveReview={archiveReview} discardReview={discardReview} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} githubDrafts={{ review: githubDraftReview, loaded: githubDraftLoaded, loading: githubDraftLoading, moving: githubDraftMoving, error: githubDraftError, pull: pullGithubDraftReview, moveLocalDrafts: moveLocalDraftsToGithub, copyHandoff: copyGithubDraftHandoff }} />}
+    {busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p><Button variant="muted" onClick={cancelOpen}>Cancel</Button></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} cleanupPrs={cleanupPrs} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} reviewMode={reviewMode} setReviewMode={setReviewMode} codeWalk={flowDag} runCodeWalk={runFlowDag} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} draftRevealId={draftRevealId} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, copyFeedbackPrompt: copyReviewFeedbackPrompt, guideReview, runGuideReview, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} reviewEvent={reviewEvent} setReviewEvent={setReviewEvent} reviewBody={reviewBody} setReviewBody={setReviewBody} draftSaveStatus={draftSaveStatus} draftSaveError={draftSaveError} retryDraftSave={() => setDraftSaveRetry((retry) => retry + 1)} archiveReview={archiveReview} discardReview={discardReview} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} githubDrafts={{ review: githubDraftReview, loaded: githubDraftLoaded, loading: githubDraftLoading, moving: githubDraftMoving, error: githubDraftError, pull: pullGithubDraftReview, moveLocalDrafts: moveLocalDraftsToGithub, copyHandoff: copyGithubDraftHandoff }} />}
     {diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}
     {review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} openDiagnostics={() => { setSettingsOpen(false); void showDiagnostics(); }} close={() => setSettingsOpen(false)} />}
     {memoryOpen && <ReviewMemoryModal memory={reviewMemory} loading={memoryLoading} distilling={memoryDistilling} refresh={() => void loadReviewMemory()} distill={() => void distillReviewMemory()} close={() => setMemoryOpen(false)} />}
     {review != null && gpuWorkspaceOpen && <GpuWorkspaceModal review={review} close={() => setGpuWorkspaceOpen(false)} refreshLogs={refreshLogs} />}
-    {review != null && flowDagOpen && <FlowDagModal flowDag={flowDag} runFlowDag={runFlowDag} close={() => setFlowDagOpen(false)} prUrl={review.pr.url} headSha={review.pr.headSha} />}
     {logsOpen && <LogsModal logs={logs} refreshLogs={refreshLogs} close={() => setLogsOpen(false)} />}
     </BaseStyles>
   </ThemeProvider>;
 }
 
 function toolbarPrLabel(key: string): string {
-  return key.replace(/^github\.com\//, "").replace(/#(\d+)$/, " #$1");
+  return key.replace(/^github\.com\//, "").replace(/#\d+$/, "");
 }
 
 function AppToolbar({ review, theme, setTheme, busy, goHome, openGpuWorkspace, openCodeWalk, codeWalkRunning, openSettings, openDiagnostics, openMemory, openLogs }: {
@@ -1334,7 +1332,7 @@ function StartPage({ prs, openPr, cleanupPr, cleanupPrs, openInput, setOpenInput
         <Button type="submit" disabled={busy || openInput.trim().length === 0}>{busy ? "Fetching…" : "Open"}</Button>
       </form>
     </section>
-    {prs.length === 0 ? <section className="panel start-empty"><p className="muted">No previous reviews yet. Paste a PR above to get started.</p></section> : <>
+    {prs.length === 0 ? <section className="panel start-empty"><GitPullRequestIcon size={24} /><p className="muted">No previous reviews yet. Paste a PR above to get started.</p></section> : <>
       <div className="start-list-toolbar">
         <nav className="start-filters" aria-label="Filter previous reviews">
           {(["all", "needs-review", "in-progress", "done"] as const).map((id) => <button key={id} type="button" className={`start-filter${filter === id ? " active" : ""}`} onClick={() => setFilter(id)}>{filterLabel(id)}<span className="start-filter-count">{counts[id]}</span></button>)}
@@ -1463,9 +1461,9 @@ function clampSidePanelWidth(width: number): number {
   return Math.min(maxSidePanelWidth(), Math.max(300, width));
 }
 
-function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { draftRevealId: string | null; piPanel: PiPanelProps; reviewEvent: "COMMENT" | "APPROVE" | "REQUEST_CHANGES"; setReviewEvent: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES") => void; reviewBody: string; setReviewBody: (body: string) => void; draftSaveStatus: "idle" | "saving" | "saved" | "error"; draftSaveError: string | null; retryDraftSave: () => void; archiveReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; discardReview: () => Promise<boolean>; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; submitting: boolean; invalidDraftIds: Record<string, boolean>; refreshingActivity: boolean; githubDrafts: GitHubDraftControls }) {
+function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { reviewMode: "overview" | "guide" | "diff"; setReviewMode: (mode: "overview" | "guide" | "diff") => void; codeWalk: FlowDag; runCodeWalk: () => Promise<void>; draftRevealId: string | null; piPanel: PiPanelProps; reviewEvent: "COMMENT" | "APPROVE" | "REQUEST_CHANGES"; setReviewEvent: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES") => void; reviewBody: string; setReviewBody: (body: string) => void; draftSaveStatus: "idle" | "saving" | "saved" | "error"; draftSaveError: string | null; retryDraftSave: () => void; archiveReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; discardReview: () => Promise<boolean>; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; submitting: boolean; invalidDraftIds: Record<string, boolean>; refreshingActivity: boolean; githubDrafts: GitHubDraftControls }) {
   const diffViewLabel = props.diffViewMode === "unified" ? "Split view" : "Unified view";
-  const [reviewMode, setReviewMode] = useState<"diff" | "guide">("diff");
+  const reviewMode = props.reviewMode;
   const [viewedGuideIds, setViewedGuideIds] = useState<Record<string, boolean>>({});
   const [sideTab, setSideTab] = useState<"review" | "pi" | "comments">("review");
   const [sideCollapsed, setSideCollapsed] = useState(true);
@@ -1473,21 +1471,21 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { d
   const draftCount = props.drafts.length;
   const piActivity = props.piPanel.review.messages.length + (props.piPanel.review.text.length > 0 && props.piPanel.review.messages.length === 0 ? 1 : 0);
   const focusCount = props.focusAreas.length;
-  const guideDocument = useMemo(() => parseGuideDocument(props.piPanel.guideReview.text), [props.piPanel.guideReview.text]);
-  const guideChapters = guideDocument.chapters;
+  const guideChapters = useMemo(() => parseGuideChapters(props.piPanel.guideReview.text), [props.piPanel.guideReview.text]);
   const piBadge = focusCount > 0 ? focusCount : piActivity > 0 ? piActivity : null;
   const commentCount = props.review.comments.length + props.review.issueComments.length + props.review.reviewSummaries.length;
   function openSidePanel(tab: "review" | "pi" | "comments"): void {
     setSideTab(tab);
     setSideCollapsed(false);
   }
-  function selectReviewMode(mode: "diff" | "guide"): void {
-    setReviewMode(mode);
-    if (mode === "guide") {
+  function selectReviewMode(mode: "overview" | "guide" | "diff"): void {
+    props.setReviewMode(mode);
+    if (mode === "overview" || mode === "guide") {
       setSideFocused(false);
       setSideCollapsed(true);
-      if (props.piPanel.guideReview.text.trim().length === 0 && !props.piPanel.guideReview.running) void props.piPanel.runGuideReview();
     }
+    if (mode === "overview" && props.codeWalk.text.trim().length === 0 && !props.codeWalk.running) void props.runCodeWalk();
+    if (mode === "guide" && props.piPanel.guideReview.text.trim().length === 0 && !props.piPanel.guideReview.running) void props.piPanel.runGuideReview();
   }
   useEffect(() => setViewedGuideIds({}), [props.piPanel.guideReview.text]);
   useEffect(() => {
@@ -1536,13 +1534,13 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { d
     }
     window.setTimeout(tryScroll, 50);
   }
-  function openGuideStepInDiff(step: FocusArea): void {
-    setReviewMode("diff");
+  function prepareGuideStep(step: FocusArea): void {
     if (props.openFiles[step.path] === false) props.setOpenFiles({ ...props.openFiles, [step.path]: true });
-    window.setTimeout(() => {
-      const lineRow = document.querySelector(`.diff-row[data-path="${CSS.escape(step.path)}"][data-line="${step.startLine}"]`);
-      (lineRow ?? document.getElementById(`file-${step.path}`))?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 50);
+  }
+  function renderGuideDiff(step: FocusArea): ReactNode {
+    const file = props.review.files.find((candidate) => candidate.filename === step.path);
+    if (file == null) return <Flash variant="danger">The guide references {step.path}, but that file is not in the current diff.</Flash>;
+    return <DiffAnnotationsContext.Provider value={annotations}><FileDiff key={file.filename} file={file} {...props} /></DiffAnnotationsContext.Provider>;
   }
   const sidePanel = sideCollapsed ? null : <>
     {!sideFocused && <div className="resize-handle" role="separator" aria-label="Resize side panel" onMouseDown={(event) => startResizeSidePanel(event, props.sideWidth, props.setSideWidth)} />}
@@ -1571,10 +1569,11 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { d
       <div className="review-main">
         <PrHeaderStrip pr={props.review.pr} refreshGithubActivity={props.refreshGithubActivity} refreshingActivity={props.refreshingActivity} />
         <nav className="review-mode-tabs" aria-label="Review view">
-          <button type="button" className={reviewMode === "diff" ? "active" : ""} aria-pressed={reviewMode === "diff"} onClick={() => selectReviewMode("diff")}>Diff</button>
+          <button type="button" className={reviewMode === "overview" ? "active" : ""} aria-pressed={reviewMode === "overview"} onClick={() => selectReviewMode("overview")}>Overview</button>
           <button type="button" className={reviewMode === "guide" ? "active" : ""} aria-pressed={reviewMode === "guide"} onClick={() => selectReviewMode("guide")}>Guide{guideChapters.length > 0 ? ` ${guideChapters.length}` : ""}</button>
+          <button type="button" className={reviewMode === "diff" ? "active" : ""} aria-pressed={reviewMode === "diff"} onClick={() => selectReviewMode("diff")}>Diff</button>
         </nav>
-        {reviewMode === "guide" ? <GuideReview review={props.review} flow={guideDocument.flow} chapters={guideChapters} viewedIds={viewedGuideIds} setViewedIds={setViewedGuideIds} guideReview={props.piPanel.guideReview} runGuideReview={props.piPanel.runGuideReview} onOpenDiff={openGuideStepInDiff} /> : <main className="files">
+        {reviewMode === "overview" ? <CodeWalkPage review={props.review} codeWalk={props.codeWalk} runCodeWalk={props.runCodeWalk} /> : reviewMode === "guide" ? <GuideReview review={props.review} chapters={guideChapters} viewedIds={viewedGuideIds} setViewedIds={setViewedGuideIds} guideReview={props.piPanel.guideReview} runGuideReview={props.piPanel.runGuideReview} onActivate={prepareGuideStep} renderDiff={renderGuideDiff} /> : <main className="files">
           <PrSummary pr={props.review.pr} />
           <div className="files-toolbar">
             <FileNavigator files={props.review.files} fileReviews={props.review.fileReviews} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} />
@@ -1618,6 +1617,17 @@ function PrHeaderStrip({ pr, refreshGithubActivity, refreshingActivity }: { pr: 
   </section>;
 }
 
+/** Collapse markdown source to plain words so collapsed previews don't show `**` / `#` syntax. */
+function markdownPreviewText(markdown: string, maxWords: number): string {
+  const words = markdown
+    .replace(/```[\s\S]*?(```|$)/g, " ")
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/[`*_~]|^#+\s*|^>\s*/gm, "")
+    .split(/\s+/)
+    .filter((word) => word.length > 0);
+  return `${words.slice(0, maxWords).join(" ")}${words.length > maxWords ? "…" : ""}`;
+}
+
 function PrSummary({ pr }: { pr: StoredPullRequest }) {
   const [collapsed, setCollapsed] = useState(true);
   const summary = pr.body?.trim();
@@ -1625,35 +1635,38 @@ function PrSummary({ pr }: { pr: StoredPullRequest }) {
     <div className="thread-head">
       <div className="thread-title">
         <Button variant="icon" aria-label={collapsed ? "Expand PR summary" : "Collapse PR summary"} onClick={() => setCollapsed(!collapsed)}>{collapsed ? <ChevronRightIcon size={16} /> : <ChevronDownIcon size={16} />}</Button>
-        <div><strong>Description</strong><span>{summary == null || summary.length === 0 ? "No description provided" : `${summary.split(/\s+/).slice(0, 12).join(" ")}${summary.split(/\s+/).length > 12 ? "…" : ""}`}</span></div>
+        <div><strong>Description</strong><span>{summary == null || summary.length === 0 ? "No description provided" : markdownPreviewText(summary, 12)}</span></div>
       </div>
     </div>
     {!collapsed && <div className="pr-summary-body">{summary == null || summary.length === 0 ? <p className="muted">No PR summary provided.</p> : <MarkdownText text={summary} fileLinks={{ prUrl: pr.url }} />}</div>}
   </section>;
 }
 
-/** Select a bounded patch excerpt around one guided-review chapter. */
-function guideExcerptRows(file: PullFile | undefined, area: FocusArea): DiffRow[] {
-  if (file?.patch == null) return [];
-  return parsePatchRows(file.patch).filter((row) => {
-    if (rowHasKind(row, "hunk") || rowHasKind(row, "meta")) return false;
-    const line = row.newLine ?? row.oldLine;
-    return line != null && line >= area.startLine - 2 && line <= area.endLine + 2;
-  }).slice(0, 18);
+/** Render the show-me-style visual orientation as a first-class PR view. */
+function CodeWalkPage({ review, codeWalk, runCodeWalk }: { review: OpenResponse; codeWalk: FlowDag; runCodeWalk: () => Promise<void> }) {
+  return <main className="code-walk-page" aria-label="PR overview">
+    <header className="code-walk-page-head">
+      <div><span className="guide-kicker">Overview</span><h2>{review.pr.title}</h2><p>Visual orientation for the change: its goal, execution path, ownership boundaries, and the smallest useful reviewer route.</p></div>
+      <div>{codeWalk.running && <AgentActivityLine activity={codeWalk.activity} />}<Button variant="muted" className="small-muted-button" onClick={() => void runCodeWalk()} disabled={codeWalk.running}>{codeWalk.running ? "Building…" : codeWalk.text.trim().length > 0 ? "Refresh overview" : "Build overview"}</Button></div>
+    </header>
+    <section className="code-walk-page-body">
+      {codeWalk.error != null ? <Flash variant="danger">Overview failed: {codeWalk.error}</Flash> : codeWalk.running ? <div className="code-walk-loading"><span className="spinner" /><p>Building a focused visual explanation of this PR…</p></div> : codeWalk.text.trim().length > 0 ? <InlineSnippetsProvider value={{ headSha: review.pr.headSha, snippets: false }}><MarkdownText text={codeWalk.text} fileLinks={{ prUrl: review.pr.url }} /></InlineSnippetsProvider> : <div className="guide-empty-card"><h2>Show me what’s going on</h2><p>Build a concise visual explanation before reviewing the implementation.</p><Button onClick={() => void runCodeWalk()}>Build overview</Button></div>}
+    </section>
+  </main>;
 }
 
 function guideStepLocation(step: FocusArea): string {
   return `${step.path}:${step.startLine === step.endLine ? step.startLine : `${step.startLine}-${step.endLine}`}`;
 }
 
-/** Present one active chapter as an ordered sequence of inline review stops. */
-function GuideReview({ review, flow, chapters, viewedIds, setViewedIds, guideReview, runGuideReview, onOpenDiff }: { review: OpenResponse; flow: string; chapters: GuideChapter[]; viewedIds: Record<string, boolean>; setViewedIds: React.Dispatch<React.SetStateAction<Record<string, boolean>>>; guideReview: FocusReview; runGuideReview: () => Promise<void>; onOpenDiff: (step: FocusArea) => void }) {
+/** Use guide chapters to navigate the authoritative diff instead of duplicating it. */
+function GuideReview({ review, chapters, viewedIds, setViewedIds, guideReview, runGuideReview, onActivate, renderDiff }: { review: OpenResponse; chapters: GuideChapter[]; viewedIds: Record<string, boolean>; setViewedIds: React.Dispatch<React.SetStateAction<Record<string, boolean>>>; guideReview: FocusReview; runGuideReview: () => Promise<void>; onActivate: (step: FocusArea) => void; renderDiff: (step: FocusArea) => ReactNode }) {
   const walkthrough = useMemo(() => chapters.flatMap((chapter, chapterIndex) => chapter.steps.map((step) => ({ chapter, chapterIndex, step }))), [chapters]);
   const [activeStepId, setActiveStepId] = useState<string | null>(null);
-  const [openTerminalId, setOpenTerminalId] = useState<string | null>(null);
   const activeIndex = Math.max(0, walkthrough.findIndex(({ step }) => step.id === activeStepId));
   const active = walkthrough[activeIndex] ?? null;
   const reviewedCount = walkthrough.filter(({ step }) => viewedIds[step.id]).length;
+
   useEffect(() => {
     if (walkthrough.length === 0) {
       setActiveStepId(null);
@@ -1661,17 +1674,49 @@ function GuideReview({ review, flow, chapters, viewedIds, setViewedIds, guideRev
     }
     if (!walkthrough.some(({ step }) => step.id === activeStepId)) setActiveStepId(walkthrough.find(({ step }) => !viewedIds[step.id])?.step.id ?? walkthrough[0].step.id);
   }, [activeStepId, viewedIds, walkthrough]);
+
+  useEffect(() => {
+    if (active == null) return;
+    onActivate(active.step);
+    let cancelled = false;
+    let attempts = 0;
+    let timer = 0;
+    function reveal(): void {
+      if (cancelled) return;
+      const stage = document.querySelector<HTMLElement>(".guide-live-diff");
+      if (stage == null) return;
+      stage.querySelectorAll(".guide-step-highlight").forEach((row) => row.classList.remove("guide-step-highlight"));
+      const rows = [...stage.querySelectorAll<HTMLElement>(`.diff-row[data-path="${CSS.escape(active.step.path)}"][data-line]`)].filter((row) => {
+        const line = Number.parseInt(row.dataset.line ?? "", 10);
+        return line >= active.step.startLine && line <= active.step.endLine;
+      });
+      rows.forEach((row) => row.classList.add("guide-step-highlight"));
+      const target = rows[0] ?? stage.querySelector<HTMLElement>(`#file-${CSS.escape(active.step.path)}`);
+      if (target != null) target.scrollIntoView({ behavior: "smooth", block: "center" });
+      else if (++attempts < 20) timer = window.setTimeout(reveal, 100);
+    }
+    timer = window.setTimeout(reveal, 50);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      document.querySelectorAll(".guide-step-highlight").forEach((row) => row.classList.remove("guide-step-highlight"));
+    };
+  }, [active?.step.id]);
+
   function activate(stepId: string): void {
     setActiveStepId(stepId);
     window.setTimeout(() => document.querySelector(".guide-stage")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
   }
+
   function toggleReviewed(step: FocusArea): void {
     setViewedIds((current) => ({ ...current, [step.id]: !current[step.id] }));
   }
+
   function move(direction: -1 | 1): void {
     const next = walkthrough[activeIndex + direction];
     if (next != null) activate(next.step.id);
   }
+
   if (chapters.length === 0) return <main className="guide-review guide-empty" aria-label="Guided review">
     <div className="guide-empty-card">
       <span className="guide-kicker">Guided review</span>
@@ -1681,6 +1726,7 @@ function GuideReview({ review, flow, chapters, viewedIds, setViewedIds, guideRev
       {guideReview.running && <AgentActivityLine activity={guideReview.activity} />}
     </div>
   </main>;
+
   if (active == null) return null;
   const chapterReviewedCount = active.chapter.steps.filter((step) => viewedIds[step.id]).length;
   return <main className="guide-review" aria-label="Guided review">
@@ -1688,14 +1734,13 @@ function GuideReview({ review, flow, chapters, viewedIds, setViewedIds, guideRev
       <div>
         <span className="guide-kicker">Guided review</span>
         <h2>{review.pr.title}</h2>
-        <p>Move through the implementation one focused stop at a time. Expand code, investigate with Pi, or leave for the full diff only when you need broader context.</p>
+        <p>Use the route to choose what to inspect; the right side is the real Pi Review diff with context expansion, comments, drafts, and line terminals.</p>
       </div>
       <div className="guide-head-actions"><div className="guide-progress" aria-label={`${reviewedCount} of ${walkthrough.length} stops reviewed`}><strong>{reviewedCount}/{walkthrough.length}</strong><span>stops reviewed</span></div><Button variant="muted" className="small-muted-button" onClick={() => void runGuideReview()}>Refresh walkthrough</Button></div>
     </header>
-    {flow.length > 0 && <details className="guide-flow" open><summary><span className="disclosure-chevron" aria-hidden="true">›</span><strong>Change flow</strong><span>Call path and ownership</span></summary><div className="guide-flow-body"><MarkdownText text={flow} fileLinks={{ prUrl: review.pr.url }} /></div></details>}
     <div className="guide-workspace">
       <nav className="guide-outline" aria-label="Guide chapters">
-        <div className="guide-outline-head"><strong>Walkthrough</strong><span>{chapters.length} chapters</span></div>
+        <div className="guide-outline-head"><strong>Review route</strong><span>{chapters.length} {chapters.length === 1 ? "chapter" : "chapters"}</span></div>
         {chapters.map((chapter, chapterIndex) => {
           const reviewed = chapter.steps.filter((step) => viewedIds[step.id]).length;
           const selected = chapter.id === active.chapter.id;
@@ -1717,34 +1762,24 @@ function GuideReview({ review, flow, chapters, viewedIds, setViewedIds, guideRev
           {active.chapter.steps.map((step, stepIndex) => {
             const selected = step.id === active.step.id;
             const reviewed = viewedIds[step.id] ?? false;
-            const file = review.files.find((candidate) => candidate.filename === step.path);
-            const excerptRows = selected ? guideExcerptRows(file, step) : [];
-            const location = guideStepLocation(step);
-            const terminalOpen = openTerminalId === step.id;
             return <article className={`guide-stop${selected ? " active" : ""}${reviewed ? " reviewed" : ""}`} key={step.id}>
               <div className="guide-stop-head">
-                <button type="button" aria-expanded={selected} onClick={() => setActiveStepId(step.id)}>
+                <button type="button" aria-expanded={selected} onClick={() => activate(step.id)}>
                   <span className="guide-stop-number">{reviewed ? "✓" : String(stepIndex + 1).padStart(2, "0")}</span>
-                  <span className="guide-stop-title"><strong>{step.title}</strong><small>{location}</small></span>
+                  <span className="guide-stop-title"><strong>{step.title}</strong><small>{guideStepLocation(step)}</small></span>
                   <span className="disclosure-chevron" aria-hidden="true">›</span>
                 </button>
                 <label className="guide-reviewed-check"><Checkbox checked={reviewed} onChange={() => toggleReviewed(step)} />Reviewed</label>
               </div>
-              {selected && <div className="guide-stop-detail">
-                {step.body.length > 0 && <div className="guide-stop-explanation"><MarkdownText text={step.body} fileLinks={{ prUrl: review.pr.url }} /></div>}
-                <div className="guide-chapter-evidence">
-                  <header>
-                    <div className="guide-evidence-file"><strong>{step.path.split("/").at(-1)}</strong><span>{step.path.includes("/") ? step.path.slice(0, step.path.lastIndexOf("/") + 1) : ""}</span></div>
-                    <div><span className="stat-add">+{file?.additions ?? 0}</span><span className="stat-del">-{file?.deletions ?? 0}</span></div>
-                  </header>
-                  {excerptRows.length > 0 ? <div className="guide-code" aria-label={`Code excerpt for ${location}`}>{excerptRows.map((row, rowIndex) => <div className={`guide-code-row ${row.kind}`} key={`${row.oldLine}:${row.newLine}:${rowIndex}`}><span className="guide-code-line old">{row.oldLine ?? ""}</span><span className="guide-code-line new">{row.newLine ?? ""}</span><span className="guide-code-marker" aria-hidden="true">{diffMarker(row)}</span><CodeText code={diffCodeText(row)} language={languageForPath(step.path)} syntaxContext={row.syntaxContext} /></div>)}</div> : <p className="guide-code-empty">This stop is outside the rendered patch context. Open the full diff to inspect surrounding lines.</p>}
-                  <div className="guide-terminal-toggle"><span>{location}</span><div><Button variant="muted" className="small-muted-button" onClick={() => onOpenDiff(step)}>Open full diff</Button><Button variant="muted" className="small-muted-button" aria-expanded={terminalOpen} onClick={() => setOpenTerminalId(terminalOpen ? null : step.id)}>{terminalOpen ? "Close terminal" : "Open Pi terminal"}</Button></div></div>
-                  {terminalOpen && <div className="guide-terminal"><InlinePiTerminal session={terminalSessionId("guide", step.id)} target={{ path: step.path, line: step.endLine, ...(step.startLine === step.endLine ? {} : { startLine: step.startLine }), side: "RIGHT" }} context={`You are reviewing ${active.chapter.title}, stop ${stepIndex + 1} of ${active.chapter.steps.length}, at ${location}. Investigate or edit from this exact review context.\n\nStop: ${step.title}\n${step.body}`} /></div>}
-                </div>
-              </div>}
             </article>;
           })}
         </div>
+        <section className="guide-active-stop">
+          <div><span className="guide-chapter-number">Stop {active.chapter.steps.indexOf(active.step) + 1}</span><h4>{active.step.title}</h4><code>{guideStepLocation(active.step)}</code></div>
+          {active.step.body.length > 0 && <MarkdownText text={active.step.body} fileLinks={{ prUrl: review.pr.url }} />}
+          <p className="muted">Expand unchanged context or click any changed line to comment and open a Pi terminal.</p>
+        </section>
+        <div className="guide-live-diff">{renderDiff(active.step)}</div>
         <footer className="guide-step-navigation">
           <Button variant="muted" disabled={activeIndex === 0} onClick={() => move(-1)}>← Previous</Button>
           <span>Stop {activeIndex + 1} of {walkthrough.length}</span>
@@ -1877,7 +1912,7 @@ function FileDiff({ file, review, openFiles, setOpenFiles, expandedContext, setE
     : rows.length === 0
       ? <DiffRowView row={{ kind: "meta", oldLine: null, newLine: null, text: "Patch unavailable. Click to attach a file-level note.", hunk: "" }} target={{ path: file.filename, line: null, side: "RIGHT", hunk: "" }} setThreads={setThreads} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} prUrl={review.pr.url} refreshGithubActivity={refreshGithubActivity} collapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} diffViewMode={diffViewMode} activeFocusAreaId={activeFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} />
       : <FoldedRows file={file} rows={rows} setThreads={setThreads} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} prUrl={review.pr.url} refreshGithubActivity={refreshGithubActivity} collapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} diffViewMode={diffViewMode} activeFocusAreaId={activeFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} />;
-  return <section className="file" id={`file-${file.filename}`}><div className="file-summary"><button className="file-summary-left" onClick={() => setOpenFiles({ ...openFiles, [file.filename]: !open })}><span className="collapse-chevron">{open ? <ChevronDownIcon size={16} /> : <ChevronRightIcon size={16} />}</span><span className="file-change-count">{file.changes.toLocaleString()}</span><span className="file-diffstat" aria-label={`${file.additions} additions and ${file.deletions} deletions`}><span className="file-diffstat-add" style={{ flexGrow: file.additions }} /><span className="file-diffstat-del" style={{ flexGrow: file.deletions }} /></span><strong className="file-path">{file.filename}</strong>{file.generated && <span className="generated-badge">Generated</span>}</button><label className="viewed-toggle" onClick={(event) => event.stopPropagation()}><Checkbox checked={fileReview?.viewed ?? false} onChange={(event) => { const viewed = event.target.checked; if (viewed) setOpenFiles({ ...openFiles, [file.filename]: false }); void setViewed(file, viewed); }} /> Viewed</label></div>{open && <><div className="patch">{diffBody}{commentAnchorRows.length > 0 && <CommentAnchorRows file={file} rows={commentAnchorRows} setThreads={setThreads} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} prUrl={review.pr.url} refreshGithubActivity={refreshGithubActivity} collapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} diffViewMode={diffViewMode} activeFocusAreaId={activeFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} />}{focusAnchorRows.length > 0 && <FocusAnchorRows file={file} rows={focusAnchorRows} setThreads={setThreads} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} prUrl={review.pr.url} refreshGithubActivity={refreshGithubActivity} collapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} diffViewMode={diffViewMode} activeFocusAreaId={activeFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} />}{unrenderedCommentThreads.length > 0 && <UnrenderedCommentThreads threads={unrenderedCommentThreads} prUrl={review.pr.url} refreshGithubActivity={refreshGithubActivity} collapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} />}</div></>}</section>;
+  return <section className="file" id={`file-${file.filename}`}><div className="file-summary"><button className="file-summary-left" onClick={() => setOpenFiles({ ...openFiles, [file.filename]: !open })}><span className="collapse-chevron">{open ? <ChevronDownIcon size={16} /> : <ChevronRightIcon size={16} />}</span><span className="file-stats" aria-label={`${file.additions} additions and ${file.deletions} deletions`}><span className="stat-add">+{file.additions.toLocaleString()}</span><span className="stat-del">−{file.deletions.toLocaleString()}</span></span><strong className="file-path">{file.filename}</strong>{file.generated && <span className="generated-badge">Generated</span>}</button><label className="viewed-toggle" onClick={(event) => event.stopPropagation()}><Checkbox checked={fileReview?.viewed ?? false} onChange={(event) => { const viewed = event.target.checked; if (viewed) setOpenFiles({ ...openFiles, [file.filename]: false }); void setViewed(file, viewed); }} /> Viewed</label></div>{open && <><div className="patch">{diffBody}{commentAnchorRows.length > 0 && <CommentAnchorRows file={file} rows={commentAnchorRows} setThreads={setThreads} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} prUrl={review.pr.url} refreshGithubActivity={refreshGithubActivity} collapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} diffViewMode={diffViewMode} activeFocusAreaId={activeFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} />}{focusAnchorRows.length > 0 && <FocusAnchorRows file={file} rows={focusAnchorRows} setThreads={setThreads} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} prUrl={review.pr.url} refreshGithubActivity={refreshGithubActivity} collapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} diffViewMode={diffViewMode} activeFocusAreaId={activeFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} />}{unrenderedCommentThreads.length > 0 && <UnrenderedCommentThreads threads={unrenderedCommentThreads} prUrl={review.pr.url} refreshGithubActivity={refreshGithubActivity} collapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} />}</div></>}</section>;
 }
 
 function patchSetSectionKey(file: PullFile, title: string, firstLine: number | null | undefined): string {
@@ -2073,7 +2108,7 @@ ${thread.target.hunk.slice(0, 4_000)}`;
     </div>
     {composing && <div className="line-comment-composer">
       <MarkdownEditor autoFocus rows={2} value={draft} ariaLabel="Review comment" placeholder="Leave a review comment on this line" onChange={setDraft} onKeyDown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); saveDraft(); } else if (event.key === "Escape") { event.preventDefault(); setComposing(false); } }} />
-      <div className="actions"><span className="muted">⌘Enter to add</span><Button variant="muted" onClick={() => { setDraft(""); setComposing(false); }}>Cancel</Button><Button onClick={saveDraft} disabled={draft.trim().length === 0}>Add draft comment</Button></div>
+      <div className="actions"><span className="muted">⌘Enter to add</span><Button variant="muted" onClick={() => { setDraft(""); setComposing(false); }}>Cancel</Button><Button className="composer-submit" onClick={saveDraft} disabled={draft.trim().length === 0}>Add draft comment</Button></div>
     </div>}
     {deleteError != null && <Flash variant="danger" className="terminal-delete-error" role="alert">Could not delete terminal: {deleteError}</Flash>}
     {terminalOpen && <InlinePiTerminal session={terminalSessionId("inline", thread.key)} target={thread.target.line == null ? undefined : { path: thread.target.path, line: thread.target.line, ...(thread.target.startLine == null ? {} : { startLine: thread.target.startLine }), side: thread.target.side }} context={terminalContext} />}
@@ -2477,33 +2512,6 @@ function GpuWorkspaceModal({ review, close, refreshLogs }: { review: OpenRespons
         <details className="gpu-workspace-output"><summary><span className="disclosure-chevron" aria-hidden="true">›</span>Setup script</summary><pre>{workspace.setupScript}</pre></details>
         <details className="gpu-workspace-output"><summary><span className="disclosure-chevron" aria-hidden="true">›</span>gpu-dev output</summary><pre>{[workspace.stdout, workspace.stderr].filter((text) => text.trim().length > 0).join("\n") || workspace.command}</pre></details>
       </PiCard>}
-    </div>
-  </ModalShell>;
-}
-
-function FlowDagModal({ flowDag, runFlowDag, close, prUrl, headSha }: { flowDag: FlowDag; runFlowDag: () => Promise<void>; close: () => void; prUrl: string; headSha: string }) {
-  const [expanded, setExpanded] = useState(false);
-  const [highRes, setHighRes] = useState(true);
-  const modalClassName = `pi-modal flow-dag-modal${expanded ? " expanded" : ""}${highRes ? " high-res" : ""}`;
-
-  return <ModalShell open onOpenChange={(open) => { if (!open) close(); }} label="Code walk" className={modalClassName}>
-    <header className="pi-modal-head">
-      <div>
-        <h2>Code walk</h2>
-        <p className="muted">Architecture, data flow, and key snippets for this PR.</p>
-      </div>
-      <div className="pi-modal-head-actions">
-        {flowDag.running && <AgentActivityLine activity={flowDag.activity} />}
-        <Button variant="muted" className="small-muted-button" onClick={() => setHighRes((current) => !current)} aria-pressed={highRes}>{highRes ? "Standard DPI" : "High DPI"}</Button>
-        <Button variant="muted" className="small-muted-button" onClick={() => setExpanded((current) => !current)} aria-pressed={expanded}>{expanded ? "Compact" : "Expand"}</Button>
-        <Button variant="muted" className="small-muted-button" onClick={() => void runFlowDag()} disabled={flowDag.running}>{flowDag.running ? "Refreshing…" : flowDag.text.trim().length > 0 ? "Refresh" : "Build"}</Button>
-      </div>
-    </header>
-    <div className="flow-dag-body">
-      {flowDag.error != null && <p className="muted">Code walk failed: {flowDag.error}</p>}
-      {flowDag.text.trim().length === 0 && !flowDag.error && flowDag.running && <p className="muted">Asking Pi for a guided code walk…</p>}
-      {flowDag.text.trim().length === 0 && !flowDag.error && !flowDag.running && <p className="muted">Build a code walk to orient the review.</p>}
-      {flowDag.text.trim().length > 0 && <InlineSnippetsProvider value={{ headSha, snippets: false }}><MarkdownText text={flowDag.text} fileLinks={{ prUrl }} /></InlineSnippetsProvider>}
     </div>
   </ModalShell>;
 }

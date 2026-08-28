@@ -41,16 +41,19 @@ async function openReviewForm(page: Page) {
   if (await startReview.count() > 0) await startReview.click();
 }
 
-async function mockAskPi(page: Page, answerForPrompt: (body: { prompt?: string }) => string, sessionEventsForPrompt?: (body: { prompt?: string }) => Record<string, unknown>[]) {
+async function mockAskPi(page: Page, answerForPrompt: (body: { prompt?: string }) => string | string[], sessionEventsForPrompt?: (body: { prompt?: string }) => Record<string, unknown>[]) {
   await page.route(/\/api\/ask\/stream$/, async (route) => {
     const request = route.request().postDataJSON() as { prompt?: string };
-    const answer = answerForPrompt(request);
+    const output = answerForPrompt(request);
+    const deltas = Array.isArray(output) ? output : [output];
+    const answer = deltas.join("");
     const sessionEvents = (sessionEventsForPrompt?.(request) ?? []).map((event) => `event: session\ndata: ${JSON.stringify(event)}\n\n`).join("");
-    await route.fulfill({ contentType: "text/event-stream", body: `${sessionEvents}event: delta\ndata: ${JSON.stringify({ delta: answer })}\n\nevent: done\ndata: ${JSON.stringify({ answer })}\n\n` });
+    const deltaEvents = deltas.map((delta) => `event: delta\ndata: ${JSON.stringify({ delta })}\n\n`).join("");
+    await route.fulfill({ contentType: "text/event-stream", body: `${sessionEvents}${deltaEvents}event: done\ndata: ${JSON.stringify({ answer })}\n\n` });
   });
   await page.route(/\/api\/ask$/, async (route) => {
-    const answer = answerForPrompt(route.request().postDataJSON() as { prompt?: string });
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ answer }) });
+    const output = answerForPrompt(route.request().postDataJSON() as { prompt?: string });
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ answer: Array.isArray(output) ? output.join("") : output }) });
   });
 }
 
@@ -290,11 +293,13 @@ test("uses a compact files toolbar and collapsible review panel", async ({ page 
   const rows = firstFile.locator(".diff-row");
   await rows.nth(Math.min(30, await rows.count() - 1)).evaluate((row) => row.scrollIntoView({ block: "center" }));
   const stickyPositions = await page.evaluate(() => {
+    const modeRect = document.querySelector(".review-mode-tabs")!.getBoundingClientRect();
     const toolbarRect = document.querySelector(".files-toolbar")!.getBoundingClientRect();
     const fileHeaderRect = document.querySelector(".file .file-summary")!.getBoundingClientRect();
-    return { toolbarTop: toolbarRect.top, toolbarBottom: toolbarRect.bottom, fileHeaderTop: fileHeaderRect.top };
+    return { modeTop: modeRect.top, modeBottom: modeRect.bottom, toolbarTop: toolbarRect.top, toolbarBottom: toolbarRect.bottom, fileHeaderTop: fileHeaderRect.top };
   });
-  expect(stickyPositions.toolbarTop).toBeLessThanOrEqual(60);
+  expect(stickyPositions.modeTop).toBeLessThanOrEqual(60);
+  expect(stickyPositions.toolbarTop).toBeGreaterThanOrEqual(stickyPositions.modeBottom);
   expect(stickyPositions.fileHeaderTop).toBeGreaterThanOrEqual(stickyPositions.toolbarBottom);
   await expect(firstFile.locator(".file-path")).toBeVisible();
 
@@ -1010,19 +1015,23 @@ test("runs a separate focus areas review and opens native focus terminals", asyn
   let guideRequests = 0;
   await mockAskPi(page, () => {
     guideRequests += 1;
-    return `## Review guide\n## Change flow\n\`\`\`text\npublic_api\n  implementation\n\`\`\`\n### 1. Core path\nFollow the implementation from selection through validation.\n- ${path}:${line}-${Number.parseInt(line, 10) + 1} — Core implementation\n  Start with the changed tiling condition and follow how it selects the implementation path.\n- ${path}:${line} — Validation path\n  Finish by checking that tests cover the intended behavior.`;
+    return `## Review guide\n### 1. Core path\nFollow the implementation from selection through validation.\n- ${path}:${line}-${Number.parseInt(line, 10) + 1} — Core implementation\n  Start with the changed tiling condition and follow how it selects the implementation path.\n- ${path}:${line} — Validation path\n  Finish by checking that tests cover the intended behavior.`;
   });
   await page.getByRole("button", { name: "Guide" }).click();
   const guide = page.getByRole("main", { name: "Guided review" });
-  await expect(guide.locator(".guide-flow-body")).toContainText("public_api");
   await expect(guide.getByRole("heading", { name: "Core path" })).toBeVisible();
-  await expect(guide.getByText("Core implementation", { exact: true })).toBeVisible();
+  await expect(guide.getByRole("heading", { name: "Core implementation" })).toBeVisible();
   await expect(guide).toContainText(`${path}:${line}`);
-  await expect(guide.locator(".guide-code-marker").filter({ hasText: /[+-]/ }).first()).toBeVisible();
+  await expect(guide.locator(".guide-live-diff .file")).toBeVisible();
+  await expect(guide.locator(".guide-live-diff .diff-row.guide-step-highlight").first()).toBeVisible();
+  const liveDiffSize = await guide.locator(".guide-live-diff").evaluate((diff) => ({ clientHeight: diff.clientHeight, scrollHeight: diff.scrollHeight }));
+  expect(liveDiffSize.clientHeight).toBeLessThanOrEqual(800);
+  expect(liveDiffSize.scrollHeight).toBeGreaterThan(liveDiffSize.clientHeight);
+  await expect(guide.locator(".guide-live-diff").getByRole("button", { name: "Expand lines above" }).first()).toBeVisible();
+  await expect(guide.locator(".guide-code")).toHaveCount(0);
   await page.setViewportSize({ width: 820, height: 900 });
   expect(await guide.locator(".guide-workspace").evaluate((workspace) => getComputedStyle(workspace).gridTemplateColumns.split(" ").length)).toBe(1);
-  await guide.getByRole("button", { name: "Open Pi terminal" }).click();
-  await expect(guide.locator(".pi-native-terminal.compact")).toBeVisible();
+  await expect(guide.locator(".guide-live-diff .pi-native-terminal.compact")).toBeVisible();
   await guide.getByRole("checkbox", { name: "Reviewed" }).first().check();
   await expect(guide).toContainText("1/2");
   await guide.getByRole("button", { name: /Next: Validation path/ }).click();
@@ -1031,7 +1040,11 @@ test("runs a separate focus areas review and opens native focus terminals", asyn
   await page.reload();
   await expect(page.locator(".review-layout")).toBeVisible({ timeout: 60_000 });
   await page.getByRole("button", { name: "Guide 1" }).click();
-  await expect(page.getByRole("main", { name: "Guided review" }).locator(".guide-flow-body")).toContainText("public_api");
+  await expect(page.getByRole("main", { name: "Guided review" }).locator(".guide-live-diff .file")).toBeVisible();
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  const modeBarTop = await page.locator(".review-mode-tabs").evaluate((tabs) => tabs.getBoundingClientRect().top);
+  expect(modeBarTop).toBeGreaterThanOrEqual(47);
+  expect(modeBarTop).toBeLessThanOrEqual(49);
   expect(guideRequests).toBe(1);
 });
 
@@ -1148,7 +1161,7 @@ test("keeps a clean focus scan compact when the Pi panel is focused", async ({ p
   expect(terminalBox.height).toBeGreaterThan(500);
 });
 
-test("opens a separate code walk modal from the toolbar", async ({ page }) => {
+test("opens the visual Overview from the toolbar", async ({ page }) => {
   let prompt = "";
   await mockAskPi(page, (body) => {
     prompt = body.prompt ?? "";
@@ -1186,18 +1199,15 @@ The walk is separate from review chat.`;
   await openTools(page);
   await page.getByRole("menuitem", { name: "Code walk" }).click();
 
-  const dialog = page.getByRole("dialog", { name: "Code walk" });
-  await expect(dialog).toContainText("Walk map");
-  await expect(dialog.locator(".markdown-mermaid-block")).toBeVisible();
-  await expect(dialog.locator("table")).toContainText("Why it matters");
-  await expect(dialog.getByRole("button", { name: "Standard DPI" })).toHaveAttribute("aria-pressed", "true");
-  await dialog.getByRole("button", { name: "Expand" }).click();
-  await expect(dialog).toHaveClass(/expanded/);
-  await expect(dialog.getByRole("button", { name: "Compact" })).toHaveAttribute("aria-pressed", "true");
-  await expect(dialog.getByRole("button", { name: "Close" })).toBeInViewport();
-  await expect.poll(() => dialog.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
-  expect(prompt).toContain("reviewer-friendly code walk");
-  expect(prompt).toContain("Walk map");
+  await expect(page.getByRole("button", { name: "Overview" })).toHaveAttribute("aria-pressed", "true");
+  const overview = page.getByRole("main", { name: "PR overview" });
+  await expect(overview).toContainText("Walk map");
+  await expect(overview.locator(".markdown-mermaid-block")).toBeVisible();
+  await expect(overview.locator("table")).toContainText("Why it matters");
+  await expect(page.getByRole("dialog", { name: "Code walk" })).toHaveCount(0);
+  await expect.poll(() => overview.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+  expect(prompt).toContain("Use the show-me skill style");
+  expect(prompt).toContain("smallest visual that makes the change click");
 });
 
 test("runs the right-sidebar Pi review beside the native terminal", async ({ page }) => {

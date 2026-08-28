@@ -1,15 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parseGuideDocument } from "../../web/src/lib/guide.js";
+import { parseGuideChapters } from "../../web/src/lib/guide.js";
 
 test("guide parser groups ordered code stops into conceptual chapters", () => {
-  const guide = parseGuideDocument(`## Review guide
-## Change flow
-\`\`\`text
-public_api
-  shared_kernel
-\`\`\`
+  const chapters = parseGuideChapters(`## Review guide
 ### 1. Core recurrence
 Understand the shared recurrence before its callers.
 - src/kernel.py:10-20 — Scan loop
@@ -21,8 +16,7 @@ Then follow the public wrapper.
 - src/api.py:7 — Public launcher
   Connect user inputs to the shared kernel.`);
 
-  assert.equal(guide.flow, "\`\`\`text\npublic_api\n  shared_kernel\n\`\`\`");
-  assert.deepEqual(guide.chapters.map((chapter) => ({ title: chapter.title, body: chapter.body, steps: chapter.steps.map((step) => ({ title: step.title, path: step.path, body: step.body })) })), [
+  assert.deepEqual(chapters.map((chapter) => ({ title: chapter.title, body: chapter.body, steps: chapter.steps.map((step) => ({ title: step.title, path: step.path, body: step.body })) })), [
     {
       title: "Core recurrence",
       body: "Understand the shared recurrence before its callers.",

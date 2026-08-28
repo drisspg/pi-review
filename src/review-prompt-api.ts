@@ -168,24 +168,21 @@ function codeWalkPrompt(payload: Record<string, unknown>): ReviewPromptResponse 
   const diffSummary = statusPatchSummary(promptFiles(payload));
   return {
     purpose: "flow-dag",
-    prompt: `Create a reviewer-friendly code walk for PR ${prKey}. This is a separate orientation document, not a findings review. Help a reviewer understand the PR before reading the diff.
+    prompt: `Use the show-me skill style to show me what's going on in PR ${prKey}. This is a visual orientation for a reviewer, not a findings report.
 
-Return only the final markdown document inline. Do not create files. Do not mention your process, commands, tests, or where you saved anything.
+Return only the final markdown inline. Do not create files or mention your process, commands, tests, or where anything was saved.
 
-Include these sections in markdown:
-1. **PR goal** — infer the user-visible or maintainer-facing goal from the title and diff.
-2. **Walk map** — include exactly one fenced \`\`\`mermaid block. Use \`flowchart LR\` by default, or \`flowchart TD\` when the change is naturally staged top-to-bottom. Make it an orientation map, not a forced file-by-file path. Pick one visual story that best explains the PR: request/data flow, state transitions, API boundary, before/after split, or subsystem fan-in/fan-out.
-   - Use the smallest number of nodes that makes the change clear; small PRs may need 4-10 nodes, but large feature PRs should use more nodes when that materially improves orientation.
-   - Use subgraphs for ownership/boundaries such as UI, server, storage, kernel, tests, or external systems.
-   - Label edges with verbs or data names when useful, but keep labels under 4 words.
-   - Keep Mermaid syntax conservative: alphanumeric node ids, quoted labels, no markdown inside labels, no raw parentheses in labels, and no lowercase \`end\` node text.
-   - If the PR is mostly local refactoring with no meaningful flow, draw a dependency/ownership map instead.
-3. **Reviewer route** — add 3-6 bullets that tell the reviewer the best order to read the diff. Each bullet should name the diagram node or edge, cite files/lines, and say what question to answer there.
-4. **Key code patterns** — include a small markdown table with at most 5 rows and columns: Pattern, Where, Why it matters. Do not paste code in this table; keep each cell to one short phrase or sentence.
-5. **Code walk** — use subheadings that correspond to the major regions or nodes in the Mermaid diagram. Walk through the PR in the order that best explains the change, which may be grouped by subsystem rather than linear file order. Cite real file/line references and include only short fenced code snippets for the most important changed snippets.
-6. **What changed in behavior** — summarize how data, state, or API behavior differs after this PR.
-
-Keep it concrete and readable. Prefer actual identifiers from the diff over vague descriptions. Keep snippets short: only the few lines needed to explain the pattern. Avoid review findings unless they are needed to explain flow. If the diagram would be misleading, say why in one sentence before the Mermaid block and still provide the best small map you can.
+Follow this contract:
+- Start with one or two sentences that state the PR's goal and the key implementation idea.
+- Choose the smallest visual that makes the change click. Prefer one focused Mermaid diagram when interactions, branches, state, data flow, or ownership are the point:
+  - \`sequenceDiagram\` for time-ordered calls, request/response paths, or async handoffs.
+  - \`stateDiagram-v2\` for lifecycles and transitions.
+  - \`flowchart\` for branching, data flow, dependencies, ownership boundaries, or source-call trees.
+- Use a compact text call tree or code-shape sketch instead only when exact source structure communicates the change more clearly than Mermaid.
+- Scale naturally to the PR. Do not pad a small change, force a table, or turn the answer into a multi-section report.
+- Use actual identifiers and boundaries from the diff. Put descriptive text inside Mermaid nodes and keep edge labels short.
+- After the visual, add only the brief explanation or reviewer route needed to connect it to the changed files. Cite real file/line references when useful.
+- Avoid generic praise and review findings unless a tradeoff is necessary to understand the design.
 
 PR title: ${prTitle}
 
@@ -208,14 +205,6 @@ Order the walkthrough by how a reviewer should understand the change, not filesy
 
 Return only markdown in this exact parseable shape:
 ## Review guide
-## Change flow
-\`\`\`text
-public_api
-  validate_inputs
-  dispatch
-    implementation
-  return_result
-\`\`\`
 ### 1. Short conceptual chapter title
 One or two sentences explaining the purpose of this chapter and how it connects to the walkthrough.
 - path:startLine-endLine — First review stop
@@ -226,8 +215,6 @@ One or two sentences explaining the purpose of this chapter and how it connects 
 One or two sentence chapter overview.
 - path:line — Next review stop
   One or two sentence explanation.
-
-The Change flow block must be a compact call tree or ownership tree using actual identifiers from the diff. Show the route from public entry points through validation, dispatch, implementation, state/data transformations, and returned results. If the PR has no meaningful runtime call stack, show the dependency or ownership path instead.
 
 Scale the walkthrough to the actual PR. A tiny local change may need one chapter and one stop; a cross-cutting change may need many chapters and stops. Do not pad to a minimum, impose a fixed maximum, or omit a meaningful part of the call path merely to fit a count. Each stop must cite a real changed file and reviewable changed line from the supplied patch. Stops should be fine-grained enough that the reviewer can inspect one focused idea at a time, but collectively cover the chapter's important control flow, data flow, or contract. Do not report bugs, severities, praise, commands, or your investigation process. Mention risks only when they are necessary to understand the design tradeoff.
 

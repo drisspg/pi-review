@@ -72,7 +72,7 @@ function ReviewCommentTimeline({ comments, commentKind, prUrl, refreshGithubActi
 }
 
 function CommentEditor({ body, submitting, error, onChange, onCancel, onSave }: { body: string; submitting: boolean; error: string | null; onChange: (body: string) => void; onCancel: () => void; onSave: () => void }) {
-  return <div className="github-comment-edit"><MarkdownEditor value={body} onChange={onChange} ariaLabel="Edit comment" autoFocus />{error != null && <Flash variant="danger" className="operation-error" role="alert">Edit failed: {error}</Flash>}<div className="github-comment-edit-actions"><Button variant="muted" onClick={onCancel} disabled={submitting}>Cancel</Button><Button onClick={onSave} disabled={submitting || body.trim().length === 0}>{submitting ? "Saving…" : error == null ? "Save" : "Retry"}</Button></div></div>;
+  return <div className="github-comment-edit"><MarkdownEditor value={body} onChange={onChange} ariaLabel="Edit comment" autoFocus />{error != null && <Flash variant="danger" className="operation-error" role="alert">Edit failed: {error}</Flash>}<div className="github-comment-edit-actions"><Button variant="muted" onClick={onCancel} disabled={submitting}>Cancel</Button><Button className="composer-submit" onClick={onSave} disabled={submitting || body.trim().length === 0}>{submitting ? "Saving…" : error == null ? "Save" : "Retry"}</Button></div></div>;
 }
 
 function GitHubCommentView({ comment, commentKind, prUrl, refreshGithubActivity }: { comment: GitHubComment; commentKind: CommentKind; prUrl: string; refreshGithubActivity: () => Promise<void> }) {
@@ -149,7 +149,7 @@ function ThreadReplyBox({ prUrl, kind, commentId, refreshGithubActivity }: { prU
       setSubmitting(false);
     }
   }
-  return <div className="thread-reply thread-reply-box"><MarkdownEditor value={body} onChange={setBody} placeholder="Reply…" ariaLabel="Reply to thread" />{error != null && <Flash variant="danger" className="operation-error" role="alert">Reply failed: {error}</Flash>}<Button variant="muted" onClick={() => void submitReply()} disabled={submitting || body.trim().length === 0}>{submitting ? "Replying…" : error == null ? "Reply" : "Retry"}</Button></div>;
+  return <div className="thread-reply thread-reply-box"><MarkdownEditor value={body} onChange={setBody} placeholder="Reply…" ariaLabel="Reply to thread" />{error != null && <Flash variant="danger" className="operation-error" role="alert">Reply failed: {error}</Flash>}<Button className="composer-submit" onClick={() => void submitReply()} disabled={submitting || body.trim().length === 0}>{submitting ? "Replying…" : error == null ? "Reply" : "Retry"}</Button></div>;
 }
 
 export function ExistingComments({ prUrl, comments, issueComments, reviewSummaries, refreshGithubActivity, collapseSignal, commentsCollapsed, toggleAllComments, onJumpToComment }: { prUrl: string; comments: PullReviewComment[]; issueComments: PullIssueComment[]; reviewSummaries: PullRequestReviewSummary[]; refreshGithubActivity: () => Promise<void>; collapseSignal: number; commentsCollapsed: boolean; toggleAllComments: () => void; onJumpToComment?: (target: ReturnType<typeof commentTarget>) => void }) {
