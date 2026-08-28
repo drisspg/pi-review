@@ -43,6 +43,8 @@ test("review prompt API builds conceptual guide walkthroughs", async () => {
   assert.match(result.prompt, /not filesystem order/);
   assert.match(result.prompt, /path:startLine-endLine/);
   assert.match(result.prompt, /Do not pad to a minimum, impose a fixed maximum/);
+  assert.match(result.prompt, /Every stop must earn its place/);
+  assert.match(result.prompt, /Never emit one stop per hunk, per file/);
   assert.match(result.prompt, /Always explain how the implementation fits together/);
 });
 

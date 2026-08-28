@@ -216,7 +216,11 @@ One or two sentence chapter overview.
 - path:line — Next review stop
   One or two sentence explanation.
 
-Scale the walkthrough to the actual PR. A tiny local change may need one chapter and one stop; a cross-cutting change may need many chapters and stops. Do not pad to a minimum, impose a fixed maximum, or omit a meaningful part of the call path merely to fit a count. Each stop must cite a real changed file and reviewable changed line from the supplied patch. Stops should be fine-grained enough that the reviewer can inspect one focused idea at a time, but collectively cover the chapter's important control flow, data flow, or contract. Do not report bugs, severities, praise, commands, or your investigation process. Mention risks only when they are necessary to understand the design tradeoff.
+Scale the walkthrough to the actual PR. A tiny local change may need one chapter and one stop; a cross-cutting change may need many chapters and stops. Do not pad to a minimum, impose a fixed maximum, or omit a meaningful part of the call path merely to fit a count. Each stop must cite a real changed file and reviewable changed line from the supplied patch.
+
+Every stop must earn its place: a stop exists to explain one idea the reviewer could get wrong, not to enumerate edits. Mechanical or repetitive plumbing — re-exports, import wiring, __all__ or registry entries, renames, and the same promotion repeated across files — is a single stop anchored at the most representative location, with the other locations named inline in that stop's explanation. Never emit one stop per hunk, per file, or per line of an import list; if two adjacent stops would be reviewed with the same thought, merge them. Stops should collectively cover the chapter's important control flow, data flow, or contract while staying few enough that each one carries real explanatory weight.
+
+Do not report bugs, severities, praise, commands, or your investigation process. Mention risks only when they are necessary to understand the design tradeoff.
 
 PR title: ${prTitle}
 
