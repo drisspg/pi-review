@@ -15,6 +15,7 @@ import { buildDiffAnnotationIndex, commentTarget, commentThreadDomId, diffAnnota
 import { contextRowsFromText, hunkNewStart, isTargetInSelection, lastNewLine, parsePatchRows, parsePatchSetSections, targetFromPoint, targetFromRow } from "./lib/diff";
 import { parseFocusAreas } from "./lib/focus";
 import { parseGuideChapters, type GuideChapter } from "./lib/guide";
+import { parseOverviewSections } from "./lib/overview";
 import { languageForPath } from "./lib/highlight";
 import { newId, prUrlFromKey, relativeTime, shortSha } from "./lib/pr";
 import type { AiReview, AiReviewMessage, AiReviewRecord, DiffRow, DraftComment, DraftReview, DragSelection, FileReviewState, FlowDag, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, GitHubDraftComment, GitHubPendingReview, GpuWorkspace, GpuWorkspaceContract, GpuWorkspaceExecResult, GuideReviewRecord, LogEntry, OpenResponse, PiAgentActivity, PullFile, PullIssueComment, PullRequestReviewSummary, PullReviewComment, ReviewMemoryRecord, ReviewMemoryResponse, StoredPullRequest, Target, ThemeName, Thread } from "./types";
@@ -1631,6 +1632,17 @@ function guideStepLocation(step: FocusArea): string {
   return `${step.path}:${step.startLine === step.endLine ? step.startLine : `${step.startLine}-${step.endLine}`}`;
 }
 
+function OverviewBody({ text, prUrl }: { text: string; prUrl: string }) {
+  const sections = parseOverviewSections(text);
+  if (sections == null) return <div className="guide-overview-body"><MarkdownText text={text} fileLinks={{ prUrl }} /></div>;
+  return <div className="guide-overview-grid">
+    <section className="guide-overview-panel guide-overview-tldr"><span className="kicker">TL;DR</span><MarkdownText text={sections.tldr} fileLinks={{ prUrl }} /></section>
+    <section className="guide-overview-panel guide-overview-schematic"><span className="kicker">Schematic</span><MarkdownText text={sections.schematic} fileLinks={{ prUrl }} /></section>
+    {sections.changeMap.length > 0 && <section className="guide-overview-panel guide-overview-map"><span className="kicker">Change map</span><MarkdownText text={sections.changeMap} fileLinks={{ prUrl }} /></section>}
+    {sections.notes.length > 0 && <section className="guide-overview-panel guide-overview-notes"><span className="kicker">Reviewer notes</span><MarkdownText text={sections.notes} fileLinks={{ prUrl }} /></section>}
+  </div>;
+}
+
 /** Use guide chapters to navigate the authoritative diff instead of duplicating it. */
 function GuideReview({ review, chapters, viewedIds, setViewedIds, guideReview, runGuideReview, overview, runOverview, onProgress, onActivate, renderDiff }: { review: OpenResponse; chapters: GuideChapter[]; viewedIds: Record<string, boolean>; setViewedIds: React.Dispatch<React.SetStateAction<Record<string, boolean>>>; guideReview: FocusReview; runGuideReview: () => Promise<void>; overview: FlowDag; runOverview: () => Promise<void>; onProgress: (viewedIds: Record<string, boolean>) => void; onActivate: (step: FocusArea) => void; renderDiff: (step: FocusArea) => ReactNode }) {
   const walkthrough = useMemo(() => chapters.flatMap((chapter, chapterIndex) => chapter.steps.map((step) => ({ chapter, chapterIndex, step }))), [chapters]);
@@ -1751,7 +1763,7 @@ function GuideReview({ review, chapters, viewedIds, setViewedIds, guideReview, r
           <div><span className="guide-chapter-number">Overview</span><h3>What’s going on in this change</h3></div>
           <Button variant="muted" className="small-muted-button" onClick={() => void runOverview()} disabled={overview.running}>{overview.running ? "Building…" : overview.text.trim().length > 0 ? "Refresh overview" : "Build overview"}</Button>
         </header>
-        {overview.error != null ? <Flash variant="danger">Overview failed: {overview.error}</Flash> : overview.running ? <div className="guide-overview-loading"><span className="spinner" /><p>Building a focused visual explanation of this PR…</p>{overview.activity != null && <AgentActivityLine activity={overview.activity} />}</div> : overview.text.trim().length > 0 ? <div className="guide-overview-body"><InlineSnippetsProvider value={{ headSha: review.pr.headSha, snippets: false }}><MarkdownText text={overview.text} fileLinks={{ prUrl: review.pr.url }} /></InlineSnippetsProvider></div> : null}
+        {overview.error != null ? <Flash variant="danger">Overview failed: {overview.error}</Flash> : overview.running ? <div className="guide-overview-loading"><span className="spinner" /><p>Building a focused visual explanation of this PR…</p>{overview.activity != null && <AgentActivityLine activity={overview.activity} />}</div> : overview.text.trim().length > 0 ? <InlineSnippetsProvider value={{ headSha: review.pr.headSha, snippets: false }}><OverviewBody text={overview.text} prUrl={review.pr.url} /></InlineSnippetsProvider> : null}
       </section> : active == null ? null : <section className="guide-stage">
         <header className="guide-stage-head">
           <span className="guide-chapter-number">Chapter {active.chapterIndex + 1} of {chapters.length}</span>

@@ -168,21 +168,25 @@ function codeWalkPrompt(payload: Record<string, unknown>): ReviewPromptResponse 
   const diffSummary = statusPatchSummary(promptFiles(payload));
   return {
     purpose: "flow-dag",
-    prompt: `Use the show-me skill style to show me what's going on in PR ${prKey}. This is a visual orientation for a reviewer, not a findings report.
+    prompt: `Use the show-me skill style to show me what's going on in PR ${prKey}. This is a visual orientation for a reviewer, not a findings report. When your session has the show-me or pr-context skills available, use them to ground the answer in the real change.
 
 Return only the final markdown inline. Do not create files or mention your process, commands, tests, or where anything was saved.
 
-Follow this contract:
-- Start with one or two sentences that state the PR's goal and the key implementation idea.
-- Ground the reviewer visually. Use one or more focused Mermaid diagrams — a small change may need a single diagram, a layered change may deserve one per distinct aspect (execution path, state lifecycle, ownership boundaries) — when interactions, branches, state, data flow, or ownership are the point:
-  - \`sequenceDiagram\` for time-ordered calls, request/response paths, or async handoffs.
-  - \`stateDiagram-v2\` for lifecycles and transitions.
-  - \`flowchart\` for branching, data flow, dependencies, ownership boundaries, or source-call trees.
-- Use a compact text call tree or code-shape sketch instead only when exact source structure communicates the change more clearly than Mermaid.
-- Scale naturally to the PR. Do not pad a small change, force a table, or turn the answer into a multi-section report. Each extra diagram must explain something the others cannot.
-- Use actual identifiers and boundaries from the diff. Put descriptive text inside Mermaid nodes and keep edge labels short.
-- After the visual, add only the brief explanation or reviewer route needed to connect it to the changed files. Cite real file/line references when useful.
-- Avoid generic praise and review findings unless a tradeoff is necessary to understand the design.
+Structure the answer as exactly these sections, in this order, so the review UI can lay them out as panels:
+## TL;DR
+Two to four sentences: the PR's goal, the key implementation idea, and why this approach.
+## Schematic
+Ground the reviewer visually. Use one or more focused Mermaid diagrams — a small change may need a single diagram, a layered change may deserve one per distinct aspect (execution path, state lifecycle, ownership boundaries):
+- \`sequenceDiagram\` for time-ordered calls, request/response paths, or async handoffs.
+- \`stateDiagram-v2\` for lifecycles and transitions.
+- \`flowchart\` for branching, data flow, dependencies, ownership boundaries, or source-call trees.
+Use a compact text call tree or code-shape sketch instead only when exact source structure communicates the change more clearly than Mermaid. Use actual identifiers and boundaries from the diff, put descriptive text inside nodes, and keep edge labels short. Each extra diagram must explain something the others cannot.
+## Change map
+Group the changed files by their role in the change (core behavior, API surface, supporting plumbing, tests). One tight line per file or coherent group: \`path\` — what changed there and why it matters to a reviewer.
+## Reviewer notes
+Three to six bullets: where to start, the order to read, contracts or invariants to verify, and anything easy to miss. Cite real file:line references.
+
+Scale every section to the actual PR — short sections for small changes, never padding. Avoid generic praise and review findings unless a tradeoff is necessary to understand the design.
 
 PR title: ${prTitle}
 

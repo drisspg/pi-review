@@ -536,6 +536,11 @@ kbd {
   margin-inline: auto;
 }
 
+/* The guide's panel layout benefits from the full viewport; prose-free, so no line-length cap. */
+.review-page:has(.guide-review) {
+  max-width: none;
+}
+
 .review-page.panel-focused {
   gap: 0;
 }
@@ -1074,6 +1079,47 @@ kbd {
 
 .guide-overview-body {
   min-width: 0;
+}
+
+.guide-overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  grid-template-rows: auto auto 1fr;
+  grid-template-areas:
+    "tldr tldr"
+    "schematic map"
+    "schematic notes";
+  gap: var(--space-3);
+}
+
+.guide-overview-notes {
+  align-self: start;
+}
+
+.guide-overview-panel {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+
+.guide-overview-panel > .markdown > :first-child { margin-top: 0; }
+.guide-overview-panel > .markdown > :last-child { margin-bottom: 0; }
+
+.guide-overview-tldr { grid-area: tldr; }
+.guide-overview-schematic { grid-area: schematic; }
+.guide-overview-map { grid-area: map; }
+.guide-overview-notes { grid-area: notes; }
+
+.guide-overview-schematic .markdown-mermaid-block {
+  margin: 0;
+}
+
+.guide-overview-schematic .mermaid-viewport {
+  min-height: clamp(360px, 52vh, 680px);
 }
 
 .guide-overview .mermaid-viewport {
@@ -5004,6 +5050,7 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
   .guide-outline-overview { border-left: 0; }
   .guide-outline-entry.active { border-left-color: var(--border); border-bottom-color: var(--accent); }
   .guide-outline .guide-refresh { flex: 0 0 auto; align-self: center; }
+  .guide-overview-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "tldr" "schematic" "map" "notes"; }
 }
 
 @media (min-width: 761px) and (max-width: 1100px) {
