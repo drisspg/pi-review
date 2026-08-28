@@ -176,7 +176,7 @@ export function Mermaid({ code }: { code: string }) {
     const baseWidth = rect.width / zoomRef.current;
     const baseHeight = rect.height / zoomRef.current;
     if (baseWidth <= 0 || baseHeight <= 0) return;
-    const fit = Math.min((viewport.clientWidth - FIT_PADDING * 2) / baseWidth, (viewport.clientHeight - FIT_PADDING * 2) / baseHeight, 1);
+    const fit = Math.min((viewport.clientWidth - FIT_PADDING * 2) / baseWidth, (viewport.clientHeight - FIT_PADDING * 2) / baseHeight, 1.5);
     const nextZoom = Math.max(MIN_ZOOM, fit);
     setZoom(nextZoom);
     setPan({ x: (viewport.clientWidth - baseWidth * nextZoom) / 2, y: Math.max((viewport.clientHeight - baseHeight * nextZoom) / 2, FIT_PADDING) });

@@ -17,7 +17,7 @@ import { parseFocusAreas } from "./lib/focus";
 import { parseGuideChapters, type GuideChapter } from "./lib/guide";
 import { languageForPath } from "./lib/highlight";
 import { newId, prUrlFromKey, relativeTime, shortSha } from "./lib/pr";
-import type { AiReview, AiReviewMessage, AiReviewRecord, DiffRow, DraftComment, DraftReview, DragSelection, FileReviewState, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, GitHubDraftComment, GitHubPendingReview, GpuWorkspace, GpuWorkspaceContract, GpuWorkspaceExecResult, GuideReviewRecord, LogEntry, OpenResponse, PiAgentActivity, PullFile, PullIssueComment, PullRequestReviewSummary, PullReviewComment, ReviewMemoryRecord, ReviewMemoryResponse, StoredPullRequest, Target, ThemeName, Thread } from "./types";
+import type { AiReview, AiReviewMessage, AiReviewRecord, DiffRow, DraftComment, DraftReview, DragSelection, FileReviewState, FlowDag, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, GitHubDraftComment, GitHubPendingReview, GpuWorkspace, GpuWorkspaceContract, GpuWorkspaceExecResult, GuideReviewRecord, LogEntry, OpenResponse, PiAgentActivity, PullFile, PullIssueComment, PullRequestReviewSummary, PullReviewComment, ReviewMemoryRecord, ReviewMemoryResponse, StoredPullRequest, Target, ThemeName, Thread } from "./types";
 import "@primer/primitives/dist/css/primitives.css";
 import "@primer/primitives/dist/css/functional/themes/dark.css";
 import "@primer/primitives/dist/css/functional/themes/dark-dimmed.css";
@@ -436,6 +436,7 @@ function App() {
   const [prs, setPrs] = useState<StoredPullRequest[]>([]);
   const [review, setReview] = useState<OpenResponse | null>(null);
   const [reviewMode, setReviewMode] = useState<"guide" | "diff">("diff");
+  const [overview, setOverview] = useState<FlowDag>({ running: false, text: "", error: null });
   const [openFiles, setOpenFiles] = useState<Record<string, boolean>>({});
   const [diffViewMode, setDiffViewMode] = useState<DiffViewMode>("unified");
   const [expandedContext, setExpandedContext] = useState<Record<string, boolean>>({});
@@ -637,6 +638,7 @@ function App() {
     showAiReviewRecord(data.aiReview);
     showFocusScanRecord(data.focusScan);
     showGuideReviewRecord(data.guideReview);
+    setOverview({ running: false, text: "", error: null });
     setReviewMode("diff");
     setGpuWorkspaceOpen(false);
   }
@@ -985,6 +987,33 @@ function App() {
     }
   }
 
+  async function runOverview() {
+    if (review == null || overview.running) return;
+    const targetReview = review;
+    const initialActivity = runningAgentActivity();
+    let cancelActivityPolling: () => void = () => undefined;
+    setOverview({ running: true, text: "", error: null, activity: initialActivity });
+    try {
+      const { prompt, purpose } = await buildPiPrompt({ mode: "code-walk", prKey: targetReview.pr.key, prTitle: targetReview.pr.title, files: targetReview.files });
+      cancelActivityPolling = startPiAgentActivityPolling(targetReview.pr.key, purpose, (activity) => {
+        if (activeReviewKeyRef.current === targetReview.pr.key) setOverview((current) => ({ ...current, activity: activity ?? current.activity ?? null }));
+      }, initialActivity);
+      const setAnswer = (answer: string) => {
+        if (activeReviewKeyRef.current !== targetReview.pr.key) return;
+        setOverview((current) => ({ running: true, text: "", error: null, activity: streamingAgentActivity(current.activity, answer) }));
+      };
+      const answer = await askPiApi({ prKey: targetReview.pr.key, prompt, purpose }, setAnswer);
+      cancelActivityPolling();
+      if (activeReviewKeyRef.current !== targetReview.pr.key) return;
+      setOverview({ running: false, text: answer, error: null, activity: null });
+      await refreshLogs();
+    } catch (err) {
+      cancelActivityPolling();
+      if (activeReviewKeyRef.current !== targetReview.pr.key) return;
+      setOverview((current) => ({ running: false, text: current.text, error: err instanceof Error ? err.message : String(err), activity: null }));
+    }
+  }
+
   async function runAiReviewFor(targetReview: OpenResponse, background: boolean) {
     updateAiReview((current) => ({ ...current, running: true, text: background ? current.text : "", messages: background ? current.messages : [], activity: null }));
     const visibleAiReview = targetReview.pr.key === review?.pr.key ? currentGeneralReviewText(aiReview) : "";
@@ -1168,7 +1197,7 @@ function App() {
       openLogs={() => { setLogsOpen(true); void refreshLogs(); }}
     />
     {error != null && <Flash variant="danger" className="error" role="alert">{error}</Flash>}
-    {busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p><Button variant="muted" onClick={cancelOpen}>Cancel</Button></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} cleanupPrs={cleanupPrs} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} reviewMode={reviewMode} setReviewMode={setReviewMode} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} draftRevealId={draftRevealId} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, copyFeedbackPrompt: copyReviewFeedbackPrompt, guideReview, runGuideReview, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} reviewEvent={reviewEvent} setReviewEvent={setReviewEvent} reviewBody={reviewBody} setReviewBody={setReviewBody} draftSaveStatus={draftSaveStatus} draftSaveError={draftSaveError} retryDraftSave={() => setDraftSaveRetry((retry) => retry + 1)} archiveReview={archiveReview} discardReview={discardReview} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} githubDrafts={{ review: githubDraftReview, loaded: githubDraftLoaded, loading: githubDraftLoading, moving: githubDraftMoving, error: githubDraftError, pull: pullGithubDraftReview, moveLocalDrafts: moveLocalDraftsToGithub, copyHandoff: copyGithubDraftHandoff }} />}
+    {busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p><Button variant="muted" onClick={cancelOpen}>Cancel</Button></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPr={cleanupPr} cleanupPrs={cleanupPrs} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} reviewMode={reviewMode} setReviewMode={setReviewMode} overview={overview} runOverview={runOverview} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedContext={expandedContext} setExpandedContext={setExpandedContext} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} draftRevealId={draftRevealId} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, copyFeedbackPrompt: copyReviewFeedbackPrompt, guideReview, runGuideReview, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} reviewEvent={reviewEvent} setReviewEvent={setReviewEvent} reviewBody={reviewBody} setReviewBody={setReviewBody} draftSaveStatus={draftSaveStatus} draftSaveError={draftSaveError} retryDraftSave={() => setDraftSaveRetry((retry) => retry + 1)} archiveReview={archiveReview} discardReview={discardReview} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} githubDrafts={{ review: githubDraftReview, loaded: githubDraftLoaded, loading: githubDraftLoading, moving: githubDraftMoving, error: githubDraftError, pull: pullGithubDraftReview, moveLocalDrafts: moveLocalDraftsToGithub, copyHandoff: copyGithubDraftHandoff }} />}
     {diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}
     {review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} openDiagnostics={() => { setSettingsOpen(false); void showDiagnostics(); }} close={() => setSettingsOpen(false)} />}
     {memoryOpen && <ReviewMemoryModal memory={reviewMemory} loading={memoryLoading} distilling={memoryDistilling} refresh={() => void loadReviewMemory()} distill={() => void distillReviewMemory()} close={() => setMemoryOpen(false)} />}
@@ -1406,7 +1435,7 @@ function clampSidePanelWidth(width: number): number {
   return Math.min(maxSidePanelWidth(), Math.max(300, width));
 }
 
-function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { reviewMode: "guide" | "diff"; setReviewMode: (mode: "guide" | "diff") => void; draftRevealId: string | null; piPanel: PiPanelProps; reviewEvent: "COMMENT" | "APPROVE" | "REQUEST_CHANGES"; setReviewEvent: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES") => void; reviewBody: string; setReviewBody: (body: string) => void; draftSaveStatus: "idle" | "saving" | "saved" | "error"; draftSaveError: string | null; retryDraftSave: () => void; archiveReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; discardReview: () => Promise<boolean>; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; submitting: boolean; invalidDraftIds: Record<string, boolean>; refreshingActivity: boolean; githubDrafts: GitHubDraftControls }) {
+function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { reviewMode: "guide" | "diff"; setReviewMode: (mode: "guide" | "diff") => void; overview: FlowDag; runOverview: () => Promise<void>; draftRevealId: string | null; piPanel: PiPanelProps; reviewEvent: "COMMENT" | "APPROVE" | "REQUEST_CHANGES"; setReviewEvent: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES") => void; reviewBody: string; setReviewBody: (body: string) => void; draftSaveStatus: "idle" | "saving" | "saved" | "error"; draftSaveError: string | null; retryDraftSave: () => void; archiveReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; discardReview: () => Promise<boolean>; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; submitting: boolean; invalidDraftIds: Record<string, boolean>; refreshingActivity: boolean; githubDrafts: GitHubDraftControls }) {
   const diffViewLabel = props.diffViewMode === "unified" ? "Split view" : "Unified view";
   const reviewMode = props.reviewMode;
   const [viewedGuideIds, setViewedGuideIds] = useState<Record<string, boolean>>({});
@@ -1516,7 +1545,7 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { r
           <button type="button" className={reviewMode === "guide" ? "active" : ""} aria-pressed={reviewMode === "guide"} onClick={() => selectReviewMode("guide")}>Guide{guideChapters.length > 0 ? ` ${guideChapters.length}` : ""}</button>
           <button type="button" className={reviewMode === "diff" ? "active" : ""} aria-pressed={reviewMode === "diff"} onClick={() => selectReviewMode("diff")}>Diff</button>
         </nav>
-        {reviewMode === "guide" ? <GuideReview review={props.review} chapters={guideChapters} viewedIds={viewedGuideIds} setViewedIds={setViewedGuideIds} guideReview={props.piPanel.guideReview} runGuideReview={props.piPanel.runGuideReview} onActivate={prepareGuideStep} renderDiff={renderGuideDiff} /> : <main className="files">
+        {reviewMode === "guide" ? <GuideReview review={props.review} chapters={guideChapters} viewedIds={viewedGuideIds} setViewedIds={setViewedGuideIds} guideReview={props.piPanel.guideReview} runGuideReview={props.piPanel.runGuideReview} overview={props.overview} runOverview={props.runOverview} onActivate={prepareGuideStep} renderDiff={renderGuideDiff} /> : <main className="files">
           <PrSummary pr={props.review.pr} />
           <div className="files-toolbar">
             <FileNavigator files={props.review.files} fileReviews={props.review.fileReviews} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} />
@@ -1589,24 +1618,32 @@ function guideStepLocation(step: FocusArea): string {
 }
 
 /** Use guide chapters to navigate the authoritative diff instead of duplicating it. */
-function GuideReview({ review, chapters, viewedIds, setViewedIds, guideReview, runGuideReview, onActivate, renderDiff }: { review: OpenResponse; chapters: GuideChapter[]; viewedIds: Record<string, boolean>; setViewedIds: React.Dispatch<React.SetStateAction<Record<string, boolean>>>; guideReview: FocusReview; runGuideReview: () => Promise<void>; onActivate: (step: FocusArea) => void; renderDiff: (step: FocusArea) => ReactNode }) {
+function GuideReview({ review, chapters, viewedIds, setViewedIds, guideReview, runGuideReview, overview, runOverview, onActivate, renderDiff }: { review: OpenResponse; chapters: GuideChapter[]; viewedIds: Record<string, boolean>; setViewedIds: React.Dispatch<React.SetStateAction<Record<string, boolean>>>; guideReview: FocusReview; runGuideReview: () => Promise<void>; overview: FlowDag; runOverview: () => Promise<void>; onActivate: (step: FocusArea) => void; renderDiff: (step: FocusArea) => ReactNode }) {
   const walkthrough = useMemo(() => chapters.flatMap((chapter, chapterIndex) => chapter.steps.map((step) => ({ chapter, chapterIndex, step }))), [chapters]);
-  const [activeStepId, setActiveStepId] = useState<string | null>(null);
-  const activeIndex = Math.max(0, walkthrough.findIndex(({ step }) => step.id === activeStepId));
-  const active = walkthrough[activeIndex] ?? null;
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const overviewSelected = selectedId === "overview";
+  const activeIndex = Math.max(0, walkthrough.findIndex(({ step }) => step.id === selectedId));
+  const active = overviewSelected ? null : walkthrough[activeIndex] ?? null;
   const reviewedCount = walkthrough.filter(({ step }) => viewedIds[step.id]).length;
 
   useEffect(() => {
+    if (overviewSelected) return;
     if (walkthrough.length === 0) {
-      setActiveStepId(null);
+      setSelectedId(null);
       return;
     }
-    if (!walkthrough.some(({ step }) => step.id === activeStepId)) setActiveStepId(walkthrough.find(({ step }) => !viewedIds[step.id])?.step.id ?? walkthrough[0].step.id);
-  }, [activeStepId, viewedIds, walkthrough]);
+    if (!walkthrough.some(({ step }) => step.id === selectedId)) setSelectedId(walkthrough.find(({ step }) => !viewedIds[step.id])?.step.id ?? walkthrough[0].step.id);
+  }, [overviewSelected, selectedId, viewedIds, walkthrough]);
+
+  // Build the overview on first visit, like the old standalone Overview tab did.
+  useEffect(() => {
+    if (overviewSelected && overview.text.trim().length === 0 && !overview.running && overview.error == null) void runOverview();
+  }, [overviewSelected]);
 
   useEffect(() => {
     if (active == null) return;
-    onActivate(active.step);
+    const step = active.step;
+    onActivate(step);
     let cancelled = false;
     let attempts = 0;
     let timer = 0;
@@ -1615,12 +1652,12 @@ function GuideReview({ review, chapters, viewedIds, setViewedIds, guideReview, r
       const stage = document.querySelector<HTMLElement>(".guide-live-diff");
       if (stage == null) return;
       stage.querySelectorAll(".guide-step-highlight").forEach((row) => row.classList.remove("guide-step-highlight"));
-      const rows = [...stage.querySelectorAll<HTMLElement>(`.diff-row[data-path="${CSS.escape(active.step.path)}"][data-line]`)].filter((row) => {
+      const rows = [...stage.querySelectorAll<HTMLElement>(`.diff-row[data-path="${CSS.escape(step.path)}"][data-line]`)].filter((row) => {
         const line = Number.parseInt(row.dataset.line ?? "", 10);
-        return line >= active.step.startLine && line <= active.step.endLine;
+        return line >= step.startLine && line <= step.endLine;
       });
       rows.forEach((row) => row.classList.add("guide-step-highlight"));
-      const target = rows[0] ?? stage.querySelector<HTMLElement>(`#file-${CSS.escape(active.step.path)}`);
+      const target = rows[0] ?? stage.querySelector<HTMLElement>(`#file-${CSS.escape(step.path)}`);
       if (target != null) target.scrollIntoView({ behavior: "smooth", block: "center" });
       else if (++attempts < 20) timer = window.setTimeout(reveal, 100);
     }
@@ -1632,8 +1669,8 @@ function GuideReview({ review, chapters, viewedIds, setViewedIds, guideReview, r
     };
   }, [active?.step.id]);
 
-  function activate(stepId: string): void {
-    setActiveStepId(stepId);
+  function activate(id: string): void {
+    setSelectedId(id);
     window.setTimeout(() => document.querySelector(".guide-stage")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
   }
 
@@ -1656,57 +1693,52 @@ function GuideReview({ review, chapters, viewedIds, setViewedIds, guideReview, r
     </div>
   </main>;
 
-  if (active == null) return null;
-  const chapterReviewedCount = active.chapter.steps.filter((step) => viewedIds[step.id]).length;
   return <main className="guide-review" aria-label="Guided review">
-    <header className="guide-review-head">
-      <div>
-        <span className="guide-kicker">Guided review</span>
-        <h2>{review.pr.title}</h2>
-        <p>Use the route to choose what to inspect; the right side is the real Pi Review diff with context expansion, comments, drafts, and line terminals.</p>
-      </div>
-      <div className="guide-head-actions"><div className="guide-progress" aria-label={`${reviewedCount} of ${walkthrough.length} stops reviewed`}><strong>{reviewedCount}/{walkthrough.length}</strong><span>stops reviewed</span></div><Button variant="muted" className="small-muted-button" onClick={() => void runGuideReview()}>Refresh walkthrough</Button></div>
-    </header>
     <div className="guide-workspace">
-      <nav className="guide-outline" aria-label="Guide chapters">
-        <div className="guide-outline-head"><strong>Review route</strong><span>{chapters.length} {chapters.length === 1 ? "chapter" : "chapters"}</span></div>
+      <nav className="guide-outline" aria-label="Review route">
+        <div className="guide-outline-head"><strong>Review route</strong><span>{reviewedCount}/{walkthrough.length} reviewed</span></div>
+        <button type="button" className={`guide-outline-entry guide-outline-overview${overviewSelected ? " active" : ""}`} onClick={() => activate("overview")}>
+          <span className="guide-outline-number" aria-hidden="true">◇</span>
+          <span className="guide-outline-title"><strong>Overview</strong><small>visual orientation</small></span>
+        </button>
         {chapters.map((chapter, chapterIndex) => {
           const reviewed = chapter.steps.filter((step) => viewedIds[step.id]).length;
-          const selected = chapter.id === active.chapter.id;
+          const expanded = active?.chapter.id === chapter.id;
           const target = chapter.steps.find((step) => !viewedIds[step.id]) ?? chapter.steps[0];
-          return <button type="button" className={`${selected ? "active" : ""}${reviewed === chapter.steps.length ? " complete" : ""}`} key={chapter.id} onClick={() => activate(target.id)}>
-            <span className="guide-outline-number">{String(chapterIndex + 1).padStart(2, "0")}</span>
-            <span className="guide-outline-title"><strong>{chapter.title}</strong><small>{reviewed}/{chapter.steps.length} stops</small></span>
-          </button>;
+          return <div className={`guide-outline-chapter${expanded ? " expanded" : ""}`} key={chapter.id}>
+            <button type="button" className={`guide-outline-entry${expanded ? " active" : ""}${reviewed === chapter.steps.length ? " complete" : ""}`} onClick={() => activate(target.id)}>
+              <span className="guide-outline-number">{String(chapterIndex + 1).padStart(2, "0")}</span>
+              <span className="guide-outline-title"><strong>{chapter.title}</strong><small>{reviewed}/{chapter.steps.length} stops</small></span>
+            </button>
+            {expanded && <div className="guide-outline-stops">
+              {chapter.steps.map((step) => {
+                const stepSelected = active?.step.id === step.id;
+                const stepReviewed = viewedIds[step.id] ?? false;
+                return <button type="button" key={step.id} aria-expanded={stepSelected} className={`guide-outline-stop${stepSelected ? " active" : ""}${stepReviewed ? " reviewed" : ""}`} onClick={() => activate(step.id)}>
+                  <span className="guide-outline-stop-mark" aria-hidden="true">{stepReviewed ? "✓" : "•"}</span>
+                  <span className="guide-outline-stop-title">{step.title}</span>
+                </button>;
+              })}
+            </div>}
+          </div>;
         })}
+        <Button variant="muted" className="small-muted-button guide-refresh" onClick={() => void runGuideReview()} disabled={guideReview.running}>{guideReview.running ? "Rebuilding…" : "Refresh walkthrough"}</Button>
       </nav>
-      <section className="guide-stage">
+      {overviewSelected ? <section className="guide-stage guide-overview">
+        <header className="guide-stage-head guide-overview-head">
+          <div><span className="guide-chapter-number">Overview</span><h3>What’s going on in this change</h3></div>
+          <Button variant="muted" className="small-muted-button" onClick={() => void runOverview()} disabled={overview.running}>{overview.running ? "Building…" : overview.text.trim().length > 0 ? "Refresh overview" : "Build overview"}</Button>
+        </header>
+        {overview.error != null ? <Flash variant="danger">Overview failed: {overview.error}</Flash> : overview.running ? <div className="guide-overview-loading"><span className="spinner" /><p>Building a focused visual explanation of this PR…</p>{overview.activity != null && <AgentActivityLine activity={overview.activity} />}</div> : overview.text.trim().length > 0 ? <div className="guide-overview-body"><InlineSnippetsProvider value={{ headSha: review.pr.headSha, snippets: false }}><MarkdownText text={overview.text} fileLinks={{ prUrl: review.pr.url }} /></InlineSnippetsProvider></div> : null}
+      </section> : active == null ? null : <section className="guide-stage">
         <header className="guide-stage-head">
           <span className="guide-chapter-number">Chapter {active.chapterIndex + 1} of {chapters.length}</span>
           <h3>{active.chapter.title}</h3>
           {active.chapter.body.length > 0 && <MarkdownText text={active.chapter.body} fileLinks={{ prUrl: review.pr.url }} />}
-          <span className="guide-stage-progress">{chapterReviewedCount}/{active.chapter.steps.length} stops reviewed</span>
         </header>
-        <div className="guide-stop-list">
-          {active.chapter.steps.map((step, stepIndex) => {
-            const selected = step.id === active.step.id;
-            const reviewed = viewedIds[step.id] ?? false;
-            return <article className={`guide-stop${selected ? " active" : ""}${reviewed ? " reviewed" : ""}`} key={step.id}>
-              <div className="guide-stop-head">
-                <button type="button" aria-expanded={selected} onClick={() => activate(step.id)}>
-                  <span className="guide-stop-number">{reviewed ? "✓" : String(stepIndex + 1).padStart(2, "0")}</span>
-                  <span className="guide-stop-title"><strong>{step.title}</strong><small>{guideStepLocation(step)}</small></span>
-                  <span className="disclosure-chevron" aria-hidden="true">›</span>
-                </button>
-                <label className="guide-reviewed-check"><Checkbox checked={reviewed} onChange={() => toggleReviewed(step)} />Reviewed</label>
-              </div>
-            </article>;
-          })}
-        </div>
         <section className="guide-active-stop">
-          <div><span className="guide-chapter-number">Stop {active.chapter.steps.indexOf(active.step) + 1}</span><h4>{active.step.title}</h4><code>{guideStepLocation(active.step)}</code></div>
+          <div><span className="guide-chapter-number">Stop {active.chapter.steps.indexOf(active.step) + 1} of {active.chapter.steps.length}</span><h4>{active.step.title}</h4><code>{guideStepLocation(active.step)}</code><label className="guide-reviewed-check"><Checkbox checked={viewedIds[active.step.id] ?? false} onChange={() => toggleReviewed(active.step)} />Reviewed</label></div>
           {active.step.body.length > 0 && <MarkdownText text={active.step.body} fileLinks={{ prUrl: review.pr.url }} />}
-          <p className="muted">Expand unchanged context or click any changed line to comment and open a Pi terminal.</p>
         </section>
         <div className="guide-live-diff">{renderDiff(active.step)}</div>
         <footer className="guide-step-navigation">
@@ -1714,7 +1746,7 @@ function GuideReview({ review, chapters, viewedIds, setViewedIds, guideReview, r
           <span>Stop {activeIndex + 1} of {walkthrough.length}</span>
           <Button disabled={activeIndex === walkthrough.length - 1} onClick={() => move(1)}>{activeIndex === walkthrough.length - 1 ? "Walkthrough complete" : `Next: ${walkthrough[activeIndex + 1].step.title}`} →</Button>
         </footer>
-      </section>
+      </section>}
     </div>
   </main>;
 }

@@ -1012,7 +1012,8 @@ test("runs a separate focus areas review and opens native focus terminals", asyn
   await expect(row).toHaveClass(/focus-highlight-active/);
 
   let guideRequests = 0;
-  await mockAskPi(page, () => {
+  await mockAskPi(page, (body) => {
+    if ((body.prompt ?? "").includes("show-me skill style")) return "# PR goal\n\nOrient reviewers.\n\n## Walk map\n\n```mermaid\nflowchart LR\n  Toolbar -->|opens| Modal\n```";
     guideRequests += 1;
     return `## Review guide\n### 1. Core path\nFollow the implementation from selection through validation.\n- ${path}:${line}-${Number.parseInt(line, 10) + 1} — Core implementation\n  Start with the changed tiling condition and follow how it selects the implementation path.\n- ${path}:${line} — Validation path\n  Finish by checking that tests cover the intended behavior.`;
   });
@@ -1034,7 +1035,11 @@ test("runs a separate focus areas review and opens native focus terminals", asyn
   await guide.getByRole("checkbox", { name: "Reviewed" }).first().check();
   await expect(guide).toContainText("1/2");
   await guide.getByRole("button", { name: /Next: Validation path/ }).click();
-  await expect(guide.getByRole("button", { name: /Validation path/ }).first()).toHaveAttribute("aria-expanded", "true");
+  await expect(guide.locator(".guide-active-stop")).toContainText("Validation path");
+
+  await guide.getByRole("button", { name: /Overview/ }).click();
+  await expect(guide).toContainText("Walk map");
+  await expect(guide.locator(".guide-overview .markdown-mermaid-block")).toBeVisible();
 
   await page.reload();
   await expect(page.locator(".review-layout")).toBeVisible({ timeout: 60_000 });

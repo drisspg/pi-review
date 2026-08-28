@@ -1,6 +1,6 @@
 import { ghstackWorkspaceInstructions } from "./ghstack-guidance.js";
 
-type ReviewPromptMode = "guide-review" | "main-review" | "focus-review" | "test-pr" | "ai-chat" | "inline-chat" | "focus-chat" | "review-feedback" | "github-draft-handoff";
+type ReviewPromptMode = "code-walk" | "guide-review" | "main-review" | "focus-review" | "test-pr" | "ai-chat" | "inline-chat" | "focus-chat" | "review-feedback" | "github-draft-handoff";
 
 type PromptFile = {
   additions?: number;
@@ -160,6 +160,34 @@ function focusRange(payload: Record<string, unknown>): string {
   const endLine = payload.endLine;
   if (typeof startLine !== "number" || typeof endLine !== "number") throw new Error("Expected focus range");
   return startLine === endLine ? String(startLine) : `${startLine}-${endLine}`;
+}
+
+function codeWalkPrompt(payload: Record<string, unknown>): ReviewPromptResponse {
+  const prKey = requiredString(payload, "prKey");
+  const prTitle = requiredString(payload, "prTitle");
+  const diffSummary = statusPatchSummary(promptFiles(payload));
+  return {
+    purpose: "flow-dag",
+    prompt: `Use the show-me skill style to show me what's going on in PR ${prKey}. This is a visual orientation for a reviewer, not a findings report.
+
+Return only the final markdown inline. Do not create files or mention your process, commands, tests, or where anything was saved.
+
+Follow this contract:
+- Start with one or two sentences that state the PR's goal and the key implementation idea.
+- Choose the smallest visual that makes the change click. Prefer one focused Mermaid diagram when interactions, branches, state, data flow, or ownership are the point:
+  - \`sequenceDiagram\` for time-ordered calls, request/response paths, or async handoffs.
+  - \`stateDiagram-v2\` for lifecycles and transitions.
+  - \`flowchart\` for branching, data flow, dependencies, ownership boundaries, or source-call trees.
+- Use a compact text call tree or code-shape sketch instead only when exact source structure communicates the change more clearly than Mermaid.
+- Scale naturally to the PR. Do not pad a small change, force a table, or turn the answer into a multi-section report.
+- Use actual identifiers and boundaries from the diff. Put descriptive text inside Mermaid nodes and keep edge labels short.
+- After the visual, add only the brief explanation or reviewer route needed to connect it to the changed files. Cite real file/line references when useful.
+- Avoid generic praise and review findings unless a tradeoff is necessary to understand the design.
+
+PR title: ${prTitle}
+
+${diffSummary}`,
+  };
 }
 
 function guideReviewPrompt(payload: Record<string, unknown>): ReviewPromptResponse {
@@ -444,6 +472,8 @@ export function createReviewPromptApi(deps: ReviewPromptApiDeps): ReviewPromptAp
     const mode = payload.mode;
     if (typeof mode !== "string") throw new Error("Expected mode");
     switch (mode as ReviewPromptMode) {
+      case "code-walk":
+        return codeWalkPrompt(payload);
       case "guide-review":
         return guideReviewPrompt(payload);
       case "main-review":

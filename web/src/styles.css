@@ -861,24 +861,11 @@ kbd {
 }
 
 .guide-review {
-  display: grid;
-  gap: var(--space-5);
   min-width: 0;
-  padding-bottom: 60px;
+  padding: var(--space-2) 0 60px;
 }
 
-.guide-review-head {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: var(--space-6);
-  padding: var(--space-4) var(--space-5) var(--space-5);
-  border-bottom: 1px solid var(--border);
-}
 
-.guide-review-head > div:first-child {
-  max-width: 760px;
-}
 
 .guide-kicker,
 .guide-chapter-number {
@@ -889,7 +876,6 @@ kbd {
   text-transform: uppercase;
 }
 
-.guide-review-head h2,
 .guide-empty-card h2 {
   margin: 6px 0 8px;
   color: var(--text);
@@ -897,36 +883,15 @@ kbd {
   line-height: 1.2;
 }
 
-.guide-review-head p,
 .guide-empty-card p {
   margin: 0;
   color: var(--muted);
   line-height: 1.55;
 }
 
-.guide-head-actions {
-  display: grid;
-  flex: 0 0 auto;
-  gap: 8px;
-  justify-items: end;
-}
 
-.guide-progress {
-  display: grid;
-  gap: 1px;
-  min-width: 116px;
-  text-align: right;
-}
 
-.guide-progress strong {
-  color: var(--text);
-  font-size: 1.15rem;
-}
 
-.guide-progress span {
-  color: var(--muted);
-  font-size: 0.75rem;
-}
 
 .guide-workspace {
   display: grid;
@@ -964,7 +929,7 @@ kbd {
   font-size: 0.7rem;
 }
 
-.guide-outline > button {
+.guide-outline-entry {
   display: grid;
   grid-template-columns: 30px minmax(0, 1fr);
   gap: 8px;
@@ -981,23 +946,23 @@ kbd {
   transition: color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
 }
 
-.guide-outline > button + button {
+.guide-outline-chapter {
   border-top: 1px solid var(--border);
 }
 
-.guide-outline > button:hover {
+.guide-outline-entry:hover {
   background: var(--panel2);
   color: var(--text);
 }
 
-.guide-outline > button.active {
+.guide-outline-entry.active {
   border-left-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 8%, var(--panel));
   color: var(--text);
 }
 
-.guide-outline > button.complete .guide-outline-number,
-.guide-outline > button.complete small {
+.guide-outline-entry.complete .guide-outline-number,
+.guide-outline-entry.complete small {
   color: var(--success);
 }
 
@@ -1028,6 +993,93 @@ kbd {
   font-size: var(--text-xs);
 }
 
+.guide-outline-stops {
+  display: grid;
+  padding: 2px 0 8px;
+  background: color-mix(in srgb, var(--accent) 3%, var(--panel));
+}
+
+.guide-outline-stop {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  width: 100%;
+  padding: 5px 12px 5px 22px;
+  border: 0;
+  border-left: 3px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  text-align: left;
+  font-size: var(--text-sm);
+  transition: color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+
+.guide-outline-stop:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+}
+
+.guide-outline-stop.active {
+  border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--text);
+}
+
+.guide-outline-stop.reviewed .guide-outline-stop-mark {
+  color: var(--success);
+}
+
+.guide-outline-stop-mark {
+  flex: 0 0 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.guide-outline-stop-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guide-outline .guide-refresh {
+  justify-self: start;
+  margin: 10px 12px;
+}
+
+.guide-stage-head.guide-overview-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.guide-overview-head h3 {
+  margin-top: 4px;
+}
+
+.guide-overview-loading {
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+  padding: 80px 20px;
+  color: var(--muted);
+}
+
+.guide-overview-loading p {
+  margin: 0;
+}
+
+.guide-overview-body {
+  min-width: 0;
+}
+
+.guide-overview .mermaid-viewport {
+  min-height: clamp(420px, 62vh, 780px);
+}
+
 .guide-stage {
   min-width: 0;
   scroll-margin-top: calc(var(--sticky-toolbar-h) + var(--sticky-mode-tabs-h) + var(--space-2));
@@ -1055,124 +1107,24 @@ kbd {
 .guide-stage-head .markdown > :first-child { margin-top: 0; }
 .guide-stage-head .markdown > :last-child { margin-bottom: 0; }
 
-.guide-stage-progress {
-  color: var(--muted);
-  font-size: 0.72rem;
-}
 
-.guide-stop-list {
-  display: grid;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--panel);
-}
 
-.guide-stop + .guide-stop {
-  border-top: 1px solid var(--border);
-}
 
-.guide-stop.active {
-  background: color-mix(in srgb, var(--accent) 3%, var(--panel));
-}
 
-.guide-stop-head {
-  display: flex;
-  align-items: stretch;
-  min-height: 56px;
-}
 
-.guide-stop-head > button {
-  display: grid;
-  flex: 1 1 auto;
-  grid-template-columns: 32px minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: center;
-  min-width: 0;
-  padding: 9px 12px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-  text-align: left;
-}
 
-.guide-stop-head > button {
-  transition: background-color var(--dur-fast) var(--ease);
-}
 
-.guide-stop-head > button:hover {
-  background: var(--hover-bg);
-}
 
-.guide-stop.active .guide-stop-head > button {
-  background: color-mix(in srgb, var(--accent) 7%, transparent);
-}
 
-.guide-stop.active .guide-stop-head .disclosure-chevron {
-  transform: rotate(90deg);
-}
 
-.guide-stop-number {
-  display: inline-grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--panel2);
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-  transition: color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
-}
 
-.guide-stop.active .guide-stop-number {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-  color: var(--accent);
-}
 
-.guide-stop.reviewed .guide-stop-number {
-  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
-  background: color-mix(in srgb, var(--success) 12%, var(--panel2));
-}
 
-.guide-stop.reviewed .guide-stop-number,
-.guide-stop.reviewed .guide-reviewed-check {
-  color: var(--success);
-}
 
-.guide-stop-title {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
 
-.guide-stop-title strong,
-.guide-stop-title small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
-.guide-stop-title strong {
-  font-size: 0.84rem;
-}
 
-.guide-stop-title small {
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-}
 
-.guide-stop-head > .guide-reviewed-check {
-  flex: 0 0 auto;
-  padding: 0 14px;
-  border-left: 1px solid var(--border);
-}
 
 .guide-active-stop {
   display: grid;
@@ -1189,6 +1141,10 @@ kbd {
   flex-wrap: wrap;
   align-items: baseline;
   gap: 8px 12px;
+}
+
+.guide-active-stop .guide-reviewed-check {
+  margin-left: auto;
 }
 
 .guide-active-stop h4 {
@@ -5039,15 +4995,15 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
 }
 
 @media (max-width: 900px) {
-  .guide-review-head { display: grid; padding: 18px 8px 22px; }
-  .guide-head-actions { justify-items: start; }
-  .guide-progress { text-align: left; }
   .guide-workspace { grid-template-columns: minmax(0, 1fr); padding: 0; }
   .guide-outline { position: static; display: flex; overflow-x: auto; }
   .guide-outline-head { display: none; }
-  .guide-outline > button { flex: 0 0 220px; border-top: 0; border-left: 0; border-bottom: 3px solid transparent; }
-  .guide-outline > button + button { border-top: 0; border-left: 1px solid var(--border); }
-  .guide-outline > button.active { border-left-color: var(--border); border-bottom-color: var(--accent); }
+  .guide-outline-chapter { display: contents; }
+  .guide-outline-stops { display: none; }
+  .guide-outline-entry { flex: 0 0 220px; border-top: 0; border-left: 1px solid var(--border); border-bottom: 3px solid transparent; }
+  .guide-outline-overview { border-left: 0; }
+  .guide-outline-entry.active { border-left-color: var(--border); border-bottom-color: var(--accent); }
+  .guide-outline .guide-refresh { flex: 0 0 auto; align-self: center; }
 }
 
 @media (min-width: 761px) and (max-width: 1100px) {
@@ -5106,8 +5062,6 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
   .files-toolbar-actions .small-muted-button { padding-inline: 4px; font-size: 0.75rem; }
   .files-toolbar-actions .review-changes-button { padding-inline: 6px; font-size: 0.75rem; }
   .diff-row { --diff-gutter: 42px; }
-  .guide-stop-head { display: grid; }
-  .guide-stop-head > .guide-reviewed-check { min-height: 36px; justify-content: flex-start; padding: 0 12px 0 54px; border-top: 1px solid var(--border); border-left: 0; }
   .guide-active-stop > div { display: grid; gap: 4px; }
   .guide-step-navigation { grid-template-columns: 1fr 1fr; }
   .guide-step-navigation > span { grid-column: 1 / -1; grid-row: 1; }
