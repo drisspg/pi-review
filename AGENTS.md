@@ -23,7 +23,9 @@ src/                    Node server (TypeScript, ESM, run via tsx)
   types.ts              Shared backend types
 web/src/                React frontend (Vite)
   main.tsx              Almost all screens/components: App, AppToolbar, StartPage/PrCard,
-                        ReviewPage, PrHeaderStrip, PrSummary, GuideReview,
+                        ReviewPage, PrHeaderStrip, PrSummary, GuideReview (Review route rail +
+                        OverviewBody four-panel dashboard: TL;DR/Schematic/Change map/Reviewer
+                        notes + Pi terminal; reviewed stops persist via guide stepStates),
                         FileNavigator, FileDiff/DiffRowView, ThreadBox, FocusAreaInline,
                         GitHubDraftReviewPanel, ReviewSummary, AiReviewPanel, and the modals
                         (Pi settings, memory, GPU workspace, sessions, logs)
@@ -34,7 +36,9 @@ web/src/                React frontend (Vite)
                         media queries → mermaid/file snippets
   components/           Small shared pieces (Button→.ui-button, Modal→ModalShell, ActionMenu,
                         Tabs, Threads, Markdown*, Mermaid, PiTerminal)
-  lib/                  diff parsing, comment helpers, guide steps, focus areas, highlight, dom
+  lib/                  diff parsing, comment helpers, guide steps, overview panel sections
+                        (overview.ts parses the code-walk prompt's four-section contract, with a
+                        free-form fallback), focus areas, highlight, dom
 tests/unit/             node:test suites for backend api modules (run via tsx)
 tests/e2e/              Playwright suite (pr-review.spec.ts, ~55 tests)
 scripts/                start.mjs + smoke scripts (gpu-workspace, chat latency)

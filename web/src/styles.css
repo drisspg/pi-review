@@ -253,6 +253,21 @@ textarea:focus-visible {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
+/* Primer TextInput draws focus on its wrapper span (runtime-injected styles win ties),
+   so the soft ring goes on the wrapper and the inner input ring is suppressed. */
+.hero-url-input:focus-within,
+.pi-settings-search:focus-within {
+  outline: none !important;
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--border)) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent) !important;
+}
+
+.hero-url-input input:focus-visible,
+.pi-settings-search input:focus-visible {
+  border-color: transparent;
+  box-shadow: none;
+}
+
 .spinner {
   width: 0.9em;
   height: 0.9em;
@@ -872,7 +887,6 @@ kbd {
 
 
 
-.guide-kicker,
 .guide-chapter-number {
   color: var(--muted);
   font-size: var(--text-xs);
@@ -986,11 +1000,13 @@ kbd {
 }
 
 .guide-outline-title strong {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
   color: inherit;
   font-size: var(--text-md);
   line-height: 1.3;
-  text-overflow: ellipsis;
 }
 
 .guide-outline-title small {
@@ -1103,9 +1119,19 @@ kbd {
   grid-template-rows: auto 1fr;
 }
 
-.guide-overview-terminal .pi-native-terminal {
-  min-height: 260px;
-  height: 100%;
+/* Beat .pi-native-terminal.compact's fixed clamp: in the dashboard the terminal
+   fills its grid row, and the xterm ResizeObserver refits rows to match. */
+.guide-overview-terminal .xterm-viewport {
+  background: var(--panel2);
+}
+
+.guide-overview-terminal .pi-native-terminal,
+.guide-overview-terminal .pi-native-terminal.compact {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 320px;
+  align-self: stretch;
+  border-top: 0;
 }
 
 .guide-overview-panel {
@@ -1265,6 +1291,13 @@ kbd {
   font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
   text-align: center;
+}
+
+.guide-key-hints {
+  display: block;
+  margin-top: 2px;
+  color: color-mix(in srgb, var(--muted) 80%, transparent);
+  font-size: var(--text-xs);
 }
 
 .guide-step-navigation > button:last-child {
@@ -1620,6 +1653,13 @@ kbd {
 .diff-row.split .old-code,
 .diff-row.split .new-code {
   border-left: 1px solid var(--border);
+}
+
+/* Hanging indent so soft-wrapped continuation lines don't lose indentation context. */
+.code-cell > code,
+.split-code-cell > code {
+  padding-left: 2ch;
+  text-indent: -2ch;
 }
 
 .code-cell,
@@ -5063,6 +5103,7 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
   .guide-outline-overview { border-left: 0; }
   .guide-outline-entry.active { border-left-color: var(--border); border-bottom-color: var(--accent); }
   .guide-outline .guide-refresh { flex: 0 0 auto; align-self: center; }
+  .guide-stage { scroll-margin-top: 90px; }
   .guide-overview-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "tldr" "schematic" "map" "notes" "terminal"; }
 }
 

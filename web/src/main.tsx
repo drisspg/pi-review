@@ -1313,7 +1313,7 @@ function StartPage({ prs, openPr, cleanupPr, cleanupPrs, openInput, setOpenInput
       <h1>Review a pull request</h1>
       <p className="muted">Paste a GitHub PR URL or <code>OWNER/REPO#123</code>. Pi will check it out and assist your review.</p>
       <form className="hero-form" onSubmit={(event) => { event.preventDefault(); void openPr(openInput); }}>
-        <TextInput autoFocus block value={openInput} onChange={(event) => setOpenInput(event.target.value)} placeholder="https://github.com/owner/repo/pull/123" />
+        <TextInput autoFocus block className="hero-url-input" value={openInput} onChange={(event) => setOpenInput(event.target.value)} placeholder="https://github.com/owner/repo/pull/123" />
         <Button type="submit" disabled={busy || openInput.trim().length === 0}>{busy ? "Fetching…" : "Open"}</Button>
       </form>
     </section>
@@ -1727,9 +1727,34 @@ function GuideReview({ review, chapters, viewedIds, setViewedIds, guideReview, r
     if (target != null) activate(target.step.id);
   }
 
+  // Keyboard-first review; re-registered each render so the handlers see current state.
+  useEffect(() => {
+    function handleKey(event: KeyboardEvent): void {
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (target != null && (target.isContentEditable || target.closest("input, textarea, select, [contenteditable], .xterm, .review-modal-card") != null)) return;
+      if (active == null) return;
+      if (event.key === "j" || event.key === "ArrowRight") {
+        event.preventDefault();
+        move(1);
+      } else if (event.key === "k" || event.key === "ArrowLeft") {
+        event.preventDefault();
+        move(-1);
+      } else if (event.key === "r") {
+        event.preventDefault();
+        toggleReviewed(active.step);
+      } else if (event.key === "o") {
+        event.preventDefault();
+        activate("overview");
+      }
+    }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  });
+
   if (chapters.length === 0) return <main className="guide-review guide-empty" aria-label="Guided review">
     <div className="guide-empty-card">
-      <span className="guide-kicker">Guided review</span>
+      <span className="kicker">Guided review</span>
       <h2>{guideReview.running ? "Building the walkthrough…" : guideReview.text.startsWith("Guide generation failed:") ? "Could not build the walkthrough" : "Build a walkthrough of the change"}</h2>
       <p>{guideReview.running ? "Pi is finding the implementation entry point, tracing its consequences, and separating supporting changes." : guideReview.text.startsWith("Guide generation failed:") ? guideReview.text : "Generate an ordered explanation of the core implementation, its consequences, supporting code, and tests."}</p>
       <Button onClick={() => void runGuideReview()} disabled={guideReview.running}>{guideReview.running ? "Building walkthrough…" : "Build walkthrough"}</Button>
@@ -1787,7 +1812,7 @@ function GuideReview({ review, chapters, viewedIds, setViewedIds, guideReview, r
         <div className="guide-live-diff">{renderDiff(active.step)}</div>
         <footer className="guide-step-navigation">
           <Button variant="muted" disabled={activeIndex === 0} onClick={() => move(-1)}>← Previous</Button>
-          <span>Stop {activeIndex + 1} of {walkthrough.length}</span>
+          <span>Stop {activeIndex + 1} of {walkthrough.length}<span className="guide-key-hints"><kbd>j</kbd>/<kbd>k</kbd> stops · <kbd>r</kbd> reviewed · <kbd>o</kbd> overview</span></span>
           <Button disabled={activeIndex === walkthrough.length - 1 && active != null && (viewedIds[active.step.id] ?? false)} onClick={() => move(1)}>{activeIndex === walkthrough.length - 1 ? "Walkthrough complete" : `Next: ${walkthrough[activeIndex + 1].step.title}`} →</Button>
         </footer>
       </section>}
@@ -2740,7 +2765,7 @@ function PiSettingsModal({ prKey, diagnostics, setDiagnostics, openDiagnostics, 
       <section className="pi-settings-section">
         <div className="pi-settings-section-head">
           <h3>Model</h3>
-          <TextInput className="pi-settings-search" type="search" placeholder="Filter models…" value={filter} onChange={(event) => setFilter(event.target.value)} />
+          <TextInput className="pi-settings-search" placeholder="Filter models…" value={filter} onChange={(event) => setFilter(event.target.value)} />
         </div>
         {providers.length === 0 ? <p className="muted">No models reported by this Pi session yet.</p> : <Tabs value={provider} onValueChange={({ value }) => { setProvider(value); setModelId(value === currentProvider ? currentModelId : ""); }}>
           <TabList className="pi-provider-tabs" aria-label="Provider">

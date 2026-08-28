@@ -1042,6 +1042,11 @@ test("runs a separate focus areas review and opens native focus terminals", asyn
   await completeSave;
   await expect(guide).toContainText("2/2");
 
+  await page.keyboard.press("k");
+  await expect(guide.locator(".guide-active-stop")).toContainText("Core implementation");
+  await page.keyboard.press("j");
+  await expect(guide.locator(".guide-active-stop")).toContainText("Validation path");
+
   await mockNativeTerminal(page);
   await guide.getByRole("button", { name: /Overview/ }).click();
   await expect(guide).toContainText("Walk map");
