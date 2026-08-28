@@ -1084,11 +1084,12 @@ kbd {
 .guide-overview-grid {
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto auto auto 1fr;
   grid-template-areas:
     "tldr tldr"
     "schematic map"
-    "schematic notes";
+    "schematic notes"
+    "schematic terminal";
   gap: var(--space-3);
 }
 
@@ -1096,8 +1097,20 @@ kbd {
   align-self: start;
 }
 
+.guide-overview-terminal {
+  grid-area: terminal;
+  align-self: stretch;
+  grid-template-rows: auto 1fr;
+}
+
+.guide-overview-terminal .pi-native-terminal {
+  min-height: 260px;
+  height: 100%;
+}
+
 .guide-overview-panel {
   display: grid;
+  align-content: start;
   gap: var(--space-2);
   min-width: 0;
   padding: var(--space-3) var(--space-4);
@@ -5050,7 +5063,7 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
   .guide-outline-overview { border-left: 0; }
   .guide-outline-entry.active { border-left-color: var(--border); border-bottom-color: var(--accent); }
   .guide-outline .guide-refresh { flex: 0 0 auto; align-self: center; }
-  .guide-overview-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "tldr" "schematic" "map" "notes"; }
+  .guide-overview-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "tldr" "schematic" "map" "notes" "terminal"; }
 }
 
 @media (min-width: 761px) and (max-width: 1100px) {
@@ -5197,7 +5210,8 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
   top: 0;
   left: 0;
   transform-origin: 0 0;
-  will-change: transform;
+  /* No will-change: the cached layer rasterizes at 100% and zoom just upscales the
+     bitmap, blurring the SVG. Re-rastering after each zoom keeps vectors crisp. */
 }
 
 .mermaid-rendered svg {

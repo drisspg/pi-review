@@ -1013,7 +1013,7 @@ test("runs a separate focus areas review and opens native focus terminals", asyn
 
   let guideRequests = 0;
   await mockAskPi(page, (body) => {
-    if ((body.prompt ?? "").includes("show-me skill style")) return "# PR goal\n\nOrient reviewers.\n\n## Walk map\n\n```mermaid\nflowchart LR\n  Toolbar -->|opens| Modal\n```";
+    if ((body.prompt ?? "").includes("show-me skill style")) return "## TL;DR\nOrient reviewers with the Walk map below.\n## Schematic\n```mermaid\nflowchart LR\n  Toolbar -->|opens| Modal\n```\n## Change map\n- `csrc/flash_attn/flash_api.cpp` — core dispatch change\n## Reviewer notes\n- Start at the dispatch condition";
     guideRequests += 1;
     return `## Review guide\n### 1. Core path\nFollow the implementation from selection through validation.\n- ${path}:${line}-${Number.parseInt(line, 10) + 1} — Core implementation\n  Start with the changed tiling condition and follow how it selects the implementation path.\n- ${path}:${line} — Validation path\n  Finish by checking that tests cover the intended behavior.`;
   });
@@ -1042,9 +1042,12 @@ test("runs a separate focus areas review and opens native focus terminals", asyn
   await completeSave;
   await expect(guide).toContainText("2/2");
 
+  await mockNativeTerminal(page);
   await guide.getByRole("button", { name: /Overview/ }).click();
   await expect(guide).toContainText("Walk map");
+  await expect(guide.locator(".guide-overview-grid")).toBeVisible();
   await expect(guide.locator(".guide-overview .markdown-mermaid-block")).toBeVisible();
+  await expect(guide.locator(".guide-overview-terminal .pi-native-terminal")).toBeVisible();
 
   await page.reload();
   await expect(page.locator(".review-layout")).toBeVisible({ timeout: 60_000 });

@@ -1640,6 +1640,10 @@ function OverviewBody({ text, prUrl }: { text: string; prUrl: string }) {
     <section className="guide-overview-panel guide-overview-schematic"><span className="kicker">Schematic</span><MarkdownText text={sections.schematic} fileLinks={{ prUrl }} /></section>
     {sections.changeMap.length > 0 && <section className="guide-overview-panel guide-overview-map"><span className="kicker">Change map</span><MarkdownText text={sections.changeMap} fileLinks={{ prUrl }} /></section>}
     {sections.notes.length > 0 && <section className="guide-overview-panel guide-overview-notes"><span className="kicker">Reviewer notes</span><MarkdownText text={sections.notes} fileLinks={{ prUrl }} /></section>}
+    <section className="guide-overview-panel guide-overview-terminal" aria-label="Overview Pi terminal">
+      <span className="kicker">Pi terminal</span>
+      <InlinePiTerminal session={terminalSessionId("guide", "overview")} context={"You are orienting a reviewer in this pull request from its guide overview. Answer questions about structure and intent, investigate the change, and keep all work grounded in this PR's worktree."} />
+    </section>
   </div>;
 }
 
