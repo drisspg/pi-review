@@ -5303,6 +5303,23 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
   ry: 8px;
 }
 
+/* Semantic color coding by shape; :not([style*="fill"]) keeps authored classDef colors. */
+.mermaid-rendered .node polygon:not([style*="fill"]) {
+  fill: color-mix(in srgb, var(--attention) 7%, var(--panel)) !important;
+  stroke: color-mix(in srgb, var(--attention) 42%, var(--border)) !important;
+}
+
+.mermaid-rendered .node circle:not([style*="fill"]),
+.mermaid-rendered .node ellipse:not([style*="fill"]) {
+  fill: color-mix(in srgb, var(--success) 9%, var(--panel)) !important;
+  stroke: color-mix(in srgb, var(--success) 45%, var(--border)) !important;
+}
+
+.mermaid-rendered .cluster rect:not([style*="fill"]) {
+  fill: color-mix(in srgb, var(--thread-accent) 6%, transparent) !important;
+  stroke: color-mix(in srgb, var(--thread-accent) 35%, var(--border)) !important;
+}
+
 .mermaid-rendered .edgePaths path {
   stroke-width: 1.5px;
 }

@@ -89,6 +89,16 @@ function mermaidThemeVariables(): Record<string, unknown> {
     loopTextColor: muted,
     activationBkgColor: blend(accent, panel, 0.18),
     activationBorderColor: nodeBorder,
+    pie1: blend(accent, panel, 0.75),
+    pie2: blend(threadAccent, panel, 0.75),
+    pie3: blend(cssVar("--success", "#3fb950"), panel, 0.75),
+    pie4: blend(attention, panel, 0.75),
+    pie5: blend(cssVar("--danger", "#f85149"), panel, 0.75),
+    pie6: blend(accent, panel, 0.45),
+    pie7: blend(threadAccent, panel, 0.45),
+    pieTitleTextColor: text,
+    pieSectionTextColor: text,
+    pieLegendTextColor: muted,
   };
 }
 
