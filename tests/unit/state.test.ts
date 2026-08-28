@@ -11,7 +11,7 @@ const paths = {
 };
 
 function emptyState(): AppState {
-  return { prs: [], fileReviews: [], draftReviews: [], focusScans: [], aiReviews: [], guideReviews: [], reviewMemory: [], reviewProfile: null };
+  return { prs: [], fileReviews: [], draftReviews: [], focusScans: [], aiReviews: [], guideReviews: [], overviews: [], reviewMemory: [], reviewProfile: null };
 }
 
 function fakeRuntime(initialState?: Partial<AppState>) {
@@ -198,6 +198,18 @@ test("clearDraftReview removes only the submitted PR draft", async () => {
 
   assert.equal(await store.getDraftReview("first"), null);
   assert.deepEqual(await store.getDraftReview("second"), second);
+});
+
+test("saveOverview replaces the cached overview for the same head", async () => {
+  const { runtime } = fakeRuntime(emptyState());
+  const store = createStateStore(runtime, paths);
+
+  const first = await store.saveOverview({ prKey: "pr", headSha: "head", answer: "first" });
+  const second = await store.saveOverview({ prKey: "pr", headSha: "head", answer: "second" });
+
+  assert.equal(second.id, first.id);
+  assert.equal((await store.listOverviews("pr")).length, 1);
+  assert.equal((await store.listOverviews("pr"))[0].answer, "second");
 });
 
 test("saveGuideReview persists step states and drops them when the answer changes", async () => {

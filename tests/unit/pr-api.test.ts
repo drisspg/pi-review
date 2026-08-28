@@ -75,6 +75,10 @@ function fakeDeps() {
         calls.push(`guide:${prKey}`);
         return [guideReview];
       },
+      async listOverviews(prKey: string) {
+        calls.push(`overview:${prKey}`);
+        return [{ ...guideReview, id: "overview" }];
+      },
       parsePullRequestRef(input: string) {
         calls.push(`parse:${input}`);
         return ref;
@@ -125,6 +129,7 @@ test("PR API activity refreshes the worktree, Pi context, and review response", 
   assert.equal(response.focusScan?.id, "focus");
   assert.equal(response.aiReview?.id, "ai");
   assert.equal(response.guideReview?.id, "guide");
+  assert.equal(response.overview?.id, "overview");
   assert.deepEqual(calls, [
     "parse:url",
     "fetch:1",
@@ -135,6 +140,7 @@ test("PR API activity refreshes the worktree, Pi context, and review response", 
     "focus:github.com/pytorch/pytorch#1",
     "ai:github.com/pytorch/pytorch#1",
     "guide:github.com/pytorch/pytorch#1",
+    "overview:github.com/pytorch/pytorch#1",
   ]);
 });
 
@@ -156,5 +162,6 @@ test("PR API open prepares worktree, registers Pi cwd, prewarms sessions, and hy
     "focus:github.com/pytorch/pytorch#1",
     "ai:github.com/pytorch/pytorch#1",
     "guide:github.com/pytorch/pytorch#1",
+    "overview:github.com/pytorch/pytorch#1",
   ]);
 });

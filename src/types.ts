@@ -245,6 +245,7 @@ export type PullRequestReviewResponse = PullRequestReviewData & {
   aiReview: AiReviewRecord | null;
   aiReviews: AiReviewRecord[];
   guideReview: GuideReviewRecord | null;
+  overview: GuideReviewRecord | null;
   worktreeDir?: string;
 };
 
@@ -255,6 +256,7 @@ export type AppState = {
   focusScans: FocusScanRecord[];
   aiReviews: AiReviewRecord[];
   guideReviews: GuideReviewRecord[];
+  overviews: GuideReviewRecord[];
   reviewMemory: ReviewMemoryRecord[];
   reviewProfile: ReviewMemoryProfile | null;
 };

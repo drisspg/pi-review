@@ -602,6 +602,10 @@ function App() {
     setAiReviewId(record?.id ?? null);
   }
 
+  function showOverviewRecord(record: GuideReviewRecord | null | undefined) {
+    setOverview({ running: false, text: record?.answer ?? "", error: null });
+  }
+
   function showGuideReviewRecord(record: GuideReviewRecord | null | undefined) {
     setGuideReview({ running: false, text: record?.answer ?? "" });
   }
@@ -645,7 +649,7 @@ function App() {
     showAiReviewRecord(data.aiReview);
     showFocusScanRecord(data.focusScan);
     showGuideReviewRecord(data.guideReview);
-    setOverview({ running: false, text: "", error: null });
+    showOverviewRecord(data.overview);
     setReviewMode("diff");
     setGpuWorkspaceOpen(false);
   }
@@ -969,10 +973,12 @@ function App() {
     const aiReviewUpToDate = nextReview.aiReview != null && nextReview.aiReview.headSha === nextReview.pr.headSha && nextReview.aiReview.answer.trim().length > 0;
     const focusScanUpToDate = nextReview.focusScan != null && nextReview.focusScan.headSha === nextReview.pr.headSha && nextReview.focusScan.answer.trim().length > 0;
     const guideUpToDate = nextReview.guideReview != null && nextReview.guideReview.headSha === nextReview.pr.headSha && nextReview.guideReview.answer.trim().length > 0;
+    const overviewUpToDate = nextReview.overview != null && nextReview.overview.headSha === nextReview.pr.headSha && nextReview.overview.answer.trim().length > 0;
     await Promise.all([
       aiReviewUpToDate ? Promise.resolve() : runAiReviewFor(nextReview, true),
       focusScanUpToDate ? Promise.resolve() : runFocusReviewFor(nextReview, true),
       guideUpToDate ? Promise.resolve() : runGuideReviewFor(nextReview),
+      overviewUpToDate ? Promise.resolve() : runOverviewFor(nextReview),
     ]);
     await refreshLogs();
   }
@@ -1020,7 +1026,11 @@ function App() {
 
   async function runOverview() {
     if (review == null || overview.running) return;
-    const targetReview = review;
+    await runOverviewFor(review);
+  }
+
+  async function runOverviewFor(targetReview: OpenResponse) {
+    if (overview.running) return;
     const initialActivity = runningAgentActivity();
     let cancelActivityPolling: () => void = () => undefined;
     setOverview({ running: true, text: "", error: null, activity: initialActivity });
@@ -1037,6 +1047,12 @@ function App() {
       cancelActivityPolling();
       if (activeReviewKeyRef.current !== targetReview.pr.key) return;
       setOverview({ running: false, text: answer, error: null, activity: null });
+      try {
+        const { overview: saved } = await api<{ overview: GuideReviewRecord }>("/api/overview/save", { method: "POST", body: JSON.stringify({ prKey: targetReview.pr.key, headSha: targetReview.pr.headSha, answer }) });
+        updateCachedReview(targetReview.pr.key, (current) => ({ ...current, overview: saved }));
+      } catch (err) {
+        setError(`Saving overview failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
       await refreshLogs();
     } catch (err) {
       cancelActivityPolling();

@@ -10,6 +10,7 @@ export type PrApiDeps = {
   listAiReviews: (prKey: string) => Promise<AiReviewRecord[]>;
   listFocusScans: (prKey: string) => Promise<FocusScanRecord[]>;
   listGuideReviews: (prKey: string) => Promise<GuideReviewRecord[]>;
+  listOverviews: (prKey: string) => Promise<GuideReviewRecord[]>;
   parsePullRequestRef: (input: string) => PullRequestRef;
   preparePrWorktree: (ref: PullRequestRef, cloneUrl: string, headSha: string) => Promise<string>;
   prewarmPiSession: (prKey: string, purposes: string[]) => void;
@@ -30,8 +31,8 @@ export const defaultPrApiDeps = (deps: Omit<PrApiDeps, "parsePullRequestRef">): 
 
 export function createPrApi(deps: PrApiDeps): PrApi {
   async function hydrateReviewResponse(data: PullRequestReviewData, pr: StoredPullRequest, extra: Partial<Pick<PullRequestReviewResponse, "worktreeDir">> = {}): Promise<PullRequestReviewResponse> {
-    const [draftReview, focusScans, aiReviews, guideReviews] = await Promise.all([deps.getDraftReview(pr.key), deps.listFocusScans(pr.key), deps.listAiReviews(pr.key), deps.listGuideReviews(pr.key)]);
-    return { ...data, pr, draftReview, focusScan: focusScans[0] ?? null, focusScans, aiReview: aiReviews[0] ?? null, aiReviews, guideReview: guideReviews.find((review) => review.headSha === pr.headSha) ?? null, ...extra };
+    const [draftReview, focusScans, aiReviews, guideReviews, overviews] = await Promise.all([deps.getDraftReview(pr.key), deps.listFocusScans(pr.key), deps.listAiReviews(pr.key), deps.listGuideReviews(pr.key), deps.listOverviews(pr.key)]);
+    return { ...data, pr, draftReview, focusScan: focusScans[0] ?? null, focusScans, aiReview: aiReviews[0] ?? null, aiReviews, guideReview: guideReviews.find((review) => review.headSha === pr.headSha) ?? null, overview: overviews.find((record) => record.headSha === pr.headSha) ?? null, ...extra };
   }
 
   function parse(input: string): { ref: PullRequestRef } {

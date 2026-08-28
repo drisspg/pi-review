@@ -3,6 +3,7 @@ import type { AiReviewMessageRecord, AiReviewRecord, FocusAreaReviewState, Focus
 export type SavedAnalysisApiDeps = {
   saveAiReview: (review: Omit<AiReviewRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<AiReviewRecord, "id" | "createdAt">>) => Promise<AiReviewRecord>;
   saveFocusScan: (scan: Omit<FocusScanRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<FocusScanRecord, "id" | "createdAt">>) => Promise<FocusScanRecord>;
+  saveOverview: (record: Omit<GuideReviewRecord, "id" | "createdAt" | "updatedAt" | "stepStates">) => Promise<GuideReviewRecord>;
   saveGuideReview: (review: Omit<GuideReviewRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<GuideReviewRecord, "id" | "createdAt">>) => Promise<GuideReviewRecord>;
 };
 
@@ -10,6 +11,7 @@ export type SavedAnalysisApi = {
   saveFocusScan: (payload: Record<string, unknown>) => Promise<{ scan: FocusScanRecord }>;
   saveAiReview: (payload: Record<string, unknown>) => Promise<{ review: AiReviewRecord }>;
   saveGuideReview: (payload: Record<string, unknown>) => Promise<{ guide: GuideReviewRecord }>;
+  saveOverview: (payload: Record<string, unknown>) => Promise<{ overview: GuideReviewRecord }>;
 };
 
 function focusAreaStatesFromPayload(payload: Record<string, unknown>): Record<string, FocusAreaReviewState> {
@@ -35,6 +37,11 @@ export function createSavedAnalysisApi(deps: SavedAnalysisApiDeps): SavedAnalysi
     };
   }
 
+  async function saveOverview(payload: Record<string, unknown>): Promise<{ overview: GuideReviewRecord }> {
+    if (typeof payload.prKey !== "string" || typeof payload.headSha !== "string" || typeof payload.answer !== "string") throw new Error("Expected overview payload");
+    return { overview: await deps.saveOverview({ prKey: payload.prKey, headSha: payload.headSha, answer: payload.answer }) };
+  }
+
   async function saveGuideReview(payload: Record<string, unknown>): Promise<{ guide: GuideReviewRecord }> {
     if (typeof payload.prKey !== "string" || typeof payload.headSha !== "string" || typeof payload.answer !== "string") throw new Error("Expected guide review payload");
     const record: Parameters<SavedAnalysisApiDeps["saveGuideReview"]>[0] = { prKey: payload.prKey, headSha: payload.headSha, answer: payload.answer };
@@ -58,5 +65,5 @@ export function createSavedAnalysisApi(deps: SavedAnalysisApiDeps): SavedAnalysi
     };
   }
 
-  return { saveFocusScan, saveAiReview, saveGuideReview };
+  return { saveFocusScan, saveAiReview, saveGuideReview, saveOverview };
 }

@@ -21,7 +21,7 @@ const maxReviewMemoryDistillationRecords = 250;
 const maxReviewMemoryPromptPatchChars = 4_000;
 const maxReviewMemoryDistillationPatchChars = 12_000;
 
-const emptyState = (): AppState => ({ prs: [], fileReviews: [], draftReviews: [], focusScans: [], aiReviews: [], guideReviews: [], reviewMemory: [], reviewProfile: null });
+const emptyState = (): AppState => ({ prs: [], fileReviews: [], draftReviews: [], focusScans: [], aiReviews: [], guideReviews: [], overviews: [], reviewMemory: [], reviewProfile: null });
 
 export type StateStorePaths = {
   statePath: string;
@@ -61,6 +61,8 @@ export type StateStore = {
   listAiReviews: (prKey: string) => Promise<AiReviewRecord[]>;
   saveAiReview: (review: Omit<AiReviewRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<AiReviewRecord, "id" | "createdAt">>) => Promise<AiReviewRecord>;
   listGuideReviews: (prKey: string) => Promise<GuideReviewRecord[]>;
+  listOverviews: (prKey: string) => Promise<GuideReviewRecord[]>;
+  saveOverview: (record: Omit<GuideReviewRecord, "id" | "createdAt" | "updatedAt" | "stepStates">) => Promise<GuideReviewRecord>;
   saveGuideReview: (review: Omit<GuideReviewRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<GuideReviewRecord, "id" | "createdAt">>) => Promise<GuideReviewRecord>;
   saveReviewMemory: (record: Omit<ReviewMemoryRecord, "id" | "createdAt">) => Promise<ReviewMemoryRecord>;
   currentReviewMemoryPrompt: () => Promise<string>;
@@ -92,7 +94,7 @@ const defaultRuntime: StateStoreRuntime = {
 };
 
 function normalizeState(state: Partial<AppState>): AppState {
-  return { prs: state.prs ?? [], fileReviews: state.fileReviews ?? [], draftReviews: state.draftReviews ?? [], focusScans: state.focusScans ?? [], aiReviews: state.aiReviews ?? [], guideReviews: state.guideReviews ?? [], reviewMemory: state.reviewMemory ?? [], reviewProfile: state.reviewProfile ?? null };
+  return { prs: state.prs ?? [], fileReviews: state.fileReviews ?? [], draftReviews: state.draftReviews ?? [], focusScans: state.focusScans ?? [], aiReviews: state.aiReviews ?? [], guideReviews: state.guideReviews ?? [], overviews: state.overviews ?? [], reviewMemory: state.reviewMemory ?? [], reviewProfile: state.reviewProfile ?? null };
 }
 
 function reviewMemoryLocation(comment: ReviewMemoryRecord["comments"][number]): string {
@@ -369,6 +371,34 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
     });
   }
 
+  async function listOverviews(prKey: string): Promise<GuideReviewRecord[]> {
+    return (await readState()).overviews.filter((record) => record.prKey === prKey).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  async function saveOverview(record: Omit<GuideReviewRecord, "id" | "createdAt" | "updatedAt" | "stepStates">): Promise<GuideReviewRecord> {
+    return mutateState(async (state) => {
+      const previous = state.overviews.find((stored) => stored.prKey === record.prKey && stored.headSha === record.headSha);
+      const now = runtime.now();
+      const next: GuideReviewRecord = {
+        id: previous?.id ?? runtime.uuid(),
+        prKey: record.prKey,
+        headSha: record.headSha,
+        answer: record.answer,
+        createdAt: previous?.createdAt ?? now,
+        updatedAt: now,
+      };
+      state.overviews = [next, ...state.overviews.filter((stored) => stored.id !== next.id)];
+      const counts = new Map<string, number>();
+      state.overviews = state.overviews.filter((stored) => {
+        const count = counts.get(stored.prKey) ?? 0;
+        counts.set(stored.prKey, count + 1);
+        return count < maxGuideReviewsPerPr;
+      });
+      await writeState(state);
+      return next;
+    });
+  }
+
   async function saveReviewMemory(record: Omit<ReviewMemoryRecord, "id" | "createdAt">): Promise<ReviewMemoryRecord> {
     return mutateState(async (state) => {
       const next: ReviewMemoryRecord = { ...record, id: runtime.uuid(), createdAt: runtime.now() };
@@ -391,11 +421,12 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
       state.focusScans = state.focusScans.filter((scan) => scan.prKey !== prKey);
       state.aiReviews = state.aiReviews.filter((review) => review.prKey !== prKey);
       state.guideReviews = state.guideReviews.filter((review) => review.prKey !== prKey);
+      state.overviews = state.overviews.filter((review) => review.prKey !== prKey);
       await writeState(state);
     });
   }
 
-  return { readState, currentReviewMemoryDistillationSource, currentReviewMemoryContext, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewProfile, listRecentPullRequests, upsertPullRequest, markPullRequestReviewed, listFileReviews, setFileViewed, getDraftReview, saveDraftReview, appendDraftReviewComment, clearDraftReview, listFocusScans, saveFocusScan, listAiReviews, saveAiReview, listGuideReviews, saveGuideReview, saveReviewMemory, currentReviewMemoryPrompt, removePullRequest };
+  return { readState, currentReviewMemoryDistillationSource, currentReviewMemoryContext, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewProfile, listRecentPullRequests, upsertPullRequest, markPullRequestReviewed, listFileReviews, setFileViewed, getDraftReview, saveDraftReview, appendDraftReviewComment, clearDraftReview, listFocusScans, saveFocusScan, listAiReviews, saveAiReview, listGuideReviews, saveGuideReview, listOverviews, saveOverview, saveReviewMemory, currentReviewMemoryPrompt, removePullRequest };
 }
 
 const defaultStore = createStateStore();
@@ -478,6 +509,14 @@ export async function listAiReviews(prKey: string): Promise<AiReviewRecord[]> {
 
 export async function saveAiReview(review: Omit<AiReviewRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<AiReviewRecord, "id" | "createdAt">>): Promise<AiReviewRecord> {
   return defaultStore.saveAiReview(review);
+}
+
+export async function listOverviews(prKey: string): Promise<GuideReviewRecord[]> {
+  return defaultStore.listOverviews(prKey);
+}
+
+export async function saveOverview(record: Omit<GuideReviewRecord, "id" | "createdAt" | "updatedAt" | "stepStates">): Promise<GuideReviewRecord> {
+  return defaultStore.saveOverview(record);
 }
 
 export async function listGuideReviews(prKey: string): Promise<GuideReviewRecord[]> {

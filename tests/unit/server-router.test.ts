@@ -196,6 +196,9 @@ function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
       async saveGuideReview() {
         return { guide: { answer: "answer", createdAt: "now", headSha: "head", id: "guide", prKey: "pr", updatedAt: "now" } };
       },
+      async saveOverview() {
+        return { overview: { answer: "answer", createdAt: "now", headSha: "head", id: "overview", prKey: "pr", updatedAt: "now" } };
+      },
     },
     async sendStatic(res, pathname, head = false) {
       res.writeHead(200, { "content-type": "text/plain" });

@@ -12,10 +12,12 @@ function fakeDeps() {
   const focusInputs: Array<Parameters<ReturnType<typeof createSavedAnalysisApi>["saveFocusScan"]>[0]> = [];
   const aiInputs: Array<Parameters<ReturnType<typeof createSavedAnalysisApi>["saveAiReview"]>[0]> = [];
   const guideInputs: Array<Parameters<ReturnType<typeof createSavedAnalysisApi>["saveGuideReview"]>[0]> = [];
+  const overviewInputs: Array<Record<string, unknown>> = [];
   return {
     focusInputs,
     aiInputs,
     guideInputs,
+    overviewInputs,
     deps: {
       async saveFocusScan(scan: Omit<FocusScanRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<FocusScanRecord, "id" | "createdAt">>) {
         focusInputs.push(scan as Record<string, unknown>);
@@ -28,6 +30,10 @@ function fakeDeps() {
       async saveGuideReview(review: Omit<GuideReviewRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<GuideReviewRecord, "id" | "createdAt">>) {
         guideInputs.push(review as Record<string, unknown>);
         return { ...review, id: review.id ?? "guide-id", createdAt: review.createdAt ?? "then", updatedAt: "now" } as GuideReviewRecord;
+      },
+      async saveOverview(record: Omit<GuideReviewRecord, "id" | "createdAt" | "updatedAt" | "stepStates">) {
+        overviewInputs.push(record as Record<string, unknown>);
+        return { ...record, id: "overview-id", createdAt: "then", updatedAt: "now" } as GuideReviewRecord;
       },
     },
   };
@@ -59,6 +65,15 @@ test("saved analysis API saves head-scoped guide reviews", async () => {
 
   assert.equal(response.guide.id, "guide-id");
   assert.deepEqual(guideInputs, [{ prKey: "pr", headSha: "head", answer: "guide" }]);
+});
+
+test("saved analysis API saves head-scoped overviews", async () => {
+  const { deps, overviewInputs } = fakeDeps();
+
+  const response = await createSavedAnalysisApi(deps).saveOverview({ prKey: "pr", headSha: "head", answer: "overview" });
+
+  assert.equal(response.overview.id, "overview-id");
+  assert.deepEqual(overviewInputs, [{ prKey: "pr", headSha: "head", answer: "overview" }]);
 });
 
 test("saved analysis API forwards guide step states when provided", async () => {
