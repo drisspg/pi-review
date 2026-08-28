@@ -1037,6 +1037,10 @@ test("runs a separate focus areas review and opens native focus terminals", asyn
   await progressSave;
   await expect(guide).toContainText("1/2");
   await expect(guide.locator(".guide-active-stop")).toContainText("Validation path");
+  const completeSave = page.waitForResponse((response) => response.url().endsWith("/api/guide-review/save"));
+  await guide.getByRole("button", { name: /Walkthrough complete/ }).click();
+  await completeSave;
+  await expect(guide).toContainText("2/2");
 
   await guide.getByRole("button", { name: /Overview/ }).click();
   await expect(guide).toContainText("Walk map");
@@ -1045,7 +1049,7 @@ test("runs a separate focus areas review and opens native focus terminals", asyn
   await page.reload();
   await expect(page.locator(".review-layout")).toBeVisible({ timeout: 60_000 });
   await page.getByRole("button", { name: "Guide 1" }).click();
-  await expect(page.getByRole("main", { name: "Guided review" })).toContainText("1/2 stops");
+  await expect(page.getByRole("main", { name: "Guided review" })).toContainText("2/2 stops");
   await expect(page.getByRole("main", { name: "Guided review" }).locator(".guide-live-diff .file")).toBeVisible();
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
   const modeBarTop = await page.locator(".review-mode-tabs").evaluate((tabs) => tabs.getBoundingClientRect().top);

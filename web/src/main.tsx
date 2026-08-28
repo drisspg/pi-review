@@ -1713,8 +1713,14 @@ function GuideReview({ review, chapters, viewedIds, setViewedIds, guideReview, r
   }
 
   function move(direction: -1 | 1): void {
-    const next = walkthrough[activeIndex + direction];
-    if (next != null) activate(next.step.id);
+    // Moving forward means the reviewer is done with the current stop.
+    if (direction === 1 && active != null && viewedIds[active.step.id] !== true) {
+      const next = { ...viewedIds, [active.step.id]: true };
+      setViewedIds(next);
+      onProgress(next);
+    }
+    const target = walkthrough[activeIndex + direction];
+    if (target != null) activate(target.step.id);
   }
 
   if (chapters.length === 0) return <main className="guide-review guide-empty" aria-label="Guided review">
@@ -1778,7 +1784,7 @@ function GuideReview({ review, chapters, viewedIds, setViewedIds, guideReview, r
         <footer className="guide-step-navigation">
           <Button variant="muted" disabled={activeIndex === 0} onClick={() => move(-1)}>← Previous</Button>
           <span>Stop {activeIndex + 1} of {walkthrough.length}</span>
-          <Button disabled={activeIndex === walkthrough.length - 1} onClick={() => move(1)}>{activeIndex === walkthrough.length - 1 ? "Walkthrough complete" : `Next: ${walkthrough[activeIndex + 1].step.title}`} →</Button>
+          <Button disabled={activeIndex === walkthrough.length - 1 && active != null && (viewedIds[active.step.id] ?? false)} onClick={() => move(1)}>{activeIndex === walkthrough.length - 1 ? "Walkthrough complete" : `Next: ${walkthrough[activeIndex + 1].step.title}`} →</Button>
         </footer>
       </section>}
     </div>
