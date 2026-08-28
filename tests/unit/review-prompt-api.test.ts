@@ -21,19 +21,6 @@ function api() {
   });
 }
 
-test("review prompt API builds code walk prompts with flow-dag purpose", async () => {
-  const result = await api().build({ mode: "code-walk", prKey: "pr", prTitle: "Title", files });
-
-  assert.equal(result.purpose, "flow-dag");
-  assert.match(result.prompt, /Use the show-me skill style/);
-  assert.match(result.prompt, /Show me what's going on in PR pr/i);
-  assert.match(result.prompt, /sequenceDiagram/);
-  assert.match(result.prompt, /stateDiagram-v2/);
-  assert.match(result.prompt, /Do not pad a small change, force a table, or turn the answer into a multi-section report/);
-  assert.match(result.prompt, /PR title: Title/);
-  assert.match(result.prompt, /Status: modified, \+3\/-1/);
-});
-
 test("review prompt API builds conceptual guide walkthroughs", async () => {
   const result = await api().build({ mode: "guide-review", prKey: "pr", prTitle: "Title", files });
 

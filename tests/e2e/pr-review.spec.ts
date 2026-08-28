@@ -840,9 +840,9 @@ test("opens and dismisses the Tools menu from the keyboard", async ({ page }) =>
   const trigger = page.getByRole("button", { name: /Tools/ });
   await trigger.focus();
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("menuitem", { name: "Code walk" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "GPU workspace" })).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("menuitem", { name: "Code walk" })).toHaveCount(0);
+  await expect(page.getByRole("menuitem", { name: "GPU workspace" })).toHaveCount(0);
   await expect(trigger).toBeFocused();
 });
 
@@ -1158,55 +1158,6 @@ test("keeps a clean focus scan compact when the Pi panel is focused", async ({ p
   expect(actionBox.height).toBeLessThan(80);
   expect(Math.max(...buttonBoxes)).toBeLessThan(40);
   expect(terminalBox.height).toBeGreaterThan(500);
-});
-
-test("opens the visual Overview from the toolbar", async ({ page }) => {
-  let prompt = "";
-  await mockAskPi(page, (body) => {
-    prompt = body.prompt ?? "";
-    return `# PR goal
-
-Orient reviewers.
-
-## Walk map
-
-\`\`\`mermaid
-flowchart LR
-  Toolbar --> Modal
-\`\`\`
-
-## Key code patterns
-
-| Pattern | Where | Why it matters |
-| --- | --- | --- |
-| Panel modal | \`csrc/flash_attn/src/flash_fwd_kernel.h:1276\` | Keeps history quiet |
-
-## Code walk
-
-See \`csrc/flash_attn/src/flash_fwd_kernel.h:1276\`.
-
-\`\`\`tsx
-<Button>Code walk</Button>
-\`\`\`
-
-## What changed in behavior
-
-The walk is separate from review chat.`;
-  });
-
-  await page.setViewportSize({ width: 320, height: 667 });
-  await openTools(page);
-  await page.getByRole("menuitem", { name: "Code walk" }).click();
-
-  await expect(page.getByRole("button", { name: "Overview" })).toHaveAttribute("aria-pressed", "true");
-  const overview = page.getByRole("main", { name: "PR overview" });
-  await expect(overview).toContainText("Walk map");
-  await expect(overview.locator(".markdown-mermaid-block")).toBeVisible();
-  await expect(overview.locator("table")).toContainText("Why it matters");
-  await expect(page.getByRole("dialog", { name: "Code walk" })).toHaveCount(0);
-  await expect.poll(() => overview.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
-  expect(prompt).toContain("Use the show-me skill style");
-  expect(prompt).toContain("smallest visual that makes the change click");
 });
 
 test("runs the right-sidebar Pi review beside the native terminal", async ({ page }) => {

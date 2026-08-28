@@ -379,10 +379,10 @@ test("server route pulls and saves private GitHub review comments", async () => 
 test("server route exposes backend prompt contracts", async () => {
   const route = createServerRoute(baseDeps());
 
-  const res = await routeRequest(route, "POST", "/api/pi/prompt", { mode: "code-walk" });
+  const res = await routeRequest(route, "POST", "/api/pi/prompt", { mode: "guide-review" });
 
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(jsonBody(res), { prompt: "prompt:code-walk", purpose: "code-walk" });
+  assert.deepEqual(jsonBody(res), { prompt: "prompt:guide-review", purpose: "guide-review" });
 });
 
 test("server route uses route-specific status codes", async () => {

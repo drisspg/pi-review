@@ -17,7 +17,6 @@ export type AiReviewMessage = { role: "user" | "pi" | "thinking" | "tool"; text:
 export type FocusArea = { id: string; path: string; startLine: number; endLine: number; title: string; body: string };
 export type PiAgentActivity = { status: "queued" | "running" | "complete" | "failed" | "idle"; label: string; elapsedMs: number; idleMs: number | null; answerChars: number; startedAt?: string; lastActivityAt?: string; detail?: string };
 export type FocusReview = { running: boolean; text: string; activity?: PiAgentActivity | null };
-export type FlowDag = { running: boolean; text: string; error: string | null; activity?: PiAgentActivity | null };
 export type FocusAreaReviewState = { viewed: boolean; collapsed: boolean; updatedAt: string };
 export type FocusScanRecord = { id: string; prKey: string; headSha: string; answer: string; areaStates: Record<string, FocusAreaReviewState>; createdAt: string; updatedAt: string };
 export type GuideReviewRecord = { id: string; prKey: string; headSha: string; answer: string; createdAt: string; updatedAt: string };

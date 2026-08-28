@@ -23,13 +23,13 @@ src/                    Node server (TypeScript, ESM, run via tsx)
   types.ts              Shared backend types
 web/src/                React frontend (Vite)
   main.tsx              Almost all screens/components: App, AppToolbar, StartPage/PrCard,
-                        ReviewPage, PrHeaderStrip, PrSummary, CodeWalkPage, GuideReview,
+                        ReviewPage, PrHeaderStrip, PrSummary, GuideReview,
                         FileNavigator, FileDiff/DiffRowView, ThreadBox, FocusAreaInline,
                         GitHubDraftReviewPanel, ReviewSummary, AiReviewPanel, and the modals
                         (Pi settings, memory, GPU workspace, sessions, logs)
   styles.css            Single stylesheet, ~5k lines. Order: design tokens + 3 theme blocks →
                         base/reset/focus → toolbar/panels → review layout → PR header/mode tabs →
-                        code walk + guide → file navigator → diff table → threads/composers →
+                        guide → file navigator → diff table → threads/composers →
                         markdown → review summary/drafts → start page → Pi panel → modals →
                         media queries → mermaid/file snippets
   components/           Small shared pieces (Button→.ui-button, Modal→ModalShell, ActionMenu,
@@ -143,8 +143,8 @@ Component conventions:
 - Modals: render through `ModalShell` (shared `.modal-close-button`, `.review-modal-card` flex
   column). Use `.pi-modal-head` / `.pi-modal-body` / `.pi-modal-foot`; the body is the single
   `flex:1; min-height:0; overflow:auto` scroll region — do not add `max-height: calc(90vh - Npx)`.
-- Buttons: one system — `.ui-button` variants plus `.pi-primary`/`.button-primary`/
-  `.composer-submit` for the rare accent-filled primary. The green `.review-changes-button` is the
+- Buttons: one system — `.ui-button` variants plus `.pi-primary`/`.composer-submit` for the rare
+  accent-filled primary. The green `.review-changes-button` is the
   single deliberate GitHub-convention primary; don't add more saturated buttons.
 - Tabs: flat underline idiom (`.side-tab` active = `box-shadow: inset 0 -2px 0 var(--accent)`),
   not pill treatments.
