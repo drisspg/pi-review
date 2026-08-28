@@ -353,6 +353,7 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
         prKey: review.prKey,
         headSha: review.headSha,
         answer: review.answer,
+        stepStates: review.stepStates ?? (previous != null && previous.answer === review.answer ? previous.stepStates : undefined),
         createdAt: previous?.createdAt ?? review.createdAt ?? now,
         updatedAt: now,
       };

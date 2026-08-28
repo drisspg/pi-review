@@ -174,12 +174,12 @@ Return only the final markdown inline. Do not create files or mention your proce
 
 Follow this contract:
 - Start with one or two sentences that state the PR's goal and the key implementation idea.
-- Choose the smallest visual that makes the change click. Prefer one focused Mermaid diagram when interactions, branches, state, data flow, or ownership are the point:
+- Ground the reviewer visually. Use one or more focused Mermaid diagrams — a small change may need a single diagram, a layered change may deserve one per distinct aspect (execution path, state lifecycle, ownership boundaries) — when interactions, branches, state, data flow, or ownership are the point:
   - \`sequenceDiagram\` for time-ordered calls, request/response paths, or async handoffs.
   - \`stateDiagram-v2\` for lifecycles and transitions.
   - \`flowchart\` for branching, data flow, dependencies, ownership boundaries, or source-call trees.
 - Use a compact text call tree or code-shape sketch instead only when exact source structure communicates the change more clearly than Mermaid.
-- Scale naturally to the PR. Do not pad a small change, force a table, or turn the answer into a multi-section report.
+- Scale naturally to the PR. Do not pad a small change, force a table, or turn the answer into a multi-section report. Each extra diagram must explain something the others cannot.
 - Use actual identifiers and boundaries from the diff. Put descriptive text inside Mermaid nodes and keep edge labels short.
 - After the visual, add only the brief explanation or reviewer route needed to connect it to the changed files. Cite real file/line references when useful.
 - Avoid generic praise and review findings unless a tradeoff is necessary to understand the design.

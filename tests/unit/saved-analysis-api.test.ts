@@ -61,6 +61,15 @@ test("saved analysis API saves head-scoped guide reviews", async () => {
   assert.deepEqual(guideInputs, [{ prKey: "pr", headSha: "head", answer: "guide" }]);
 });
 
+test("saved analysis API forwards guide step states when provided", async () => {
+  const { deps, guideInputs } = fakeDeps();
+  const stepStates = { "src/a.ts:1-2:0": { reviewed: true, updatedAt: "now" } };
+
+  await createSavedAnalysisApi(deps).saveGuideReview({ prKey: "pr", headSha: "head", answer: "guide", stepStates });
+
+  assert.deepEqual(guideInputs, [{ prKey: "pr", headSha: "head", answer: "guide", stepStates }]);
+});
+
 test("saved analysis API validates focus scan payload shape", async () => {
   const api = createSavedAnalysisApi(fakeDeps().deps);
 

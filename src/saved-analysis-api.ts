@@ -37,7 +37,12 @@ export function createSavedAnalysisApi(deps: SavedAnalysisApiDeps): SavedAnalysi
 
   async function saveGuideReview(payload: Record<string, unknown>): Promise<{ guide: GuideReviewRecord }> {
     if (typeof payload.prKey !== "string" || typeof payload.headSha !== "string" || typeof payload.answer !== "string") throw new Error("Expected guide review payload");
-    return { guide: await deps.saveGuideReview({ prKey: payload.prKey, headSha: payload.headSha, answer: payload.answer }) };
+    const record: Parameters<SavedAnalysisApiDeps["saveGuideReview"]>[0] = { prKey: payload.prKey, headSha: payload.headSha, answer: payload.answer };
+    if (payload.stepStates != null) {
+      if (typeof payload.stepStates !== "object" || Array.isArray(payload.stepStates)) throw new Error("Expected guide review payload");
+      record.stepStates = payload.stepStates as GuideReviewRecord["stepStates"];
+    }
+    return { guide: await deps.saveGuideReview(record) };
   }
 
   async function saveAiReview(payload: Record<string, unknown>): Promise<{ review: AiReviewRecord }> {

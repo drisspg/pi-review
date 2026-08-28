@@ -200,6 +200,19 @@ test("clearDraftReview removes only the submitted PR draft", async () => {
   assert.deepEqual(await store.getDraftReview("second"), second);
 });
 
+test("saveGuideReview persists step states and drops them when the answer changes", async () => {
+  const { runtime } = fakeRuntime(emptyState());
+  const store = createStateStore(runtime, paths);
+
+  const saved = await store.saveGuideReview({ prKey: "pr", headSha: "head", answer: "guide", stepStates: { "s1": { reviewed: true, updatedAt: "t1" } } });
+  const progressOnly = await store.saveGuideReview({ prKey: "pr", headSha: "head", answer: "guide" });
+  const regenerated = await store.saveGuideReview({ prKey: "pr", headSha: "head", answer: "different" });
+
+  assert.deepEqual(saved.stepStates, { s1: { reviewed: true, updatedAt: "t1" } });
+  assert.deepEqual(progressOnly.stepStates, { s1: { reviewed: true, updatedAt: "t1" } });
+  assert.equal(regenerated.stepStates, undefined);
+});
+
 test("saveGuideReview replaces the cached guide for the same head", async () => {
   const { runtime } = fakeRuntime(emptyState());
   const store = createStateStore(runtime, paths);

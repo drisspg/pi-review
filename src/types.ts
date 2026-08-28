@@ -174,11 +174,17 @@ export type AiReviewMessageRecord = {
   toolStatus?: "running" | "success" | "error";
 };
 
+export type GuideStepState = {
+  reviewed: boolean;
+  updatedAt: string;
+};
+
 export type GuideReviewRecord = {
   id: string;
   prKey: string;
   headSha: string;
   answer: string;
+  stepStates?: Record<string, GuideStepState>;
   createdAt: string;
   updatedAt: string;
 };

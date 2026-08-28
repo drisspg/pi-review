@@ -1032,9 +1032,10 @@ test("runs a separate focus areas review and opens native focus terminals", asyn
   await page.setViewportSize({ width: 820, height: 900 });
   expect(await guide.locator(".guide-workspace").evaluate((workspace) => getComputedStyle(workspace).gridTemplateColumns.split(" ").length)).toBe(1);
   await expect(guide.locator(".guide-live-diff .pi-native-terminal.compact")).toBeVisible();
-  await guide.getByRole("checkbox", { name: "Reviewed" }).first().check();
+  const progressSave = page.waitForResponse((response) => response.url().endsWith("/api/guide-review/save"));
+  await guide.getByRole("checkbox", { name: "Reviewed" }).first().click();
+  await progressSave;
   await expect(guide).toContainText("1/2");
-  await guide.getByRole("button", { name: /Next: Validation path/ }).click();
   await expect(guide.locator(".guide-active-stop")).toContainText("Validation path");
 
   await guide.getByRole("button", { name: /Overview/ }).click();
@@ -1044,6 +1045,7 @@ test("runs a separate focus areas review and opens native focus terminals", asyn
   await page.reload();
   await expect(page.locator(".review-layout")).toBeVisible({ timeout: 60_000 });
   await page.getByRole("button", { name: "Guide 1" }).click();
+  await expect(page.getByRole("main", { name: "Guided review" })).toContainText("1/2 stops");
   await expect(page.getByRole("main", { name: "Guided review" }).locator(".guide-live-diff .file")).toBeVisible();
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
   const modeBarTop = await page.locator(".review-mode-tabs").evaluate((tabs) => tabs.getBoundingClientRect().top);
