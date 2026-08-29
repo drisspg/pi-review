@@ -1879,7 +1879,7 @@ kbd {
 
 .inline-thread {
   margin: var(--space-2) var(--space-4) 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
   background: var(--panel);
   display: grid;
@@ -1901,7 +1901,7 @@ kbd {
 }
 
 .inline-thread.existing.github-thread {
-  border-color: var(--border);
+  border-color: var(--border-soft);
   background: var(--panel);
   box-shadow: none;
 }
@@ -3947,7 +3947,7 @@ button.fold:hover {
   gap: 6px;
   margin-top: 8px;
   padding: 8px 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-soft);
   border-radius: var(--radius);
   background: var(--panel2);
 }
@@ -4185,7 +4185,7 @@ button.focus-area-collapsed {
 .pi-native-terminal.compact {
   flex: 0 0 auto;
   height: clamp(300px, 48vh, 440px);
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--border-soft);
   padding: 10px 12px;
 }
 
@@ -4193,7 +4193,7 @@ button.focus-area-collapsed {
   max-height: 132px;
   overflow: auto;
   padding: 8px 12px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--border-soft);
   font-size: 0.84rem;
 }
 
