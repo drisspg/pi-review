@@ -52,6 +52,14 @@ function fakeDeps() {
         calls.push(`cleanup:${requestRef.number}`);
         return "/tmp/worktree";
       },
+      async compareCommits(requestRef: PullRequestRef, baseSha: string, headSha: string) {
+        calls.push(`compare:${requestRef.number}:${baseSha}:${headSha}`);
+        return { files: [{ filename: "b.ts", status: "modified", additions: 2, deletions: 1, changes: 3, patch: "@@ interdiff" }], totalCommits: 3 };
+      },
+      async fetchCommitChecks(requestRef: PullRequestRef, sha: string) {
+        calls.push(`checks:${requestRef.number}:${sha}`);
+        return { total: 5, success: 3, failure: 1, pending: 1, neutral: 0, failures: [{ name: "lint", url: "https://ci.example/lint" }] };
+      },
       async disposePiSession(prKey: string) {
         calls.push(`dispose:${prKey}`);
       },
@@ -164,4 +172,38 @@ test("PR API open prepares worktree, registers Pi cwd, prewarms sessions, and hy
     "guide:github.com/pytorch/pytorch#1",
     "overview:github.com/pytorch/pytorch#1",
   ]);
+});
+
+test("PR API interdiff compares the previously reviewed head with the current head", async () => {
+  const { deps, calls } = fakeDeps();
+
+  const response = await createPrApi(deps).interdiff({ prUrl: "url", sinceSha: "abc1234", headSha: "def5678" });
+
+  assert.deepEqual(response, {
+    files: [{ filename: "b.ts", status: "modified", additions: 2, deletions: 1, changes: 3, patch: "@@ interdiff" }],
+    totalCommits: 3,
+    sinceSha: "abc1234",
+    headSha: "def5678",
+  });
+  assert.deepEqual(calls, ["parse:url", "compare:1:abc1234:def5678"]);
+});
+
+test("PR API checks summarizes commit check runs", async () => {
+  const { deps, calls } = fakeDeps();
+
+  const response = await createPrApi(deps).checks({ prUrl: "url", sha: "def5678" });
+
+  assert.equal(response.checks.total, 5);
+  assert.deepEqual(response.checks.failures, [{ name: "lint", url: "https://ci.example/lint" }]);
+  assert.deepEqual(calls, ["parse:url", "checks:1:def5678"]);
+});
+
+test("PR API interdiff and checks reject malformed payloads", async () => {
+  const { deps } = fakeDeps();
+  const prApi = createPrApi(deps);
+
+  await assert.rejects(prApi.interdiff({ sinceSha: "abc1234", headSha: "def5678" }), /prUrl/);
+  await assert.rejects(prApi.interdiff({ prUrl: "url", sinceSha: "not a sha", headSha: "def5678" }), /sinceSha/);
+  await assert.rejects(prApi.interdiff({ prUrl: "url", sinceSha: "abc1234" }), /headSha/);
+  await assert.rejects(prApi.checks({ prUrl: "url" }), /sha/);
 });

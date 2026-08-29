@@ -1,9 +1,11 @@
 import { parsePullRequestRef, prKey } from "./pr.js";
-import type { AiReviewRecord, DraftReview, FocusScanRecord, GuideReviewRecord, PullRequestRef, PullRequestReviewData, PullRequestReviewResponse, StoredPullRequest } from "./types.js";
+import type { AiReviewRecord, CommitChecks, DraftReview, FocusScanRecord, GuideReviewRecord, PullFile, PullRequestRef, PullRequestReviewData, PullRequestReviewResponse, StoredPullRequest } from "./types.js";
 
 export type PrApiDeps = {
   cleanupPrWorktree: (ref: PullRequestRef) => Promise<string>;
+  compareCommits: (ref: PullRequestRef, baseSha: string, headSha: string) => Promise<{ files: PullFile[]; totalCommits: number }>;
   disposePiSession: (prKey: string) => Promise<void>;
+  fetchCommitChecks: (ref: PullRequestRef, sha: string) => Promise<CommitChecks>;
   fetchPullRequestReviewData: (ref: PullRequestRef) => Promise<PullRequestReviewData>;
   getDraftReview: (prKey: string) => Promise<DraftReview | null>;
   listAiReviews: (prKey: string) => Promise<AiReviewRecord[]>;
@@ -23,7 +25,20 @@ export type PrApi = {
   cleanup: (input: string) => Promise<{ ok: true; prKey: string; worktreeDir: string }>;
   activity: (input: string) => Promise<PullRequestReviewResponse>;
   open: (input: string) => Promise<PullRequestReviewResponse>;
+  interdiff: (payload: Record<string, unknown>) => Promise<{ files: PullFile[]; totalCommits: number; sinceSha: string; headSha: string }>;
+  checks: (payload: Record<string, unknown>) => Promise<{ checks: CommitChecks }>;
 };
+
+function shaFromPayload(payload: Record<string, unknown>, key: string): string {
+  const value = payload[key];
+  if (typeof value !== "string" || !/^[0-9a-f]{7,40}$/i.test(value)) throw new Error(`Expected ${key} to be a commit SHA`);
+  return value;
+}
+
+function prUrlFromPayload(payload: Record<string, unknown>): string {
+  if (typeof payload.prUrl !== "string" || payload.prUrl.length === 0) throw new Error("Expected prUrl");
+  return payload.prUrl;
+}
 
 export const defaultPrApiDeps = (deps: Omit<PrApiDeps, "parsePullRequestRef">): PrApiDeps => ({ ...deps, parsePullRequestRef });
 
@@ -65,5 +80,19 @@ export function createPrApi(deps: PrApiDeps): PrApi {
     return hydrateReviewResponse(data, pr, { worktreeDir });
   }
 
-  return { parse, cleanup, activity, open };
+  /** Diff of what changed since the reviewer's last look: previously reviewed head vs current head. */
+  async function interdiff(payload: Record<string, unknown>): Promise<{ files: PullFile[]; totalCommits: number; sinceSha: string; headSha: string }> {
+    const ref = deps.parsePullRequestRef(prUrlFromPayload(payload));
+    const sinceSha = shaFromPayload(payload, "sinceSha");
+    const headSha = shaFromPayload(payload, "headSha");
+    const { files, totalCommits } = await deps.compareCommits(ref, sinceSha, headSha);
+    return { files, totalCommits, sinceSha, headSha };
+  }
+
+  async function checks(payload: Record<string, unknown>): Promise<{ checks: CommitChecks }> {
+    const ref = deps.parsePullRequestRef(prUrlFromPayload(payload));
+    return { checks: await deps.fetchCommitChecks(ref, shaFromPayload(payload, "sha")) };
+  }
+
+  return { parse, cleanup, activity, open, interdiff, checks };
 }

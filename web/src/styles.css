@@ -362,6 +362,21 @@ kbd {
   overflow-x: auto;
 }
 
+.interdiff-toggle[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.interdiff-banner {
+  margin: var(--space-2) 2px 0;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
 .section-head {
   display: flex;
   justify-content: space-between;
@@ -805,6 +820,61 @@ kbd {
   content: "·";
   margin-right: 8px;
   color: var(--muted);
+}
+
+.pr-header-meta .pr-checks span::before {
+  content: none;
+  margin-right: 0;
+}
+
+.pr-checks {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.checks-pass { color: var(--success); }
+.checks-fail { color: var(--danger); }
+.checks-pending { color: var(--muted); }
+
+.pr-checks-details {
+  position: relative;
+}
+
+.pr-checks-details > summary {
+  cursor: pointer;
+  list-style: none;
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.pr-checks-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.pr-checks-details[open] > .pr-checks-popover {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 4px);
+  left: 0;
+  display: grid;
+  gap: 4px;
+  min-width: 260px;
+  max-width: 420px;
+  max-height: 300px;
+  overflow-y: auto;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow-popover);
+  font-size: var(--text-sm);
+}
+
+.pr-checks-popover a,
+.pr-checks-popover span {
+  overflow-wrap: anywhere;
 }
 
 .pr-header-actions {
@@ -1894,6 +1964,17 @@ kbd {
   gap: 0;
   white-space: normal;
   font-family: var(--font-system);
+}
+
+.thread-blame {
+  padding: 2px var(--space-3) var(--space-1);
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+
+.thread-blame a {
+  color: inherit;
+  text-decoration: underline;
 }
 
 .inline-thread.existing,

@@ -62,6 +62,11 @@ function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
         res.end();
       },
     },
+    blameApi: {
+      async blame() {
+        return { blame: { sha: "a".repeat(40), author: "alice", authorTime: "now", summary: "summary", prNumber: null, commitUrl: "commit-url" } };
+      },
+    },
     commentApi: {
       async edit() {
         return { result: "edit" };
@@ -155,6 +160,12 @@ function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
       },
       parse(input) {
         return { ref: { host: "github.com", owner: "o", repo: "r", number: Number(input) || 1 } };
+      },
+      async interdiff() {
+        return { files: [], totalCommits: 0, sinceSha: "aaa1111", headSha: "bbb2222" };
+      },
+      async checks() {
+        return { checks: { total: 0, success: 0, failure: 0, pending: 0, neutral: 0, failures: [] } };
       },
     },
     reviewArchiveApi: {

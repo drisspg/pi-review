@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 import { inputFromBody, type JsonValue, MalformedJsonError, readBody, recordFromBody, sendJson } from "./http.js";
 import type { AskStreamResponse } from "./ask-stream-api.js";
+import type { BlameApi } from "./blame-api.js";
 import type { CommentApi } from "./comment-api.js";
 import type { DraftReviewApi } from "./draft-review-api.js";
 import type { FileApi } from "./file-api.js";
@@ -24,6 +25,7 @@ export type ServerLogger = {
 
 export type ServerRouteDeps = {
   askStreamApi: { stream: (res: AskStreamResponse, payload: Record<string, unknown>) => Promise<void> };
+  blameApi: BlameApi;
   commentApi: CommentApi;
   draftReviewApi: DraftReviewApi;
   fileApi: FileApi;
@@ -68,6 +70,7 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
     "/api/comment/reply": (payload) => deps.commentApi.reply(payload),
     "/api/draft-review/discard": (payload) => deps.draftReviewApi.discard(payload),
     "/api/draft-review/get": (payload) => deps.draftReviewApi.get(payload),
+    "/api/file/blame": (payload) => deps.blameApi.blame(payload),
     "/api/file/open": (payload) => deps.fileApi.open(payload),
     "/api/file/text": (payload) => deps.fileApi.text(payload),
     "/api/focus-scan/save": (payload) => deps.savedAnalysisApi.saveFocusScan(payload),
@@ -81,6 +84,8 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
     "/api/pi/prompt": (payload) => deps.reviewPromptApi.build(payload),
     "/api/pi/review/status": (payload) => deps.piApi.jobStatus(payload),
     "/api/pi/terminal/delete": (payload) => deps.piTerminalApi.remove(payload),
+    "/api/pr/checks": (payload) => deps.prApi.checks(payload),
+    "/api/pr/interdiff": (payload) => deps.prApi.interdiff(payload),
     "/api/review/archive": (payload) => deps.reviewArchiveApi.archive(payload),
     "/api/usage": async (payload) => deps.usageApi.recordClientEvents(payload),
   };

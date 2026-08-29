@@ -40,6 +40,17 @@ export type PullFile = {
   generated?: boolean;
 };
 
+export type CommitCheckFailure = { name: string; url: string | null };
+
+export type CommitChecks = {
+  total: number;
+  success: number;
+  failure: number;
+  pending: number;
+  neutral: number;
+  failures: CommitCheckFailure[];
+};
+
 export type PullReviewComment = {
   id: number;
   path: string;

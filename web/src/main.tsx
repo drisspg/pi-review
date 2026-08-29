@@ -19,7 +19,7 @@ import { parseGuideChapters, type GuideChapter } from "./lib/guide";
 import { parseOverviewSections } from "./lib/overview";
 import { languageForPath } from "./lib/highlight";
 import { newId, prUrlFromKey, relativeTime, shortSha } from "./lib/pr";
-import type { AiReview, AiReviewMessage, AiReviewRecord, DiffRow, DraftComment, DraftReview, DragSelection, FileReviewState, FlowDag, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, GitHubDraftComment, GitHubPendingReview, GpuWorkspace, GpuWorkspaceContract, GpuWorkspaceExecResult, GuideReviewRecord, LogEntry, OpenResponse, PiAgentActivity, PullFile, PullIssueComment, PullRequestReviewSummary, PullReviewComment, ReviewMemoryRecord, ReviewMemoryResponse, StoredPullRequest, Target, ThemeName, Thread } from "./types";
+import type { AiReview, AiReviewMessage, AiReviewRecord, BlameInfo, CommitChecks, DiffRow, DraftComment, DraftReview, DragSelection, FileReviewState, FlowDag, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, GitHubDraftComment, GitHubPendingReview, GpuWorkspace, GpuWorkspaceContract, GpuWorkspaceExecResult, GuideReviewRecord, InterdiffResponse, LogEntry, OpenResponse, PiAgentActivity, PullFile, PullIssueComment, PullRequestReviewSummary, PullReviewComment, ReviewMemoryRecord, ReviewMemoryResponse, StoredPullRequest, Target, ThemeName, Thread } from "./types";
 import "@primer/primitives/dist/css/primitives.css";
 import "@primer/primitives/dist/css/functional/themes/dark.css";
 import "@primer/primitives/dist/css/functional/themes/dark-dimmed.css";
@@ -1444,6 +1444,36 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { r
   const [sideTab, setSideTab] = useState<"review" | "pi" | "comments">("review");
   const [sideCollapsed, setSideCollapsed] = useState(true);
   const [sideFocused, setSideFocused] = useState(false);
+  const pr = props.review.pr;
+  const sinceSha = pr.lastReviewedHeadSha;
+  const canInterdiff = sinceSha != null && sinceSha !== pr.headSha;
+  const [diffScope, setDiffScope] = useState<"all" | "since-review">("all");
+  const [interdiff, setInterdiff] = useState<InterdiffResponse | null>(null);
+  const [interdiffError, setInterdiffError] = useState<string | null>(null);
+  useEffect(() => {
+    setDiffScope("all");
+    setInterdiff(null);
+    setInterdiffError(null);
+  }, [pr.key, pr.headSha]);
+  const wantInterdiff = diffScope === "since-review" && canInterdiff;
+  useEffect(() => {
+    if (!wantInterdiff || sinceSha == null || interdiff != null) return;
+    let cancelled = false;
+    api<InterdiffResponse>("/api/pr/interdiff", { method: "POST", body: JSON.stringify({ prUrl: pr.url, sinceSha, headSha: pr.headSha }) })
+      .then((response) => { if (!cancelled) setInterdiff(response); })
+      .catch((err: unknown) => { if (!cancelled) setInterdiffError(errorMessage(err)); });
+    return () => { cancelled = true; };
+  }, [wantInterdiff, interdiff, pr.url, pr.headSha, sinceSha]);
+  const interdiffFiles = wantInterdiff ? interdiff?.files ?? null : null;
+  const diffFiles = interdiffFiles ?? props.review.files;
+  // Interdiff LEFT lines belong to the previously reviewed head, not the PR base, so GitHub cannot anchor comments there.
+  const diffPlumbing: typeof props = interdiffFiles == null ? props : {
+    ...props,
+    handleRowClick: (target, extend) => { if (target.side !== "LEFT") props.handleRowClick(target, extend); },
+    beginDrag: (target) => { if (target.side !== "LEFT") props.beginDrag(target); },
+    updateDrag: (target) => { if (target.side !== "LEFT") props.updateDrag(target); },
+    finishDrag: (target) => props.finishDrag(target.side === "LEFT" && props.dragSelection != null ? props.dragSelection.current : target),
+  };
   const draftCount = props.drafts.length;
   const piActivity = props.piPanel.review.messages.length + (props.piPanel.review.text.length > 0 && props.piPanel.review.messages.length === 0 ? 1 : 0);
   const focusCount = props.focusAreas.length;
@@ -1538,8 +1568,9 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { r
         {reviewMode === "guide" ? <GuideReview review={props.review} chapters={guideChapters} viewedIds={viewedGuideIds} setViewedIds={setViewedGuideIds} guideReview={props.piPanel.guideReview} runGuideReview={props.piPanel.runGuideReview} overview={props.overview} runOverview={props.runOverview} onProgress={props.saveGuideProgress} onActivate={prepareGuideStep} renderDiff={renderGuideDiff} /> : <main className="files">
           <PrSummary pr={props.review.pr} />
           <div className="files-toolbar">
-            <FileNavigator files={props.review.files} fileReviews={props.review.fileReviews} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} />
+            <FileNavigator files={diffFiles} fileReviews={props.review.fileReviews} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} />
             <div className="files-toolbar-actions">
+              {canInterdiff && <Button variant="muted" className="small-muted-button interdiff-toggle" aria-pressed={diffScope === "since-review"} onClick={() => { const scope = diffScope === "all" ? "since-review" : "all"; logUsage("ui:diff-scope", { scope }); setDiffScope(scope); }}>{diffScope === "all" ? "Since last review" : "All changes"}</Button>}
               {commentCount > 0 && <Button variant="muted" className="small-muted-button" onClick={props.toggleAllComments}>{props.commentsCollapsed ? "Expand review threads" : "Collapse review threads"}</Button>}
               <Button variant="muted" className="small-muted-button" onClick={() => { const mode = props.diffViewMode === "unified" ? "split" : "unified"; logUsage("ui:diff-view-mode", { mode }); props.setDiffViewMode(mode); }}>{diffViewLabel}</Button>
               <Button variant="muted" className="small-muted-button panel-launch-button" onClick={() => openSidePanel("comments")}>Comments{commentCount > 0 ? ` ${commentCount}` : ""}</Button>
@@ -1547,7 +1578,13 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { r
               <Button className="review-changes-button panel-launch-button" onClick={() => openSidePanel("review")}>Review changes{draftCount > 0 ? ` (${draftCount})` : ""}</Button>
             </div>
           </div>
-          <DiffAnnotationsContext.Provider value={annotations}>{props.review.files.map((file) => <FileDiff key={file.filename} file={file} {...props} />)}</DiffAnnotationsContext.Provider>
+          {wantInterdiff && <div className="interdiff-banner" role="status">
+            {interdiffError != null ? `Could not load changes since your last review: ${interdiffError}`
+              : interdiff == null ? "Loading changes since your last review…"
+              : interdiff.files.length === 0 ? `No changes since your last review (${shortSha(sinceSha ?? "")}).`
+              : <>Showing changes since your last review · {shortSha(sinceSha ?? "")} → {shortSha(pr.headSha)} · {interdiff.totalCommits} commit{interdiff.totalCommits === 1 ? "" : "s"} · comments attach to new-side lines only</>}
+          </div>}
+          <DiffAnnotationsContext.Provider value={annotations}>{diffFiles.map((file) => <FileDiff key={file.filename} file={file} {...diffPlumbing} />)}</DiffAnnotationsContext.Provider>
         </main>}
       </div>
       {sidePanel}
@@ -1556,10 +1593,35 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { r
   </div></GitHubDraftContext.Provider></PiTerminalPrContext.Provider>;
 }
 
+function PrChecks({ checks }: { checks: CommitChecks }) {
+  const counts = <>
+    {checks.success > 0 && <span className="checks-pass">✓ {checks.success}</span>}
+    {checks.failure > 0 && <span className="checks-fail">✗ {checks.failure}</span>}
+    {checks.pending > 0 && <span className="checks-pending">● {checks.pending}</span>}
+    {checks.success === 0 && checks.failure === 0 && checks.pending === 0 && <span>{checks.total} checks</span>}
+  </>;
+  if (checks.failure === 0) return <span className="pr-checks" title="CI checks">{counts}</span>;
+  return <span className="pr-checks">
+    <details className="pr-checks-details">
+      <summary title="CI checks — expand for failing checks">{counts}</summary>
+      <div className="pr-checks-popover">{checks.failures.map((failure, index) => failure.url == null ? <span key={`${failure.name}:${index}`}>{failure.name}</span> : <a key={`${failure.name}:${index}`} href={failure.url} target="_blank" rel="noreferrer">{failure.name}</a>)}</div>
+    </details>
+  </span>;
+}
+
 function PrHeaderStrip({ pr, refreshGithubActivity, refreshingActivity }: { pr: StoredPullRequest; refreshGithubActivity: () => Promise<void>; refreshingActivity: boolean }) {
   const status = reviewStatus(pr);
   const number = pr.key.match(/#(\d+)$/)?.[1];
   const repository = pr.key.replace(/^github\.com\//, "").replace(/#\d+$/, "");
+  const [checks, setChecks] = useState<CommitChecks | null>(null);
+  useEffect(() => {
+    if (refreshingActivity) return;
+    let cancelled = false;
+    api<{ checks: CommitChecks }>("/api/pr/checks", { method: "POST", body: JSON.stringify({ prUrl: pr.url, sha: pr.headSha }) })
+      .then(({ checks: next }) => { if (!cancelled) setChecks(next); })
+      .catch(() => { if (!cancelled) setChecks(null); });
+    return () => { cancelled = true; };
+  }, [pr.url, pr.headSha, refreshingActivity]);
   return <section className="pr-header-strip">
     <div className="pr-header-main">
       <h1 className="pr-header-title">{pr.title}{number != null && <span className="pr-header-number"> #{number}</span>}</h1>
@@ -1569,6 +1631,7 @@ function PrHeaderStrip({ pr, refreshGithubActivity, refreshingActivity }: { pr: 
         <span>{pr.filesChanged} files changed</span>
         <span>{pr.existingCommentCount} comments</span>
         <span>{shortSha(pr.headSha)}</span>
+        {checks != null && checks.total > 0 && <PrChecks checks={checks} />}
       </div>
     </div>
     <div className="pr-header-actions">
@@ -2085,7 +2148,7 @@ function DiffRowView({ row, target, languagePath, setThreads, drafts, setDrafts,
   const codeCell = (className = "code-cell") => <span className={className}>{showMarker && <span className="diff-marker">{diffMarker(row)}</span>}<CodeText code={codeText} language={language} syntaxContext={row.syntaxContext} /></span>;
   const unifiedCells = <><span className="num old-num">{row.oldLine ?? ""}</span><span className="num new-num">{row.newLine ?? ""}</span>{codeCell()}{threadPill}</>;
   const splitCells = <><span className="num old-num">{row.oldLine ?? ""}</span><div className="split-code old-code">{row.newLine == null || rowHasKind(row, "context") || rowHasKind(row, "hunk") || rowHasKind(row, "meta") ? codeCell("code-cell split-code-cell") : null}</div><span className="num new-num">{row.newLine ?? ""}</span><div className="split-code new-code">{row.oldLine == null || rowHasKind(row, "context") || rowHasKind(row, "hunk") || rowHasKind(row, "meta") ? codeCell("code-cell split-code-cell") : null}</div>{threadPill}</>;
-  return <><div className={`diff-row ${diffViewMode} ${row.kind} ${thread != null && !thread.collapsed ? "selected" : ""} ${selecting ? "range-selecting" : ""} ${inThreadRange ? "in-thread-range" : ""}`} data-path={target?.path} data-line={target?.line ?? undefined} data-side={target?.side} data-hunk={target?.hunk} role={target != null ? "button" : undefined} tabIndex={target != null ? 0 : undefined} aria-label={target != null ? `Review ${targetLabel(target)}` : undefined} onKeyDown={(event) => { if (target != null && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); handleRowClick(target, event.shiftKey); } }} onMouseDown={(event) => { if (target != null && event.button === 0) { if (isDiffCodeTarget(event.target)) return; event.preventDefault(); beginDrag(target); } }} onMouseEnter={() => { if (target != null && dragSelection != null) updateDrag(target); }} onMouseUp={() => { if (target != null) finishDrag(target); }} onClick={(event) => { if (target != null && !hasSelectedDiffCode(event)) handleRowClick(target, event.shiftKey); }}>{diffViewMode === "split" ? splitCells : unifiedCells}</div>{inlineCommentThreads.map((commentThread) => <ExistingReviewThread key={commentThread.map((comment) => comment.id).join(":")} comments={commentThread} prUrl={prUrl} refreshGithubActivity={refreshGithubActivity} collapseSignal={collapseSignal} collapseComments={commentsCollapsed} />)}{rowFocusAreas.map((area) => <FocusAreaInline key={area.id} prUrl={prUrl} area={area} active={area.id === activeFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} />)}{inlineDrafts.map((draft) => <div className="inline-thread draft" id={`draft-${draft.id}`} key={draft.id}><DraftView draft={draft} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} /></div>)}{thread != null && <ThreadBox thread={thread} setThread={(updatedThread) => setThreads((current) => { const next = { ...current }; delete next[thread.key]; next[updatedThread.key] = updatedThread; return next; })} removeThread={() => setThreads((current) => { const next = { ...current }; delete next[thread.key]; return next; })} addDraft={(body) => setDrafts([...drafts, { id: newId(), path: thread.target.path, line: thread.target.line, startLine: thread.target.startLine, side: thread.target.side, body }])} />}</>;
+  return <><div className={`diff-row ${diffViewMode} ${row.kind} ${thread != null && !thread.collapsed ? "selected" : ""} ${selecting ? "range-selecting" : ""} ${inThreadRange ? "in-thread-range" : ""}`} data-path={target?.path} data-line={target?.line ?? undefined} data-side={target?.side} data-hunk={target?.hunk} role={target != null ? "button" : undefined} tabIndex={target != null ? 0 : undefined} aria-label={target != null ? `Review ${targetLabel(target)}` : undefined} onKeyDown={(event) => { if (target != null && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); handleRowClick(target, event.shiftKey); } }} onMouseDown={(event) => { if (target != null && event.button === 0) { if (isDiffCodeTarget(event.target)) return; event.preventDefault(); beginDrag(target); } }} onMouseEnter={() => { if (target != null && dragSelection != null) updateDrag(target); }} onMouseUp={() => { if (target != null) finishDrag(target); }} onClick={(event) => { if (target != null && !hasSelectedDiffCode(event)) handleRowClick(target, event.shiftKey); }}>{diffViewMode === "split" ? splitCells : unifiedCells}</div>{inlineCommentThreads.map((commentThread) => <ExistingReviewThread key={commentThread.map((comment) => comment.id).join(":")} comments={commentThread} prUrl={prUrl} refreshGithubActivity={refreshGithubActivity} collapseSignal={collapseSignal} collapseComments={commentsCollapsed} />)}{rowFocusAreas.map((area) => <FocusAreaInline key={area.id} prUrl={prUrl} area={area} active={area.id === activeFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} />)}{inlineDrafts.map((draft) => <div className="inline-thread draft" id={`draft-${draft.id}`} key={draft.id}><DraftView draft={draft} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} /></div>)}{thread != null && <ThreadBox thread={thread} prUrl={prUrl} setThread={(updatedThread) => setThreads((current) => { const next = { ...current }; delete next[thread.key]; next[updatedThread.key] = updatedThread; return next; })} removeThread={() => setThreads((current) => { const next = { ...current }; delete next[thread.key]; return next; })} addDraft={(body) => setDrafts([...drafts, { id: newId(), path: thread.target.path, line: thread.target.line, startLine: thread.target.startLine, side: thread.target.side, body }])} />}</>;
 }
 
 function FocusAreaInline({ prUrl, area, active, collapsedFocusAreaIds, setCollapsedFocusAreaIds }: { prUrl: string; area: FocusArea; active: boolean; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"] }) {
@@ -2105,13 +2168,23 @@ ${area.body}`} />
   </div>;
 }
 
-function ThreadBox({ thread, setThread, removeThread, addDraft }: { thread: Thread; setThread: (thread: Thread) => void; removeThread: () => void; addDraft: (body: string) => void }) {
+function ThreadBox({ thread, prUrl, setThread, removeThread, addDraft }: { thread: Thread; prUrl: string; setThread: (thread: Thread) => void; removeThread: () => void; addDraft: (body: string) => void }) {
   const review = useContext(PiTerminalPrContext);
   const terminalOpen = thread.terminalOpen === true;
   const [composing, setComposing] = useState(!terminalOpen);
   const [draft, setDraft] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [blame, setBlame] = useState<BlameInfo | null>(null);
+  const { path: targetPath, line: targetLine, side: targetSide } = thread.target;
+  useEffect(() => {
+    if (thread.collapsed || targetLine == null || targetSide !== "RIGHT") return;
+    let cancelled = false;
+    api<{ blame: BlameInfo }>("/api/file/blame", { method: "POST", body: JSON.stringify({ prUrl, path: targetPath, line: targetLine }) })
+      .then(({ blame: next }) => { if (!cancelled) setBlame(next); })
+      .catch(() => { if (!cancelled) setBlame(null); });
+    return () => { cancelled = true; };
+  }, [thread.collapsed, prUrl, targetPath, targetLine, targetSide]);
   async function deleteThread(): Promise<void> {
     if (!terminalOpen) {
       removeThread();
@@ -2150,6 +2223,7 @@ ${thread.target.hunk.slice(0, 4_000)}`;
         <Button variant="icon" className="close-thread-button" aria-label={terminalOpen ? "Delete terminal" : "Discard comment"} onClick={() => void deleteThread()} disabled={deleting}><XIcon size={16} /></Button>
       </div>
     </div>
+    {blame != null && <div className="thread-blame">Last changed {relativeTime(blame.authorTime)} by {blame.author} in <a href={blame.commitUrl} target="_blank" rel="noreferrer">{shortSha(blame.sha)}</a> · {blame.prNumber != null ? <a href={prUrl.replace(/\/pull\/\d+.*$/, `/pull/${blame.prNumber}`)} target="_blank" rel="noreferrer">{blame.summary}</a> : blame.summary}</div>}
     {composing && <div className="line-comment-composer">
       <MarkdownEditor autoFocus rows={2} value={draft} ariaLabel="Review comment" placeholder="Leave a review comment on this line" onChange={setDraft} onKeyDown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); saveDraft(); } else if (event.key === "Escape") { event.preventDefault(); setComposing(false); } }} />
       <div className="actions"><span className="muted">⌘Enter to add</span><Button variant="muted" onClick={() => { setDraft(""); setComposing(false); }}>Cancel</Button><Button className="composer-submit" onClick={saveDraft} disabled={draft.trim().length === 0}>Add draft comment</Button></div>

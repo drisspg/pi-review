@@ -31,6 +31,9 @@ Ask Pi can work at multiple levels: an inline question on a selected line/range,
 - Ask Pi about selected lines, focus areas, or the full PR.
 - Reuse PR worktrees and Pi sessions across reloads/server restarts.
 - Store submitted review examples and distill them into a reviewer profile.
+- Re-review with "Since last review": diff only what changed since the head you last reviewed.
+- See CI check-run status in the PR header, with failing checks one click away.
+- See inline blame context (last commit, author, age, originating PR) when opening a line thread.
 - Log feature usage locally (API calls plus key UI actions) to a JSONL file; `npm run usage:report` summarizes what you use, what you don't, and where latency or errors add friction.
 
 ## How it works

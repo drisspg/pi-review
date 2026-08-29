@@ -29,7 +29,9 @@ function fakeRuntime(options: { failMutations?: boolean; gitattributes?: string;
         if (args[0] === "api" && key === "/repos/pytorch/pytorch/pulls/185924/comments") return { stdout: JSON.stringify([{ id: 123, path: "torch/a.py", line: 7, side: "RIGHT", body: "note", html_url: "comment" }]), stderr: "" };
         if (args[0] === "api" && key === "/repos/pytorch/pytorch/issues/185924/comments") return { stdout: JSON.stringify([{ id: 456, body: "issue", html_url: "issue" }]), stderr: "" };
         if (args[0] === "api" && key === "/repos/pytorch/pytorch/pulls/185924/reviews") return { stdout: JSON.stringify([{ id: 789, body: "summary", html_url: "review", state: "COMMENTED" }, { id: 790, body: "   ", html_url: "empty", state: "COMMENTED" }]), stderr: "" };
-        if (args[0] === "api" && key === "/repos/pytorch/pytorch/contents/.gitattributes?ref=head") return { stdout: options.gitattributes ?? "", stderr: "" };
+        if (args[0] === "api" && key?.startsWith("/repos/pytorch/pytorch/contents/.gitattributes?ref=")) return { stdout: options.gitattributes ?? "", stderr: "" };
+        if (args[0] === "api" && key === "/repos/pytorch/pytorch/compare/aaa1111...bbb2222") return { stdout: JSON.stringify({ total_commits: 2, files: [{ filename: "torch/a.py", status: "modified", additions: 1, deletions: 1, changes: 2, patch: "@@ interdiff" }, { filename: "generated/model.py", status: "modified", additions: 4, deletions: 0, changes: 4, patch: "@@" }] }), stderr: "" };
+        if (args[0] === "api" && key?.startsWith("/repos/pytorch/pytorch/commits/head/check-runs")) return { stdout: JSON.stringify({ total_count: 4, check_runs: [{ name: "build", status: "completed", conclusion: "success", html_url: "build-url" }, { name: "lint", status: "completed", conclusion: "failure", html_url: "lint-url" }, { name: "docs", status: "in_progress", conclusion: null, html_url: "docs-url" }, { name: "optional", status: "completed", conclusion: "skipped", html_url: "optional-url" }] }), stderr: "" };
         if (args[0] === "api" && key === "graphql" && args.some((arg) => String(arg).includes("states: [PENDING]"))) return { stdout: JSON.stringify({ data: { repository: { pullRequest: { id: "pr-id", reviews: { nodes: [{ id: "pending-id", state: "PENDING", viewerDidAuthor: true, body: "", updatedAt: "now", comments: { nodes: [{ id: "comment-id", path: "torch/a.py", line: 7, startLine: null, subjectType: "LINE", body: "private", url: "private-url" }], pageInfo: { hasNextPage: false, endCursor: null } } }] } } } } }), stderr: "" };
         if (args[0] === "api" && key === "graphql" && args.some((arg) => String(arg).includes("addPullRequestReviewThread"))) return { stdout: JSON.stringify({ data: { addPullRequestReviewThread: { thread: { id: "thread-id" } } } }), stderr: "" };
         if (args[0] === "api" && key === "graphql" && args.some((arg) => String(arg).includes("addPullRequestReview(input"))) return { stdout: JSON.stringify({ data: { addPullRequestReview: { pullRequestReview: { id: "pending-id" } } } }), stderr: "" };
@@ -170,4 +172,24 @@ test("GitHub client mutation wrappers use expected endpoints and methods", async
     ["api", "/repos/pytorch/pytorch/issues/comments/13", "--method", "PATCH", "--input", "/tmp/pi-review-test/payload.json"],
     ["api", "/repos/pytorch/pytorch/pulls/185924/reviews/14", "--method", "PATCH", "--input", "/tmp/pi-review-test/payload.json"],
   ]);
+});
+
+test("GitHub client compares commits and marks generated files", async () => {
+  const { runtime } = fakeRuntime({ gitattributes: "generated/** linguist-generated=true\n" });
+
+  const result = await createGitHubClient(runtime).compareCommits(ref, "aaa1111", "bbb2222");
+
+  assert.equal(result.totalCommits, 2);
+  assert.deepEqual(result.files.map((file) => ({ filename: file.filename, generated: file.generated === true })), [
+    { filename: "torch/a.py", generated: false },
+    { filename: "generated/model.py", generated: true },
+  ]);
+});
+
+test("GitHub client summarizes commit check runs", async () => {
+  const { runtime } = fakeRuntime();
+
+  const checks = await createGitHubClient(runtime).fetchCommitChecks(ref, "head");
+
+  assert.deepEqual(checks, { total: 4, success: 1, failure: 1, pending: 1, neutral: 1, failures: [{ name: "lint", url: "lint-url" }] });
 });

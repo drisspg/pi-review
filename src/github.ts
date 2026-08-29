@@ -9,7 +9,7 @@ import { markGeneratedPullFiles, parseGitattributes, type GitattributesRule } fr
 import { logger } from "./logger.js";
 import { prKey } from "./pr.js";
 import { listFileReviews } from "./state.js";
-import type { FileReviewState, GitHubDraftComment, GitHubDraftCommentInput, GitHubPendingReview, GitHubPendingReviewLookup, PullFile, PullIssueComment, PullRequest, PullRequestRef, PullRequestReviewData, PullRequestReviewDecision, PullRequestReviewSummary, PullReviewComment, StoredPullRequest } from "./types.js";
+import type { CommitChecks, FileReviewState, GitHubDraftComment, GitHubDraftCommentInput, GitHubPendingReview, GitHubPendingReviewLookup, PullFile, PullIssueComment, PullRequest, PullRequestRef, PullRequestReviewData, PullRequestReviewDecision, PullRequestReviewSummary, PullReviewComment, StoredPullRequest } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -26,6 +26,8 @@ export type GitHubRuntime = {
 
 export type GitHubClient = {
   fetchPullRequestReviewData: (ref: PullRequestRef) => Promise<PullRequestReviewData>;
+  compareCommits: (ref: PullRequestRef, baseSha: string, headSha: string) => Promise<{ files: PullFile[]; totalCommits: number }>;
+  fetchCommitChecks: (ref: PullRequestRef, sha: string) => Promise<CommitChecks>;
   fetchFileText: (ref: PullRequestRef, path: string, sha: string) => Promise<string>;
   fetchPendingPullRequestReview: (ref: PullRequestRef) => Promise<GitHubPendingReviewLookup>;
   createPendingPullRequestReview: (ref: PullRequestRef, pullRequestId: string) => Promise<string>;
@@ -227,6 +229,39 @@ export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): Git
     return { pr, raw: rawPr, files, comments, issueComments, reviewSummaries, fileReviews };
   }
 
+  /** Diff two arbitrary commits of the PR repo, e.g. the previously reviewed head vs the current head. */
+  async function compareCommits(ref: PullRequestRef, baseSha: string, headSha: string): Promise<{ files: PullFile[]; totalCommits: number }> {
+    const data = await ghApi<{ total_commits?: number; files?: PullFile[] }>(`/repos/${ref.owner}/${ref.repo}/compare/${baseSha}...${headSha}`);
+    const gitattributes = await fetchRootGitattributes(ref, headSha);
+    const files = markGeneratedPullFiles(data.files ?? [], gitattributes);
+    logger.info("github", "compared commits", { ref, baseSha: baseSha.slice(0, 12), headSha: headSha.slice(0, 12), files: files.length, commits: data.total_commits ?? 0 });
+    return { files, totalCommits: data.total_commits ?? 0 };
+  }
+
+  async function fetchCommitChecks(ref: PullRequestRef, sha: string): Promise<CommitChecks> {
+    type CheckRun = { name?: string; status?: string; conclusion?: string | null; html_url?: string | null };
+    const runs: CheckRun[] = [];
+    let total = 0;
+    for (let page = 1; page <= 5; page += 1) {
+      const data = await ghApi<{ total_count?: number; check_runs?: CheckRun[] }>(`/repos/${ref.owner}/${ref.repo}/commits/${sha}/check-runs?per_page=100&page=${page}`);
+      total = data.total_count ?? 0;
+      runs.push(...(data.check_runs ?? []));
+      if (runs.length >= total || (data.check_runs?.length ?? 0) === 0) break;
+    }
+    const checks: CommitChecks = { total, success: 0, failure: 0, pending: 0, neutral: 0, failures: [] };
+    for (const run of runs) {
+      if (run.status !== "completed") checks.pending += 1;
+      else if (run.conclusion === "success") checks.success += 1;
+      else if (run.conclusion === "neutral" || run.conclusion === "skipped" || run.conclusion === "stale") checks.neutral += 1;
+      else {
+        checks.failure += 1;
+        if (checks.failures.length < 30) checks.failures.push({ name: run.name ?? "unknown check", url: run.html_url ?? null });
+      }
+    }
+    logger.info("github", "fetched commit checks", { ref, sha: sha.slice(0, 12), total: checks.total, failure: checks.failure, pending: checks.pending });
+    return checks;
+  }
+
   async function fetchFileText(ref: PullRequestRef, path: string, sha: string): Promise<string> {
     const endpoint = `/repos/${ref.owner}/${ref.repo}/contents/${encodeURIComponent(path).replace(/%2F/g, "/")}?ref=${sha}`;
     const startedAt = performance.now();
@@ -329,13 +364,21 @@ export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): Git
     return ghApiPatch(ref, `${apiBase(ref)}/reviews/${reviewId}`, { body }, "edit review summary");
   }
 
-  return { fetchPullRequestReviewData, fetchFileText, fetchPendingPullRequestReview, createPendingPullRequestReview, addPendingPullRequestReviewThread, submitPullRequestReview, replyToReviewComment, addIssueComment, editReviewComment, editIssueComment, editReviewSummary };
+  return { fetchPullRequestReviewData, compareCommits, fetchCommitChecks, fetchFileText, fetchPendingPullRequestReview, createPendingPullRequestReview, addPendingPullRequestReviewThread, submitPullRequestReview, replyToReviewComment, addIssueComment, editReviewComment, editIssueComment, editReviewSummary };
 }
 
 const defaultClient = createGitHubClient();
 
 export async function fetchPullRequestReviewData(ref: PullRequestRef): Promise<PullRequestReviewData> {
   return defaultClient.fetchPullRequestReviewData(ref);
+}
+
+export async function compareCommits(ref: PullRequestRef, baseSha: string, headSha: string): Promise<{ files: PullFile[]; totalCommits: number }> {
+  return defaultClient.compareCommits(ref, baseSha, headSha);
+}
+
+export async function fetchCommitChecks(ref: PullRequestRef, sha: string): Promise<CommitChecks> {
+  return defaultClient.fetchCommitChecks(ref, sha);
 }
 
 export async function fetchFileText(ref: PullRequestRef, path: string, sha: string): Promise<string> {

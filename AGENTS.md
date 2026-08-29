@@ -14,7 +14,7 @@ src/                    Node server (TypeScript, ESM, run via tsx)
   *-api.ts              One injectable module per feature contract (pr, comment, draft-review,
                         review-prompt, review-submit, review-memory, saved-analysis, file,
                         gpu-workspace, pi, pi-terminal, ask-stream, review-archive, shell,
-                        usage, …)
+                        usage, blame, …)
   state.ts              StateStore: JSON persistence of AppState (PRs, drafts, viewed files,
                         AI/guide/focus-scan records, reviewer memory) at PI_REVIEW_STATE_PATH
   github.ts             gh api / GraphQL calls (PR data, pending reviews, comments)

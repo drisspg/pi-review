@@ -7,13 +7,15 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import { createAskStreamApi } from "./ask-stream-api.js";
+import { createBlameApi } from "./blame-api.js";
 import { createCommentApi, defaultCommentApiDeps } from "./comment-api.js";
 import { createDraftReviewApi } from "./draft-review-api.js";
 import { createFileApi, defaultFileApiDeps } from "./file-api.js";
 import { createGitHubDraftReviewApi, defaultGitHubDraftReviewApiDeps } from "./github-draft-review-api.js";
 import { gpuWorkspaceCreateResponse, gpuWorkspaceDeleteResponse, gpuWorkspaceExecResponse, gpuWorkspaceStatusResponse } from "./gpu-workspace-api.js";
-import { addIssueComment, addPendingPullRequestReviewThread, createPendingPullRequestReview, editIssueComment, editReviewComment, editReviewSummary, fetchFileText, fetchPendingPullRequestReview, fetchPullRequestReviewData, replyToReviewComment, submitPullRequestReview } from "./github.js";
+import { addIssueComment, addPendingPullRequestReviewThread, compareCommits, createPendingPullRequestReview, editIssueComment, editReviewComment, editReviewSummary, fetchCommitChecks, fetchFileText, fetchPendingPullRequestReview, fetchPullRequestReviewData, replyToReviewComment, submitPullRequestReview } from "./github.js";
 import { logger } from "./logger.js";
+import { parsePullRequestRef } from "./pr.js";
 import { createPiApi } from "./pi-api.js";
 import { createPiJobRunner } from "./pi-jobs.js";
 import { createPiTerminalApi } from "./pi-terminal-api.js";
@@ -31,7 +33,7 @@ import { createServerRoute, createRequestListener } from "./server-router.js";
 import { createShellApi } from "./shell-api.js";
 import { createUsageApi, defaultUsageApiDeps } from "./usage-api.js";
 import { appendDraftReviewComment, clearDraftReview, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, getDraftReview, listAiReviews, listFocusScans, listGuideReviews, listOverviews, listRecentPullRequests, listReviewMemoryRecords, markPullRequestReviewed, removePullRequest, reviewMemoryStats, saveAiReview, saveDraftReview, saveFocusScan, saveGuideReview, saveOverview, saveReviewMemory, saveReviewProfile, setFileViewed, upsertPullRequest } from "./state.js";
-import { cleanupPrWorktree, preparePrWorktree } from "./worktrees.js";
+import { cleanupPrWorktree, preparePrWorktree, worktreeDirForRef } from "./worktrees.js";
 
 const DEFAULT_PORT = 43133;
 const WEB_ROOT = resolve(process.cwd(), "dist-web");
@@ -48,6 +50,12 @@ const piTerminalManager = createPiTerminalManager({
   logger,
 });
 const askStreamApi = createAskStreamApi({ askPi, logger });
+const blameApi = createBlameApi({
+  exists: existsSync,
+  git: async (args, cwd) => (await execFileAsync("git", args, { cwd, maxBuffer: 10 * 1024 * 1024 })).stdout,
+  parsePullRequestRef,
+  worktreeDirForRef,
+});
 const commentApi = createCommentApi(defaultCommentApiDeps({ addIssueComment, editIssueComment, editReviewComment, editReviewSummary, replyToReviewComment }));
 const draftReviewApi = createDraftReviewApi({ clearDraftReview, getDraftReview, now: () => new Date().toISOString(), saveDraftReview });
 const fileApi = createFileApi(defaultFileApiDeps(fetchFileText, setFileViewed, async (url) => {
@@ -59,6 +67,8 @@ const piTerminalApi = createPiTerminalApi({ deleteSession: piTerminalManager.del
 const piTerminalDraftApi = createPiTerminalDraftApi({ appendDraftReviewComment, contextForPr: piSessionReviewContext, notifyDraftReview: piTerminalManager.broadcastDraftReview });
 const prApi = createPrApi(defaultPrApiDeps({
   cleanupPrWorktree,
+  compareCommits,
+  fetchCommitChecks,
   disposePiSession: async (prKey) => {
     await Promise.all([disposePiSession(prKey), piTerminalManager.disposePr(prKey)]);
   },
@@ -103,6 +113,7 @@ async function sendStatic(res: ServerResponse, pathname: string, head = false): 
 const route = createServerRoute({
   serverConfig: () => ({ autoReviews: process.env.PI_REVIEW_DISABLE_AUTO_REVIEWS !== "1" }),
   askStreamApi,
+  blameApi,
   commentApi,
   draftReviewApi,
   fileApi,
