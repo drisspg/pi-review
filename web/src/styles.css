@@ -12,8 +12,6 @@
   --success: #3fb950;
   --attention: #d29922;
   --thread-accent: #a371f7;
-  --thread-bg: rgba(163, 113, 247, 0.12);
-  --thread-bg-strong: rgba(163, 113, 247, 0.18);
   --link: #79c0ff;
   --fgColor-default: var(--text);
   --fgColor-muted: var(--muted);
@@ -81,8 +79,6 @@
   --success: #1a7f37;
   --attention: #9a6700;
   --thread-accent: #8250df;
-  --thread-bg: rgba(130, 80, 223, 0.09);
-  --thread-bg-strong: rgba(130, 80, 223, 0.14);
   --link: #0969da;
   --fgColor-default: var(--text);
   --fgColor-muted: var(--muted);
@@ -121,8 +117,6 @@
   --success: #57ab5a;
   --attention: #c69026;
   --thread-accent: #986ee2;
-  --thread-bg: rgba(152, 110, 226, 0.13);
-  --thread-bg-strong: rgba(152, 110, 226, 0.2);
   --link: #539bf5;
   --fgColor-default: var(--text);
   --fgColor-muted: var(--muted);
