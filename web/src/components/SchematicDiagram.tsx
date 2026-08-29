@@ -26,9 +26,8 @@ import {
 import ELK, { type ElkNode } from "elkjs/lib/elk.bundled.js";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { api } from "../api";
-import { cssVar } from "../lib/dom";
-import { parseSchematic, type Schematic, type SchematicDirection, type SchematicNodeKind } from "../lib/schematic";
+import { errorMessage, openFileInEditor } from "../api";
+import { cssVar } from "../lib/dom";import { parseSchematic, type Schematic, type SchematicDirection, type SchematicNodeKind } from "../lib/schematic";
 import type { FileLinkContext } from "./MarkdownContext";
 
 type CardData = { label: string; detail?: string; refText?: string; kind: SchematicNodeKind; direction: SchematicDirection };
@@ -220,7 +219,7 @@ export function SchematicDiagram({ code, fileLinks }: { code: string; fileLinks?
     try {
       return { schematic: parseSchematic(code) };
     } catch (err) {
-      return { error: err instanceof Error ? err.message : String(err) };
+      return { error: errorMessage(err) };
     }
   }, [code]);
 
@@ -242,7 +241,7 @@ export function SchematicDiagram({ code, fileLinks }: { code: string; fileLinks?
     if (fileLinks == null) return;
     const match = /^(.+):(\d+)/.exec(ref);
     if (match == null) return;
-    void api<{ target: string }>("/api/file/open", { method: "POST", body: JSON.stringify({ prUrl: fileLinks.prUrl, path: match[1], line: Number.parseInt(match[2], 10) }) });
+    void openFileInEditor(fileLinks.prUrl, match[1], Number.parseInt(match[2], 10));
   }
 
   return <div className="schematic-block">

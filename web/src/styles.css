@@ -156,7 +156,11 @@
   --radius: var(--borderRadius-medium);
 }
 
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
 
 body {
   margin: 0;
@@ -164,11 +168,6 @@ body {
   color: var(--text);
   font-size: 14px;
   line-height: 1.5;
-}
-
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
 }
 
 ::-webkit-scrollbar {
@@ -1449,9 +1448,6 @@ kbd {
   font-size: 0.82rem;
   user-select: none;
   list-style: none;
-}
-
-.file-navigator > summary {
   transition: background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
 }
 
@@ -1604,9 +1600,6 @@ kbd {
   cursor: pointer;
   color: inherit;
   font: inherit;
-}
-
-.file-summary-left {
   transition: background-color var(--dur-fast) var(--ease);
 }
 
@@ -1658,9 +1651,6 @@ kbd {
   font-size: 0.78rem;
   user-select: none;
   cursor: pointer;
-}
-
-.viewed-toggle {
   transition: color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease);
 }
 

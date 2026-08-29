@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import type mermaidNs from "mermaid";
 
-import { cssVar } from "../lib/dom";
-import { Button } from "./Button";
+import { errorMessage } from "../api";
+import { cssVar } from "../lib/dom";import { Button } from "./Button";
 
 type PanPoint = { x: number; y: number };
 type DragState = { pointerId: number; startX: number; startY: number; originX: number; originY: number };
@@ -163,7 +163,7 @@ export function Mermaid({ code }: { code: string }) {
       } catch (err) {
         if (cancelled) return;
         setSvg(null);
-        setError(err instanceof Error ? err.message : String(err));
+        setError(errorMessage(err));
       }
     })();
     return () => { cancelled = true; };

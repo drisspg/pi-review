@@ -1,8 +1,18 @@
+/** Human-readable message for a caught unknown, usually an api() rejection. */
+export function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { ...init, headers: { "content-type": "application/json", ...init?.headers } });
   const body = await response.json();
   if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
   return body as T;
+}
+
+/** Ask the server to open a PR worktree file location in the reviewer's editor. */
+export async function openFileInEditor(prUrl: string, path: string, line: number): Promise<void> {
+  await api("/api/file/open", { method: "POST", body: JSON.stringify({ prUrl, path, line }) });
 }
 
 type AskPiPayload = { prKey: string; prompt: string; purpose?: string };

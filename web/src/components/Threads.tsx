@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { ChevronDownIcon, ChevronRightIcon, LinkExternalIcon } from "@primer/octicons-react";
 import { Flash, TextInput } from "@primer/react";
 
-import { api } from "../api";
+import { api, errorMessage } from "../api";
 import { Button } from "./Button";
 import { relativeTime } from "../lib/pr";
 import { commentTarget, commentThreadDomId, groupReviewComments, targetLabel } from "../lib/comments";
@@ -82,7 +82,7 @@ function GitHubCommentView({ comment, commentKind, prUrl, refreshGithubActivity 
       setEditing(false);
       void refreshGithubActivity();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     } finally {
       setSubmitting(false);
     }
@@ -135,7 +135,7 @@ function ThreadReplyBox({ prUrl, kind, commentId, refreshGithubActivity }: { prU
       setBody("");
       await refreshGithubActivity();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     } finally {
       setSubmitting(false);
     }

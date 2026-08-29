@@ -2,7 +2,7 @@ import React, { createContext, ReactNode, useContext, useEffect, useMemo, useRef
 import { createRoot } from "react-dom/client";
 import { ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, GitPullRequestIcon, ScreenFullIcon, ScreenNormalIcon, XIcon } from "@primer/octicons-react";
 import { BaseStyles, Checkbox, Flash, Radio, Select, Textarea, TextInput, ThemeProvider } from "@primer/react";
-import { api, askPi as askPiApi } from "./api";
+import { api, askPi as askPiApi, errorMessage } from "./api";
 import { ActionMenu, ActionMenuItem } from "./components/ActionMenu";
 import { Button } from "./components/Button";
 import { CodeText, InlineSnippetsProvider, MarkdownText } from "./components/Markdown";
@@ -13,6 +13,7 @@ import { ExistingComments, ExistingReviewThread } from "./components/Threads";
 import type { PiTerminalTarget } from "./components/PiTerminal";
 import { buildDiffAnnotationIndex, commentTarget, commentThreadDomId, diffAnnotationTargetKey, targetKey, targetLabel, type DiffAnnotationIndex } from "./lib/comments";
 import { contextRowsFromText, hunkNewStart, isTargetInSelection, lastNewLine, parsePatchRows, parsePatchSetSections, targetFromPoint, targetFromRow } from "./lib/diff";
+import { writeClipboard } from "./lib/dom";
 import { parseFocusAreas } from "./lib/focus";
 import { parseGuideChapters, type GuideChapter } from "./lib/guide";
 import { parseOverviewSections } from "./lib/overview";
@@ -189,30 +190,6 @@ function focusScanSummary(record: FocusScanRecord): string {
   const areas = parseFocusAreas(record.answer);
   if (areas.length > 0) return `${areas.length} focus ${areas.length === 1 ? "area" : "areas"}`;
   return record.answer.trim().length === 0 ? "Not yet scanned" : "Clean — no focus areas";
-}
-
-function writeClipboardFallback(text: string): void {
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.style.position = "fixed";
-  textarea.style.opacity = "0";
-  document.body.append(textarea);
-  textarea.select();
-  document.execCommand("copy");
-  textarea.remove();
-}
-
-async function writeClipboard(text: string): Promise<void> {
-  if (navigator.clipboard != null) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return;
-    } catch {
-      writeClipboardFallback(text);
-      return;
-    }
-  }
-  writeClipboardFallback(text);
 }
 
 function draftDiffHunk(files: PullFile[], draft: DraftComment): string {
@@ -406,6 +383,22 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 }
 
+/** Start a background Pi review job and poll it to completion, reporting activity while it runs. */
+async function runPiJob(endpoint: "review" | "focus-review", label: string, prKey: string, prompt: string, onActivity: (activity: PiAgentActivity | undefined) => void): Promise<string | undefined> {
+  const { job } = await api<{ job: { id: string } }>(`/api/pi/${endpoint}`, { method: "POST", body: JSON.stringify({ prKey, prompt }) });
+  for (;;) {
+    await sleep(800);
+    const { job: status } = await api<{ job: { status: "running" | "complete" | "failed"; answer?: string; error?: string; activity?: PiAgentActivity } }>(`/api/pi/${endpoint}/status`, { method: "POST", body: JSON.stringify({ jobId: job.id }) });
+    if (status.status === "running") {
+      onActivity(status.activity);
+      continue;
+    }
+    if (status.status === "failed") throw new Error(status.error ?? `${label} failed`);
+    if (status.status !== "complete") throw new Error(`${label} returned an unknown job status`);
+    return status.answer;
+  }
+}
+
 async function loadPiAgentActivityForPr(prKey: string, purpose: string, fallback: PiAgentActivity | null): Promise<PiAgentActivity | null> {
   const data = await api<{ diagnostics: { sessions?: unknown[] } }>("/api/pi/diagnostics", { method: "POST", body: JSON.stringify({ prKey }) });
   const session = data.diagnostics.sessions?.find((item): item is Record<string, unknown> => typeof item === "object" && item != null && (item as Record<string, unknown>).purpose === purpose);
@@ -505,8 +498,7 @@ function App() {
     setAiReview(aiReviewRef.current);
   }
 
-  useEffect(() => { refreshHistory().catch((err: unknown) => setError(err instanceof Error ? err.message : String(err))); refreshLogs().catch(() => undefined); }, []);
-
+  useEffect(() => { refreshHistory().catch((err: unknown) => setError(errorMessage(err))); refreshLogs().catch(() => undefined); }, []);
   useEffect(() => {
     function openRoute() {
       const routedInput = reviewInputFromHash();
@@ -673,7 +665,7 @@ function App() {
       void runAutomaticPiReviews(data);
       await Promise.all([refreshHistory(), refreshLogs()]);
     } catch (err) {
-      if (requestId === openRequestIdRef.current && !(err instanceof DOMException && err.name === "AbortError")) setError(err instanceof Error ? err.message : String(err));
+      if (requestId === openRequestIdRef.current && !(err instanceof DOMException && err.name === "AbortError")) setError(errorMessage(err));
     } finally {
       if (pendingOpenRef.current?.requestId === requestId) pendingOpenRef.current = null;
       if (openAbortRef.current === controller) openAbortRef.current = null;
@@ -711,7 +703,7 @@ function App() {
         .catch((err: unknown) => {
           if (requestId !== draftSaveRequestIdRef.current || (err instanceof DOMException && err.name === "AbortError")) return;
           setDraftSaveStatus("error");
-          setDraftSaveError(err instanceof Error ? err.message : String(err));
+          setDraftSaveError(errorMessage(err));
         });
     }, 300);
     return () => {
@@ -735,7 +727,7 @@ function App() {
       showGuideReviewRecord(data.guideReview);
       await Promise.all([refreshHistory(), refreshLogs()]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     } finally {
       setRefreshingActivity(false);
     }
@@ -750,7 +742,7 @@ function App() {
       setGithubDraftReview(response.review);
       setGithubDraftLoaded(true);
     } catch (err) {
-      setGithubDraftError(err instanceof Error ? err.message : String(err));
+      setGithubDraftError(errorMessage(err));
     } finally {
       setGithubDraftLoading(false);
     }
@@ -767,7 +759,7 @@ function App() {
       setGithubDraftLoaded(true);
       setDrafts([]);
     } catch (err) {
-      setGithubDraftError(err instanceof Error ? err.message : String(err));
+      setGithubDraftError(errorMessage(err));
     } finally {
       setGithubDraftMoving(false);
     }
@@ -899,7 +891,7 @@ function App() {
       clearActiveDraftReview(review.pr.key);
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
       return false;
     }
   }
@@ -911,7 +903,7 @@ function App() {
       clearActiveDraftReview(review.pr.key);
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
       return false;
     }
   }
@@ -934,7 +926,7 @@ function App() {
       await refreshGithubActivity();
       return true;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       setInvalidDraftIds(draftIdsFromSubmitError(message, drafts));
       setError(message);
       return false;
@@ -1006,13 +998,13 @@ function App() {
         const { guide } = await api<{ guide: GuideReviewRecord }>("/api/guide-review/save", { method: "POST", body: JSON.stringify({ prKey: targetReview.pr.key, headSha: targetReview.pr.headSha, answer }) });
         updateCachedReview(targetReview.pr.key, (current) => ({ ...current, guideReview: guide }));
       } catch (err) {
-        setError(`Saving guide failed: ${err instanceof Error ? err.message : String(err)}`);
+        setError(`Saving guide failed: ${errorMessage(err)}`);
       }
       await refreshLogs();
     } catch (err) {
       cancelActivityPolling();
       if (activeReviewKeyRef.current !== targetReview.pr.key) return;
-      setGuideReview({ running: false, text: `Guide generation failed: ${err instanceof Error ? err.message : String(err)}`, activity: null });
+      setGuideReview({ running: false, text: `Guide generation failed: ${errorMessage(err)}`, activity: null });
     }
   }
 
@@ -1043,13 +1035,13 @@ function App() {
         const { overview: saved } = await api<{ overview: GuideReviewRecord }>("/api/overview/save", { method: "POST", body: JSON.stringify({ prKey: targetReview.pr.key, headSha: targetReview.pr.headSha, answer }) });
         updateCachedReview(targetReview.pr.key, (current) => ({ ...current, overview: saved }));
       } catch (err) {
-        setError(`Saving overview failed: ${err instanceof Error ? err.message : String(err)}`);
+        setError(`Saving overview failed: ${errorMessage(err)}`);
       }
       await refreshLogs();
     } catch (err) {
       cancelActivityPolling();
       if (activeReviewKeyRef.current !== targetReview.pr.key) return;
-      setOverview((current) => ({ running: false, text: current.text, error: err instanceof Error ? err.message : String(err), activity: null }));
+      setOverview((current) => ({ running: false, text: current.text, error: errorMessage(err), activity: null }));
     }
   }
 
@@ -1060,26 +1052,16 @@ function App() {
     const previousFocusAreas = targetReview.focusScan == null ? "No previous focus scan findings are stored." : focusScanHistoryPrompt(targetReview.focusScan.answer, targetReview.focusScan.areaStates);
     try {
       const { prompt } = await buildPiPrompt({ mode: "main-review", prKey: targetReview.pr.key, previousAiReview, previousFocusAreas, files: targetReview.files });
-      const { job } = await api<{ job: { id: string } }>("/api/pi/review", { method: "POST", body: JSON.stringify({ prKey: targetReview.pr.key, prompt }) });
-      for (;;) {
-        await sleep(800);
-        const { job: status } = await api<{ job: { status: "running" | "complete" | "failed"; answer?: string; error?: string; activity?: PiAgentActivity } }>("/api/pi/review/status", { method: "POST", body: JSON.stringify({ jobId: job.id }) });
-        if (status.status === "running") {
-          if (activeReviewKeyRef.current === targetReview.pr.key) updateAiReview((current) => ({ ...current, activity: status.activity ?? current.activity ?? null }));
-          continue;
-        }
-        if (activeReviewKeyRef.current !== targetReview.pr.key) return;
-        if (status.status === "failed") throw new Error(status.error ?? "AI review failed");
-        if (status.status !== "complete") throw new Error("AI review returned an unknown job status");
-        const answer = status.answer ?? "AI review completed without output.";
-        const nextMessages = [generalReviewMessage(answer)];
-        updateAiReview((current) => ({ ...current, running: false, text: answer, messages: nextMessages, activity: null }));
-        void saveAiReviewFor(targetReview, answer, nextMessages, null);
-        break;
-      }
+      const answer = (await runPiJob("review", "AI review", targetReview.pr.key, prompt, (activity) => {
+        if (activeReviewKeyRef.current === targetReview.pr.key) updateAiReview((current) => ({ ...current, activity: activity ?? current.activity ?? null }));
+      })) ?? "AI review completed without output.";
+      if (activeReviewKeyRef.current !== targetReview.pr.key) return;
+      const nextMessages = [generalReviewMessage(answer)];
+      updateAiReview((current) => ({ ...current, running: false, text: answer, messages: nextMessages, activity: null }));
+      void saveAiReviewFor(targetReview, answer, nextMessages, null);
     } catch (err) {
       if (activeReviewKeyRef.current !== targetReview.pr.key) return;
-      const text = `AI review failed: ${err instanceof Error ? err.message : String(err)}`;
+      const text = `AI review failed: ${errorMessage(err)}`;
       updateAiReview((current) => ({ ...current, running: false, text, messages: [generalReviewMessage(text)], activity: null }));
     }
   }
@@ -1100,34 +1082,24 @@ function App() {
     const previousFocusAreas = previousScan == null ? "No previous focus scan findings are stored." : focusScanHistoryPrompt(previousScan.answer, previousScan.areaStates);
     try {
       const { prompt } = await buildPiPrompt({ mode: "focus-review", prKey: targetReview.pr.key, prTitle: targetReview.pr.title, previousFocusAreas, files: targetReview.files });
-      const { job } = await api<{ job: { id: string } }>("/api/pi/focus-review", { method: "POST", body: JSON.stringify({ prKey: targetReview.pr.key, prompt }) });
-      for (;;) {
-        await sleep(800);
-        const { job: status } = await api<{ job: { status: "running" | "complete" | "failed"; answer?: string; error?: string; activity?: PiAgentActivity } }>("/api/pi/focus-review/status", { method: "POST", body: JSON.stringify({ jobId: job.id }) });
-        if (status.status === "running") {
-          if (activeReviewKeyRef.current === targetReview.pr.key) setFocusReview((current) => ({ ...current, activity: status.activity ?? current.activity ?? null }));
-          continue;
-        }
-        if (activeReviewKeyRef.current !== targetReview.pr.key) return;
-        if (status.status === "failed") throw new Error(status.error ?? "Focus review failed");
-        if (status.status !== "complete") throw new Error("Focus review returned an unknown job status");
-        const answer = status.answer ?? "Focus scan completed without output.";
-        const nextAreas = parseFocusAreas(answer);
-        const inheritedStates = statesFromFocusAreas(focusAreas, viewedFocusAreaIds, collapsedFocusAreaIds);
-        const nextViewedIds = idsFromFocusStates(nextAreas, inheritedStates, "viewed");
-        const nextCollapsedIds = idsFromFocusStates(nextAreas, inheritedStates, "collapsed");
-        setFocusReview((current) => ({ ...current, running: false, text: answer, activity: null }));
-        setViewedFocusAreaIds(nextViewedIds);
-        setCollapsedFocusAreaIds(nextCollapsedIds);
-        // Background warms must not auto-activate an area: activation mounts its inline
-        // terminal and spawns a real Pi session the reviewer never asked for.
-        if (!background) setActiveFocusAreaId(nextAreas[0]?.id ?? null);
-        void saveFocusScanFor(targetReview, answer, nextViewedIds, nextCollapsedIds, null);
-        break;
-      }
+      const answer = (await runPiJob("focus-review", "Focus review", targetReview.pr.key, prompt, (activity) => {
+        if (activeReviewKeyRef.current === targetReview.pr.key) setFocusReview((current) => ({ ...current, activity: activity ?? current.activity ?? null }));
+      })) ?? "Focus scan completed without output.";
+      if (activeReviewKeyRef.current !== targetReview.pr.key) return;
+      const nextAreas = parseFocusAreas(answer);
+      const inheritedStates = statesFromFocusAreas(focusAreas, viewedFocusAreaIds, collapsedFocusAreaIds);
+      const nextViewedIds = idsFromFocusStates(nextAreas, inheritedStates, "viewed");
+      const nextCollapsedIds = idsFromFocusStates(nextAreas, inheritedStates, "collapsed");
+      setFocusReview((current) => ({ ...current, running: false, text: answer, activity: null }));
+      setViewedFocusAreaIds(nextViewedIds);
+      setCollapsedFocusAreaIds(nextCollapsedIds);
+      // Background warms must not auto-activate an area: activation mounts its inline
+      // terminal and spawns a real Pi session the reviewer never asked for.
+      if (!background) setActiveFocusAreaId(nextAreas[0]?.id ?? null);
+      void saveFocusScanFor(targetReview, answer, nextViewedIds, nextCollapsedIds, null);
     } catch (err) {
       if (activeReviewKeyRef.current !== targetReview.pr.key) return;
-      const text = `Focus review failed: ${err instanceof Error ? err.message : String(err)}`;
+      const text = `Focus review failed: ${errorMessage(err)}`;
       setFocusReview((current) => ({ ...current, running: false, text, activity: null }));
     }
   }
@@ -1179,7 +1151,7 @@ function App() {
         await api("/api/pr/cleanup", { method: "POST", body: JSON.stringify({ input: pr.url || prUrlFromKey(pr.key) }) });
         removedKeys.push(pr.key);
       } catch (error) {
-        failures.push(`${pr.key}: ${error instanceof Error ? error.message : String(error)}`);
+        failures.push(`${pr.key}: ${errorMessage(error)}`);
       }
     }
     const removedKeySet = new Set(removedKeys);
@@ -1230,8 +1202,7 @@ function App() {
       openLogs={() => { setLogsOpen(true); void refreshLogs(); }}
     />
     {error != null && <Flash variant="danger" className="error" role="alert">{error}</Flash>}
-    {busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p><Button variant="muted" onClick={cancelOpen}>Cancel</Button></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPrs={cleanupPrs} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} reviewMode={reviewMode} setReviewMode={setReviewMode} overview={overview} runOverview={runOverview} saveGuideProgress={saveGuideProgress} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, copyFeedbackPrompt: copyReviewFeedbackPrompt, guideReview, runGuideReview, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} reviewEvent={reviewEvent} setReviewEvent={setReviewEvent} reviewBody={reviewBody} setReviewBody={setReviewBody} draftSaveStatus={draftSaveStatus} draftSaveError={draftSaveError} retryDraftSave={() => setDraftSaveRetry((retry) => retry + 1)} archiveReview={archiveReview} discardReview={discardReview} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} githubDrafts={{ review: githubDraftReview, loaded: githubDraftLoaded, loading: githubDraftLoading, moving: githubDraftMoving, error: githubDraftError, pull: pullGithubDraftReview, moveLocalDrafts: moveLocalDraftsToGithub, copyHandoff: copyGithubDraftHandoff }} />}
-    {diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}
+    {busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p><Button variant="muted" onClick={cancelOpen}>Cancel</Button></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPrs={cleanupPrs} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} reviewMode={reviewMode} setReviewMode={setReviewMode} overview={overview} runOverview={runOverview} saveGuideProgress={saveGuideProgress} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, copyFeedbackPrompt: copyReviewFeedbackPrompt, guideReview, runGuideReview, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} reviewEvent={reviewEvent} setReviewEvent={setReviewEvent} reviewBody={reviewBody} setReviewBody={setReviewBody} draftSaveStatus={draftSaveStatus} draftSaveError={draftSaveError} retryDraftSave={() => setDraftSaveRetry((retry) => retry + 1)} archiveReview={archiveReview} discardReview={discardReview} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} githubDrafts={{ review: githubDraftReview, loaded: githubDraftLoaded, loading: githubDraftLoading, moving: githubDraftMoving, error: githubDraftError, pull: pullGithubDraftReview, moveLocalDrafts: moveLocalDraftsToGithub, copyHandoff: copyGithubDraftHandoff }} />}    {diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}
     {review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} openDiagnostics={() => { setSettingsOpen(false); void loadDiagnostics(); }} close={() => setSettingsOpen(false)} />}
     {memoryOpen && <ReviewMemoryModal memory={reviewMemory} loading={memoryLoading} distilling={memoryDistilling} refresh={() => void loadReviewMemory()} distill={() => void distillReviewMemory()} close={() => setMemoryOpen(false)} />}
     {review != null && gpuWorkspaceOpen && <GpuWorkspaceModal review={review} close={() => setGpuWorkspaceOpen(false)} refreshLogs={refreshLogs} />}
@@ -1355,8 +1326,7 @@ function StartPage({ prs, openPr, cleanupPrs, openInput, setOpenInput, busy }: {
       </div>
       {visibleGroups.length === 0 ? <p className="muted">Nothing in this category.</p> : visibleGroups.map((group) => <section className="start-group" key={group.id}>
         <header className="start-group-head"><h2>{group.title}</h2><span className="muted">{group.hint}</span></header>
-        <div className="pr-grid">{group.prs.map((pr) => <PrCard key={pr.key} pr={pr} openPr={openPr} cleanupPrs={cleanupPrs} selecting={selecting} selected={selectedKeys.has(pr.key)} toggleSelected={toggleSelected} />)}</div>
-      </section>)}
+        <div className="pr-grid">{group.prs.map((pr) => <PrCard key={pr.key} pr={pr} openPr={openPr} cleanupPrs={cleanupPrs} selecting={selecting} selected={selectedKeys.has(pr.key)} toggleSelected={toggleSelected} />)}</div>      </section>)}
     </>}
   </div>;
 }
@@ -1382,8 +1352,7 @@ function groupPrsByStatus(prs: StoredPullRequest[]): { needsReview: StoredPullRe
   return { needsReview, inProgress, done };
 }
 
-function PrCard({ pr, openPr, cleanupPrs, selecting, selected, toggleSelected }: { pr: StoredPullRequest; openPr: (input: string) => Promise<void>; cleanupPrs: (prs: StoredPullRequest[]) => Promise<string[]>; selecting: boolean; selected: boolean; toggleSelected: (key: string) => void }) {
-  const status = reviewStatus(pr);
+function PrCard({ pr, openPr, cleanupPrs, selecting, selected, toggleSelected }: { pr: StoredPullRequest; openPr: (input: string) => Promise<void>; cleanupPrs: (prs: StoredPullRequest[]) => Promise<string[]>; selecting: boolean; selected: boolean; toggleSelected: (key: string) => void }) {  const status = reviewStatus(pr);
   return <article className={`pr-card status-${status.tone}${selecting ? " selecting" : ""}${selected ? " selected" : ""}`}>
     {selecting && <label className="pr-card-select"><Checkbox checked={selected} onChange={() => toggleSelected(pr.key)} aria-label={`Select ${pr.key}`} /></label>}
     <a className="pr-card-body" href={reviewHash(pr.url)} onClick={(event) => { if (!isPlainLeftClick(event)) return; event.preventDefault(); if (selecting) toggleSelected(pr.key); else void openPr(pr.url); }}>
@@ -1633,8 +1602,7 @@ function PrSummary({ pr }: { pr: StoredPullRequest }) {
   </section>;
 }
 
-function focusAreaLocation(area: FocusArea): string {
-  return `${area.path}:${area.startLine === area.endLine ? area.startLine : `${area.startLine}-${area.endLine}`}`;
+function focusAreaLocation(area: Pick<FocusArea, "path" | "startLine" | "endLine">): string {  return `${area.path}:${area.startLine === area.endLine ? area.startLine : `${area.startLine}-${area.endLine}`}`;
 }
 
 /** Right-column overview panel that collapses to a header strip so the remaining panels (e.g. the terminal) take the space. */
@@ -2155,7 +2123,7 @@ function ThreadBox({ thread, setThread, removeThread, addDraft }: { thread: Thre
       await api("/api/pi/terminal/delete", { method: "POST", body: JSON.stringify({ prKey: review.prKey, session: terminalSessionId("inline", thread.key) }) });
       removeThread();
     } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : String(err));
+      setDeleteError(errorMessage(err));
       setDeleting(false);
     }
   }
@@ -2202,36 +2170,42 @@ function reviewStatus(pr: StoredPullRequest): { label: string; tone: string } {
   return { label: "Reviewed", tone: "success" };
 }
 
-function GitHubDraftReviewPanel({ files, localDraftCount, onJumpToTarget }: { files: PullFile[]; localDraftCount: number; onJumpToTarget?: (target: Target) => void }) {
-  const githubDrafts = useContext(GitHubDraftContext);
-  const [copied, setCopied] = useState(false);
+/** Shared copy-button state: busy flag, transient "copied" confirmation, and the last failure. */
+function useCopyAction(copy: () => Promise<void>): { copying: boolean; copied: boolean; error: string | null; trigger: () => void } {
   const [copying, setCopying] = useState(false);
-  const [copyError, setCopyError] = useState<string | null>(null);
-  const comments = githubDrafts.review?.comments ?? [];
-  async function copyHandoff() {
-    if (copying || comments.length === 0) return;
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function run(): Promise<void> {
+    if (copying) return;
     setCopying(true);
-    setCopyError(null);
+    setError(null);
     try {
-      await githubDrafts.copyHandoff();
+      await copy();
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1600);
     } catch (err) {
-      setCopyError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     } finally {
       setCopying(false);
     }
   }
+  return { copying, copied, error, trigger: () => void run() };
+}
+
+function GitHubDraftReviewPanel({ files, localDraftCount, onJumpToTarget }: { files: PullFile[]; localDraftCount: number; onJumpToTarget?: (target: Target) => void }) {
+  const githubDrafts = useContext(GitHubDraftContext);
+  const handoffCopy = useCopyAction(githubDrafts.copyHandoff);
+  const comments = githubDrafts.review?.comments ?? [];
   return <details className="github-draft-review">
     <summary className="github-draft-review-head"><span className="disclosure-chevron" aria-hidden="true">›</span><div><strong>GitHub private drafts <span className="muted">(optional)</span></strong><span>{comments.length > 0 ? `${comments.length} private ${comments.length === 1 ? "comment" : "comments"}` : githubDrafts.loaded ? "No pending comments" : "Separate from your local drafts below"}</span></div></summary>
     <p className="github-draft-review-note">Move local drafts here to store them in your pending GitHub review. They remain private until you submit that review on GitHub.</p>
     <div className="github-draft-review-actions">
       <Button className="github-draft-move" onClick={() => void githubDrafts.moveLocalDrafts()} disabled={localDraftCount === 0 || githubDrafts.moving}>{githubDrafts.moving ? "Moving drafts…" : localDraftCount > 0 ? `Move ${localDraftCount} local ${localDraftCount === 1 ? "draft" : "drafts"} to GitHub privately` : "No local drafts to move"}</Button>
       <Button variant="muted" className="small-muted-button" onClick={() => void githubDrafts.pull()} disabled={githubDrafts.loading}>{githubDrafts.loading ? "Pulling…" : githubDrafts.loaded ? "Refresh GitHub private drafts" : "Pull GitHub private drafts"}</Button>
-      <Button variant="muted" className="small-muted-button" onClick={() => void copyHandoff()} disabled={copying || comments.length === 0}>{copying ? "Copying…" : copied ? "Copied agent handoff" : "Copy agent handoff"}</Button>
+      <Button variant="muted" className="small-muted-button" onClick={() => { if (comments.length > 0) handoffCopy.trigger(); }} disabled={handoffCopy.copying || comments.length === 0}>{handoffCopy.copying ? "Copying…" : handoffCopy.copied ? "Copied agent handoff" : "Copy agent handoff"}</Button>
     </div>
     {githubDrafts.error != null && <Flash variant="danger" className="operation-error" role="alert">GitHub draft failed: {githubDrafts.error}</Flash>}
-    {copyError != null && <Flash variant="danger" className="copy-feedback-error" role="alert">Copy failed: {copyError}</Flash>}
+    {handoffCopy.error != null && <Flash variant="danger" className="copy-feedback-error" role="alert">Copy failed: {handoffCopy.error}</Flash>}
     {comments.length > 0 && <div className="github-draft-list">{comments.map((comment, index) => <article className="github-draft-card" key={comment.id}><button className="github-draft-location" onClick={onJumpToTarget == null ? undefined : () => onJumpToTarget(githubDraftTarget(files, comment))}><span>#{index + 1}</span><strong>{githubDraftLocation(comment)}</strong></button><MarkdownText text={comment.body} /></article>)}</div>}
   </details>;
 }
@@ -2241,9 +2215,7 @@ function ReviewSummary({ pr, files, drafts, setDrafts, event, setEvent, body, se
   const [copied, setCopied] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [discarding, setDiscarding] = useState(false);
-  const [copyingFeedback, setCopyingFeedback] = useState(false);
-  const [feedbackCopied, setFeedbackCopied] = useState(false);
-  const [feedbackCopyError, setFeedbackCopyError] = useState<string | null>(null);
+  const feedbackCopy = useCopyAction(() => copyFeedbackPrompt(body));
   const hasDrafts = drafts.length > 0;
   const hasReviewContent = body.trim().length > 0 || hasDrafts;
   const canPublish = hasReviewContent || event === "APPROVE";
@@ -2288,29 +2260,15 @@ function ReviewSummary({ pr, files, drafts, setDrafts, event, setEvent, body, se
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1600);
   }
-  async function copyFeedback(): Promise<void> {
-    if (copyingFeedback) return;
-    setCopyingFeedback(true);
-    setFeedbackCopyError(null);
-    try {
-      await copyFeedbackPrompt(body);
-      setFeedbackCopied(true);
-      window.setTimeout(() => setFeedbackCopied(false), 1600);
-    } catch (err) {
-      setFeedbackCopyError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setCopyingFeedback(false);
-    }
-  }
-  const copyFeedbackButton = <Button variant="muted" className="small-muted-button pi-copy-feedback" onClick={() => void copyFeedback()} disabled={copyingFeedback}>{copyingFeedback ? "Copying…" : feedbackCopied ? "Copied feedback prompt" : "Copy feedback prompt"}</Button>;
+  const copyFeedbackButton = <Button variant="muted" className="small-muted-button pi-copy-feedback" onClick={feedbackCopy.trigger} disabled={feedbackCopy.copying}>{feedbackCopy.copying ? "Copying…" : feedbackCopy.copied ? "Copied feedback prompt" : "Copy feedback prompt"}</Button>;
   const saveStatus = draftSaveStatus !== "idle" && <span className={`draft-save-status is-${draftSaveStatus}`} role={draftSaveStatus === "error" ? "alert" : "status"}>{draftSaveStatus === "saving" ? "Saving…" : draftSaveStatus === "saved" ? "Saved locally" : <>Not saved: {draftSaveError}<button type="button" onClick={retryDraftSave}>Retry</button></>}</span>;
   const finishedDescription = finished === "published" ? "Review published to GitHub." : finished === "archived" ? "Review archived locally. You can find it in Review memory." : draftDescription;
   const githubDraftPanel = <GitHubDraftReviewPanel files={files} localDraftCount={drafts.length} onJumpToTarget={onJumpToTarget} />;
-  if (!composing && !hasReviewContent) return <section className="panel review-summary review-summary-empty"><div className="review-summary-head"><div><h2>Review changes</h2><p className="muted">{finishedDescription}</p>{feedbackCopyError != null && <Flash variant="danger" className="copy-feedback-error" role="alert">Copy failed: {feedbackCopyError}</Flash>}</div></div>{githubDraftPanel}<div className="review-summary-empty-actions">{copyFeedbackButton}<Button className="review-start-button" onClick={() => { setFinished(null); setComposing(true); }}>Start review</Button></div></section>;
+  if (!composing && !hasReviewContent) return <section className="panel review-summary review-summary-empty"><div className="review-summary-head"><div><h2>Review changes</h2><p className="muted">{finishedDescription}</p>{feedbackCopy.error != null && <Flash variant="danger" className="copy-feedback-error" role="alert">Copy failed: {feedbackCopy.error}</Flash>}</div></div>{githubDraftPanel}<div className="review-summary-empty-actions">{copyFeedbackButton}<Button className="review-start-button" onClick={() => { setFinished(null); setComposing(true); }}>Start review</Button></div></section>;
   const publishLabel = submitting ? "Publishing…" : event === "APPROVE" ? "Approve on GitHub" : event === "REQUEST_CHANGES" ? "Request changes on GitHub" : `Publish to GitHub${drafts.length > 0 ? ` (${drafts.length})` : ""}`;
   return <section className="panel review-summary">
     <div className="review-summary-head"><div><h2>Review changes</h2><p className="muted">{draftDescription}</p>{saveStatus}</div>{copyFeedbackButton}</div>
-    {feedbackCopyError != null && <Flash variant="danger" className="copy-feedback-error" role="alert">Copy failed: {feedbackCopyError}</Flash>}
+    {feedbackCopy.error != null && <Flash variant="danger" className="copy-feedback-error" role="alert">Copy failed: {feedbackCopy.error}</Flash>}
     {githubDraftPanel}
     <div className="review-compose">
       <label className="review-event-field"><span>Outcome</span><Select className={`review-event ${event.toLowerCase().replace("_", "-")}`} value={event} onChange={(change) => { setEvent(change.target.value as typeof event); setFinished(null); }}><option value="COMMENT">Comment</option><option value="APPROVE">Approve</option><option value="REQUEST_CHANGES">Request changes</option></Select></label>
@@ -2351,28 +2309,12 @@ function GeneralReviewEntry({ message, prUrl }: { message: AiReviewMessage; prUr
 
 function AiReviewPanel({ prKey, prUrl, focusPanel, review, aiReviewHistory, aiReviewId, showAiReviewRecord, runReview, copyFeedbackPrompt, focusReview, focusScanHistory, focusScanId, showFocusScanRecord, runFocusReview, focusAreas, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds, viewedFocusIds, setViewedFocusIds, saveFocusScan, openFiles, setOpenFiles }: PiPanelProps & { prKey: string; prUrl: string; focusPanel: () => void; focusAreas: FocusArea[]; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"]; openFiles: Record<string, boolean>; setOpenFiles: (open: Record<string, boolean>) => void }) {
   const terminalReview = useContext(PiTerminalPrContext);
-  const [copyingFeedback, setCopyingFeedback] = useState(false);
-  const [feedbackCopied, setFeedbackCopied] = useState(false);
-  const [feedbackCopyError, setFeedbackCopyError] = useState<string | null>(null);
+  const feedbackCopy = useCopyAction(copyFeedbackPrompt);
   const [terminalFocused, setTerminalFocused] = useState(false);
   const focusAreaCount = focusAreas.length;
   const allFocusCollapsed = focusAreaCount > 0 && focusAreas.every((area) => collapsedFocusAreaIds[area.id]);
   const messages = review.messages.length > 0 ? review.messages : review.text.trim().length > 0 ? [generalReviewMessage(review.text)] : [];
   const reviewMessages = generalReviewMessages(messages);
-  async function copyFeedback() {
-    if (copyingFeedback) return;
-    setCopyingFeedback(true);
-    setFeedbackCopyError(null);
-    try {
-      await copyFeedbackPrompt();
-      setFeedbackCopied(true);
-      window.setTimeout(() => setFeedbackCopied(false), 1600);
-    } catch (err) {
-      setFeedbackCopyError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setCopyingFeedback(false);
-    }
-  }
   function toggleFocusAreas(): void {
     const nextCollapsedIds = Object.fromEntries(focusAreas.map((area) => [area.id, !allFocusCollapsed]));
     setCollapsedFocusAreaIds(nextCollapsedIds);
@@ -2440,8 +2382,8 @@ function AiReviewPanel({ prKey, prUrl, focusPanel, review, aiReviewHistory, aiRe
     })}
   </div>;
   return <section className={`panel ai-review${viewingHistory ? " viewing-history" : ""}${terminalFocused ? " terminal-focused" : ""}`}>
-    <div className="section-head pi-panel-head"><h2>Pi session{viewingHistory && <span className="pi-history-flag" role="status">Viewing earlier run</span>}</h2><Button type="button" variant="muted" className="small-muted-button pi-copy-feedback" onClick={() => void copyFeedback()} disabled={copyingFeedback}>{copyingFeedback ? "Copying…" : feedbackCopied ? "Copied feedback prompt" : "Copy feedback prompt"}</Button></div>
-    {feedbackCopyError != null && <Flash variant="danger" className="copy-feedback-error" role="alert">Copy failed: {feedbackCopyError}</Flash>}
+    <div className="section-head pi-panel-head"><h2>Pi session{viewingHistory && <span className="pi-history-flag" role="status">Viewing earlier run</span>}</h2><Button type="button" variant="muted" className="small-muted-button pi-copy-feedback" onClick={feedbackCopy.trigger} disabled={feedbackCopy.copying}>{feedbackCopy.copying ? "Copying…" : feedbackCopy.copied ? "Copied feedback prompt" : "Copy feedback prompt"}</Button></div>
+    {feedbackCopy.error != null && <Flash variant="danger" className="copy-feedback-error" role="alert">Copy failed: {feedbackCopy.error}</Flash>}
     <div className="pi-actions">
       <div className="pi-action">
         <Button className="focus-review-run" onClick={() => void runFocusReview()} disabled={focusReview.running}>{focusReview.running ? "Scanning…" : focusReview.text.length > 0 ? "Refresh focus scan" : "Focus scan"}</Button>
@@ -2494,7 +2436,7 @@ function GpuWorkspaceModal({ review, close, refreshLogs }: { review: OpenRespons
       setExecResult(null);
       await refreshLogs();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     } finally {
       setCreating(false);
     }
@@ -2509,7 +2451,7 @@ function GpuWorkspaceModal({ review, close, refreshLogs }: { review: OpenRespons
       setExecResult(result);
       await refreshLogs();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     } finally {
       setExecuting(false);
     }
@@ -2530,7 +2472,7 @@ function GpuWorkspaceModal({ review, close, refreshLogs }: { review: OpenRespons
       await refreshLogs();
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
       return false;
     } finally {
       setDeleting(false);
@@ -2546,7 +2488,7 @@ function GpuWorkspaceModal({ review, close, refreshLogs }: { review: OpenRespons
   }
 
   async function copy(text: string | null) {
-    if (text != null) await navigator.clipboard.writeText(text);
+    if (text != null) await writeClipboard(text);
   }
 
   return <ModalShell open onOpenChange={(open) => { if (!open) void requestClose(); }} label="GPU workspace" className="pi-modal gpu-workspace-modal">
@@ -2777,7 +2719,7 @@ function PiSettingsModal({ prKey, diagnostics, setDiagnostics, openDiagnostics, 
       setDiagnostics(data.diagnostics);
       setSavedAt(Date.now());
     } catch (err) {
-      setApplyError(err instanceof Error ? err.message : String(err));
+      setApplyError(errorMessage(err));
     } finally {
       setSaving(false);
     }

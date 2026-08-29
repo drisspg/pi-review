@@ -3,9 +3,9 @@ import React, { lazy, Suspense, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { api } from "../api";
-import { highlightedHtml, languageForPath } from "../lib/highlight";
-import { prUrlForNumber } from "../lib/pr";
+import { api, errorMessage, openFileInEditor } from "../api";
+import { writeClipboard } from "../lib/dom";
+import { highlightedHtml, languageForPath } from "../lib/highlight";import { prUrlForNumber } from "../lib/pr";
 import { Button } from "./Button";
 import { InlineSnippetsContext, type FileLinkContext } from "./MarkdownContext";
 import { Mermaid } from "./Mermaid";
@@ -52,7 +52,7 @@ function InlineFileSnippet({ context, reference }: { context: FileLinkContext; r
       setState({ status: "ready", lines: text.split("\n") });
     }).catch((err) => {
       if (cancelled) return;
-      setState({ status: "error", error: err instanceof Error ? err.message : String(err) });
+      setState({ status: "error", error: errorMessage(err) });
     });
     return () => { cancelled = true; };
   }, [context.headSha, context.prUrl, reference.path]);
@@ -152,7 +152,7 @@ function MarkdownAnchor({ href, children, fileLinks, target, rel, ...props }: Ma
 function FileReferenceAnchor({ context, reference, children }: { context: FileLinkContext; reference: FileReference; children: React.ReactNode }) {
   function open(event: React.MouseEvent<HTMLAnchorElement>) {
     event.preventDefault();
-    void openFileReference(context, reference);
+    void openFileInEditor(context.prUrl, reference.path, reference.line);
   }
   const link = <a className="file-reference-link" href="#" title="Open in VS Code" onMouseDown={open} onClick={open}>{children}</a>;
   if (!context.snippets || context.headSha == null) return link;
@@ -261,23 +261,4 @@ function codeBlockText(value: React.ReactNode): string {
   if (Array.isArray(value)) return value.map(codeBlockText).join("");
   if (React.isValidElement<{ children?: React.ReactNode }>(value)) return codeBlockText(value.props.children);
   return "";
-}
-
-async function writeClipboard(text: string) {
-  if (navigator.clipboard != null) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.style.position = "fixed";
-  textarea.style.opacity = "0";
-  document.body.append(textarea);
-  textarea.select();
-  document.execCommand("copy");
-  textarea.remove();
-}
-
-async function openFileReference(context: FileLinkContext, reference: FileReference) {
-  await api<{ target: string }>("/api/file/open", { method: "POST", body: JSON.stringify({ prUrl: context.prUrl, path: reference.path, line: reference.line }) });
 }
