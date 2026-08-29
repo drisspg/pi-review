@@ -1461,7 +1461,13 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { r
     let cancelled = false;
     api<InterdiffResponse>("/api/pr/interdiff", { method: "POST", body: JSON.stringify({ prUrl: pr.url, sinceSha, headSha: pr.headSha }) })
       .then((response) => { if (!cancelled) setInterdiff(response); })
-      .catch((err: unknown) => { if (!cancelled) setInterdiffError(errorMessage(err)); });
+      .catch((err: unknown) => {
+        // A force-push can discard the previously reviewed head, so fall back to the full diff instead of a dead end.
+        if (cancelled) return;
+        setInterdiffError(errorMessage(err));
+        setDiffScope("all");
+        logUsage("ui:diff-scope", { scope: "all", reason: "interdiff-error" });
+      });
     return () => { cancelled = true; };
   }, [wantInterdiff, interdiff, pr.url, pr.headSha, sinceSha]);
   const interdiffFiles = wantInterdiff ? interdiff?.files ?? null : null;
@@ -1570,7 +1576,7 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { r
           <div className="files-toolbar">
             <FileNavigator files={diffFiles} fileReviews={props.review.fileReviews} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} />
             <div className="files-toolbar-actions">
-              {canInterdiff && <Button variant="muted" className="small-muted-button interdiff-toggle" aria-pressed={diffScope === "since-review"} onClick={() => { const scope = diffScope === "all" ? "since-review" : "all"; logUsage("ui:diff-scope", { scope }); setDiffScope(scope); }}>{diffScope === "all" ? "Since last review" : "All changes"}</Button>}
+              {canInterdiff && <Button variant="muted" className="small-muted-button interdiff-toggle" aria-pressed={diffScope === "since-review"} onClick={() => { const scope = diffScope === "all" ? "since-review" : "all"; logUsage("ui:diff-scope", { scope }); setInterdiffError(null); setDiffScope(scope); }}>{diffScope === "all" ? "Since last review" : "All changes"}</Button>}
               {commentCount > 0 && <Button variant="muted" className="small-muted-button" onClick={props.toggleAllComments}>{props.commentsCollapsed ? "Expand review threads" : "Collapse review threads"}</Button>}
               <Button variant="muted" className="small-muted-button" onClick={() => { const mode = props.diffViewMode === "unified" ? "split" : "unified"; logUsage("ui:diff-view-mode", { mode }); props.setDiffViewMode(mode); }}>{diffViewLabel}</Button>
               <Button variant="muted" className="small-muted-button panel-launch-button" onClick={() => openSidePanel("comments")}>Comments{commentCount > 0 ? ` ${commentCount}` : ""}</Button>
@@ -1578,11 +1584,14 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { r
               <Button className="review-changes-button panel-launch-button" onClick={() => openSidePanel("review")}>Review changes{draftCount > 0 ? ` (${draftCount})` : ""}</Button>
             </div>
           </div>
+          {interdiffError != null && <div className="interdiff-banner" role="status">
+            <span>Couldn't compare against your last-reviewed commit {shortSha(sinceSha ?? "")} (it may have been force-pushed away) — showing all changes. {interdiffError}</span>
+            <Button variant="muted" className="small-muted-button" onClick={() => setInterdiffError(null)}>Dismiss</Button>
+          </div>}
           {wantInterdiff && <div className="interdiff-banner" role="status">
-            {interdiffError != null ? `Could not load changes since your last review: ${interdiffError}`
-              : interdiff == null ? "Loading changes since your last review…"
+            <span>{interdiff == null ? "Loading changes since your last review…"
               : interdiff.files.length === 0 ? `No changes since your last review (${shortSha(sinceSha ?? "")}).`
-              : <>Showing changes since your last review · {shortSha(sinceSha ?? "")} → {shortSha(pr.headSha)} · {interdiff.totalCommits} commit{interdiff.totalCommits === 1 ? "" : "s"} · comments attach to new-side lines only</>}
+              : <>Showing changes since your last review · {shortSha(sinceSha ?? "")} → {shortSha(pr.headSha)} · {interdiff.totalCommits} commit{interdiff.totalCommits === 1 ? "" : "s"} · comments attach to new-side lines only</>}</span>
           </div>}
           <DiffAnnotationsContext.Provider value={annotations}>{diffFiles.map((file) => <FileDiff key={file.filename} file={file} {...diffPlumbing} />)}</DiffAnnotationsContext.Provider>
         </main>}

@@ -368,6 +368,10 @@ kbd {
 }
 
 .interdiff-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
   margin: var(--space-2) 2px 0;
   padding: var(--space-1) var(--space-3);
   border: 1px solid var(--border-soft);
@@ -1341,6 +1345,9 @@ kbd {
 
 
 .guide-active-stop {
+  position: sticky;
+  top: calc(var(--sticky-toolbar-h) + var(--sticky-mode-tabs-h));
+  z-index: 30;
   display: grid;
   gap: 8px;
   margin-top: 14px;
@@ -1348,6 +1355,7 @@ kbd {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--panel2);
+  box-shadow: 0 6px 12px color-mix(in srgb, var(--bg) 72%, transparent);
 }
 
 .guide-active-stop > div {
