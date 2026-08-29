@@ -1,5 +1,5 @@
 import { CheckIcon, CopyIcon } from "@primer/octicons-react";
-import React, { useState } from "react";
+import React, { lazy, Suspense, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -9,6 +9,9 @@ import { prUrlForNumber } from "../lib/pr";
 import { Button } from "./Button";
 import { InlineSnippetsContext, type FileLinkContext } from "./MarkdownContext";
 import { Mermaid } from "./Mermaid";
+
+// React Flow + ELK only load when an answer actually contains a schematic block.
+const SchematicDiagram = lazy(() => import("./SchematicDiagram").then((module) => ({ default: module.SchematicDiagram })));
 
 const fileReferencePattern = /((?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+\.[A-Za-z0-9_+-]+):(\d+)(?:-(\d+))?/g;
 const fileReferenceExactPattern = /^((?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+\.[A-Za-z0-9_+-]+):(\d+)(?:-(\d+))?$/;
@@ -129,12 +132,12 @@ function InlineFileSnippet({ context, reference }: { context: FileLinkContext; r
 export function MarkdownTextRenderer({ text, fileLinks }: { text: string; fileLinks?: FileLinkContext }) {
   const inlineCtx = React.useContext(InlineSnippetsContext);
   const mergedFileLinks: FileLinkContext | undefined = fileLinks == null ? undefined : { ...fileLinks, headSha: fileLinks.headSha ?? inlineCtx?.headSha, snippets: fileLinks.snippets ?? inlineCtx?.snippets ?? false };
-  const components = mergedFileLinks == null ? { code: MarkdownCode, pre: MarkdownPre } : { code: (props: MarkdownCodeProps) => <MarkdownCode {...props} fileLinks={mergedFileLinks} />, pre: MarkdownPre, a: (props: MarkdownAnchorProps) => <MarkdownAnchor {...props} fileLinks={mergedFileLinks} /> };
+  const components = mergedFileLinks == null ? { code: MarkdownCode, pre: MarkdownPre } : { code: (props: MarkdownCodeProps) => <MarkdownCode {...props} fileLinks={mergedFileLinks} />, pre: (props: MarkdownPreProps) => <MarkdownPre {...props} fileLinks={mergedFileLinks} />, a: (props: MarkdownAnchorProps) => <MarkdownAnchor {...props} fileLinks={mergedFileLinks} /> };
   return <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm, remarkFileReferenceLinks, remarkPullRequestLinks]} components={components}>{text}</ReactMarkdown></div>;
 }
 
 type MarkdownCodeProps = { className?: string; children?: React.ReactNode; fileLinks?: FileLinkContext };
-type MarkdownPreProps = React.HTMLAttributes<HTMLPreElement> & { children?: React.ReactNode };
+type MarkdownPreProps = React.HTMLAttributes<HTMLPreElement> & { children?: React.ReactNode; fileLinks?: FileLinkContext };
 type MarkdownAnchorProps = React.AnchorHTMLAttributes<HTMLAnchorElement> & { fileLinks?: FileLinkContext };
 
 function MarkdownCode({ className, children, fileLinks }: MarkdownCodeProps) {
@@ -147,11 +150,12 @@ function MarkdownCode({ className, children, fileLinks }: MarkdownCodeProps) {
   return <code dangerouslySetInnerHTML={{ __html: highlightedHtml(code, language) }} />;
 }
 
-function MarkdownPre({ children, ...props }: MarkdownPreProps) {
+function MarkdownPre({ children, fileLinks, ...props }: MarkdownPreProps) {
   const [copied, setCopied] = useState(false);
   const code = codeBlockText(children);
   const language = preBlockLanguage(children);
   if (language === "mermaid") return <div className="markdown-mermaid-block"><Mermaid code={code} /></div>;
+  if (language === "schematic") return <Suspense fallback={<div className="schematic-placeholder" aria-label="Rendering schematic" />}><SchematicDiagram code={code} fileLinks={fileLinks} /></Suspense>;
 
   async function copyCode() {
     await writeClipboard(code);

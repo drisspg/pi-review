@@ -176,11 +176,24 @@ Structure the answer as exactly these sections, in this order, so the review UI 
 ## TL;DR
 Two to four sentences: the PR's goal, the key implementation idea, and why this approach.
 ## Schematic
-Ground the reviewer visually. Use one or more focused Mermaid diagrams — a small change may need a single diagram, a layered change may deserve one per distinct aspect (execution path, state lifecycle, ownership boundaries):
-- \`sequenceDiagram\` for time-ordered calls, request/response paths, or async handoffs.
-- \`stateDiagram-v2\` for lifecycles and transitions.
-- \`flowchart\` for branching, data flow, dependencies, ownership boundaries, or source-call trees.
-Use a compact text call tree or code-shape sketch instead only when exact source structure communicates the change more clearly than Mermaid. Use actual identifiers and boundaries from the diff, put descriptive text inside nodes, and keep edge labels short. Each extra diagram must explain something the others cannot.
+Ground the reviewer visually with one or more fenced \`\`\`schematic blocks. Each block is one JSON diagram the review UI renders as an interactive canvas:
+\`\`\`schematic
+{
+  "title": "Execution path",
+  "direction": "right",
+  "groups": [{ "id": "wiring", "label": "CP wiring" }],
+  "nodes": [
+    { "id": "apply_cp", "label": "apply_cp()", "detail": "selects the MLA path", "ref": "torchtitan/models/kimi_k3/parallelize.py:105", "kind": "entry", "group": "wiring" },
+    { "id": "forward", "label": "KimiK3Model.forward", "ref": "torchtitan/models/kimi_k3/model.py:132", "kind": "core" }
+  ],
+  "edges": [{ "from": "apply_cp", "to": "forward", "label": "wires", "kind": "call" }]
+}
+\`\`\`
+Contract:
+- "direction": "right" for call/data flow, "down" for layered or lifecycle structure.
+- Node "kind": "entry" (where reading starts), "core" (main logic), "state" (owned state/lifecycle), "boundary" (API/config/process boundary), "test" (validation). "label" is a real identifier from the diff, "detail" one short clause, "ref" a real changed file:line, "group" optional.
+- Edge "kind": "call" (control flow), "data" (data/tensor flow), "state" (state transition); "label" is three words or fewer.
+Keep each diagram to at most 12 nodes. A small change may need a single diagram; a layered change may deserve one block per distinct aspect (execution path, state lifecycle, ownership boundaries), and each extra diagram must explain something the others cannot. Use a compact text call tree or code-shape sketch instead only when exact source structure communicates the change more clearly than a graph.
 ## Change map
 Group the changed files by their role in the change (core behavior, API surface, supporting plumbing, tests). One tight line per file or coherent group: \`path\` — what changed there and why it matters to a reviewer.
 ## Reviewer notes

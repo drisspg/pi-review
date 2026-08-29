@@ -27,8 +27,8 @@ test("review prompt API builds code walk prompts with flow-dag purpose", async (
   assert.equal(result.purpose, "flow-dag");
   assert.match(result.prompt, /Use the show-me skill style/);
   assert.match(result.prompt, /Show me what's going on in PR pr/i);
-  assert.match(result.prompt, /sequenceDiagram/);
-  assert.match(result.prompt, /stateDiagram-v2/);
+  assert.match(result.prompt, /```schematic/);
+  assert.match(result.prompt, /"kind": "entry"/);
   assert.match(result.prompt, /## TL;DR/);
   assert.match(result.prompt, /## Change map/);
   assert.match(result.prompt, /## Reviewer notes/);

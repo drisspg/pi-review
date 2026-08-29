@@ -33,12 +33,14 @@ web/src/                React frontend (Vite)
                         base/reset/focus → toolbar/panels → review layout → PR header/mode tabs →
                         guide → file navigator → diff table → threads/composers →
                         markdown → review summary/drafts → start page → Pi panel → modals →
-                        media queries → mermaid/file snippets
+                        media queries → mermaid/schematic/file snippets
   components/           Small shared pieces (Button→.ui-button, Modal→ModalShell, ActionMenu,
-                        Tabs, Threads, Markdown*, Mermaid, PiTerminal)
+                        Tabs, Threads, Markdown*, Mermaid, SchematicDiagram, PiTerminal)
   lib/                  diff parsing, comment helpers, guide steps, overview panel sections
                         (overview.ts parses the code-walk prompt's four-section contract, with a
-                        free-form fallback), focus areas, highlight, dom
+                        free-form fallback), schematic.ts (typed JSON contract behind fenced
+                        ```schematic blocks, rendered by SchematicDiagram via React Flow + ELK;
+                        mermaid remains the legacy fallback), focus areas, highlight, dom
 tests/unit/             node:test suites for backend api modules (run via tsx)
 tests/e2e/              Playwright suite (pr-review.spec.ts, ~55 tests)
 scripts/                start.mjs + smoke scripts (gpu-workspace, chat latency)

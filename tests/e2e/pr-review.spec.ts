@@ -1016,7 +1016,7 @@ test("runs a separate focus areas review and opens native focus terminals", asyn
   await mockAskPi(page, (body) => {
     if ((body.prompt ?? "").includes("show-me skill style")) {
       overviewRequests += 1;
-      return "## TL;DR\nOrient reviewers with the Walk map below.\n## Schematic\n```mermaid\nflowchart LR\n  Toolbar -->|opens| Modal\n```\n## Change map\n- `csrc/flash_attn/flash_api.cpp` — core dispatch change\n## Reviewer notes\n- Start at the dispatch condition";
+      return "## TL;DR\nOrient reviewers with the Walk map below.\n## Schematic\n```schematic\n{\"title\": \"Dispatch path\", \"groups\": [{\"id\": \"api\", \"label\": \"API surface\"}], \"nodes\": [{\"id\": \"toolbar\", \"label\": \"Toolbar\", \"detail\": \"entry point\", \"ref\": \"csrc/flash_attn/flash_api.cpp:10\", \"kind\": \"entry\", \"group\": \"api\"}, {\"id\": \"modal\", \"label\": \"Modal\", \"kind\": \"core\"}], \"edges\": [{\"from\": \"toolbar\", \"to\": \"modal\", \"label\": \"opens\", \"kind\": \"call\"}]}\n```\n```mermaid\nflowchart LR\n  Toolbar -->|opens| Modal\n```\n## Change map\n- `csrc/flash_attn/flash_api.cpp` — core dispatch change\n## Reviewer notes\n- Start at the dispatch condition";
     }
     guideRequests += 1;
     return `## Review guide\n### 1. Core path\nFollow the implementation from selection through validation.\n- ${path}:${line}-${Number.parseInt(line, 10) + 1} — Core implementation\n  Start with the changed tiling condition and follow how it selects the implementation path.\n- ${path}:${line} — Validation path\n  Finish by checking that tests cover the intended behavior.`;
@@ -1055,6 +1055,9 @@ test("runs a separate focus areas review and opens native focus terminals", asyn
   await guide.getByRole("button", { name: /Overview/ }).click();
   await expect(guide).toContainText("Walk map");
   await expect(guide.locator(".guide-overview-grid")).toBeVisible();
+  await expect(guide.locator(".guide-overview .schematic-canvas")).toBeVisible();
+  await expect(guide.locator(".schematic-card-label").first()).toHaveText("Toolbar");
+  await expect(guide.locator(".schematic-frame-label")).toHaveText("API surface");
   await expect(guide.locator(".guide-overview .markdown-mermaid-block")).toBeVisible();
   await expect(guide.locator(".guide-overview-terminal .pi-native-terminal")).toBeVisible();
 
