@@ -24,7 +24,6 @@ export type PrApi = {
   cleanup: (input: string) => Promise<{ ok: true; prKey: string; worktreeDir: string }>;
   activity: (input: string) => Promise<PullRequestReviewResponse>;
   open: (input: string) => Promise<PullRequestReviewResponse>;
-  hydrateReviewResponse: (data: PullRequestReviewData, pr: StoredPullRequest, extra?: Partial<Pick<PullRequestReviewResponse, "worktreeDir">>) => Promise<PullRequestReviewResponse>;
 };
 
 export const defaultPrApiDeps = (deps: Omit<PrApiDeps, "parsePullRequestRef">): PrApiDeps => ({ ...deps, parsePullRequestRef });
@@ -67,5 +66,5 @@ export function createPrApi(deps: PrApiDeps): PrApi {
     return hydrateReviewResponse(data, pr, { worktreeDir });
   }
 
-  return { parse, cleanup, activity, open, hydrateReviewResponse };
+  return { parse, cleanup, activity, open };
 }

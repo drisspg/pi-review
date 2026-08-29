@@ -57,15 +57,4 @@ export function refFromBody(body: unknown) {
   return parsePullRequestRef(payload.prUrl);
 }
 
-export function prKeyForRef(ref: ReturnType<typeof parsePullRequestRef>): string {
-  return `${ref.host}/${ref.owner}/${ref.repo}#${ref.number}`;
-}
-
-export function viewedPayloadFromBody(body: unknown) {
-  if (typeof body !== "object" || body == null) throw new Error("Expected JSON body");
-  const payload = body as Record<string, unknown>;
-  if (typeof payload.prKey !== "string" || typeof payload.path !== "string" || typeof payload.fingerprint !== "string" || typeof payload.viewed !== "boolean") {
-    throw new Error("Expected prKey, path, fingerprint, and viewed fields");
-  }
-  return payload as { prKey: string; path: string; fingerprint: string; viewed: boolean };
-}
+export { prKey as prKeyForRef } from "./pr.js";

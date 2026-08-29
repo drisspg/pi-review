@@ -6,7 +6,6 @@ export type ReviewMemoryApiDeps = {
   currentReviewMemoryDistillationSource: () => Promise<string>;
   currentReviewMemoryPrompt: () => Promise<string>;
   currentReviewProfile: () => Promise<ReviewMemoryProfile | null>;
-  fetchPullRequestReviewData?: (payload: Record<string, unknown>) => Promise<PullRequestReviewData>;
   listReviewMemoryRecords: (limit?: number) => Promise<ReviewMemoryRecord[]>;
   reviewMemoryStats: () => Promise<{ recordCount: number; inlineCommentCount: number; prCount: number; latestCreatedAt: string | null; profileUpdatedAt: string | null; profileSourceRecordCount: number | null }>;
   saveReviewMemory: (record: Omit<ReviewMemoryRecord, "id" | "createdAt">) => Promise<ReviewMemoryRecord>;

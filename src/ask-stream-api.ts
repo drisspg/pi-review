@@ -14,7 +14,7 @@ export type AskStreamResponse = {
   end: () => void;
 };
 
-export type AskStreamPayload = {
+type AskStreamPayload = {
   prKey: string;
   prompt: string;
   purpose?: string;

@@ -18,7 +18,6 @@ import type { SavedAnalysisApi } from "./saved-analysis-api.js";
 import type { ShellApi } from "./shell-api.js";
 
 export type ServerLogger = {
-  entries: () => unknown[];
   error: (scope: string, message: string, data?: Record<string, unknown>) => void;
   info: (scope: string, message: string, data?: Record<string, unknown>) => void;
 };
@@ -279,7 +278,7 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
   };
 }
 
-export function createRequestListener(route: ServerRoute, logger: Pick<ServerLogger, "error" | "info">): (req: IncomingMessage, res: ServerResponse) => void {
+export function createRequestListener(route: ServerRoute, logger: ServerLogger): (req: IncomingMessage, res: ServerResponse) => void {
   return (req, res) => {
     const startedAt = performance.now();
     const method = req.method ?? "GET";

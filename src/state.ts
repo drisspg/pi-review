@@ -42,7 +42,6 @@ export type StateStoreRuntime = {
 export type StateStore = {
   readState: () => Promise<AppState>;
   currentReviewMemoryDistillationSource: () => Promise<string>;
-  currentReviewMemoryContext: () => Promise<string>;
   currentReviewProfile: () => Promise<ReviewMemoryProfile | null>;
   listReviewMemoryRecords: (limit?: number) => Promise<ReviewMemoryRecord[]>;
   reviewMemoryStats: () => Promise<{ recordCount: number; inlineCommentCount: number; prCount: number; latestCreatedAt: string | null; profileUpdatedAt: string | null; profileSourceRecordCount: number | null }>;
@@ -102,6 +101,16 @@ function reviewMemoryLocation(comment: ReviewMemoryRecord["comments"][number]): 
   return `${comment.path}:${line}`;
 }
 
+/** Keep at most `maxPerPr` records per PR, preserving order (newest first). */
+function capRecordsPerPr<T extends { prKey: string }>(records: T[], maxPerPr: number): T[] {
+  const counts = new Map<string, number>();
+  return records.filter((record) => {
+    const count = counts.get(record.prKey) ?? 0;
+    counts.set(record.prKey, count + 1);
+    return count < maxPerPr;
+  });
+}
+
 function truncateText(text: string, maxChars: number): string {
   return text.length <= maxChars ? text : `${text.slice(0, maxChars)}\n… truncated ${text.length - maxChars} chars …`;
 }
@@ -116,7 +125,7 @@ function reviewMemoryChangeSetBlock(record: ReviewMemoryRecord, maxPatchChars: n
   return `${header.length > 0 ? `${header}\n\n` : ""}${files.length > 0 ? files : "No files stored."}`;
 }
 
-export function reviewMemoryPrompt(records: ReviewMemoryRecord[]): string {
+function reviewMemoryPrompt(records: ReviewMemoryRecord[]): string {
   if (records.length === 0) return "No review preference examples have been captured yet.";
   const examples = records.slice(0, maxReviewMemoryPromptRecords).map((record, index) => {
     const comments = record.comments.length === 0 ? "No inline comments." : record.comments.map((comment) => `- ${reviewMemoryLocation(comment)}: ${comment.body}`).join("\n");
@@ -170,7 +179,7 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
     return reviewMemoryDistillationSource((await readState()).reviewMemory);
   }
 
-  async function currentReviewMemoryContext(): Promise<string> {
+  async function currentReviewMemoryPrompt(): Promise<string> {
     const state = await readState();
     const profile = state.reviewProfile?.text.trim();
     return [
@@ -301,13 +310,7 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
         createdAt: previous?.createdAt ?? scan.createdAt ?? now,
         updatedAt: now,
       };
-      state.focusScans = [next, ...state.focusScans.filter((stored) => stored.id !== next.id)];
-      const counts = new Map<string, number>();
-      state.focusScans = state.focusScans.filter((stored) => {
-        const count = counts.get(stored.prKey) ?? 0;
-        counts.set(stored.prKey, count + 1);
-        return count < maxFocusScansPerPr;
-      });
+      state.focusScans = capRecordsPerPr([next, ...state.focusScans.filter((stored) => stored.id !== next.id)], maxFocusScansPerPr);
       await writeState(state);
       return next;
     });
@@ -330,13 +333,7 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
         createdAt: previous?.createdAt ?? review.createdAt ?? now,
         updatedAt: now,
       };
-      state.aiReviews = [next, ...state.aiReviews.filter((stored) => stored.id !== next.id)];
-      const counts = new Map<string, number>();
-      state.aiReviews = state.aiReviews.filter((stored) => {
-        const count = counts.get(stored.prKey) ?? 0;
-        counts.set(stored.prKey, count + 1);
-        return count < maxAiReviewsPerPr;
-      });
+      state.aiReviews = capRecordsPerPr([next, ...state.aiReviews.filter((stored) => stored.id !== next.id)], maxAiReviewsPerPr);
       await writeState(state);
       return next;
     });
@@ -359,13 +356,7 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
         createdAt: previous?.createdAt ?? review.createdAt ?? now,
         updatedAt: now,
       };
-      state.guideReviews = [next, ...state.guideReviews.filter((stored) => stored.id !== next.id)];
-      const counts = new Map<string, number>();
-      state.guideReviews = state.guideReviews.filter((stored) => {
-        const count = counts.get(stored.prKey) ?? 0;
-        counts.set(stored.prKey, count + 1);
-        return count < maxGuideReviewsPerPr;
-      });
+      state.guideReviews = capRecordsPerPr([next, ...state.guideReviews.filter((stored) => stored.id !== next.id)], maxGuideReviewsPerPr);
       await writeState(state);
       return next;
     });
@@ -387,13 +378,7 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
         createdAt: previous?.createdAt ?? now,
         updatedAt: now,
       };
-      state.overviews = [next, ...state.overviews.filter((stored) => stored.id !== next.id)];
-      const counts = new Map<string, number>();
-      state.overviews = state.overviews.filter((stored) => {
-        const count = counts.get(stored.prKey) ?? 0;
-        counts.set(stored.prKey, count + 1);
-        return count < maxGuideReviewsPerPr;
-      });
+      state.overviews = capRecordsPerPr([next, ...state.overviews.filter((stored) => stored.id !== next.id)], maxGuideReviewsPerPr);
       await writeState(state);
       return next;
     });
@@ -409,10 +394,6 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
     });
   }
 
-  async function currentReviewMemoryPrompt(): Promise<string> {
-    return currentReviewMemoryContext();
-  }
-
   async function removePullRequest(prKey: string): Promise<void> {
     await mutateState(async (state) => {
       state.prs = state.prs.filter((pr) => pr.key !== prKey);
@@ -426,115 +407,33 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
     });
   }
 
-  return { readState, currentReviewMemoryDistillationSource, currentReviewMemoryContext, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewProfile, listRecentPullRequests, upsertPullRequest, markPullRequestReviewed, listFileReviews, setFileViewed, getDraftReview, saveDraftReview, appendDraftReviewComment, clearDraftReview, listFocusScans, saveFocusScan, listAiReviews, saveAiReview, listGuideReviews, saveGuideReview, listOverviews, saveOverview, saveReviewMemory, currentReviewMemoryPrompt, removePullRequest };
+  return { readState, currentReviewMemoryDistillationSource, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewProfile, listRecentPullRequests, upsertPullRequest, markPullRequestReviewed, listFileReviews, setFileViewed, getDraftReview, saveDraftReview, appendDraftReviewComment, clearDraftReview, listFocusScans, saveFocusScan, listAiReviews, saveAiReview, listGuideReviews, saveGuideReview, listOverviews, saveOverview, saveReviewMemory, currentReviewMemoryPrompt, removePullRequest };
 }
 
-const defaultStore = createStateStore();
-
-export async function readState(): Promise<AppState> {
-  return defaultStore.readState();
-}
-
-export async function currentReviewMemoryDistillationSource(): Promise<string> {
-  return defaultStore.currentReviewMemoryDistillationSource();
-}
-
-export async function currentReviewMemoryContext(): Promise<string> {
-  return defaultStore.currentReviewMemoryContext();
-}
-
-export async function currentReviewProfile(): Promise<ReviewMemoryProfile | null> {
-  return defaultStore.currentReviewProfile();
-}
-
-export async function listReviewMemoryRecords(limit = 50): Promise<ReviewMemoryRecord[]> {
-  return defaultStore.listReviewMemoryRecords(limit);
-}
-
-export async function reviewMemoryStats(): Promise<{ recordCount: number; inlineCommentCount: number; prCount: number; latestCreatedAt: string | null; profileUpdatedAt: string | null; profileSourceRecordCount: number | null }> {
-  return defaultStore.reviewMemoryStats();
-}
-
-export async function saveReviewProfile(text: string): Promise<ReviewMemoryProfile> {
-  return defaultStore.saveReviewProfile(text);
-}
-
-export async function listRecentPullRequests(): Promise<StoredPullRequest[]> {
-  return defaultStore.listRecentPullRequests();
-}
-
-export async function upsertPullRequest(pr: StoredPullRequest): Promise<StoredPullRequest> {
-  return defaultStore.upsertPullRequest(pr);
-}
-
-export async function markPullRequestReviewed(prKey: string, headSha: string, event: StoredPullRequest["lastReviewEvent"]): Promise<StoredPullRequest | null> {
-  return defaultStore.markPullRequestReviewed(prKey, headSha, event);
-}
-
-export async function listFileReviews(prKey: string): Promise<FileReviewState[]> {
-  return defaultStore.listFileReviews(prKey);
-}
-
-export async function setFileViewed(review: FileReviewState): Promise<FileReviewState> {
-  return defaultStore.setFileViewed(review);
-}
-
-export async function getDraftReview(prKey: string): Promise<DraftReview | null> {
-  return defaultStore.getDraftReview(prKey);
-}
-
-export async function saveDraftReview(review: DraftReview): Promise<DraftReview> {
-  return defaultStore.saveDraftReview(review);
-}
-
-export async function appendDraftReviewComment(prKey: string, headSha: string, comment: Omit<DraftReview["comments"][number], "id">): Promise<{ draftReview: DraftReview; comment: DraftReview["comments"][number]; created: boolean }> {
-  return defaultStore.appendDraftReviewComment(prKey, headSha, comment);
-}
-
-export async function clearDraftReview(prKey: string): Promise<void> {
-  await defaultStore.clearDraftReview(prKey);
-}
-
-export async function listFocusScans(prKey: string): Promise<FocusScanRecord[]> {
-  return defaultStore.listFocusScans(prKey);
-}
-
-export async function saveFocusScan(scan: Omit<FocusScanRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<FocusScanRecord, "id" | "createdAt">>): Promise<FocusScanRecord> {
-  return defaultStore.saveFocusScan(scan);
-}
-
-export async function listAiReviews(prKey: string): Promise<AiReviewRecord[]> {
-  return defaultStore.listAiReviews(prKey);
-}
-
-export async function saveAiReview(review: Omit<AiReviewRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<AiReviewRecord, "id" | "createdAt">>): Promise<AiReviewRecord> {
-  return defaultStore.saveAiReview(review);
-}
-
-export async function listOverviews(prKey: string): Promise<GuideReviewRecord[]> {
-  return defaultStore.listOverviews(prKey);
-}
-
-export async function saveOverview(record: Omit<GuideReviewRecord, "id" | "createdAt" | "updatedAt" | "stepStates">): Promise<GuideReviewRecord> {
-  return defaultStore.saveOverview(record);
-}
-
-export async function listGuideReviews(prKey: string): Promise<GuideReviewRecord[]> {
-  return defaultStore.listGuideReviews(prKey);
-}
-
-export async function saveGuideReview(review: Omit<GuideReviewRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<GuideReviewRecord, "id" | "createdAt">>): Promise<GuideReviewRecord> {
-  return defaultStore.saveGuideReview(review);
-}
-
-export async function saveReviewMemory(record: Omit<ReviewMemoryRecord, "id" | "createdAt">): Promise<ReviewMemoryRecord> {
-  return defaultStore.saveReviewMemory(record);
-}
-
-export async function currentReviewMemoryPrompt(): Promise<string> {
-  return defaultStore.currentReviewMemoryPrompt();
-}
-
-export async function removePullRequest(prKey: string): Promise<void> {
-  return defaultStore.removePullRequest(prKey);
-}
+export const {
+  appendDraftReviewComment,
+  clearDraftReview,
+  currentReviewMemoryDistillationSource,
+  currentReviewMemoryPrompt,
+  currentReviewProfile,
+  getDraftReview,
+  listAiReviews,
+  listFileReviews,
+  listFocusScans,
+  listGuideReviews,
+  listOverviews,
+  listRecentPullRequests,
+  listReviewMemoryRecords,
+  markPullRequestReviewed,
+  removePullRequest,
+  reviewMemoryStats,
+  saveAiReview,
+  saveDraftReview,
+  saveFocusScan,
+  saveGuideReview,
+  saveOverview,
+  saveReviewMemory,
+  saveReviewProfile,
+  setFileViewed,
+  upsertPullRequest,
+} = createStateStore();

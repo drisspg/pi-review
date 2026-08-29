@@ -52,9 +52,6 @@ function jsonBody(res: FakeResponse): unknown {
 
 function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
   const logger = {
-    entries() {
-      return [];
-    },
     error() {},
     info() {},
   };

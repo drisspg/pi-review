@@ -5,9 +5,9 @@ export type PullRequestRef = {
   number: number;
 };
 
-export type GitHubUser = { login?: string } | null;
+type GitHubUser = { login?: string } | null;
 
-export type GitHubRepo = {
+type GitHubRepo = {
   full_name: string;
   clone_url: string;
   html_url: string;
@@ -174,7 +174,7 @@ export type AiReviewMessageRecord = {
   toolStatus?: "running" | "success" | "error";
 };
 
-export type GuideStepState = {
+type GuideStepState = {
   reviewed: boolean;
   updatedAt: string;
 };
@@ -195,7 +195,7 @@ export type AiReviewRecord = GuideReviewRecord & {
 
 export type ReviewMemoryComment = InlineReviewComment;
 
-export type ReviewMemoryFile = {
+type ReviewMemoryFile = {
   path: string;
   status?: string;
   additions?: number;

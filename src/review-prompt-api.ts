@@ -136,10 +136,6 @@ function promptFiles(payload: Record<string, unknown>): PromptFile[] {
   });
 }
 
-function optionalPromptFiles(payload: Record<string, unknown>): PromptFile[] {
-  return Array.isArray(payload.files) ? promptFiles(payload) : [];
-}
-
 function patchSummary(files: PromptFile[]): string {
   return files.map((file) => `## ${file.filename}\n${file.patch ?? "Patch unavailable"}`).join("\n\n");
 }
@@ -308,7 +304,7 @@ function testPrPrompt(payload: Record<string, unknown>): ReviewPromptResponse {
   const prKey = requiredString(payload, "prKey");
   const testIntent = requiredString(payload, "testIntent");
   const gpuRequired = payload.gpuRequired === true;
-  const files = optionalPromptFiles(payload);
+  const files = Array.isArray(payload.files) ? promptFiles(payload) : [];
   const changedFiles = files.length === 0 ? "No changed-file summary was provided. Inspect the checked-out PR worktree and current PR metadata before choosing tests." : `Changed files:\n${statusPatchSummary(files)}`;
   return {
     purpose: "test-pr",

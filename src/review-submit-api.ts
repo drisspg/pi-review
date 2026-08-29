@@ -28,7 +28,7 @@ export function reviewMemoryComments(comments: ReviewSubmitComment[]): ReviewMem
   return comments.flatMap(reviewMemoryCommentFromPayload).filter((comment) => comment.body.length > 0);
 }
 
-export function reviewMemoryFiles(files: PullFile[], comments: ReviewMemoryComment[]): ReviewMemoryChangeSet["files"] {
+function reviewMemoryFiles(files: PullFile[], comments: ReviewMemoryComment[]): ReviewMemoryChangeSet["files"] {
   const commentedPaths = new Set(comments.map((comment) => comment.path));
   return files.filter((file) => commentedPaths.size === 0 || commentedPaths.has(file.filename)).map((file) => ({
     path: file.filename,
@@ -48,7 +48,7 @@ export function reviewMemoryChangeSet(data: Pick<PullRequestReviewData, "raw" | 
   };
 }
 
-export function reviewMemoryCommentFromPayload(comment: ReviewSubmitComment): ReviewMemoryComment[] {
+function reviewMemoryCommentFromPayload(comment: ReviewSubmitComment): ReviewMemoryComment[] {
   if (typeof comment.path !== "string" || typeof comment.body !== "string") return [];
   const side: ReviewMemoryComment["side"] | null = comment.side === "RIGHT" || comment.side === "LEFT" ? comment.side : null;
   if (side == null) return [];
