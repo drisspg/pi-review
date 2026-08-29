@@ -1,4 +1,5 @@
-import { prKeyForRef, refFromBody } from "./http.js";
+import { refFromBody } from "./http.js";
+import { prKey } from "./pr.js";
 import { reviewSubmitMemoryRecord } from "./review-memory-api.js";
 import { githubReviewComments, reviewSubmitCommentsFromPayload, reviewSubmitFailureMessage } from "./review-submit-api.js";
 import type { PullRequestRef, PullRequestReviewData, ReviewMemoryRecord, StoredPullRequest } from "./types.js";
@@ -29,11 +30,11 @@ export function createReviewSubmitRouteApi(deps: ReviewSubmitRouteApiDeps): Revi
     } catch (error) {
       throw new Error(reviewSubmitFailureMessage(error, comments));
     }
-    const prKey = prKeyForRef(ref);
-    await deps.clearDraftReview(prKey);
+    const key = prKey(ref);
+    await deps.clearDraftReview(key);
     const reviewData = await deps.fetchPullRequestReviewData(ref);
-    await deps.saveReviewMemory({ ...reviewSubmitMemoryRecord(payload, reviewData, prKey), disposition: "published" });
-    return { result, pr: await deps.markPullRequestReviewed(prKey, typeof payload.headSha === "string" ? payload.headSha : "", payload.event) };
+    await deps.saveReviewMemory({ ...reviewSubmitMemoryRecord(payload, reviewData, key), disposition: "published" });
+    return { result, pr: await deps.markPullRequestReviewed(key, typeof payload.headSha === "string" ? payload.headSha : "", payload.event) };
   }
 
   return { submit };

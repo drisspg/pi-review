@@ -2,6 +2,7 @@ import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 
 import { defaultGpuWorkspaceStore, type GpuWorkspaceStore } from "./gpu-workspace.js";
+import { parsePullRequestKey } from "./pr.js";
 import type { PullRequestRef } from "./types.js";
 
 type GpuWorkspaceToolParams = {
@@ -14,9 +15,9 @@ type GpuWorkspaceToolParams = {
 };
 
 function refFromPrKey(prKey: string): PullRequestRef {
-  const match = prKey.match(/^([^/]+)\/([^/]+)\/([^#]+)#(\d+)$/);
-  if (match == null) throw new Error(`Cannot allocate GPU workspace for invalid PR key: ${prKey}`);
-  return { host: match[1], owner: match[2], repo: match[3], number: Number.parseInt(match[4], 10) };
+  const ref = parsePullRequestKey(prKey);
+  if (ref == null) throw new Error(`Cannot allocate GPU workspace for invalid PR key: ${prKey}`);
+  return ref;
 }
 
 function textToolResult(details: unknown): { content: Array<{ type: "text"; text: string }>; details: unknown } {

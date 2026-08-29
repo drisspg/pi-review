@@ -56,5 +56,3 @@ export function refFromBody(body: unknown) {
   if (typeof payload.prUrl !== "string") throw new Error("Expected prUrl");
   return parsePullRequestRef(payload.prUrl);
 }
-
-export { prKey as prKeyForRef } from "./pr.js";

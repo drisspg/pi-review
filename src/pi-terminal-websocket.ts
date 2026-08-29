@@ -13,7 +13,7 @@ export type PiTerminalWebSocketLogger = {
 };
 
 /** Accept browser connections only from the local Pi Review application. */
-export function isLocalTerminalOrigin(origin: string | undefined): boolean {
+function isLocalTerminalOrigin(origin: string | undefined): boolean {
   if (origin == null) return true;
   try {
     return ["127.0.0.1", "::1", "localhost"].includes(new URL(origin).hostname);

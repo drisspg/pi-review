@@ -1,5 +1,4 @@
-import { prKeyForRef } from "./http.js";
-import { parsePullRequestRef } from "./pr.js";
+import { parsePullRequestRef, prKey } from "./pr.js";
 import type { AiReviewRecord, DraftReview, FocusScanRecord, GuideReviewRecord, PullRequestRef, PullRequestReviewData, PullRequestReviewResponse, StoredPullRequest } from "./types.js";
 
 export type PrApiDeps = {
@@ -40,11 +39,11 @@ export function createPrApi(deps: PrApiDeps): PrApi {
 
   async function cleanup(input: string): Promise<{ ok: true; prKey: string; worktreeDir: string }> {
     const ref = deps.parsePullRequestRef(input);
-    const prKey = prKeyForRef(ref);
-    await deps.disposePiSession(prKey);
+    const key = prKey(ref);
+    await deps.disposePiSession(key);
     const worktreeDir = await deps.cleanupPrWorktree(ref);
-    await deps.removePullRequest(prKey);
-    return { ok: true, prKey, worktreeDir };
+    await deps.removePullRequest(key);
+    return { ok: true, prKey: key, worktreeDir };
   }
 
   async function activity(input: string): Promise<PullRequestReviewResponse> {
