@@ -1195,11 +1195,29 @@ kbd {
   min-height: clamp(420px, 62vh, 780px);
 }
 
+/* Stretch schematics through the panel so the canvas absorbs the left slot's
+   height instead of stranding dead space below the diagram; the canvas's
+   inline content-fit height acts as the flex basis floor. */
+.guide-overview-schematic {
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: stretch;
+}
+
+.guide-overview-schematic > .markdown {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .guide-overview-schematic .schematic-block {
+  display: flex;
+  flex-direction: column;
+  flex: 1 0 auto;
   margin: 0;
 }
 
 .guide-overview-schematic .schematic-canvas {
+  flex: 1 0 auto;
   height: clamp(360px, 52vh, 680px);
 }
 

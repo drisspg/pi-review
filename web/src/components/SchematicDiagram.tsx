@@ -24,7 +24,7 @@ import {
   type NodeProps,
 } from "@xyflow/react";
 import ELK, { type ElkNode } from "elkjs/lib/elk.bundled.js";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "../api";
 import { cssVar } from "../lib/dom";
@@ -133,6 +133,8 @@ function SchematicFlow({ schematic, canvasHeight, onOpenRef, onContentHeight }: 
   const { getNodes, fitView } = useReactFlow();
   const [laidOut, setLaidOut] = useState(false);
   const [fitted, setFitted] = useState(false);
+  const flowRef = useRef<HTMLDivElement | null>(null);
+  const interactedRef = useRef(false);
 
   // Nodes render hidden at the origin first so ELK can lay out real DOM sizes.
   useEffect(() => {
@@ -166,8 +168,35 @@ function SchematicFlow({ schematic, canvasHeight, onOpenRef, onContentHeight }: 
     return () => cancelAnimationFrame(frame);
   }, [laidOut, canvasHeight, fitView]);
 
+  // The canvas resizes after the initial fit (streamed sibling panels settle,
+  // fonts load, window resizes); keep the diagram fitted until the user takes
+  // over with their own pan/zoom.
+  useEffect(() => {
+    if (!fitted) return;
+    const el = flowRef.current;
+    if (el == null) return;
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      if (interactedRef.current) return;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => void fitView({ padding: 0.1, maxZoom: 1.25 }));
+    });
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [fitted, fitView]);
+
   return <ReactFlow
+    ref={flowRef}
     className={fitted ? undefined : "schematic-measuring"}
+    onMoveStart={(event) => {
+      if (event != null) interactedRef.current = true;
+    }}
+    onNodeDragStart={() => {
+      interactedRef.current = true;
+    }}
     nodes={nodes}
     edges={edges}
     onNodesChange={onNodesChange}
