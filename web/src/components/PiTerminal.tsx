@@ -57,19 +57,14 @@ function terminalWebSocketUrl(prKey: string, session: string, headSha: string, c
 }
 
 /** Render a real interactive Pi TUI connected to a server-owned pseudoterminal. */
-export function PiTerminal({ prKey, headSha, session = "main", context, target, compact = false, stopSignal = 0, onDraftReview }: { prKey: string; headSha: string; session?: string; context?: string; target?: PiTerminalTarget; compact?: boolean; stopSignal?: number; onDraftReview?: (draftReview: DraftReview) => void }) {
+export function PiTerminal({ prKey, headSha, session = "main", context, target, compact = false, onDraftReview }: { prKey: string; headSha: string; session?: string; context?: string; target?: PiTerminalTarget; compact?: boolean; onDraftReview?: (draftReview: DraftReview) => void }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
-  const previousStopSignalRef = useRef(stopSignal);
   const onDraftReviewRef = useRef(onDraftReview);
   const [status, setStatus] = useState<TerminalStatus>("connecting");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => { onDraftReviewRef.current = onDraftReview; }, [onDraftReview]);
-  useEffect(() => {
-    if (stopSignal !== previousStopSignalRef.current && socketRef.current?.readyState === WebSocket.OPEN) socketRef.current.send(JSON.stringify({ type: "stop" }));
-    previousStopSignalRef.current = stopSignal;
-  }, [stopSignal]);
   useEffect(() => {
     if (containerRef.current == null) return;
     const container: HTMLDivElement = containerRef.current;
