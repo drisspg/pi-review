@@ -596,13 +596,15 @@ kbd {
   cursor: col-resize;
 }
 
+/* Invisible at rest: the side panel's own border already separates the
+   columns, and a third parallel line here reads as clutter. */
 .resize-handle::before {
   content: "";
   display: block;
   width: 1px;
   height: 100%;
   margin: 0 auto;
-  background: var(--border);
+  background: transparent;
 }
 
 .resize-handle:hover::before {
@@ -4072,7 +4074,7 @@ button.focus-area-collapsed {
 
 .ai-chat-message {
   padding: 10px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-soft);
   border-left: 3px solid color-mix(in srgb, var(--muted) 35%, var(--border));
   border-radius: var(--radius);
   background: var(--panel);
@@ -4123,7 +4125,7 @@ button.focus-area-collapsed {
   height: auto;
   min-height: 220px;
   overflow: hidden;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-soft);
   border-radius: var(--radius);
   background: var(--panel2);
 }
