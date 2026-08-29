@@ -1670,18 +1670,39 @@ function guideStepLocation(step: FocusArea): string {
   return `${step.path}:${step.startLine === step.endLine ? step.startLine : `${step.startLine}-${step.endLine}`}`;
 }
 
+/** Right-column overview panel that collapses to a header strip so the remaining panels (e.g. the terminal) take the space. */
+function OverviewSidePanel({ id, title, className, ariaLabel, children }: { id: string; title: string; className: string; ariaLabel?: string; children: ReactNode }) {
+  const storageKey = `pi-review-overview-${id}`;
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(storageKey) === "collapsed");
+  function toggle() {
+    setCollapsed((current) => {
+      localStorage.setItem(storageKey, current ? "expanded" : "collapsed");
+      return !current;
+    });
+  }
+  return <section className={`guide-overview-panel ${className}${collapsed ? " collapsed" : ""}`} aria-label={ariaLabel}>
+    <div className="guide-overview-panel-head" onClick={toggle}>
+      <span className="kicker">{title}</span>
+      <Button variant="icon" aria-label={`${collapsed ? "Expand" : "Collapse"} ${title}`} onClick={(event) => { event.stopPropagation(); toggle(); }}>{collapsed ? <ChevronRightIcon size={14} /> : <ChevronDownIcon size={14} />}</Button>
+    </div>
+    {/* Keep the body mounted so collapsing the terminal doesn't drop its session. */}
+    <div className="guide-overview-panel-body" hidden={collapsed}>{children}</div>
+  </section>;
+}
+
 function OverviewBody({ text, prUrl }: { text: string; prUrl: string }) {
   const sections = parseOverviewSections(text);
   if (sections == null) return <div className="guide-overview-body"><MarkdownText text={text} fileLinks={{ prUrl }} /></div>;
   return <div className="guide-overview-grid">
     <section className="guide-overview-panel guide-overview-tldr"><span className="kicker">TL;DR</span><MarkdownText text={sections.tldr} fileLinks={{ prUrl }} /></section>
     <section className="guide-overview-panel guide-overview-schematic"><span className="kicker">Schematic</span><MarkdownText text={sections.schematic} fileLinks={{ prUrl }} /></section>
-    {sections.changeMap.length > 0 && <section className="guide-overview-panel guide-overview-map"><span className="kicker">Change map</span><MarkdownText text={sections.changeMap} fileLinks={{ prUrl }} /></section>}
-    {sections.notes.length > 0 && <section className="guide-overview-panel guide-overview-notes"><span className="kicker">Reviewer notes</span><MarkdownText text={sections.notes} fileLinks={{ prUrl }} /></section>}
-    <section className="guide-overview-panel guide-overview-terminal" aria-label="Overview Pi terminal">
-      <span className="kicker">Pi terminal</span>
-      <InlinePiTerminal session={terminalSessionId("guide", "overview")} context={"You are orienting a reviewer in this pull request from its guide overview. Answer questions about structure and intent, investigate the change, and keep all work grounded in this PR's worktree."} />
-    </section>
+    <div className="guide-overview-side">
+      {sections.changeMap.length > 0 && <OverviewSidePanel id="map" title="Change map" className="guide-overview-map"><MarkdownText text={sections.changeMap} fileLinks={{ prUrl }} /></OverviewSidePanel>}
+      {sections.notes.length > 0 && <OverviewSidePanel id="notes" title="Reviewer notes" className="guide-overview-notes"><MarkdownText text={sections.notes} fileLinks={{ prUrl }} /></OverviewSidePanel>}
+      <OverviewSidePanel id="terminal" title="Pi terminal" className="guide-overview-terminal" ariaLabel="Overview Pi terminal">
+        <InlinePiTerminal session={terminalSessionId("guide", "overview")} context={"You are orienting a reviewer in this pull request from its guide overview. Answer questions about structure and intent, investigate the change, and keep all work grounded in this PR's worktree."} />
+      </OverviewSidePanel>
+    </div>
   </div>;
 }
 

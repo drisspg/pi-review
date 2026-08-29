@@ -1061,6 +1061,15 @@ test("runs a separate focus areas review and opens native focus terminals", asyn
   await expect(guide.locator(".guide-overview .markdown-mermaid-block")).toBeVisible();
   await expect(guide.locator(".guide-overview-terminal .pi-native-terminal")).toBeVisible();
 
+  await guide.getByRole("button", { name: "Collapse Change map" }).click();
+  await guide.getByRole("button", { name: "Collapse Reviewer notes" }).click();
+  await expect(guide.locator(".guide-overview-map .markdown")).toBeHidden();
+  await expect(guide.locator(".guide-overview-notes .markdown")).toBeHidden();
+  await expect(guide.locator(".guide-overview-terminal .pi-native-terminal")).toBeVisible();
+  await guide.getByRole("button", { name: "Expand Change map" }).click();
+  await guide.getByRole("button", { name: "Expand Reviewer notes" }).click();
+  await expect(guide.locator(".guide-overview-map .markdown")).toBeVisible();
+
   await page.reload();
   await expect(page.locator(".review-layout")).toBeVisible({ timeout: 60_000 });
   await page.getByRole("button", { name: "Guide 1" }).click();

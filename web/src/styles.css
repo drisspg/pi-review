@@ -1100,23 +1100,57 @@ kbd {
 .guide-overview-grid {
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-  grid-template-rows: auto auto auto 1fr;
+  grid-template-rows: auto minmax(0, 1fr);
   grid-template-areas:
     "tldr tldr"
-    "schematic map"
-    "schematic notes"
-    "schematic terminal";
+    "schematic side";
   gap: var(--space-3);
 }
 
-.guide-overview-notes {
-  align-self: start;
+/* Collapsible stack: folding a panel hands its space to the expanded siblings. */
+.guide-overview-side {
+  grid-area: side;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.guide-overview-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.guide-overview-panel-body {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Author display values above would otherwise beat the UA [hidden] rule. */
+.guide-overview-panel-body[hidden] {
+  display: none;
 }
 
 .guide-overview-terminal {
-  grid-area: terminal;
-  align-self: stretch;
-  grid-template-rows: auto 1fr;
+  flex: 1 1 auto;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.guide-overview-terminal.collapsed {
+  flex: 0 0 auto;
+  grid-template-rows: auto;
+}
+
+.guide-overview-terminal .guide-overview-panel-body {
+  display: flex;
+  flex-direction: column;
 }
 
 /* Beat .pi-native-terminal.compact's fixed clamp: in the dashboard the terminal
@@ -1145,13 +1179,13 @@ kbd {
   background: var(--panel);
 }
 
-.guide-overview-panel > .markdown > :first-child { margin-top: 0; }
-.guide-overview-panel > .markdown > :last-child { margin-bottom: 0; }
+.guide-overview-panel > .markdown > :first-child,
+.guide-overview-panel-body > .markdown > :first-child { margin-top: 0; }
+.guide-overview-panel > .markdown > :last-child,
+.guide-overview-panel-body > .markdown > :last-child { margin-bottom: 0; }
 
 .guide-overview-tldr { grid-area: tldr; }
 .guide-overview-schematic { grid-area: schematic; }
-.guide-overview-map { grid-area: map; }
-.guide-overview-notes { grid-area: notes; }
 
 .guide-overview-schematic .markdown-mermaid-block {
   margin: 0;
@@ -5116,7 +5150,7 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
   .guide-outline-entry.active { border-left-color: var(--border); border-bottom-color: var(--accent); }
   .guide-outline .guide-refresh { flex: 0 0 auto; align-self: center; }
   .guide-stage { scroll-margin-top: 90px; }
-  .guide-overview-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "tldr" "schematic" "map" "notes" "terminal"; }
+  .guide-overview-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "tldr" "schematic" "side"; }
 }
 
 @media (min-width: 761px) and (max-width: 1100px) {
