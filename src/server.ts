@@ -29,6 +29,7 @@ import { createReviewSubmitRouteApi, defaultReviewSubmitRouteApiDeps } from "./r
 import { createSavedAnalysisApi } from "./saved-analysis-api.js";
 import { createServerRoute, createRequestListener } from "./server-router.js";
 import { createShellApi } from "./shell-api.js";
+import { createUsageApi, defaultUsageApiDeps } from "./usage-api.js";
 import { appendDraftReviewComment, clearDraftReview, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, getDraftReview, listAiReviews, listFocusScans, listGuideReviews, listOverviews, listRecentPullRequests, listReviewMemoryRecords, markPullRequestReviewed, removePullRequest, reviewMemoryStats, saveAiReview, saveDraftReview, saveFocusScan, saveGuideReview, saveOverview, saveReviewMemory, saveReviewProfile, setFileViewed, upsertPullRequest } from "./state.js";
 import { cleanupPrWorktree, preparePrWorktree } from "./worktrees.js";
 
@@ -79,6 +80,7 @@ const reviewPromptApi = createReviewPromptApi({ currentReviewMemoryPrompt });
 const reviewSubmitRouteApi = createReviewSubmitRouteApi(defaultReviewSubmitRouteApiDeps({ clearDraftReview, fetchPullRequestReviewData, markPullRequestReviewed, saveReviewMemory, submitPullRequestReview }));
 const savedAnalysisApi = createSavedAnalysisApi({ saveAiReview, saveFocusScan, saveGuideReview, saveOverview });
 const shellApi = createShellApi({ listRecentPullRequests, logEntries: logger.entries });
+const usageApi = createUsageApi(defaultUsageApiDeps(logger));
 
 const contentTypes: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
@@ -121,9 +123,10 @@ const route = createServerRoute({
   savedAnalysisApi,
   sendStatic,
   shellApi,
+  usageApi,
 });
 
-const server = createServer(createRequestListener(route, logger));
+const server = createServer(createRequestListener(route, logger, (name, data) => usageApi.record("server", name, data)));
 const detachPiTerminalWebSocketServer = attachPiTerminalWebSocketServer(server, piTerminalManager, logger);
 
 let shuttingDown = false;
@@ -147,4 +150,5 @@ process.once("SIGTERM", () => void shutdown("SIGTERM"));
 
 server.listen(port, "127.0.0.1", () => {
   logger.info("server", "listening", { url: `http://127.0.0.1:${port}`, webRoot: WEB_ROOT });
+  usageApi.record("server", "server:start");
 });

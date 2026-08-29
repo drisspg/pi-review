@@ -2,7 +2,7 @@ import React, { createContext, ReactNode, useContext, useEffect, useMemo, useRef
 import { createRoot } from "react-dom/client";
 import { ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, GitPullRequestIcon, ScreenFullIcon, ScreenNormalIcon, XIcon } from "@primer/octicons-react";
 import { BaseStyles, Checkbox, Flash, Radio, Select, Textarea, TextInput, ThemeProvider } from "@primer/react";
-import { api, askPi as askPiApi, errorMessage } from "./api";
+import { api, askPi as askPiApi, errorMessage, logUsage } from "./api";
 import { ActionMenu, ActionMenuItem } from "./components/ActionMenu";
 import { Button } from "./components/Button";
 import { CodeText, InlineSnippetsProvider, MarkdownText } from "./components/Markdown";
@@ -1235,7 +1235,7 @@ function AppToolbar({ review, theme, setTheme, busy, goHome, openGpuWorkspace, o
     </div>
     <div className="toolbar-actions">
       {review != null && <a className="toolbar-link" href={homeHash} onClick={(event) => { if (!isPlainLeftClick(event)) return; event.preventDefault(); goHome(); }}>New review</a>}
-      <Select aria-label="Theme" value={theme} onChange={(event) => setTheme(event.target.value as ThemeName)}>{themes.map((item) => <option key={item.name} value={item.name}>{item.label}</option>)}</Select>
+      <Select aria-label="Theme" value={theme} onChange={(event) => { logUsage("ui:theme", { theme: event.target.value }); setTheme(event.target.value as ThemeName); }}>{themes.map((item) => <option key={item.name} value={item.name}>{item.label}</option>)}</Select>
       <ActionMenu trigger={<button type="button" className="toolbar-tools">Tools <ChevronDownIcon size={14} /></button>}>
         {review != null && <>
           <ActionMenuItem onSelect={openGpuWorkspace}>GPU workspace</ActionMenuItem>
@@ -1455,6 +1455,7 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { r
     setSideCollapsed(false);
   }
   function selectReviewMode(mode: "guide" | "diff"): void {
+    logUsage("ui:review-mode", { mode });
     props.setReviewMode(mode);
     if (mode === "guide") {
       setSideFocused(false);
@@ -1507,7 +1508,7 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { r
   const sidePanel = sideCollapsed ? null : <>
     {!sideFocused && <div className="resize-handle" role="separator" aria-label="Resize side panel" onMouseDown={(event) => startResizeSidePanel(event, props.sideWidth, props.setSideWidth)} />}
     <aside className="side">
-      <Tabs value={sideTab} onValueChange={({ value }) => setSideTab(value as typeof sideTab)}>
+      <Tabs value={sideTab} onValueChange={({ value }) => { logUsage("ui:side-tab", { tab: value }); setSideTab(value as typeof sideTab); }}>
       <nav className="side-tabs">
         <TabList className="side-tab-list" aria-label="Review side panel">
           <Tab value="review" className={`side-tab${sideTab === "review" ? " active" : ""}`}><span>Review</span>{draftCount > 0 && <span className="side-tab-badge">{draftCount}</span>}</Tab>
@@ -1540,7 +1541,7 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { r
             <FileNavigator files={props.review.files} fileReviews={props.review.fileReviews} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} />
             <div className="files-toolbar-actions">
               {commentCount > 0 && <Button variant="muted" className="small-muted-button" onClick={props.toggleAllComments}>{props.commentsCollapsed ? "Expand review threads" : "Collapse review threads"}</Button>}
-              <Button variant="muted" className="small-muted-button" onClick={() => props.setDiffViewMode(props.diffViewMode === "unified" ? "split" : "unified")}>{diffViewLabel}</Button>
+              <Button variant="muted" className="small-muted-button" onClick={() => { const mode = props.diffViewMode === "unified" ? "split" : "unified"; logUsage("ui:diff-view-mode", { mode }); props.setDiffViewMode(mode); }}>{diffViewLabel}</Button>
               <Button variant="muted" className="small-muted-button panel-launch-button" onClick={() => openSidePanel("comments")}>Comments{commentCount > 0 ? ` ${commentCount}` : ""}</Button>
               <Button variant="muted" className="small-muted-button panel-launch-button" onClick={() => openSidePanel("pi")}>Pi review{piBadge != null ? ` ${piBadge}` : ""}</Button>
               <Button className="review-changes-button panel-launch-button" onClick={() => openSidePanel("review")}>Review changes{draftCount > 0 ? ` (${draftCount})` : ""}</Button>

@@ -45,6 +45,7 @@ export type ServerRouteDeps = {
   sendStatic: (res: ServerResponse, pathname: string, head?: boolean) => Promise<void>;
   serverConfig: () => { autoReviews: boolean };
   shellApi: ShellApi;
+  usageApi: { recordClientEvents: (payload: Record<string, unknown>) => { recorded: number } };
 };
 
 export type ServerRoute = (req: IncomingMessage, res: ServerResponse) => Promise<void>;
@@ -81,6 +82,7 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
     "/api/pi/review/status": (payload) => deps.piApi.jobStatus(payload),
     "/api/pi/terminal/delete": (payload) => deps.piTerminalApi.remove(payload),
     "/api/review/archive": (payload) => deps.reviewArchiveApi.archive(payload),
+    "/api/usage": async (payload) => deps.usageApi.recordClientEvents(payload),
   };
 
   return async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -278,7 +280,10 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
   };
 }
 
-export function createRequestListener(route: ServerRoute, logger: ServerLogger): (req: IncomingMessage, res: ServerResponse) => void {
+/** High-frequency polling/infra routes that would drown the usage log without adding signal. */
+const usageIgnoredApiPaths = new Set(["/api/health", "/api/logs", "/api/config", "/api/usage", "/api/pi/review/status", "/api/pi/focus-review/status"]);
+
+export function createRequestListener(route: ServerRoute, logger: ServerLogger, recordUsage?: (name: string, data: Record<string, unknown>) => void): (req: IncomingMessage, res: ServerResponse) => void {
   return (req, res) => {
     const startedAt = performance.now();
     const method = req.method ?? "GET";
@@ -286,7 +291,12 @@ export function createRequestListener(route: ServerRoute, logger: ServerLogger):
     const shouldLogRequest = method !== "GET";
     if (shouldLogRequest) logger.info("http", "request start", { method, url });
     res.on("finish", () => {
-      if (shouldLogRequest) logger.info("http", "request finish", { method, url, status: res.statusCode, ms: Math.round(performance.now() - startedAt) });
+      const ms = Math.round(performance.now() - startedAt);
+      if (shouldLogRequest) logger.info("http", "request finish", { method, url, status: res.statusCode, ms });
+      const pathname = url.split("?")[0];
+      if (recordUsage != null && method !== "OPTIONS" && pathname.startsWith("/api/") && !usageIgnoredApiPaths.has(pathname)) {
+        recordUsage(pathname, { method, status: res.statusCode, ms });
+      }
     });
     route(req, res).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);

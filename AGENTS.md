@@ -13,7 +13,8 @@ src/                    Node server (TypeScript, ESM, run via tsx)
   server-router.ts      Route dispatch (createServerRoute / createRequestListener)
   *-api.ts              One injectable module per feature contract (pr, comment, draft-review,
                         review-prompt, review-submit, review-memory, saved-analysis, file,
-                        gpu-workspace, pi, pi-terminal, ask-stream, review-archive, shell, …)
+                        gpu-workspace, pi, pi-terminal, ask-stream, review-archive, shell,
+                        usage, …)
   state.ts              StateStore: JSON persistence of AppState (PRs, drafts, viewed files,
                         AI/guide/focus-scan records, reviewer memory) at PI_REVIEW_STATE_PATH
   github.ts             gh api / GraphQL calls (PR data, pending reviews, comments)
@@ -60,9 +61,12 @@ vscode-extension/       Generated artifacts only (dist/), no source here
 | `npm run test:e2e:fast` | Build once, 3 workers, mocked-Pi e2e on port 43134 |
 | `npm run test:e2e` | Full e2e (slower, traces/videos on failure) |
 | `npm run validate` | typecheck + build + unit + e2e |
+| `npm run usage:report` | Summarize the local usage JSONL (feature counts, latency, errors) |
 
 Env vars: `PI_PR_REVIEW_PORT` (API), `PI_REVIEW_WEB_PORT` (Vite), `PI_REVIEW_STATE_PATH` (state
-JSON), `PI_REVIEW_TEST_PORT` (Playwright port override), `PI_REVIEW_FAST_TESTS=1` (fast e2e mode),
+JSON), `PI_REVIEW_USAGE_LOG_PATH` (usage JSONL; defaults to `<state>.usage.jsonl` next to the
+state file so test/dev instances never pollute the real log), `PI_REVIEW_TEST_PORT` (Playwright
+port override), `PI_REVIEW_FAST_TESTS=1` (fast e2e mode),
 `PI_REVIEW_DISABLE_AUTO_REVIEWS=1` (suppress the on-open guide/review/focus warmup — REQUIRED for
 any test or probe server, or PR opens will start real Pi jobs);
 `PI_REVIEW_API_URL` / `PI_REVIEW_PR_KEY` / `PI_REVIEW_HEAD_SHA` / `PI_REVIEW_TARGET` are injected

@@ -215,6 +215,11 @@ function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
         return { prs: [{ key: "pr" }] };
       },
     },
+    usageApi: {
+      recordClientEvents(payload) {
+        return { recorded: Array.isArray(payload.events) ? payload.events.length : 0 };
+      },
+    },
     ...overrides,
   } as ServerRouteDeps;
 }
@@ -434,6 +439,53 @@ test("server route returns JSON 404 for unsupported methods", async () => {
 
   assert.equal(res.statusCode, 404);
   assert.deepEqual(jsonBody(res), { error: "No route for DELETE /api/health" });
+});
+
+test("server route records client usage events", async () => {
+  const payloads: Record<string, unknown>[] = [];
+  const route = createServerRoute(baseDeps({
+    usageApi: {
+      recordClientEvents(payload) {
+        payloads.push(payload);
+        return { recorded: 1 };
+      },
+    },
+  }));
+
+  const res = await routeRequest(route, "POST", "/api/usage", { events: [{ name: "ui:side-tab", data: { tab: "pi" } }] });
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(jsonBody(res), { recorded: 1 });
+  assert.deepEqual(payloads, [{ events: [{ name: "ui:side-tab", data: { tab: "pi" } }] }]);
+});
+
+test("request listener records API usage but skips polling and non-API paths", async () => {
+  const deps = baseDeps();
+  const usage: { name: string; data: Record<string, unknown> }[] = [];
+  const listener = createRequestListener(createServerRoute(deps), deps.logger, (name, data) => usage.push({ name, data }));
+
+  async function dispatch(method: string, url: string, body?: unknown): Promise<void> {
+    const res = new FakeResponse();
+    await new Promise<void>((resolve) => {
+      res.on("finish", resolve);
+      listener(fakeRequest(method, url, body), res as unknown as ServerResponse);
+    });
+  }
+
+  await dispatch("POST", "/api/ask", { prKey: "pr", prompt: "prompt" });
+  await dispatch("GET", "/api/prs?limit=5");
+  await dispatch("GET", "/api/health");
+  await dispatch("POST", "/api/usage", { events: [] });
+  await dispatch("POST", "/api/pi/review/status", { jobId: "job" });
+  await dispatch("OPTIONS", "/api/ask");
+  await dispatch("GET", "/assets/app.js");
+
+  assert.deepEqual(usage.map((entry) => entry.name), ["/api/ask", "/api/prs"]);
+  assert.deepEqual(usage.map((entry) => ({ method: entry.data.method, status: entry.data.status })), [
+    { method: "POST", status: 200 },
+    { method: "GET", status: 200 },
+  ]);
+  assert.ok(usage.every((entry) => typeof entry.data.ms === "number"));
 });
 
 test("request listener returns JSON 400 for malformed request bodies", async () => {

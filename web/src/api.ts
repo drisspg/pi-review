@@ -10,6 +10,11 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+/** Fire-and-forget local usage event for the friction/feature monitor; must never block or throw. */
+export function logUsage(name: string, data?: Record<string, unknown>): void {
+  void api("/api/usage", { method: "POST", body: JSON.stringify({ events: [{ name, data }] }) }).catch(() => undefined);
+}
+
 /** Ask the server to open a PR worktree file location in the reviewer's editor. */
 export async function openFileInEditor(prUrl: string, path: string, line: number): Promise<void> {
   await api("/api/file/open", { method: "POST", body: JSON.stringify({ prUrl, path, line }) });

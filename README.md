@@ -31,6 +31,7 @@ Ask Pi can work at multiple levels: an inline question on a selected line/range,
 - Ask Pi about selected lines, focus areas, or the full PR.
 - Reuse PR worktrees and Pi sessions across reloads/server restarts.
 - Store submitted review examples and distill them into a reviewer profile.
+- Log feature usage locally (API calls plus key UI actions) to a JSONL file; `npm run usage:report` summarizes what you use, what you don't, and where latency or errors add friction.
 
 ## How it works
 
