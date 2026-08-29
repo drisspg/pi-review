@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import type mermaidNs from "mermaid";
 
+import { cssVar } from "../lib/dom";
 import { Button } from "./Button";
 
 type PanPoint = { x: number; y: number };
@@ -25,11 +26,6 @@ async function loadMermaid(): Promise<MermaidModule> {
     });
   }
   return modulePromise;
-}
-
-function cssVar(name: string, fallback: string): string {
-  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  return value.length > 0 ? value : fallback;
 }
 
 function parseColor(value: string): [number, number, number] | null {

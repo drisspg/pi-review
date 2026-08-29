@@ -35,10 +35,10 @@ export function parseOverviewSections(text: string): OverviewSections | null {
   }
   if (collected.tldr == null || collected.schematic == null) return null;
   const intro = preamble.join("\n").trim();
-  const tldr = (collected.tldr ?? []).join("\n").trim();
+  const tldr = collected.tldr.join("\n").trim();
   return {
     tldr: intro.length > 0 ? `${intro}\n\n${tldr}`.trim() : tldr,
-    schematic: (collected.schematic ?? []).join("\n").trim(),
+    schematic: collected.schematic.join("\n").trim(),
     changeMap: (collected.changeMap ?? []).join("\n").trim(),
     notes: (collected.notes ?? []).join("\n").trim(),
   };

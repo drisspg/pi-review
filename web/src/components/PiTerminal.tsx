@@ -74,8 +74,6 @@ export function PiTerminal({ prKey, headSha, session = "main", context, target, 
     if (containerRef.current == null) return;
     const container: HTMLDivElement = containerRef.current;
     const terminal = new Terminal({
-      allowProposedApi: false,
-      convertEol: false,
       cursorBlink: true,
       fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim(),
       fontSize: 13,

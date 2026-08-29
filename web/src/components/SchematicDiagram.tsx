@@ -27,6 +27,7 @@ import ELK, { type ElkNode } from "elkjs/lib/elk.bundled.js";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api } from "../api";
+import { cssVar } from "../lib/dom";
 import { parseSchematic, type Schematic, type SchematicDirection, type SchematicNodeKind } from "../lib/schematic";
 import type { FileLinkContext } from "./MarkdownContext";
 
@@ -50,11 +51,6 @@ function SchematicFrame({ data }: NodeProps<FrameNode>) {
 }
 
 const nodeTypes = { card: SchematicCard, frame: SchematicFrame };
-
-function cssVar(name: string, fallback: string): string {
-  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  return value.length > 0 ? value : fallback;
-}
 
 function flowNodes(schematic: Schematic): Node[] {
   // Group frames must precede their children: React Flow resolves parentId

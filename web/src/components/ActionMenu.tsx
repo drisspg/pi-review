@@ -1,12 +1,12 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import type { ReactElement, ReactNode } from "react";
 
-export function ActionMenu({ trigger, children, align = "end" }: { trigger: ReactElement; children: ReactNode; align?: "start" | "center" | "end" }) {
+export function ActionMenu({ trigger, children }: { trigger: ReactElement; children: ReactNode }) {
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>{trigger}</DropdownMenu.Trigger>
       <DropdownMenu.Portal>
-        <DropdownMenu.Content className="action-menu-popover" align={align} sideOffset={4}>
+        <DropdownMenu.Content className="action-menu-popover" align="end" sideOffset={4}>
           {children}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>

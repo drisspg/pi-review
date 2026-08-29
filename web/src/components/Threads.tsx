@@ -10,19 +10,10 @@ import type { PullIssueComment, PullRequestReviewSummary, PullReviewComment } fr
 import { MarkdownText } from "./Markdown";
 import { MarkdownEditor } from "./MarkdownEditor";
 
-function commenterHash(login: string): number {
+function commenterColor(login: string): string {
   let hash = 0;
   for (const char of login) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  return hash;
-}
-
-function commenterColor(login: string): string {
-  const hash = commenterHash(login);
   return `hsl(${hash % 360} ${(hash % 17) + 58}% ${(hash % 11) + 58}%)`;
-}
-
-function avatarLabel(login: string): string {
-  return login.slice(0, 1).toUpperCase();
 }
 
 function commentCountLabel(count: number): string {
@@ -60,7 +51,7 @@ function reviewerOptions(comments: GitHubComment[]): string[] {
   return [...reviewers].sort((a, b) => a.localeCompare(b));
 }
 
-export function ExistingReviewThread({ comments, prUrl, refreshGithubActivity, collapseSignal = 0, collapseComments = true }: { comments: PullReviewComment[]; prUrl: string; refreshGithubActivity: () => Promise<void>; collapseSignal?: number; collapseComments?: boolean }) {
+export function ExistingReviewThread({ comments, prUrl, refreshGithubActivity, collapseSignal, collapseComments }: { comments: PullReviewComment[]; prUrl: string; refreshGithubActivity: () => Promise<void>; collapseSignal: number; collapseComments: boolean }) {
   const target = commentTarget(comments[0]);
   const status = resolvedLabel(comments);
   const locationState = comments[0].line == null && comments[0].original_line != null ? " · Outdated" : "";
@@ -106,10 +97,10 @@ function GitHubCommentView({ comment, commentKind, prUrl, refreshGithubActivity 
     setError(null);
     setEditing(false);
   }
-  return <div className="github-comment" style={{ "--commenter": commenterColor(login) } as React.CSSProperties}><div className="avatar" aria-hidden="true">{avatarLabel(login)}</div><div className="github-comment-body"><div className="github-comment-header"><span className="github-comment-meta"><strong>@{login}</strong>{timestamp != null && <span className="comment-time">commented {relativeTime(timestamp)}</span>}</span>{!editing && <Button variant="muted" className="small-muted-button" onClick={startEditing}>Edit</Button>}</div>{editing ? <CommentEditor body={body} submitting={submitting} error={error} onChange={setBody} onCancel={cancelEditing} onSave={() => void saveEdit()} /> : <MarkdownText text={body} />}</div></div>;
+  return <div className="github-comment" style={{ "--commenter": commenterColor(login) } as React.CSSProperties}><div className="avatar" aria-hidden="true">{login.slice(0, 1).toUpperCase()}</div><div className="github-comment-body"><div className="github-comment-header"><span className="github-comment-meta"><strong>@{login}</strong>{timestamp != null && <span className="comment-time">commented {relativeTime(timestamp)}</span>}</span>{!editing && <Button variant="muted" className="small-muted-button" onClick={startEditing}>Edit</Button>}</div>{editing ? <CommentEditor body={body} submitting={submitting} error={error} onChange={setBody} onCancel={cancelEditing} onSave={() => void saveEdit()} /> : <MarkdownText text={body} />}</div></div>;
 }
 
-function GitHubThreadCard({ id, className = "comment", title, subtitle, status, href, comments, commentKind, prUrl, refreshGithubActivity, reply, collapseSignal = 0, collapseComments = true, onJump }: { id?: string; className?: string; title: string; subtitle: string; status?: string | null; href: string; comments: GitHubComment[]; commentKind: CommentKind; prUrl: string; refreshGithubActivity: () => Promise<void>; reply?: React.ReactNode; collapseSignal?: number; collapseComments?: boolean; onJump?: () => void }) {
+function GitHubThreadCard({ id, className = "comment", title, subtitle, status, href, comments, commentKind, prUrl, refreshGithubActivity, reply, collapseSignal, collapseComments, onJump }: { id?: string; className?: string; title: string; subtitle: string; status?: string | null; href: string; comments: GitHubComment[]; commentKind: CommentKind; prUrl: string; refreshGithubActivity: () => Promise<void>; reply?: React.ReactNode; collapseSignal: number; collapseComments: boolean; onJump?: () => void }) {
   const [collapsed, setCollapsed] = useState(false);
   useEffect(() => {
     if (collapseSignal > 0) setCollapsed(collapseComments);
