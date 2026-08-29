@@ -4,7 +4,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { api } from "../api";
-import { highlightedHtml } from "../lib/highlight";
+import { highlightedHtml, languageForPath } from "../lib/highlight";
 import { prUrlForNumber } from "../lib/pr";
 import { Button } from "./Button";
 import { InlineSnippetsContext, type FileLinkContext } from "./MarkdownContext";
@@ -37,49 +37,6 @@ async function loadFileText(prUrl: string, path: string, sha: string): Promise<s
   return promise;
 }
 
-function languageFromPath(path: string): string {
-  const ext = path.split(".").pop()?.toLowerCase() ?? "";
-  switch (ext) {
-    case "ts":
-    case "tsx":
-    case "js":
-    case "jsx":
-    case "mjs":
-    case "cjs": return "ts";
-    case "py": return "python";
-    case "rs": return "rust";
-    case "go": return "go";
-    case "java": return "java";
-    case "kt":
-    case "kts": return "kotlin";
-    case "rb": return "ruby";
-    case "swift": return "swift";
-    case "c":
-    case "h": return "c";
-    case "cc":
-    case "cpp":
-    case "cxx":
-    case "hpp":
-    case "hh":
-    case "cuh":
-    case "cu": return "cpp";
-    case "css": return "css";
-    case "scss": return "scss";
-    case "html":
-    case "htm": return "html";
-    case "json": return "json";
-    case "yaml":
-    case "yml": return "yaml";
-    case "toml": return "toml";
-    case "sh":
-    case "bash":
-    case "zsh": return "bash";
-    case "md":
-    case "markdown": return "markdown";
-    default: return "";
-  }
-}
-
 function InlineFileSnippet({ context, reference }: { context: FileLinkContext; reference: FileReference }) {
   const [state, setState] = React.useState<{ status: "loading" | "ready" | "error"; lines?: string[]; error?: string }>({ status: "loading" });
   const [collapsed, setCollapsed] = React.useState(false);
@@ -105,7 +62,7 @@ function InlineFileSnippet({ context, reference }: { context: FileLinkContext; r
   if (state.status === "error") return <span className="file-snippet error"><span className="file-snippet-head"><span className="file-snippet-path">{referenceLabel(reference)}</span><span className="file-snippet-status muted">{state.error}</span></span></span>;
   const lines = state.lines ?? [];
   const stop = Math.min(lines.length, endLine + SNIPPET_CONTEXT_LINES);
-  const language = languageFromPath(reference.path);
+  const language = languageForPath(reference.path);
   const slice = lines.slice(start - 1, stop);
   const html = highlightedHtml(slice.join("\n"), language);
   const rowHtmls = html.split("\n");

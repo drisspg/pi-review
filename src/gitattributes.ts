@@ -30,10 +30,8 @@ export function isGeneratedPath(path: string, rules: GitattributesRule[]): boole
   return rules.reduce((generated, rule) => patternMatchesPath(rule.pattern, path) ? rule.generated : generated, false);
 }
 
-export function markGeneratedPullFiles(files: PullFile[], gitattributesText: string | null): PullFile[] {
-  if (gitattributesText == null || gitattributesText.trim().length === 0) return files;
-  const rules = parseGitattributes(gitattributesText);
-  if (rules.length === 0) return files;
+export function markGeneratedPullFiles(files: PullFile[], rules: GitattributesRule[] | null): PullFile[] {
+  if (rules == null || rules.length === 0) return files;
   return files.map((file) => isGeneratedPath(file.filename, rules) ? { ...file, generated: true } : file);
 }
 

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import { markGeneratedPullFiles, parseGitattributes } from "./gitattributes.js";
+import { markGeneratedPullFiles, parseGitattributes, type GitattributesRule } from "./gitattributes.js";
 import { logger } from "./logger.js";
 import { prKey } from "./pr.js";
 import { listFileReviews } from "./state.js";
@@ -158,13 +158,13 @@ export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): Git
     }
   }
 
-  async function fetchRootGitattributes(ref: PullRequestRef, sha: string): Promise<string | null> {
+  async function fetchRootGitattributes(ref: PullRequestRef, sha: string): Promise<GitattributesRule[] | null> {
     const endpoint = `/repos/${ref.owner}/${ref.repo}/contents/.gitattributes?ref=${sha}`;
     try {
       const { stdout } = await runtime.execFile("gh", ["api", endpoint, "-H", "Accept: application/vnd.github.raw"], { maxBuffer: 1024 * 1024 });
       const rules = parseGitattributes(stdout);
       logger.info("github", "fetched gitattributes", { ref, sha: sha.slice(0, 12), rules: rules.length });
-      return stdout;
+      return rules;
     } catch (error) {
       logger.info("github", "gitattributes unavailable", { ref, sha: sha.slice(0, 12), error: error instanceof Error ? error.message : String(error) });
       return null;

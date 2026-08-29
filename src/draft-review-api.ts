@@ -35,7 +35,7 @@ export function createDraftReviewApi(deps: DraftReviewApiDeps): DraftReviewApi {
 
   async function get(payload: Record<string, unknown>): Promise<{ draftReview: DraftReview | null }> {
     if (typeof payload.prKey !== "string" || payload.prKey.trim().length === 0) throw new Error("Expected prKey");
-    return { draftReview: await deps.getDraftReview(payload.prKey) };
+    return { draftReview: await deps.getDraftReview(payload.prKey.trim()) };
   }
 
   async function save(payload: Record<string, unknown>): Promise<{ draftReview: DraftReview }> {

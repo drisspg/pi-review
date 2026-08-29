@@ -34,7 +34,7 @@ test("markGeneratedPullFiles tags generated files", () => {
   assert.deepEqual(markGeneratedPullFiles([
     { filename: "generated/model.py", status: "modified", additions: 1, deletions: 0, changes: 1 },
     { filename: "src/main.py", status: "modified", additions: 1, deletions: 0, changes: 1 },
-  ], "generated/** linguist-generated=true\n"), [
+  ], parseGitattributes("generated/** linguist-generated=true\n")), [
     { filename: "generated/model.py", status: "modified", additions: 1, deletions: 0, changes: 1, generated: true },
     { filename: "src/main.py", status: "modified", additions: 1, deletions: 0, changes: 1 },
   ]);

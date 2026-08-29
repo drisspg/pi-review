@@ -51,6 +51,7 @@ test("draft review API gets the current PR draft", async () => {
   saved.push({ prKey: "github.com/o/r#1", headSha: "head", event: "COMMENT", body: "", comments: [], updatedAt: "now" });
 
   assert.deepEqual(await createDraftReviewApi(deps).get({ prKey: "github.com/o/r#1" }), { draftReview: saved[0] });
+  assert.deepEqual(await createDraftReviewApi(deps).get({ prKey: " github.com/o/r#1 " }), { draftReview: saved[0] });
   assert.deepEqual(await createDraftReviewApi(deps).get({ prKey: "github.com/o/r#2" }), { draftReview: null });
 });
 

@@ -17,7 +17,7 @@ export function languageForPath(path: string | null | undefined): string {
   if (path == null) return "";
   if (/\.(cc|cpp|cu|cuh|c|h|hpp)$/.test(path)) return "cpp";
   if (/\.tsx?$/.test(path)) return "typescript";
-  if (/\.jsx?$/.test(path)) return "javascript";
+  if (/\.(jsx?|mjs|cjs)$/.test(path)) return "javascript";
   if (/\.py$/.test(path)) return "python";
   if (/\.json$/.test(path)) return "json";
   if (/\.(sh|bash|zsh)$/.test(path)) return "bash";
