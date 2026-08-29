@@ -99,7 +99,7 @@ async function sendStatic(res: ServerResponse, pathname: string, head = false): 
 }
 
 const route = createServerRoute({
-    serverConfig: () => ({ autoReviews: process.env.PI_REVIEW_DISABLE_AUTO_REVIEWS !== "1" }),
+  serverConfig: () => ({ autoReviews: process.env.PI_REVIEW_DISABLE_AUTO_REVIEWS !== "1" }),
   askStreamApi,
   commentApi,
   draftReviewApi,

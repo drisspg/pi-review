@@ -36,7 +36,6 @@ export type GitHubClient = {
   editReviewComment: (ref: PullRequestRef, commentId: number, body: string) => Promise<unknown>;
   editIssueComment: (ref: PullRequestRef, commentId: number, body: string) => Promise<unknown>;
   editReviewSummary: (ref: PullRequestRef, reviewId: number, body: string) => Promise<unknown>;
-  fetchPullRequestSummary: (ref: PullRequestRef) => Promise<StoredPullRequest>;
 };
 
 const defaultRuntime: GitHubRuntime = {
@@ -113,10 +112,6 @@ function toStoredPullRequest(ref: PullRequestRef, pr: PullRequest, files: PullFi
 
 function fileFingerprint(file: PullFile): string {
   return createHash("sha1").update(`${file.status}\n${file.previous_filename ?? ""}\n${file.patch ?? ""}`).digest("hex");
-}
-
-export function fingerprintPullFile(file: PullFile): string {
-  return fileFingerprint(file);
 }
 
 export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): GitHubClient {
@@ -334,11 +329,7 @@ export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): Git
     return ghApiPatch(ref, `${apiBase(ref)}/reviews/${reviewId}`, { body }, "edit review summary");
   }
 
-  async function fetchPullRequestSummary(ref: PullRequestRef): Promise<StoredPullRequest> {
-    return (await fetchPullRequestReviewData(ref)).pr;
-  }
-
-  return { fetchPullRequestReviewData, fetchFileText, fetchPendingPullRequestReview, createPendingPullRequestReview, addPendingPullRequestReviewThread, submitPullRequestReview, replyToReviewComment, addIssueComment, editReviewComment, editIssueComment, editReviewSummary, fetchPullRequestSummary };
+  return { fetchPullRequestReviewData, fetchFileText, fetchPendingPullRequestReview, createPendingPullRequestReview, addPendingPullRequestReviewThread, submitPullRequestReview, replyToReviewComment, addIssueComment, editReviewComment, editIssueComment, editReviewSummary };
 }
 
 const defaultClient = createGitHubClient();
@@ -385,8 +376,4 @@ export async function editIssueComment(ref: PullRequestRef, commentId: number, b
 
 export async function editReviewSummary(ref: PullRequestRef, reviewId: number, body: string): Promise<unknown> {
   return defaultClient.editReviewSummary(ref, reviewId, body);
-}
-
-export async function fetchPullRequestSummary(ref: PullRequestRef): Promise<StoredPullRequest> {
-  return defaultClient.fetchPullRequestSummary(ref);
 }

@@ -11,8 +11,6 @@ import { createReviewDraftTool, type ReviewDraftToolContext } from "./review-dra
 import type { PiPromptEvent } from "./types.js";
 import { worktreeDirForRef } from "./worktrees.js";
 
-export type { PiPromptEvent } from "./types.js";
-
 type TextPart = {
   text?: string;
   type?: string;
@@ -45,7 +43,6 @@ const PI_THINKING_LEVEL_BY_PURPOSE: Record<string, ThinkingLevel> = {
 
 const REVIEW_TOOLS = ["read", "grep", "find", "bash"];
 const CHAT_TOOLS = ["read", "grep", "find", "bash", "web_search"];
-const INLINE_TOOLS = ["read", "grep", "find", "bash", "web_search"];
 const DRAFT_TOOL_PURPOSES = new Set(["chat", "inline-chat", "focus-chat"]);
 
 const PI_TOOLS_BY_PURPOSE: Record<string, string[]> = {
@@ -54,7 +51,7 @@ const PI_TOOLS_BY_PURPOSE: Record<string, string[]> = {
   "guide-review": REVIEW_TOOLS,
   "focus-chat": CHAT_TOOLS,
   "focus-review": REVIEW_TOOLS,
-  "inline-chat": INLINE_TOOLS,
+  "inline-chat": CHAT_TOOLS,
   "main-review": REVIEW_TOOLS,
   "review-memory-distill": CHAT_TOOLS,
   "test-pr": REVIEW_TOOLS,

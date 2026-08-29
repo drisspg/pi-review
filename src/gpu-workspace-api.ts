@@ -1,7 +1,7 @@
 import { DEFAULT_GPU_WORKSPACE_GPU_COUNT, DEFAULT_GPU_WORKSPACE_GPU_TYPE, DEFAULT_GPU_WORKSPACE_TTL_HOURS, SUPPORTED_GPU_WORKSPACE_REPO, SUPPORTED_GPU_WORKSPACE_TYPES, defaultGpuWorkspaceStore, type GpuWorkspaceStore } from "./gpu-workspace.js";
 import { prKey, parsePullRequestRef } from "./pr.js";
 
-export function prKeyFromGpuWorkspacePayload(payload: Record<string, unknown>): string {
+function prKeyFromGpuWorkspacePayload(payload: Record<string, unknown>): string {
   if (typeof payload.prKey === "string" && payload.prKey.trim().length > 0) return payload.prKey.trim();
   if (typeof payload.prUrl === "string" && payload.prUrl.trim().length > 0) return prKey(parsePullRequestRef(payload.prUrl));
   throw new Error("Expected prKey or prUrl");

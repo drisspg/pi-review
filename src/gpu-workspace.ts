@@ -165,18 +165,6 @@ export function createGpuWorkspaceStore(runtime: GpuWorkspaceRuntime = defaultRu
 
 export const defaultGpuWorkspaceStore = createGpuWorkspaceStore();
 
-export function gpuWorkspaceForPr(prKey: string): GpuWorkspace | null {
-  return defaultGpuWorkspaceStore.gpuWorkspaceForPr(prKey);
-}
-
-export function unregisterGpuWorkspace(prKey: string, id?: string): boolean {
-  return defaultGpuWorkspaceStore.unregisterGpuWorkspace(prKey, id);
-}
-
-export async function createOrReuseGpuWorkspace(prKey: string, request: GpuWorkspaceRequest): Promise<{ workspace: GpuWorkspace; reused: boolean }> {
-  return defaultGpuWorkspaceStore.createOrReuseGpuWorkspace(prKey, request);
-}
-
 export async function deleteGpuWorkspace(id: string): Promise<{ id: string; stdout: string; stderr: string }> {
   return defaultGpuWorkspaceStore.deleteGpuWorkspace(id);
 }
