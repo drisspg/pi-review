@@ -261,7 +261,7 @@ function commentUpdatedAt(comment: PullReviewComment | PullIssueComment | PullRe
   return comment.updated_at;
 }
 
-function reviewFeedbackPromptPayload(review: OpenResponse, drafts: DraftComment[], overallBody: string, aiReview: AiReview, focusReview: FocusReview, focusAreas: FocusArea[], viewedFocusIds: Record<string, boolean>): Record<string, unknown> {
+function reviewFeedbackPromptPayload(review: OpenResponse, drafts: DraftComment[], overallBody: string, aiReview: AiReview, focusAreas: FocusArea[], viewedFocusIds: Record<string, boolean>): Record<string, unknown> {
   const localReviewComments = [overallBody.trim().length > 0 ? { kind: "Local overall review", author: "You", body: overallBody.trim() } : null, ...drafts.filter((draft) => draft.body.trim().length > 0).map((draft) => ({ kind: "Local draft comment", author: "You", body: draft.body.trim(), location: draftLocation(draft) }))].filter((comment) => comment != null);
   const reviewSummaries = review.reviewSummaries.filter((comment) => comment.body.trim().length > 0).map((comment) => ({ kind: `Review summary (${comment.state.toLowerCase().replace("_", " ")})`, author: commentAuthor(comment), body: comment.body.trim(), url: comment.html_url, updatedAt: commentUpdatedAt(comment) }));
   const issueComments = review.issueComments.filter((comment) => comment.body.trim().length > 0).map((comment) => ({ kind: "Conversation comment", author: commentAuthor(comment), body: comment.body.trim(), url: comment.html_url, updatedAt: commentUpdatedAt(comment) }));
@@ -276,7 +276,6 @@ function reviewFeedbackPromptPayload(review: OpenResponse, drafts: DraftComment[
     aiComments: sessionMessages(aiReview.messages).filter((message) => (message.role === "user" || message.role === "pi") && message.text.trim().length > 0).map(({ role, text, title, kind }) => ({ role, text: text.trim(), title, kind })),
     focusAreas: focusAreas.map((area) => ({ path: area.path, startLine: area.startLine, endLine: area.endLine, title: area.title, body: area.body, viewed: viewedFocusIds[area.id] === true })),
     globalFeedback: currentGeneralReviewText(aiReview),
-    focusScan: focusReview.text,
   };
 }
 
@@ -947,7 +946,7 @@ function App() {
 
   async function copyReviewFeedbackPrompt(overallBody = ""): Promise<void> {
     if (review == null) return;
-    const { prompt } = await buildPiPrompt(reviewFeedbackPromptPayload(review, drafts, overallBody, aiReview, focusReview, focusAreas, viewedFocusAreaIds));
+    const { prompt } = await buildPiPrompt(reviewFeedbackPromptPayload(review, drafts, overallBody, aiReview, focusAreas, viewedFocusAreaIds));
     await writeClipboard(prompt);
   }
 
@@ -1460,7 +1459,7 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { r
   useEffect(() => {
     if (!wantInterdiff || sinceSha == null || interdiff != null) return;
     let cancelled = false;
-    api<InterdiffResponse>("/api/pr/interdiff", { method: "POST", body: JSON.stringify({ prUrl: pr.url, sinceSha, headSha: pr.headSha }) })
+    api<InterdiffResponse>("/api/pr/interdiff", { method: "POST", body: JSON.stringify({ prUrl: pr.url, sinceSha, headSha: pr.headSha, paths: props.review.files.map((file) => file.filename) }) })
       .then((response) => { if (!cancelled) setInterdiff(response); })
       .catch((err: unknown) => {
         // A force-push can discard the previously reviewed head, so fall back to the full diff instead of a dead end.
@@ -1470,7 +1469,7 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { r
         logUsage("ui:diff-scope", { scope: "all", reason: "interdiff-error" });
       });
     return () => { cancelled = true; };
-  }, [wantInterdiff, interdiff, pr.url, pr.headSha, sinceSha]);
+  }, [wantInterdiff, interdiff, pr.url, pr.headSha, sinceSha, props.review.files]);
   const interdiffFiles = wantInterdiff ? interdiff?.files ?? null : null;
   const diffFiles = interdiffFiles ?? props.review.files;
   // Interdiff LEFT lines belong to the previously reviewed head, not the PR base, so GitHub cannot anchor comments there.
@@ -1592,7 +1591,7 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { r
           {wantInterdiff && <div className="interdiff-banner" role="status">
             <span>{interdiff == null ? "Loading changes since your last review…"
               : interdiff.files.length === 0 ? `No changes since your last review (${shortSha(sinceSha ?? "")}).`
-              : <>Showing changes since your last review · {shortSha(sinceSha ?? "")} → {shortSha(pr.headSha)} · {interdiff.totalCommits} commit{interdiff.totalCommits === 1 ? "" : "s"} · comments attach to new-side lines only</>}</span>
+              : <>Showing changes since your last review · {shortSha(sinceSha ?? "")} → {shortSha(pr.headSha)}{interdiff.totalCommits > 0 && <> · {interdiff.totalCommits} commit{interdiff.totalCommits === 1 ? "" : "s"}</>}{interdiff.source === "local-git" && <> · compared locally (force-pushed history)</>} · comments attach to new-side lines only</>}</span>
           </div>}
           <DiffAnnotationsContext.Provider value={annotations}>{diffFiles.map((file) => <FileDiff key={file.filename} file={file} {...diffPlumbing} />)}</DiffAnnotationsContext.Provider>
         </main>}
@@ -2456,7 +2455,7 @@ function AiReviewPanel({ prKey, prUrl, focusPanel, review, aiReviewHistory, aiRe
     {!focusLinksMinimized && focusAreas.map((area, index) => {
       const viewed = viewedFocusIds[area.id] ?? false;
       return <div key={area.id} className={`focus-area-link-row${viewed ? " viewed" : ""}`}>
-        <label className="focus-area-check" title="Mark as reviewed" onClick={(event) => event.stopPropagation()}>
+        <label className="focus-area-check" title="Mark as handled or dismissed — checked focus areas are left out of the copied feedback prompt" onClick={(event) => event.stopPropagation()}>
           <Checkbox checked={viewed} onChange={() => toggleFocusViewed(area)} />
         </label>
         <button type="button" onClick={() => jumpToFocusArea(area)}>

@@ -1,9 +1,11 @@
+import { safeDiffPath } from "./interdiff-git.js";
 import { parsePullRequestRef, prKey } from "./pr.js";
 import type { AiReviewRecord, CommitChecks, DraftReview, FocusScanRecord, GuideReviewRecord, PullFile, PullRequestRef, PullRequestReviewData, PullRequestReviewResponse, StoredPullRequest } from "./types.js";
 
 export type PrApiDeps = {
   cleanupPrWorktree: (ref: PullRequestRef) => Promise<string>;
   compareCommits: (ref: PullRequestRef, baseSha: string, headSha: string) => Promise<{ files: PullFile[]; totalCommits: number }>;
+  compareCommitsLocally: (ref: PullRequestRef, sinceSha: string, headSha: string, paths: string[]) => Promise<{ files: PullFile[]; totalCommits: number }>;
   disposePiSession: (prKey: string) => Promise<void>;
   fetchCommitChecks: (ref: PullRequestRef, sha: string) => Promise<CommitChecks>;
   fetchPullRequestReviewData: (ref: PullRequestRef) => Promise<PullRequestReviewData>;
@@ -25,7 +27,7 @@ export type PrApi = {
   cleanup: (input: string) => Promise<{ ok: true; prKey: string; worktreeDir: string }>;
   activity: (input: string) => Promise<PullRequestReviewResponse>;
   open: (input: string) => Promise<PullRequestReviewResponse>;
-  interdiff: (payload: Record<string, unknown>) => Promise<{ files: PullFile[]; totalCommits: number; sinceSha: string; headSha: string }>;
+  interdiff: (payload: Record<string, unknown>) => Promise<{ files: PullFile[]; totalCommits: number; sinceSha: string; headSha: string; source: "github" | "local-git" }>;
   checks: (payload: Record<string, unknown>) => Promise<{ checks: CommitChecks }>;
 };
 
@@ -81,12 +83,22 @@ export function createPrApi(deps: PrApiDeps): PrApi {
   }
 
   /** Diff of what changed since the reviewer's last look: previously reviewed head vs current head. */
-  async function interdiff(payload: Record<string, unknown>): Promise<{ files: PullFile[]; totalCommits: number; sinceSha: string; headSha: string }> {
+  async function interdiff(payload: Record<string, unknown>): Promise<{ files: PullFile[]; totalCommits: number; sinceSha: string; headSha: string; source: "github" | "local-git" }> {
     const ref = deps.parsePullRequestRef(prUrlFromPayload(payload));
     const sinceSha = shaFromPayload(payload, "sinceSha");
     const headSha = shaFromPayload(payload, "headSha");
-    const { files, totalCommits } = await deps.compareCommits(ref, sinceSha, headSha);
-    return { files, totalCommits, sinceSha, headSha };
+    const paths = Array.isArray(payload.paths) ? payload.paths.filter(safeDiffPath).slice(0, 400) : [];
+    try {
+      const { files, totalCommits } = await deps.compareCommits(ref, sinceSha, headSha);
+      return { files, totalCommits, sinceSha, headSha, source: "github" };
+    } catch (error) {
+      // Force-pushed PRs (ghstack, rebases) 404 on the compare API, but the
+      // cached repo usually still has the old head from the previous review.
+      const { files, totalCommits } = await deps.compareCommitsLocally(ref, sinceSha, headSha, paths).catch(() => {
+        throw error;
+      });
+      return { files, totalCommits, sinceSha, headSha, source: "local-git" };
+    }
   }
 
   async function checks(payload: Record<string, unknown>): Promise<{ checks: CommitChecks }> {

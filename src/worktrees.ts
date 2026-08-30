@@ -139,6 +139,10 @@ export function worktreeDirForRef(ref: PullRequestRef): string {
   return defaultService.worktreeDirForRef(ref);
 }
 
+export function repoDirForRef(ref: PullRequestRef): string {
+  return defaultService.repoDirForRef(ref);
+}
+
 export async function preparePrWorktree(ref: PullRequestRef, cloneUrl: string, headSha: string): Promise<string> {
   return defaultService.preparePrWorktree(ref, cloneUrl, headSha);
 }

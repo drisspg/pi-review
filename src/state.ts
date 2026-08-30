@@ -225,7 +225,14 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
   async function upsertPullRequest(pr: StoredPullRequest): Promise<StoredPullRequest> {
     return mutateState(async (state) => {
       const previous = state.prs.find((stored) => stored.key === pr.key);
-      state.prs = [{ ...pr, lastReviewedHeadSha: previous?.lastReviewedHeadSha ?? pr.lastReviewedHeadSha, lastReviewEvent: previous?.lastReviewEvent ?? pr.lastReviewEvent, reviewDecision: pr.reviewDecision ?? previous?.reviewDecision ?? null }, ...state.prs.filter((stored) => stored.key !== pr.key)];
+      // Newest-first memory records backfill reviews recorded before the app tracked reviewed heads.
+      const remembered = state.reviewMemory.find((record) => record.prKey === pr.key);
+      state.prs = [{
+        ...pr,
+        lastReviewedHeadSha: previous?.lastReviewedHeadSha ?? pr.lastReviewedHeadSha ?? remembered?.headSha ?? null,
+        lastReviewEvent: previous?.lastReviewEvent ?? pr.lastReviewEvent ?? remembered?.event ?? null,
+        reviewDecision: pr.reviewDecision ?? previous?.reviewDecision ?? null,
+      }, ...state.prs.filter((stored) => stored.key !== pr.key)];
       await writeState(state);
       return state.prs[0];
     });

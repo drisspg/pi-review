@@ -13,6 +13,7 @@ import { createDraftReviewApi } from "./draft-review-api.js";
 import { createFileApi, defaultFileApiDeps } from "./file-api.js";
 import { createGitHubDraftReviewApi, defaultGitHubDraftReviewApiDeps } from "./github-draft-review-api.js";
 import { gpuWorkspaceCreateResponse, gpuWorkspaceDeleteResponse, gpuWorkspaceExecResponse, gpuWorkspaceStatusResponse } from "./gpu-workspace-api.js";
+import { createGitInterdiff } from "./interdiff-git.js";
 import { addIssueComment, addPendingPullRequestReviewThread, compareCommits, createPendingPullRequestReview, editIssueComment, editReviewComment, editReviewSummary, fetchCommitChecks, fetchFileText, fetchPendingPullRequestReview, fetchPullRequestReviewData, replyToReviewComment, submitPullRequestReview } from "./github.js";
 import { logger } from "./logger.js";
 import { parsePullRequestRef } from "./pr.js";
@@ -33,7 +34,7 @@ import { createServerRoute, createRequestListener } from "./server-router.js";
 import { createShellApi } from "./shell-api.js";
 import { createUsageApi, defaultUsageApiDeps } from "./usage-api.js";
 import { appendDraftReviewComment, clearDraftReview, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, getDraftReview, listAiReviews, listFocusScans, listGuideReviews, listOverviews, listRecentPullRequests, listReviewMemoryRecords, markPullRequestReviewed, removePullRequest, reviewMemoryStats, saveAiReview, saveDraftReview, saveFocusScan, saveGuideReview, saveOverview, saveReviewMemory, saveReviewProfile, setFileViewed, upsertPullRequest } from "./state.js";
-import { cleanupPrWorktree, preparePrWorktree, worktreeDirForRef } from "./worktrees.js";
+import { cleanupPrWorktree, preparePrWorktree, repoDirForRef, worktreeDirForRef } from "./worktrees.js";
 
 const DEFAULT_PORT = 43133;
 const WEB_ROOT = resolve(process.cwd(), "dist-web");
@@ -68,6 +69,11 @@ const piTerminalDraftApi = createPiTerminalDraftApi({ appendDraftReviewComment, 
 const prApi = createPrApi(defaultPrApiDeps({
   cleanupPrWorktree,
   compareCommits,
+  compareCommitsLocally: createGitInterdiff({
+    exists: existsSync,
+    git: async (args, cwd) => (await execFileAsync("git", args, { cwd, maxBuffer: 50 * 1024 * 1024 })).stdout,
+    repoDirForRef,
+  }),
   fetchCommitChecks,
   disposePiSession: async (prKey) => {
     await Promise.all([disposePiSession(prKey), piTerminalManager.disposePr(prKey)]);

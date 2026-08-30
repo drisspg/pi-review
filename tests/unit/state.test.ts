@@ -250,3 +250,13 @@ test("saveFocusScan updates existing records and caps scans per PR", async () =>
   assert.equal(scans[0]?.answer, "new");
   assert.equal(scans.some((scan) => scan.id === "old-19"), false);
 });
+
+test("upsertPullRequest backfills reviewed head from the newest review memory record", async () => {
+  const memory = { id: "m1", prKey: pr().key, headSha: "archived-head", event: "COMMENT" as const, body: "", comments: [], createdAt: "then" };
+  const { runtime } = fakeRuntime({ ...emptyState(), reviewMemory: [memory] });
+
+  const saved = await createStateStore(runtime, paths).upsertPullRequest(pr({ headSha: "new-head" }));
+
+  assert.equal(saved.lastReviewedHeadSha, "archived-head");
+  assert.equal(saved.lastReviewEvent, "COMMENT");
+});

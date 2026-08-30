@@ -108,9 +108,11 @@ test("review prompt API builds copyable review feedback bundles", async () => {
     headSha: "abc123",
     userComments: [{ kind: "Inline review comment", author: "reviewer", location: "src/a.ts:4", state: "unresolved", body: "please handle this edge case", url: "comment-url" }],
     aiComments: [{ role: "user", kind: "chat", text: "what should I test?" }, { role: "pi", title: "Follow-up", kind: "chat", text: "add a regression test" }],
-    focusAreas: [{ path: "src/a.ts", startLine: 4, endLine: 6, title: "edge case", body: "src/a.ts:4-6 — check error state", viewed: true }],
+    focusAreas: [
+      { path: "src/a.ts", startLine: 4, endLine: 6, title: "edge case", body: "src/a.ts:4-6 — check error state", viewed: false },
+      { path: "src/b.ts", startLine: 10, endLine: 12, title: "dismissed concern", body: "src/b.ts:10-12 — not worth addressing", viewed: true },
+    ],
     globalFeedback: "Global review says the flow is sound.",
-    focusScan: "Focus scan raw output.",
   });
 
   assert.equal(result.purpose, "review-feedback");
@@ -120,7 +122,10 @@ test("review prompt API builds copyable review feedback bundles", async () => {
   assert.match(result.prompt, /please handle this edge case/);
   assert.match(result.prompt, /User · chat\nwhat should I test\?/);
   assert.match(result.prompt, /Pi · Follow-up · chat\nadd a regression test/);
-  assert.match(result.prompt, /src\/a\.ts:4-6 — edge case · reviewed/);
+  assert.match(result.prompt, /src\/a\.ts:4-6 — edge case/);
+  // Checked-off focus areas stay out of the feedback pool.
+  assert.doesNotMatch(result.prompt, /dismissed concern/);
+  assert.match(result.prompt, /checked off 1 focus area as handled or not worth addressing/);
   assert.match(result.prompt, /Global review says the flow is sound/);
 });
 

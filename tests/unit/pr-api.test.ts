@@ -56,6 +56,10 @@ function fakeDeps() {
         calls.push(`compare:${requestRef.number}:${baseSha}:${headSha}`);
         return { files: [{ filename: "b.ts", status: "modified", additions: 2, deletions: 1, changes: 3, patch: "@@ interdiff" }], totalCommits: 3 };
       },
+      async compareCommitsLocally(requestRef: PullRequestRef, sinceSha: string, headSha: string, paths: string[]) {
+        calls.push(`local-compare:${requestRef.number}:${sinceSha}:${headSha}:${paths.join(",")}`);
+        return { files: [{ filename: "c.ts", status: "modified", additions: 1, deletions: 0, changes: 1, patch: "@@ local" }], totalCommits: 2 };
+      },
       async fetchCommitChecks(requestRef: PullRequestRef, sha: string) {
         calls.push(`checks:${requestRef.number}:${sha}`);
         return { total: 5, success: 3, failure: 1, pending: 1, neutral: 0, failures: [{ name: "lint", url: "https://ci.example/lint" }] };
@@ -184,8 +188,41 @@ test("PR API interdiff compares the previously reviewed head with the current he
     totalCommits: 3,
     sinceSha: "abc1234",
     headSha: "def5678",
+    source: "github",
   });
   assert.deepEqual(calls, ["parse:url", "compare:1:abc1234:def5678"]);
+});
+
+test("PR API interdiff falls back to the local repo when the compare API fails", async () => {
+  const { deps, calls } = fakeDeps();
+  const failing = {
+    ...deps,
+    async compareCommits(): Promise<{ files: never[]; totalCommits: number }> {
+      throw new Error("gh: Not Found (HTTP 404)");
+    },
+  };
+
+  const response = await createPrApi(failing).interdiff({ prUrl: "url", sinceSha: "abc1234", headSha: "def5678", paths: ["a.ts", "../etc/passwd", "b.ts"] });
+
+  assert.equal(response.source, "local-git");
+  assert.equal(response.totalCommits, 2);
+  assert.deepEqual(response.files.map((file) => file.filename), ["c.ts"]);
+  assert.deepEqual(calls, ["parse:url", "local-compare:1:abc1234:def5678:a.ts,b.ts"]);
+});
+
+test("PR API interdiff surfaces the GitHub error when the local fallback also fails", async () => {
+  const { deps } = fakeDeps();
+  const failing = {
+    ...deps,
+    async compareCommits(): Promise<{ files: never[]; totalCommits: number }> {
+      throw new Error("gh: Not Found (HTTP 404)");
+    },
+    async compareCommitsLocally(): Promise<{ files: never[]; totalCommits: number }> {
+      throw new Error("no cached repo");
+    },
+  };
+
+  await assert.rejects(createPrApi(failing).interdiff({ prUrl: "url", sinceSha: "abc1234", headSha: "def5678" }), /Not Found/);
 });
 
 test("PR API checks summarizes commit check runs", async () => {

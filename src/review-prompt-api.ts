@@ -403,7 +403,7 @@ function formatFocusAreas(areas: PromptFocusArea[]): string {
   if (areas.length === 0) return "No parsed focus areas were captured.";
   return areas.map((area, index) => {
     const range = area.startLine === area.endLine ? String(area.startLine) : `${area.startLine}-${area.endLine}`;
-    return `### ${index + 1}. ${area.path}:${range} — ${area.title} · ${area.viewed === true ? "reviewed" : "unreviewed"}\n${area.body}`;
+    return `### ${index + 1}. ${area.path}:${range} — ${area.title}\n${area.body}`;
   }).join("\n\n");
 }
 
@@ -449,10 +449,11 @@ function reviewFeedbackPrompt(payload: Record<string, unknown>): ReviewPromptRes
   const prUrl = optionalString(payload, "prUrl", "(unknown URL)");
   const headSha = optionalString(payload, "headSha", "(unknown head)");
   const globalFeedback = optionalString(payload, "globalFeedback", "No global AI feedback was captured.");
-  const focusScan = optionalString(payload, "focusScan", "No focus scan transcript was captured.");
   const userComments = promptFeedbackItems(payload, "userComments");
   const aiComments = promptAiMessages(payload);
-  const focusAreas = promptFocusAreas(payload);
+  // Checked-off focus areas mean "handled or deliberately dismissed" — they stay out of the feedback pool.
+  const focusAreas = promptFocusAreas(payload).filter((area) => area.viewed !== true);
+  const dismissedCount = promptFocusAreas(payload).length - focusAreas.length;
 
   return {
     purpose: "review-feedback",
@@ -474,13 +475,10 @@ ${formatFeedbackItems(userComments)}
 ${formatAiMessages(aiComments)}
 
 ## AI focus areas
-${formatFocusAreas(focusAreas)}
+${dismissedCount > 0 ? `The reviewer checked off ${dismissedCount} focus area${dismissedCount === 1 ? "" : "s"} as handled or not worth addressing; those are deliberately excluded.\n\n` : ""}${formatFocusAreas(focusAreas)}
 
 ## AI global feedback
-${globalFeedback}
-
-## Focus scan transcript
-${focusScan}`,
+${globalFeedback}`,
   };
 }
 
