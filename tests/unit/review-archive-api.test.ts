@@ -25,6 +25,10 @@ test("review archive saves a local snapshot and clears the active draft", async 
       calls.push(`fetch:${requestRef.number}`);
       return reviewData;
     },
+    async markPullRequestReviewed(prKey, headSha, event) {
+      calls.push(`reviewed:${prKey}:${headSha}:${event}`);
+      return null;
+    },
     refFromBody() {
       calls.push("ref");
       return ref;
@@ -40,7 +44,7 @@ test("review archive saves a local snapshot and clears the active draft", async 
   assert.equal(response.memory.disposition, "archived");
   assert.equal(response.memory.body, "local");
   assert.deepEqual(response.memory.changeSet?.files.map((file) => file.path), ["a.ts"]);
-  assert.deepEqual(calls, ["ref", "fetch:1", "save:archived:1", "clear:github.com/pytorch/pytorch#1"]);
+  assert.deepEqual(calls, ["ref", "fetch:1", "save:archived:1", "reviewed:github.com/pytorch/pytorch#1:head:COMMENT", "clear:github.com/pytorch/pytorch#1"]);
 });
 
 test("review archive validates the review event before clearing drafts", async () => {
@@ -51,6 +55,9 @@ test("review archive validates the review event before clearing drafts", async (
     },
     async fetchPullRequestReviewData() {
       return reviewData;
+    },
+    async markPullRequestReviewed() {
+      return null;
     },
     refFromBody() {
       return ref;

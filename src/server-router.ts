@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import { inputFromBody, type JsonValue, MalformedJsonError, readBody, recordFromBody, sendJson } from "./http.js";
+import { inputFromBody, isLocalOrigin, type JsonValue, MalformedJsonError, readBody, recordFromBody, sendJson } from "./http.js";
 import type { AskStreamResponse } from "./ask-stream-api.js";
 import type { BlameApi } from "./blame-api.js";
 import type { CommentApi } from "./comment-api.js";
@@ -91,6 +91,11 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
   };
 
   return async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (!isLocalOrigin(req.headers.origin)) {
+      sendJson(res, 403, { error: "Cross-origin requests are not allowed" });
+      return;
+    }
+
     if (req.method === "OPTIONS") {
       sendJson(res, 204, null);
       return;

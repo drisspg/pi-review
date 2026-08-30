@@ -537,3 +537,20 @@ test("request listener logs and wraps route failures as JSON 500", async () => {
   assert.deepEqual(jsonBody(res), { error: "boom" });
   assert.deepEqual(logs.map((entry) => (entry as { message: string }).message), ["request start", "request failed", "request finish"]);
 });
+
+test("server route rejects cross-origin browser requests but allows local origins", async () => {
+  const route = createServerRoute(baseDeps());
+
+  const crossOrigin = fakeRequest("POST", "/api/ask", { prKey: "pr", prompt: "p" });
+  crossOrigin.headers = { host: "test.local", origin: "https://evil.example" };
+  const rejected = new FakeResponse();
+  await route(crossOrigin, rejected as unknown as ServerResponse);
+  assert.equal(rejected.statusCode, 403);
+  assert.deepEqual(jsonBody(rejected), { error: "Cross-origin requests are not allowed" });
+
+  const localOrigin = fakeRequest("GET", "/api/health");
+  localOrigin.headers = { host: "test.local", origin: "http://localhost:5173" };
+  const allowed = new FakeResponse();
+  await route(localOrigin, allowed as unknown as ServerResponse);
+  assert.equal(allowed.statusCode, 200);
+});

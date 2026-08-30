@@ -82,9 +82,19 @@ export function PiTerminal({ prKey, headSha, session = "main", context, target, 
     const socket = new WebSocket(terminalWebSocketUrl(prKey, session, headSha, context, target));
     socketRef.current = socket;
     let ready = false;
+    let pendingAckChars = 0;
 
     function send(message: Record<string, unknown>): void {
       if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+    }
+
+    // Flow control: acknowledge output once xterm has actually parsed it, so the
+    // server can pause the pty instead of flooding this terminal during bursts.
+    function acknowledgeOutput(chars: number): void {
+      pendingAckChars += chars;
+      if (pendingAckChars < 32_768) return;
+      send({ type: "ack", chars: pendingAckChars });
+      pendingAckChars = 0;
     }
 
     function fit(): void {
@@ -116,7 +126,8 @@ export function PiTerminal({ prKey, headSha, session = "main", context, target, 
           terminal.focus();
         });
       } else if (message.type === "output") {
-        terminal.write(message.data);
+        const chars = message.data.length;
+        terminal.write(message.data, () => acknowledgeOutput(chars));
       } else if (message.type === "draftReview") {
         onDraftReviewRef.current?.(message.draftReview);
       } else if (message.type === "exit") {

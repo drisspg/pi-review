@@ -81,6 +81,7 @@ export type PullRequestReviewSummary = {
   html_url: string;
   user?: GitHubUser;
   state: string;
+  commit_id?: string | null;
   submitted_at?: string | null;
   updated_at?: string;
 };

@@ -11,13 +11,23 @@ export class MalformedJsonError extends Error {
   }
 }
 
+/**
+ * Browsers may only call this server from the same machine: the API executes
+ * privileged local actions (editor opens, gh mutations, workspace exec), so a
+ * cross-origin page must never be able to drive it. Non-browser clients (curl,
+ * the VS Code extension host) send no Origin header and pass.
+ */
+export function isLocalOrigin(origin: string | undefined): boolean {
+  if (origin == null) return true;
+  try {
+    return ["127.0.0.1", "::1", "localhost"].includes(new URL(origin).hostname);
+  } catch {
+    return false;
+  }
+}
+
 export function sendJson(res: ServerResponse, status: number, body: JsonValue): void {
-  res.writeHead(status, {
-    "content-type": "application/json; charset=utf-8",
-    "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
-    "access-control-allow-headers": "content-type",
-  });
+  res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(body));
 }
 

@@ -1,6 +1,6 @@
 import { CheckIcon, CopyIcon } from "@primer/octicons-react";
 import React, { lazy, Suspense, useState } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { api, errorMessage, openFileInEditor } from "../api";
@@ -86,11 +86,30 @@ function InlineFileSnippet({ context, reference }: { context: FileLinkContext; r
   </span>;
 }
 
+const remarkPlugins = [remarkGfm, remarkFileReferenceLinks, remarkPullRequestLinks];
+
+/** Default sanitization strips unknown protocols, which would empty our internal file-reference hrefs. */
+function markdownUrlTransform(url: string): string {
+  return url.startsWith(fileReferenceUrlPrefix) ? url : defaultUrlTransform(url);
+}
+
 export function MarkdownTextRenderer({ text, fileLinks }: { text: string; fileLinks?: FileLinkContext }) {
   const inlineCtx = React.useContext(InlineSnippetsContext);
-  const mergedFileLinks: FileLinkContext | undefined = fileLinks == null ? undefined : { ...fileLinks, headSha: fileLinks.headSha ?? inlineCtx?.headSha, snippets: fileLinks.snippets ?? inlineCtx?.snippets ?? false };
-  const components = mergedFileLinks == null ? { code: MarkdownCode, pre: MarkdownPre } : { code: (props: MarkdownCodeProps) => <MarkdownCode {...props} fileLinks={mergedFileLinks} />, pre: (props: MarkdownPreProps) => <MarkdownPre {...props} fileLinks={mergedFileLinks} />, a: (props: MarkdownAnchorProps) => <MarkdownAnchor {...props} fileLinks={mergedFileLinks} /> };
-  return <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm, remarkFileReferenceLinks, remarkPullRequestLinks]} components={components}>{text}</ReactMarkdown></div>;
+  const prUrl = fileLinks?.prUrl;
+  const headSha = fileLinks?.headSha ?? inlineCtx?.headSha;
+  const snippets = fileLinks?.snippets ?? inlineCtx?.snippets ?? false;
+  // Fresh component functions would remount the whole rendered tree (and drop
+  // snippet/copy state) on every parent re-render, e.g. per streamed delta.
+  const components = React.useMemo(() => {
+    if (prUrl == null) return { code: MarkdownCode, pre: MarkdownPre };
+    const mergedFileLinks: FileLinkContext = { prUrl, headSha, snippets };
+    return {
+      code: (props: MarkdownCodeProps) => <MarkdownCode {...props} fileLinks={mergedFileLinks} />,
+      pre: (props: MarkdownPreProps) => <MarkdownPre {...props} fileLinks={mergedFileLinks} />,
+      a: (props: MarkdownAnchorProps) => <MarkdownAnchor {...props} fileLinks={mergedFileLinks} />,
+    };
+  }, [prUrl, headSha, snippets]);
+  return <div className="markdown"><ReactMarkdown remarkPlugins={remarkPlugins} components={components} urlTransform={markdownUrlTransform}>{text}</ReactMarkdown></div>;
 }
 
 type MarkdownCodeProps = { className?: string; children?: React.ReactNode; fileLinks?: FileLinkContext };

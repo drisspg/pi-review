@@ -1,11 +1,12 @@
 import { refFromBody } from "./http.js";
 import { prKey } from "./pr.js";
 import { reviewSubmitMemoryRecord } from "./review-memory-api.js";
-import type { PullRequestRef, PullRequestReviewData, ReviewMemoryRecord } from "./types.js";
+import type { PullRequestRef, PullRequestReviewData, ReviewMemoryRecord, StoredPullRequest } from "./types.js";
 
 export type ReviewArchiveApiDeps = {
   clearDraftReview: (prKey: string) => Promise<void>;
   fetchPullRequestReviewData: (ref: PullRequestRef) => Promise<PullRequestReviewData>;
+  markPullRequestReviewed: (prKey: string, headSha: string, event: StoredPullRequest["lastReviewEvent"]) => Promise<StoredPullRequest | null>;
   refFromBody: (body: unknown) => PullRequestRef;
   saveReviewMemory: (record: Omit<ReviewMemoryRecord, "id" | "createdAt">) => Promise<ReviewMemoryRecord>;
 };
@@ -21,6 +22,8 @@ export function createReviewArchiveApi(deps: ReviewArchiveApiDeps) {
     const key = prKey(ref);
     const reviewData = await deps.fetchPullRequestReviewData(ref);
     const memory = await deps.saveReviewMemory({ ...reviewSubmitMemoryRecord(payload, reviewData, key), disposition: "archived" });
+    // An archived review still means "I finished looking at this head" — record it so re-opens offer the interdiff.
+    await deps.markPullRequestReviewed(key, reviewData.pr.headSha, memory.event);
     await deps.clearDraftReview(key);
     return { memory };
   }

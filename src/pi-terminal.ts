@@ -15,6 +15,11 @@ const DEFAULT_ROWS = 30;
 const MAX_BUFFER_CHARS = 1_000_000;
 const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_MAX_SESSIONS = 15;
+// Ack-based flow control (the xterm.js-recommended pattern): pause the pty when
+// the slowest attached browser falls too far behind, so a burst (e.g. catting a
+// large file) cannot flood the WebSocket or xterm's parse queue.
+const FLOW_PAUSE_CHARS = 512_000;
+const FLOW_RESUME_CHARS = 128_000;
 
 export type PiTerminalServerMessage =
   | { type: "ready"; pid: number }
@@ -26,6 +31,7 @@ export type PiTerminalServerMessage =
 export type PiTerminalClientMessage =
   | { type: "input"; data: string }
   | { type: "resize"; cols: number; rows: number }
+  | { type: "ack"; chars: number }
   | { type: "stop" };
 
 export type PiTerminalTarget = {
@@ -50,7 +56,7 @@ export type PiTerminalPeer = {
   onClose: (listener: () => void) => void;
 };
 
-type TerminalProcess = Pick<IPty, "kill" | "pid" | "resize" | "write"> & {
+type TerminalProcess = Pick<IPty, "kill" | "pause" | "pid" | "resize" | "resume" | "write"> & {
   onData: IPty["onData"];
   onExit: IPty["onExit"];
 };
@@ -61,6 +67,8 @@ type TerminalSession = {
   buffer: string;
   idleTimer: NodeJS.Timeout | null;
   lastActivityAt: number;
+  paused: boolean;
+  unackedChars: Map<PiTerminalPeer, number>;
 };
 
 export type PiTerminalManagerDeps = {
@@ -148,6 +156,9 @@ export function parsePiTerminalClientMessage(raw: string): PiTerminalClientMessa
       rows: boundedDimension(parsed.rows, DEFAULT_ROWS, 500),
     };
   }
+  if (parsed.type === "ack" && "chars" in parsed && typeof parsed.chars === "number" && Number.isInteger(parsed.chars) && parsed.chars > 0) {
+    return { type: "ack", chars: Math.min(parsed.chars, 1_000_000_000) };
+  }
   return parsed.type === "stop" ? { type: "stop" } : null;
 }
 
@@ -158,6 +169,18 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
   const sessionRoot = deps.sessionRoot ?? resolve(homedir(), ".pi", "agent", "state", "pi-pr-review", "terminal-sessions");
   const idleTimeoutMs = deps.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
   const maxSessions = deps.maxSessions ?? DEFAULT_MAX_SESSIONS;
+
+  /** Pause the pty while the slowest attached browser is too far behind; resume once it catches up. */
+  function updateFlowControl(session: TerminalSession): void {
+    const maxUnacked = Math.max(0, ...session.unackedChars.values());
+    if (!session.paused && maxUnacked > FLOW_PAUSE_CHARS) {
+      session.paused = true;
+      session.process.pause();
+    } else if (session.paused && maxUnacked < FLOW_RESUME_CHARS) {
+      session.paused = false;
+      session.process.resume();
+    }
+  }
 
   function stopSession(key: string, session: TerminalSession, reason: string): void {
     if (sessions.get(key) == null) return;
@@ -206,11 +229,15 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
     const processHandle = deps.spawn == null
       ? (await import("node-pty")).spawn(piCommand, args, options)
       : deps.spawn(piCommand, args, options);
-    const terminalSession: TerminalSession = { process: processHandle, peers: new Set(), buffer: "", idleTimer: null, lastActivityAt: Date.now() };
+    const terminalSession: TerminalSession = { process: processHandle, peers: new Set(), buffer: "", idleTimer: null, lastActivityAt: Date.now(), paused: false, unackedChars: new Map() };
     processHandle.onData((data) => {
       terminalSession.lastActivityAt = Date.now();
       terminalSession.buffer = `${terminalSession.buffer}${data}`.slice(-MAX_BUFFER_CHARS);
-      for (const peer of terminalSession.peers) peer.send({ type: "output", data });
+      for (const peer of terminalSession.peers) {
+        peer.send({ type: "output", data });
+        terminalSession.unackedChars.set(peer, (terminalSession.unackedChars.get(peer) ?? 0) + data.length);
+      }
+      updateFlowControl(terminalSession);
     });
     processHandle.onExit(({ exitCode, signal }) => {
       for (const peer of terminalSession.peers) peer.send({ type: "exit", exitCode, signal: signal ?? 0 });
@@ -248,6 +275,8 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
       closed = true;
       if (attachedSession == null) return;
       attachedSession.peers.delete(peer);
+      attachedSession.unackedChars.delete(peer);
+      updateFlowControl(attachedSession);
       attachedSession.lastActivityAt = Date.now();
       scheduleIdleStop(`${request.prKey}\0${request.session}`, attachedSession);
     });
@@ -260,14 +289,21 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
       if (session.idleTimer != null) clearTimeout(session.idleTimer);
       session.idleTimer = null;
       peer.send({ type: "ready", pid: session.process.pid });
-      if (session.buffer.length > 0) peer.send({ type: "output", data: session.buffer });
+      if (session.buffer.length > 0) {
+        peer.send({ type: "output", data: session.buffer });
+        session.unackedChars.set(peer, session.buffer.length);
+        updateFlowControl(session);
+      }
       peer.onMessage((raw) => {
         const message = parsePiTerminalClientMessage(raw);
         if (message == null) return;
         session.lastActivityAt = Date.now();
         if (message.type === "input") session.process.write(message.data);
         else if (message.type === "resize") session.process.resize(message.cols, message.rows);
-        else stopSession(`${request.prKey}\0${request.session}`, session, "Terminal stopped");
+        else if (message.type === "ack") {
+          session.unackedChars.set(peer, Math.max(0, (session.unackedChars.get(peer) ?? 0) - message.chars));
+          updateFlowControl(session);
+        } else stopSession(`${request.prKey}\0${request.session}`, session, "Terminal stopped");
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

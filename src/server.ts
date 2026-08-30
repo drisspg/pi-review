@@ -84,7 +84,7 @@ const prApi = createPrApi(defaultPrApiDeps({
   removePullRequest,
   upsertPullRequest,
 }));
-const reviewArchiveApi = createReviewArchiveApi(defaultReviewArchiveApiDeps({ clearDraftReview, fetchPullRequestReviewData, saveReviewMemory }));
+const reviewArchiveApi = createReviewArchiveApi(defaultReviewArchiveApiDeps({ clearDraftReview, fetchPullRequestReviewData, markPullRequestReviewed, saveReviewMemory }));
 const reviewMemoryApi = createReviewMemoryApi({ askPi, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewMemory, saveReviewProfile });
 const reviewPromptApi = createReviewPromptApi({ currentReviewMemoryPrompt });
 const reviewSubmitRouteApi = createReviewSubmitRouteApi(defaultReviewSubmitRouteApiDeps({ clearDraftReview, fetchPullRequestReviewData, markPullRequestReviewed, saveReviewMemory, submitPullRequestReview }));

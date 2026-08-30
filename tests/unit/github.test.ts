@@ -28,7 +28,8 @@ function fakeRuntime(options: { failMutations?: boolean; gitattributes?: string;
         if (args[0] === "api" && key === "/repos/pytorch/pytorch/pulls/185924/files") return { stdout: JSON.stringify([{ filename: "torch/a.py", status: "modified", additions: 1, deletions: 2, changes: 3, patch: "@@" }, { filename: "generated/model.py", status: "modified", additions: 10, deletions: 0, changes: 10, patch: "@@" }]), stderr: "" };
         if (args[0] === "api" && key === "/repos/pytorch/pytorch/pulls/185924/comments") return { stdout: JSON.stringify([{ id: 123, path: "torch/a.py", line: 7, side: "RIGHT", body: "note", html_url: "comment" }]), stderr: "" };
         if (args[0] === "api" && key === "/repos/pytorch/pytorch/issues/185924/comments") return { stdout: JSON.stringify([{ id: 456, body: "issue", html_url: "issue" }]), stderr: "" };
-        if (args[0] === "api" && key === "/repos/pytorch/pytorch/pulls/185924/reviews") return { stdout: JSON.stringify([{ id: 789, body: "summary", html_url: "review", state: "COMMENTED" }, { id: 790, body: "   ", html_url: "empty", state: "COMMENTED" }]), stderr: "" };
+        if (args[0] === "api" && key === "/user") return { stdout: JSON.stringify({ login: "alice" }), stderr: "" };
+        if (args[0] === "api" && key === "/repos/pytorch/pytorch/pulls/185924/reviews") return { stdout: JSON.stringify([{ id: 789, body: "summary", html_url: "review", state: "COMMENTED", user: { login: "alice" }, commit_id: "aaa1111", submitted_at: "2026-05-01T00:00:00Z" }, { id: 790, body: "   ", html_url: "empty", state: "APPROVED", user: { login: "alice" }, commit_id: "bbb2222", submitted_at: "2026-06-01T00:00:00Z" }, { id: 791, body: "  ", html_url: "bob", state: "CHANGES_REQUESTED", user: { login: "bob" }, commit_id: "ccc3333", submitted_at: "2026-07-01T00:00:00Z" }]), stderr: "" };
         if (args[0] === "api" && key?.startsWith("/repos/pytorch/pytorch/contents/.gitattributes?ref=")) return { stdout: options.gitattributes ?? "", stderr: "" };
         if (args[0] === "api" && key === "/repos/pytorch/pytorch/compare/aaa1111...bbb2222") return { stdout: JSON.stringify({ total_commits: 2, files: [{ filename: "torch/a.py", status: "modified", additions: 1, deletions: 1, changes: 2, patch: "@@ interdiff" }, { filename: "generated/model.py", status: "modified", additions: 4, deletions: 0, changes: 4, patch: "@@" }] }), stderr: "" };
         if (args[0] === "api" && key?.startsWith("/repos/pytorch/pytorch/commits/head/check-runs")) return { stdout: JSON.stringify({ total_count: 4, check_runs: [{ name: "build", status: "completed", conclusion: "success", html_url: "build-url" }, { name: "lint", status: "completed", conclusion: "failure", html_url: "lint-url" }, { name: "docs", status: "in_progress", conclusion: null, html_url: "docs-url" }, { name: "optional", status: "completed", conclusion: "skipped", html_url: "optional-url" }] }), stderr: "" };
@@ -72,6 +73,9 @@ test("GitHub client fetches and combines PR review data", async () => {
   assert.equal(data.reviewSummaries.length, 1);
   assert.equal(data.fileReviews[0]?.viewed, false);
   assert.equal(data.fileReviews[0]?.updatedAt, "2026-06-04T00:00:00.000Z");
+  // Derived from the viewer's own latest submitted review, not bob's newer one.
+  assert.equal(data.pr.lastReviewedHeadSha, "bbb2222");
+  assert.equal(data.pr.lastReviewEvent, "APPROVE");
 });
 
 test("GitHub client recognizes bot-landed pull requests from their merged label", async () => {

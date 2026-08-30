@@ -1451,10 +1451,11 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { r
   const [interdiff, setInterdiff] = useState<InterdiffResponse | null>(null);
   const [interdiffError, setInterdiffError] = useState<string | null>(null);
   useEffect(() => {
-    setDiffScope("all");
+    // Re-reviews open on the delta by default: what changed since the head you last reviewed.
+    setDiffScope(pr.lastReviewedHeadSha != null && pr.lastReviewedHeadSha !== pr.headSha ? "since-review" : "all");
     setInterdiff(null);
     setInterdiffError(null);
-  }, [pr.key, pr.headSha]);
+  }, [pr.key, pr.headSha, pr.lastReviewedHeadSha]);
   const wantInterdiff = diffScope === "since-review" && canInterdiff;
   useEffect(() => {
     if (!wantInterdiff || sinceSha == null || interdiff != null) return;

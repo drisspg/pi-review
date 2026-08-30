@@ -190,15 +190,23 @@ function SchematicFlow({ schematic, canvasHeight, onOpenRef, onContentHeight }: 
     };
   }, [fitted, fitView]);
 
+  // Stable handlers keep React Flow's memoized node wrappers from re-rendering every node.
+  const onMoveStart = useCallback((event: unknown) => {
+    if (event != null) interactedRef.current = true;
+  }, []);
+  const onNodeDragStart = useCallback(() => {
+    interactedRef.current = true;
+  }, []);
+  const onNodeClick = useCallback((_: unknown, node: Node) => {
+    const ref = (node.data as Partial<CardData>).refText;
+    if (ref != null) onOpenRef?.(ref);
+  }, [onOpenRef]);
+
   return <ReactFlow
     ref={flowRef}
     className={fitted ? undefined : "schematic-measuring"}
-    onMoveStart={(event) => {
-      if (event != null) interactedRef.current = true;
-    }}
-    onNodeDragStart={() => {
-      interactedRef.current = true;
-    }}
+    onMoveStart={onMoveStart}
+    onNodeDragStart={onNodeDragStart}
     nodes={nodes}
     edges={edges}
     onNodesChange={onNodesChange}
@@ -207,10 +215,7 @@ function SchematicFlow({ schematic, canvasHeight, onOpenRef, onContentHeight }: 
     edgesFocusable={false}
     minZoom={0.2}
     maxZoom={2}
-    onNodeClick={(_, node) => {
-      const ref = (node.data as Partial<CardData>).refText;
-      if (ref != null) onOpenRef?.(ref);
-    }}
+    onNodeClick={onNodeClick}
   >
     <Background variant={BackgroundVariant.Dots} gap={18} size={1} />
     <Controls showInteractive={false} fitViewOptions={{ padding: 0.1, maxZoom: 1.25 }} />

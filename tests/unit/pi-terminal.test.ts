@@ -11,11 +11,15 @@ class FakeProcess {
   writes: string[] = [];
   resizes: Array<[number, number]> = [];
   killed = false;
+  pauses = 0;
+  resumes = 0;
   dataListener: (data: string) => void = () => undefined;
   exitListener: (event: { exitCode: number; signal?: number }) => void = () => undefined;
 
   write(data: string) { this.writes.push(data); }
   resize(cols: number, rows: number) { this.resizes.push([cols, rows]); }
+  pause() { this.pauses += 1; }
+  resume() { this.resumes += 1; }
   kill() { this.killed = true; }
   onData(listener: (data: string) => void) { this.dataListener = listener; return { dispose() {} }; }
   onExit(listener: (event: { exitCode: number; signal?: number }) => void) { this.exitListener = listener; return { dispose() {} }; }
@@ -46,6 +50,9 @@ test("bounds terminal resize and input messages", () => {
   assert.deepEqual(parsePiTerminalClientMessage(JSON.stringify({ type: "resize", cols: 0, rows: 900 })), { type: "resize", cols: 2, rows: 500 });
   assert.deepEqual(parsePiTerminalClientMessage(JSON.stringify({ type: "input", data: "hello" })), { type: "input", data: "hello" });
   assert.deepEqual(parsePiTerminalClientMessage(JSON.stringify({ type: "stop" })), { type: "stop" });
+  assert.deepEqual(parsePiTerminalClientMessage(JSON.stringify({ type: "ack", chars: 32_768 })), { type: "ack", chars: 32_768 });
+  assert.equal(parsePiTerminalClientMessage(JSON.stringify({ type: "ack", chars: -5 })), null);
+  assert.equal(parsePiTerminalClientMessage(JSON.stringify({ type: "ack", chars: 1.5 })), null);
   assert.equal(parsePiTerminalClientMessage("not-json"), null);
   assert.equal(parsePiTerminalClientMessage(JSON.stringify({ type: "input", data: "x".repeat(64_001) })), null);
 });
@@ -217,4 +224,36 @@ test("reports a missing PR checkout without spawning", async () => {
   await manager.attach(peer, { prKey: "github.com/org/repo#1", session: "main" });
   assert.deepEqual(peer.messages, [{ type: "error", message: "Open this pull request before starting its terminal." }]);
   assert.deepEqual(peer.closed, [1011, "Terminal startup failed"]);
+});
+
+test("pauses the pty when a peer falls behind and resumes on acks", async () => {
+  const fake = new FakeProcess();
+  const manager = createPiTerminalManager({ cwdForPr: () => "/tmp/pr-worktree", piCommand: "pi", sessionRoot: "/tmp/pi-review-terminal-test", spawn: () => fake });
+  const peer = new FakePeer();
+  await manager.attach(peer, { prKey: "github.com/org/repo#1", session: "flow" });
+
+  fake.dataListener("x".repeat(400_000));
+  assert.equal(fake.pauses, 0);
+  fake.dataListener("y".repeat(200_000));
+  assert.equal(fake.pauses, 1);
+
+  peer.messageListener(JSON.stringify({ type: "ack", chars: 400_000 }));
+  assert.equal(fake.resumes, 0);
+  peer.messageListener(JSON.stringify({ type: "ack", chars: 100_000 }));
+  assert.equal(fake.resumes, 1);
+  await manager.dispose();
+});
+
+test("a disconnecting slow peer releases flow control", async () => {
+  const fake = new FakeProcess();
+  const manager = createPiTerminalManager({ cwdForPr: () => "/tmp/pr-worktree", piCommand: "pi", sessionRoot: "/tmp/pi-review-terminal-test", spawn: () => fake });
+  const peer = new FakePeer();
+  await manager.attach(peer, { prKey: "github.com/org/repo#1", session: "flow-close" });
+
+  fake.dataListener("x".repeat(600_000));
+  assert.equal(fake.pauses, 1);
+
+  peer.closeListener();
+  assert.equal(fake.resumes, 1);
+  await manager.dispose();
 });

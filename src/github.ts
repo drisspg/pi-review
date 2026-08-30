@@ -91,7 +91,25 @@ function pendingReview(review: PendingReviewGraphql, comments: PendingReviewComm
   };
 }
 
-function toStoredPullRequest(ref: PullRequestRef, pr: PullRequest, files: PullFile[], comments: PullReviewComment[], issueComments: PullIssueComment[], reviewSummaries: PullRequestReviewSummary[], reviewDecision: PullRequestReviewDecision, now: string): StoredPullRequest {
+function reviewEventFromState(state: string): StoredPullRequest["lastReviewEvent"] {
+  if (state === "APPROVED") return "APPROVE";
+  if (state === "CHANGES_REQUESTED") return "REQUEST_CHANGES";
+  return "COMMENT";
+}
+
+/**
+ * The head SHA of the viewer's most recent submitted review, so re-review
+ * interdiffs work even when the review happened on GitHub itself or before
+ * this app started recording reviews. Local records still win on upsert.
+ */
+function latestViewerReview(reviews: PullRequestReviewSummary[], viewer: string | null): PullRequestReviewSummary | null {
+  if (viewer == null) return null;
+  const own = reviews.filter((review) => review.user?.login === viewer && typeof review.commit_id === "string" && review.commit_id.length > 0 && review.submitted_at != null);
+  own.sort((a, b) => String(b.submitted_at).localeCompare(String(a.submitted_at)));
+  return own[0] ?? null;
+}
+
+function toStoredPullRequest(ref: PullRequestRef, pr: PullRequest, files: PullFile[], comments: PullReviewComment[], issueComments: PullIssueComment[], reviewSummaries: PullRequestReviewSummary[], reviewDecision: PullRequestReviewDecision, now: string, viewerReview: PullRequestReviewSummary | null): StoredPullRequest {
   return {
     key: prKey(ref),
     ref,
@@ -106,8 +124,8 @@ function toStoredPullRequest(ref: PullRequestRef, pr: PullRequest, files: PullFi
     filesChanged: files.length,
     existingCommentCount: comments.length + issueComments.length + reviewSummaries.length,
     lastOpenedAt: now,
-    lastReviewedHeadSha: null,
-    lastReviewEvent: null,
+    lastReviewedHeadSha: viewerReview?.commit_id ?? null,
+    lastReviewEvent: viewerReview == null ? null : reviewEventFromState(viewerReview.state),
     reviewDecision,
   };
 }
@@ -117,6 +135,16 @@ function fileFingerprint(file: PullFile): string {
 }
 
 export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): GitHubClient {
+  let viewerLoginPromise: Promise<string | null> | null = null;
+
+  function fetchViewerLogin(): Promise<string | null> {
+    viewerLoginPromise ??= ghApi<{ login?: string }>("/user").then((user) => user.login ?? null).catch((error: unknown) => {
+      logger.warn("github", "fetch viewer login failed", { error: error instanceof Error ? error.message : String(error) });
+      return null;
+    });
+    return viewerLoginPromise;
+  }
+
   async function ghApi<T>(path: string): Promise<T> {
     const startedAt = performance.now();
     logger.info("github", "gh api start", { path });
@@ -200,7 +228,7 @@ export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): Git
     logger.info("github", "fetch PR review data", { ref });
     const rawPrPromise = ghApi<PullRequest>(apiBase(ref));
     const gitattributesPromise = rawPrPromise.then((pr) => fetchRootGitattributes(ref, pr.head.sha));
-    const [rawPr, rawFiles, rawComments, issueComments, rawReviewSummaries, threadStates, reviewDecision, gitattributes] = await Promise.all([
+    const [rawPr, rawFiles, rawComments, issueComments, rawReviewSummaries, threadStates, reviewDecision, gitattributes, viewer] = await Promise.all([
       rawPrPromise,
       ghApi<PullFile[]>(`${apiBase(ref)}/files`),
       ghApi<PullReviewComment[]>(`${apiBase(ref)}/comments`),
@@ -209,11 +237,12 @@ export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): Git
       fetchReviewThreadStates(ref),
       fetchReviewDecision(ref),
       gitattributesPromise,
+      fetchViewerLogin(),
     ]);
     const files = markGeneratedPullFiles(rawFiles, gitattributes);
     const comments = rawComments.map((comment) => ({ ...comment, ...threadStates.get(comment.id) }));
     const reviewSummaries = rawReviewSummaries.filter((review) => review.body.trim().length > 0);
-    const pr = toStoredPullRequest(ref, rawPr, files, comments, issueComments, reviewSummaries, reviewDecision, runtime.now());
+    const pr = toStoredPullRequest(ref, rawPr, files, comments, issueComments, reviewSummaries, reviewDecision, runtime.now(), latestViewerReview(rawReviewSummaries, viewer));
     logger.info("github", "fetched PR review data", { key: pr.key, title: pr.title, files: files.length, reviewComments: comments.length, issueComments: issueComments.length, reviewSummaries: reviewSummaries.length });
     const storedFileReviews = await runtime.listFileReviews(pr.key);
     const fileReviews = files.map((file) => {
