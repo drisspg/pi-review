@@ -100,16 +100,19 @@ async function elkPlacements(schematic: Schematic, measured: Node[]): Promise<El
     layoutOptions: {
       "elk.algorithm": "layered",
       "elk.direction": schematic.direction === "down" ? "DOWN" : "RIGHT",
-      "elk.layered.spacing.nodeNodeBetweenLayers": "64",
-      "elk.spacing.nodeNode": "28",
-      "elk.spacing.edgeNode": "28",
+      "elk.layered.spacing.nodeNodeBetweenLayers": "88",
+      "elk.layered.spacing.edgeNodeBetweenLayers": "32",
+      "elk.spacing.nodeNode": "44",
+      "elk.spacing.edgeNode": "36",
+      "elk.spacing.edgeEdge": "20",
+      "elk.spacing.componentComponent": "56",
       "elk.hierarchyHandling": "INCLUDE_CHILDREN",
     },
     children: [
       ...schematic.groups.map((group) => ({
         id: group.id,
         // Top padding reserves room for the frame label.
-        layoutOptions: { "elk.padding": "[top=42,left=16,bottom=16,right=16]" },
+        layoutOptions: { "elk.padding": "[top=44,left=20,bottom=20,right=20]" },
         children: schematic.nodes.filter((node) => node.group === group.id).map((node) => leaf(node.id)),
       })),
       ...schematic.nodes.filter((node) => node.group == null).map((node) => leaf(node.id)),

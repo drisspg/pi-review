@@ -2355,13 +2355,13 @@ function ReviewSummary({ pr, files, drafts, setDrafts, event, setEvent, body, se
     {feedbackCopy.error != null && <Flash variant="danger" className="copy-feedback-error" role="alert">Copy failed: {feedbackCopy.error}</Flash>}
     {githubDraftPanel}
     <div className="review-compose">
-      <label className="review-event-field"><span>Outcome</span><Select className={`review-event ${event.toLowerCase().replace("_", "-")}`} value={event} onChange={(change) => { setEvent(change.target.value as typeof event); setFinished(null); }}><option value="COMMENT">Comment</option><option value="APPROVE">Approve</option><option value="REQUEST_CHANGES">Request changes</option></Select></label>
+      <label className="review-event-field"><span>Outcome</span><Select className={`review-event outcome-${event.toLowerCase().replace("_", "-")}`} value={event} onChange={(change) => { setEvent(change.target.value as typeof event); setFinished(null); }}><option value="COMMENT">Comment</option><option value="APPROVE">Approve</option><option value="REQUEST_CHANGES">Request changes</option></Select></label>
       <div className="review-body"><MarkdownEditor rows={2} value={body} onChange={(value) => { setBody(value); setFinished(null); }} placeholder="Overall review body" ariaLabel="Overall review body" /></div>
     </div>
     {hasDrafts ? <div className="review-draft-list">{drafts.map((draft, index) => <DraftView key={draft.id} draft={draft} index={index} invalid={invalidDraftIds[draft.id] === true} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} onJump={onJumpToTarget != null ? () => onJumpToTarget({ ...draft, hunk: "" }) : undefined} />)}</div> : <p className="muted review-no-drafts">No inline draft comments.</p>}
     <div className="review-actions">
       <div className="review-publish-group">
-        <Button className={`review-submit ${event.toLowerCase().replace("_", "-")}`} disabled={submitting || archiving || discarding || !canPublish} onClick={() => void handlePublish()}>{publishLabel}</Button>
+        <Button className={`review-submit outcome-${event.toLowerCase().replace("_", "-")}`} disabled={submitting || archiving || discarding || !canPublish} onClick={() => void handlePublish()}>{publishLabel}</Button>
         <ActionMenu trigger={<Button variant="muted" className="review-more-actions" aria-label="More review actions" disabled={!hasReviewContent || submitting || archiving || discarding}>More <ChevronDownIcon size={14} /></Button>}>
           <ActionMenuItem onSelect={() => void copyDraftContext()}>{copied ? "Copied draft context" : "Copy draft context"}</ActionMenuItem>
           <ActionMenuItem onSelect={() => void handleArchive()}>{archiving ? "Archiving…" : "Archive locally"}</ActionMenuItem>

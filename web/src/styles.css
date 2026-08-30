@@ -2997,27 +2997,27 @@ button.fold:hover {
   font-weight: 650;
 }
 
-.review-event.comment {
+.review-event.outcome-comment {
   border-color: var(--border);
   background: color-mix(in srgb, var(--muted) 10%, var(--panel2));
   color: var(--muted);
 }
 
-.review-event.approve,
-.review-submit.approve {
+.review-event.outcome-approve,
+.review-submit.outcome-approve {
   border-color: color-mix(in srgb, var(--success) 55%, var(--border));
   background: color-mix(in srgb, var(--success) 16%, var(--panel2));
   color: var(--success);
 }
 
-.review-event.request-changes,
-.review-submit.request-changes {
+.review-event.outcome-request-changes,
+.review-submit.outcome-request-changes {
   border-color: color-mix(in srgb, var(--danger) 58%, var(--border));
   background: color-mix(in srgb, var(--danger) 16%, var(--panel2));
   color: var(--danger-text);
 }
 
-.review-submit.comment {
+.review-submit.outcome-comment {
   border-color: var(--accent);
   background: var(--accent);
   color: var(--on-accent);
@@ -3043,11 +3043,11 @@ button.fold:hover {
   filter: brightness(1.08);
 }
 
-.review-submit.approve:hover {
+.review-submit.outcome-approve:hover {
   border-color: var(--success);
 }
 
-.review-submit.request-changes:hover {
+.review-submit.outcome-request-changes:hover {
   border-color: var(--danger);
 }
 
@@ -5517,7 +5517,7 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
   display: grid;
   gap: 2px;
   min-width: 140px;
-  max-width: 280px;
+  max-width: 320px;
   padding: 7px 12px;
   border: 1px solid var(--border);
   border-left: 3px solid var(--border);
@@ -5542,12 +5542,16 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
 .schematic-kind-boundary { border-left-color: var(--attention); }
 .schematic-kind-test { border-left-color: var(--success); }
 
+/* Labels and refs are single unbreakable tokens (function names, file paths);
+   without a break opportunity they overflow the max-width card and paint under
+   neighboring nodes, because ELK only sees the clamped card width. */
 .schematic-card-label {
   color: var(--text);
   font-family: var(--font-mono);
   font-size: 0.78rem;
   font-weight: 600;
   line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 
 .schematic-card-detail {
@@ -5560,6 +5564,7 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
   color: var(--accent);
   font-family: var(--font-mono);
   font-size: 0.68rem;
+  overflow-wrap: anywhere;
 }
 
 .schematic-handle.react-flow__handle {

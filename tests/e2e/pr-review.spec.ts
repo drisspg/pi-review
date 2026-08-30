@@ -1115,6 +1115,8 @@ test("marking a file viewed collapses it without jumping to the active focus are
   await expect(focusLink).toContainText("check this line");
   await focusLink.click();
   await expect(focusRow).toHaveClass(/focus-highlight-active/);
+  // jumpToFocusArea scrolls on a 50ms timer; let it fire before the scroll spy below starts counting.
+  await page.waitForTimeout(150);
 
   const files = page.locator(".file");
   let otherFileIndex = -1;
@@ -1131,14 +1133,18 @@ test("marking a file viewed collapses it without jumping to the active focus are
   await otherFile.locator(".viewed-toggle input").scrollIntoViewIfNeeded();
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   await page.evaluate(() => {
-    const state = window as typeof window & { scrollIntoViewCalls: number };
+    const state = window as typeof window & { scrollIntoViewCalls: number; scrollIntoViewTargets: string[] };
     state.scrollIntoViewCalls = 0;
-    Element.prototype.scrollIntoView = () => { state.scrollIntoViewCalls += 1; };
+    state.scrollIntoViewTargets = [];
+    Element.prototype.scrollIntoView = function scrollSpy(this: Element) {
+      state.scrollIntoViewCalls += 1;
+      state.scrollIntoViewTargets.push(`${this.tagName.toLowerCase()}.${this.className.toString().split(" ").slice(0, 4).join(".")}#${new Error().stack?.split("\n").slice(1, 3).join(" | ") ?? ""}`);
+    };
   });
 
   await otherFile.locator(".viewed-toggle input").click();
   await expect(otherFile.locator(".diff-row")).toHaveCount(0);
-  expect(await page.evaluate(() => (window as typeof window & { scrollIntoViewCalls: number }).scrollIntoViewCalls)).toBe(0);
+  expect(await page.evaluate(() => (window as typeof window & { scrollIntoViewTargets: string[] }).scrollIntoViewTargets)).toEqual([]);
 });
 
 test("minimizes focus area links after all are reviewed", async ({ page }) => {
