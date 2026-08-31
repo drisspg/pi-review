@@ -2,7 +2,9 @@ import React, { useEffect, useRef, useState } from "react";
 import type mermaidNs from "mermaid";
 
 import { errorMessage } from "../api";
-import { cssVar } from "../lib/dom";import { Button } from "./Button";
+import { cssVar } from "../lib/dom";
+import { isLightTheme } from "../lib/theme";
+import { Button } from "./Button";
 
 type PanPoint = { x: number; y: number };
 type DragState = { pointerId: number; startX: number; startY: number; originX: number; originY: number };
@@ -58,7 +60,7 @@ function mermaidThemeVariables(): Record<string, unknown> {
   const nodeBkg = blend(accent, panel, 0.09);
   const nodeBorder = blend(accent, border, 0.5);
   return {
-    darkMode: (document.documentElement.dataset.theme ?? "github-dark") !== "github-light",
+    darkMode: !isLightTheme(document.documentElement.dataset.theme ?? "github-dark"),
     background: panel2,
     fontSize: "14px",
     primaryColor: nodeBkg,

@@ -19,6 +19,7 @@ import { parseGuideChapters, type GuideChapter } from "./lib/guide";
 import { parseOverviewSections } from "./lib/overview";
 import { languageForPath } from "./lib/highlight";
 import { newId, prUrlFromKey, relativeTime, shortSha } from "./lib/pr";
+import { isLightTheme, themes } from "./lib/theme";
 import type { AiReview, AiReviewMessage, AiReviewRecord, BlameInfo, CommitChecks, DiffRow, DraftComment, DraftReview, DragSelection, FileReviewState, FlowDag, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, GitHubDraftComment, GitHubPendingReview, GpuWorkspace, GpuWorkspaceContract, GpuWorkspaceExecResult, GuideReviewRecord, InterdiffResponse, LogEntry, OpenResponse, PiAgentActivity, PullFile, PullIssueComment, PullRequestReviewSummary, PullReviewComment, ReviewMemoryRecord, ReviewMemoryResponse, StoredPullRequest, Target, ThemeName, Thread } from "./types";
 import "@primer/primitives/dist/css/primitives.css";
 import "@primer/primitives/dist/css/functional/themes/dark.css";
@@ -53,6 +54,47 @@ function InlinePiTerminal({ session, context, target }: { session: string; conte
   return <React.Suspense fallback={<div className="pi-native-terminal-loading" role="status">Loading terminal…</div>}><PiTerminal compact prKey={review.prKey} headSha={review.headSha} session={session} context={context} target={target} onDraftReview={review.onDraftReview} /></React.Suspense>;
 }
 
+/**
+ * Detect that the server's built assets changed underneath this tab (rebuilds
+ * swap dist-web in place), which otherwise surfaces as broken styling or
+ * failing lazy-chunk loads. Compares this page's hashed entry script against
+ * the one the server currently serves.
+ */
+function useStaleBuildCheck(): boolean {
+  const [stale, setStale] = useState(false);
+  useEffect(() => {
+    if (stale) return;
+    const loadedAssets = [...document.querySelectorAll<HTMLScriptElement | HTMLLinkElement>('script[src*="/assets/"], link[href*="/assets/"]')]
+      .map((el) => ("src" in el ? el.src : el.href).replace(/^.*\/assets\//, ""))
+      .sort()
+      .join("\n");
+    if (loadedAssets.length === 0) return; // dev server: HMR owns updates
+    let last = 0;
+    let cancelled = false;
+    async function check(): Promise<void> {
+      if (Date.now() - last < 30_000) return;
+      last = Date.now();
+      try {
+        const html = await (await fetch("/", { cache: "no-store" })).text();
+        const served = [...html.matchAll(/\/assets\/([^"']+)/g)].map((match) => match[1]).sort().join("\n");
+        if (!cancelled && served.length > 0 && served !== loadedAssets) setStale(true);
+      } catch {
+        // Server restarting or offline; the next focus/interval retries.
+      }
+    }
+    void check();
+    const onFocus = () => void check();
+    window.addEventListener("focus", onFocus);
+    const interval = window.setInterval(() => void check(), 120_000);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", onFocus);
+      window.clearInterval(interval);
+    };
+  }, [stale]);
+  return stale;
+}
+
 const homeHash = "#/";
 
 function reviewHash(input: string): string {
@@ -73,11 +115,6 @@ function isPlainLeftClick(event: React.MouseEvent): boolean {
   return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
 }
 
-const themes: Array<{ name: ThemeName; label: string }> = [
-  { name: "github-dark", label: "GitHub dark" },
-  { name: "github-dimmed", label: "GitHub dimmed" },
-  { name: "github-light", label: "GitHub light" },
-];
 
 type DiffProps = {
   review: OpenResponse;
@@ -1184,10 +1221,12 @@ function App() {
     setCommentCollapseSignal((signal) => signal + 1);
   }
 
-  const primerColorMode = theme === "github-light" ? "day" : "night";
+  const primerColorMode = isLightTheme(theme) ? "day" : "night";
   const primerNightScheme = theme === "github-dimmed" ? "dark_dimmed" : "dark";
+  const staleBuild = useStaleBuildCheck();
   return <ThemeProvider colorMode={primerColorMode} dayScheme="light" nightScheme={primerNightScheme}>
     <BaseStyles as="main" className="app-shell">
+    {staleBuild && <button type="button" className="stale-build-pill" onClick={() => window.location.reload()}>Pi Review was rebuilt — reload to pick up the new version</button>}
     <AppToolbar
       review={review}
       theme={theme}
@@ -1459,7 +1498,7 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { r
   useEffect(() => {
     if (!wantInterdiff || sinceSha == null || interdiff != null) return;
     let cancelled = false;
-    api<InterdiffResponse>("/api/pr/interdiff", { method: "POST", body: JSON.stringify({ prUrl: pr.url, sinceSha, headSha: pr.headSha, paths: props.review.files.map((file) => file.filename) }) })
+    api<InterdiffResponse>("/api/pr/interdiff", { method: "POST", body: JSON.stringify({ prUrl: pr.url, sinceSha, headSha: pr.headSha, files: props.review.files }) })
       .then((response) => { if (!cancelled) setInterdiff(response); })
       .catch((err: unknown) => {
         // A force-push can discard the previously reviewed head, so fall back to the full diff instead of a dead end.
@@ -1567,23 +1606,27 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { r
     <div className={`review-layout${sideCollapsed ? " side-collapsed" : ""}${sideFocused ? " side-focused" : ""}`} style={{ gridTemplateColumns }}>
       <div className="review-main">
         <PrHeaderStrip pr={props.review.pr} refreshGithubActivity={props.refreshGithubActivity} refreshingActivity={props.refreshingActivity} />
-        <nav className="review-mode-tabs" aria-label="Review view">
-          <button type="button" className={reviewMode === "guide" ? "active" : ""} aria-pressed={reviewMode === "guide"} onClick={() => selectReviewMode("guide")}>Guide{guideChapters.length > 0 ? ` ${guideChapters.length}` : ""}</button>
-          <button type="button" className={reviewMode === "diff" ? "active" : ""} aria-pressed={reviewMode === "diff"} onClick={() => selectReviewMode("diff")}>Diff</button>
-        </nav>
-        {reviewMode === "guide" ? <GuideReview review={props.review} chapters={guideChapters} viewedIds={viewedGuideIds} setViewedIds={setViewedGuideIds} guideReview={props.piPanel.guideReview} runGuideReview={props.piPanel.runGuideReview} overview={props.overview} runOverview={props.runOverview} onProgress={props.saveGuideProgress} onActivate={prepareGuideStep} renderDiff={renderGuideDiff} /> : <main className="files">
-          <PrSummary pr={props.review.pr} />
-          <div className="files-toolbar">
-            <FileNavigator files={diffFiles} fileReviews={props.review.fileReviews} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} />
-            <div className="files-toolbar-actions">
-              {canInterdiff && <Button variant="muted" className="small-muted-button interdiff-toggle" aria-pressed={diffScope === "since-review"} onClick={() => { const scope = diffScope === "all" ? "since-review" : "all"; logUsage("ui:diff-scope", { scope }); setInterdiffError(null); setDiffScope(scope); }}>{diffScope === "all" ? "Since last review" : "All changes"}</Button>}
-              {commentCount > 0 && <Button variant="muted" className="small-muted-button" onClick={props.toggleAllComments}>{props.commentsCollapsed ? "Expand review threads" : "Collapse review threads"}</Button>}
-              <Button variant="muted" className="small-muted-button" onClick={() => { const mode = props.diffViewMode === "unified" ? "split" : "unified"; logUsage("ui:diff-view-mode", { mode }); props.setDiffViewMode(mode); }}>{diffViewLabel}</Button>
+        <div className="review-bar files-toolbar">
+          <nav className="review-mode-tabs" aria-label="Review view">
+            <button type="button" className={reviewMode === "guide" ? "active" : ""} aria-pressed={reviewMode === "guide"} onClick={() => selectReviewMode("guide")}>Guide{guideChapters.length > 0 ? ` ${guideChapters.length}` : ""}</button>
+            <button type="button" className={reviewMode === "diff" ? "active" : ""} aria-pressed={reviewMode === "diff"} onClick={() => selectReviewMode("diff")}>Diff</button>
+          </nav>
+          {reviewMode === "diff" && <FileNavigator files={diffFiles} fileReviews={props.review.fileReviews} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} />}
+          <div className="files-toolbar-actions">
+            {reviewMode === "diff" && <>
+              <ActionMenu trigger={<Button variant="muted" className="small-muted-button view-menu-button">View{diffScope === "since-review" ? " · since review" : ""} <ChevronDownIcon size={14} /></Button>}>
+                {canInterdiff && <ActionMenuItem onSelect={() => { const scope = diffScope === "all" ? "since-review" : "all"; logUsage("ui:diff-scope", { scope }); setInterdiffError(null); setDiffScope(scope); }}>{diffScope === "all" ? "Changes since last review" : "All changes"}</ActionMenuItem>}
+                <ActionMenuItem onSelect={() => { const mode = props.diffViewMode === "unified" ? "split" : "unified"; logUsage("ui:diff-view-mode", { mode }); props.setDiffViewMode(mode); }}>{diffViewLabel}</ActionMenuItem>
+                {commentCount > 0 && <ActionMenuItem onSelect={props.toggleAllComments}>{props.commentsCollapsed ? "Expand review threads" : "Collapse review threads"}</ActionMenuItem>}
+              </ActionMenu>
               <Button variant="muted" className="small-muted-button panel-launch-button" onClick={() => openSidePanel("comments")}>Comments{commentCount > 0 ? ` ${commentCount}` : ""}</Button>
               <Button variant="muted" className="small-muted-button panel-launch-button" onClick={() => openSidePanel("pi")}>Pi review{piBadge != null ? ` ${piBadge}` : ""}</Button>
               <Button className="review-changes-button panel-launch-button" onClick={() => openSidePanel("review")}>Review changes{draftCount > 0 ? ` (${draftCount})` : ""}</Button>
-            </div>
+            </>}
           </div>
+        </div>
+        {reviewMode === "guide" ? <GuideReview review={props.review} chapters={guideChapters} viewedIds={viewedGuideIds} setViewedIds={setViewedGuideIds} guideReview={props.piPanel.guideReview} runGuideReview={props.piPanel.runGuideReview} overview={props.overview} runOverview={props.runOverview} onProgress={props.saveGuideProgress} onActivate={prepareGuideStep} renderDiff={renderGuideDiff} /> : <main className="files">
+          <PrSummary pr={props.review.pr} />
           {interdiffError != null && <div className="interdiff-banner" role="status">
             <span>Couldn't compare against your last-reviewed commit {shortSha(sinceSha ?? "")} (it may have been force-pushed away) — showing all changes. {interdiffError}</span>
             <Button variant="muted" className="small-muted-button" onClick={() => setInterdiffError(null)}>Dismiss</Button>
@@ -1591,7 +1634,8 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { r
           {wantInterdiff && <div className="interdiff-banner" role="status">
             <span>{interdiff == null ? "Loading changes since your last review…"
               : interdiff.files.length === 0 ? `No changes since your last review (${shortSha(sinceSha ?? "")}).`
-              : <>Showing changes since your last review · {shortSha(sinceSha ?? "")} → {shortSha(pr.headSha)}{interdiff.totalCommits > 0 && <> · {interdiff.totalCommits} commit{interdiff.totalCommits === 1 ? "" : "s"}</>}{interdiff.source === "local-git" && <> · compared locally (force-pushed history)</>} · comments attach to new-side lines only</>}</span>
+              : interdiff.rewritten ? <>History was rewritten since your last review ({shortSha(sinceSha ?? "")} → {shortSha(pr.headSha)}) — showing the {interdiff.files.length} file{interdiff.files.length === 1 ? "" : "s"} whose changes differ, with their full current diffs · comments attach to new-side lines only</>
+              : <>Showing changes since your last review · {shortSha(sinceSha ?? "")} → {shortSha(pr.headSha)}{interdiff.totalCommits > 0 && <> · {interdiff.totalCommits} commit{interdiff.totalCommits === 1 ? "" : "s"}</>} · comments attach to new-side lines only</>}</span>
           </div>}
           <DiffAnnotationsContext.Provider value={annotations}>{diffFiles.map((file) => <FileDiff key={file.filename} file={file} {...diffPlumbing} />)}</DiffAnnotationsContext.Provider>
         </main>}

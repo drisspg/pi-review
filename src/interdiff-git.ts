@@ -1,9 +1,12 @@
 /**
- * Local-git fallback for "changes since my last review": force-pushed PRs make
- * GitHub's compare API 404 on the old head, but the cached PR repo usually
- * still has the commit from the previous review's fetch. Diffing is scoped to
- * the PR's current files so a rebase onto newer upstream does not drown the
- * interdiff in unrelated changes.
+ * Local-git engine for "changes since my last review".
+ *
+ * Appended commits are a plain two-dot diff. Rewritten history (ghstack,
+ * stack-pr, rebases) is the hard case: comparing the two heads directly — or
+ * GitHub's three-dot compare — reports every upstream commit the rebase pulled
+ * in. Instead we compare each file's *own* patch (its added/removed lines) in
+ * the old PR diff vs the current one, and surface only files whose change
+ * actually changed.
  */
 
 import type { PullFile, PullRequestRef } from "./types.js";
@@ -59,8 +62,16 @@ export function safeDiffPath(path: unknown): path is string {
   return typeof path === "string" && path.length > 0 && path.length <= 1_000 && !path.startsWith("/") && !path.startsWith("-") && !path.includes("..") && !path.includes("\0");
 }
 
+/** A file's change identity: its added/removed lines, independent of hunk offsets and context drift. */
+export function patchSignature(patch: string | undefined): string {
+  if (patch == null) return "";
+  return patch.split("\n").filter((line) => (line.startsWith("+") && !line.startsWith("+++")) || (line.startsWith("-") && !line.startsWith("---"))).join("\n");
+}
+
+export type GitInterdiffResult = { files: PullFile[]; totalCommits: number; rewritten: boolean };
+
 export function createGitInterdiff(deps: GitInterdiffDeps) {
-  return async function gitInterdiff(ref: PullRequestRef, sinceSha: string, headSha: string, paths: string[]): Promise<{ files: PullFile[]; totalCommits: number }> {
+  return async function gitInterdiff(ref: PullRequestRef, sinceSha: string, headSha: string, currentFiles: PullFile[]): Promise<GitInterdiffResult> {
     const repoDir = deps.repoDirForRef(ref);
     if (!deps.exists(repoDir)) throw new Error("No cached repository for this pull request");
     await deps.git(["cat-file", "-e", `${sinceSha}^{commit}`], repoDir).catch(async () => {
@@ -70,10 +81,24 @@ export function createGitInterdiff(deps: GitInterdiffDeps) {
         throw new Error(`Commit ${sinceSha.slice(0, 12)} is no longer available locally or upstream`);
       });
     });
-    const [diff, count] = await Promise.all([
-      deps.git(["diff", "--no-color", "--find-renames", sinceSha, headSha, "--", ...paths], repoDir),
-      deps.git(["rev-list", "--count", `${sinceSha}..${headSha}`], repoDir).catch(() => "0"),
-    ]);
-    return { files: parseGitDiffFiles(diff), totalCommits: Number.parseInt(count.trim(), 10) || 0 };
+
+    const appended = await deps.git(["merge-base", "--is-ancestor", sinceSha, headSha], repoDir).then(() => true, () => false);
+    if (appended) {
+      const [diff, count] = await Promise.all([
+        deps.git(["diff", "--no-color", "--find-renames", sinceSha, headSha], repoDir),
+        deps.git(["rev-list", "--count", `${sinceSha}..${headSha}`], repoDir).catch(() => "0"),
+      ]);
+      return { files: parseGitDiffFiles(diff), totalCommits: Number.parseInt(count.trim(), 10) || 0, rewritten: false };
+    }
+
+    // Rewritten history: reconstruct the old PR diff from its fork point and
+    // keep only current files whose own patch differs from the old one.
+    const oldDiff = await deps.git(["merge-base", sinceSha, headSha], repoDir)
+      .then((oldBase) => deps.git(["diff", "--no-color", "--find-renames", oldBase.trim(), sinceSha], repoDir))
+      .catch(() => null);
+    if (oldDiff == null) return { files: currentFiles, totalCommits: 0, rewritten: true };
+    const oldSignatures = new Map(parseGitDiffFiles(oldDiff).map((file) => [file.filename, patchSignature(file.patch)]));
+    const files = currentFiles.filter((file) => oldSignatures.get(file.filename) !== patchSignature(file.patch));
+    return { files, totalCommits: 0, rewritten: true };
   };
 }

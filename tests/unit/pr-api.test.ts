@@ -56,9 +56,9 @@ function fakeDeps() {
         calls.push(`compare:${requestRef.number}:${baseSha}:${headSha}`);
         return { files: [{ filename: "b.ts", status: "modified", additions: 2, deletions: 1, changes: 3, patch: "@@ interdiff" }], totalCommits: 3 };
       },
-      async compareCommitsLocally(requestRef: PullRequestRef, sinceSha: string, headSha: string, paths: string[]) {
-        calls.push(`local-compare:${requestRef.number}:${sinceSha}:${headSha}:${paths.join(",")}`);
-        return { files: [{ filename: "c.ts", status: "modified", additions: 1, deletions: 0, changes: 1, patch: "@@ local" }], totalCommits: 2 };
+      async compareCommitsLocally(requestRef: PullRequestRef, sinceSha: string, headSha: string, currentFiles: { filename: string }[]) {
+        calls.push(`local-compare:${requestRef.number}:${sinceSha}:${headSha}:${currentFiles.map((file) => file.filename).join(",")}`);
+        return { files: [{ filename: "c.ts", status: "modified", additions: 1, deletions: 0, changes: 1, patch: "@@ local" }], totalCommits: 2, rewritten: false };
       },
       async fetchCommitChecks(requestRef: PullRequestRef, sha: string) {
         calls.push(`checks:${requestRef.number}:${sha}`);
@@ -178,51 +178,67 @@ test("PR API open prepares worktree, registers Pi cwd, prewarms sessions, and hy
   ]);
 });
 
-test("PR API interdiff compares the previously reviewed head with the current head", async () => {
+test("PR API interdiff prefers the local repo and filters unsafe file entries", async () => {
   const { deps, calls } = fakeDeps();
 
-  const response = await createPrApi(deps).interdiff({ prUrl: "url", sinceSha: "abc1234", headSha: "def5678" });
+  const response = await createPrApi(deps).interdiff({ prUrl: "url", sinceSha: "abc1234", headSha: "def5678", files: [{ filename: "a.ts", patch: "+x" }, { filename: "../etc/passwd" }, { filename: "b.ts" }] });
 
   assert.deepEqual(response, {
-    files: [{ filename: "b.ts", status: "modified", additions: 2, deletions: 1, changes: 3, patch: "@@ interdiff" }],
-    totalCommits: 3,
+    files: [{ filename: "c.ts", status: "modified", additions: 1, deletions: 0, changes: 1, patch: "@@ local" }],
+    totalCommits: 2,
     sinceSha: "abc1234",
     headSha: "def5678",
-    source: "github",
+    source: "local-git",
+    rewritten: false,
   });
-  assert.deepEqual(calls, ["parse:url", "compare:1:abc1234:def5678"]);
-});
-
-test("PR API interdiff falls back to the local repo when the compare API fails", async () => {
-  const { deps, calls } = fakeDeps();
-  const failing = {
-    ...deps,
-    async compareCommits(): Promise<{ files: never[]; totalCommits: number }> {
-      throw new Error("gh: Not Found (HTTP 404)");
-    },
-  };
-
-  const response = await createPrApi(failing).interdiff({ prUrl: "url", sinceSha: "abc1234", headSha: "def5678", paths: ["a.ts", "../etc/passwd", "b.ts"] });
-
-  assert.equal(response.source, "local-git");
-  assert.equal(response.totalCommits, 2);
-  assert.deepEqual(response.files.map((file) => file.filename), ["c.ts"]);
   assert.deepEqual(calls, ["parse:url", "local-compare:1:abc1234:def5678:a.ts,b.ts"]);
 });
 
-test("PR API interdiff surfaces the GitHub error when the local fallback also fails", async () => {
-  const { deps } = fakeDeps();
+test("PR API interdiff falls back to the compare API when the local repo cannot answer", async () => {
+  const { deps, calls } = fakeDeps();
   const failing = {
     ...deps,
-    async compareCommits(): Promise<{ files: never[]; totalCommits: number }> {
-      throw new Error("gh: Not Found (HTTP 404)");
-    },
-    async compareCommitsLocally(): Promise<{ files: never[]; totalCommits: number }> {
+    async compareCommitsLocally(): Promise<never> {
       throw new Error("no cached repo");
     },
   };
 
-  await assert.rejects(createPrApi(failing).interdiff({ prUrl: "url", sinceSha: "abc1234", headSha: "def5678" }), /Not Found/);
+  const response = await createPrApi(failing).interdiff({ prUrl: "url", sinceSha: "abc1234", headSha: "def5678" });
+
+  assert.equal(response.source, "github");
+  assert.equal(response.rewritten, false);
+  assert.equal(response.totalCommits, 3);
+  assert.deepEqual(calls, ["parse:url", "compare:1:abc1234:def5678"]);
+});
+
+test("PR API interdiff rejects rebase-noise compare results when local data is unavailable", async () => {
+  const { deps } = fakeDeps();
+  const failing = {
+    ...deps,
+    async compareCommits() {
+      return { files: Array.from({ length: 40 }, (_, index) => ({ filename: `noise-${index}.ts`, status: "modified", additions: 1, deletions: 0, changes: 1 })), totalCommits: 614 };
+    },
+    async compareCommitsLocally(): Promise<never> {
+      throw new Error("Commit abc1234 is no longer available locally or upstream");
+    },
+  };
+
+  await assert.rejects(createPrApi(failing).interdiff({ prUrl: "url", sinceSha: "abc1234", headSha: "def5678", files: [{ filename: "a.ts" }, { filename: "b.ts" }] }), /no longer available locally or upstream/);
+});
+
+test("PR API interdiff surfaces the local error when both engines fail", async () => {
+  const { deps } = fakeDeps();
+  const failing = {
+    ...deps,
+    async compareCommits(): Promise<never> {
+      throw new Error("gh: Not Found (HTTP 404)");
+    },
+    async compareCommitsLocally(): Promise<never> {
+      throw new Error("Commit abc1234 is no longer available locally or upstream");
+    },
+  };
+
+  await assert.rejects(createPrApi(failing).interdiff({ prUrl: "url", sinceSha: "abc1234", headSha: "def5678" }), /no longer available locally or upstream/);
 });
 
 test("PR API checks summarizes commit check runs", async () => {

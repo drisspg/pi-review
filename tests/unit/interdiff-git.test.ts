@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createGitInterdiff, parseGitDiffFiles, safeDiffPath, type GitInterdiffDeps } from "../../src/interdiff-git.js";
-import type { PullRequestRef } from "../../src/types.js";
+import { createGitInterdiff, parseGitDiffFiles, patchSignature, safeDiffPath, type GitInterdiffDeps } from "../../src/interdiff-git.js";
+import type { PullFile, PullRequestRef } from "../../src/types.js";
 
 const ref: PullRequestRef = { host: "github.com", owner: "pytorch", repo: "pytorch", number: 1 };
 
@@ -47,6 +47,10 @@ const diffOutput = [
   "",
 ].join("\n");
 
+function currentFile(filename: string, patch?: string): PullFile {
+  return { filename, status: "modified", additions: 1, deletions: 0, changes: 1, ...(patch == null ? {} : { patch }) };
+}
+
 test("parseGitDiffFiles maps git diff output to the GitHub files shape", () => {
   const files = parseGitDiffFiles(diffOutput);
 
@@ -61,6 +65,12 @@ test("parseGitDiffFiles maps git diff output to the GitHub files shape", () => {
   assert.deepEqual(parseGitDiffFiles(""), []);
 });
 
+test("patchSignature keeps only change lines so context and offsets do not matter", () => {
+  assert.equal(patchSignature("@@ -1,3 +1,4 @@\n context\n-old\n+new"), "-old\n+new");
+  assert.equal(patchSignature("@@ -9,3 +12,4 @@\n moved context\n-old\n+new"), "-old\n+new");
+  assert.equal(patchSignature(undefined), "");
+});
+
 test("safeDiffPath rejects traversal, flags, and absolute paths", () => {
   assert.equal(safeDiffPath("src/a.ts"), true);
   assert.equal(safeDiffPath("../etc/passwd"), false);
@@ -69,37 +79,104 @@ test("safeDiffPath rejects traversal, flags, and absolute paths", () => {
   assert.equal(safeDiffPath(42), false);
 });
 
-test("gitInterdiff verifies the old commit and scopes the diff to the given paths", async () => {
-  const gitCalls: Array<{ args: string[]; cwd: string }> = [];
-  const deps: GitInterdiffDeps = {
-    exists: () => true,
-    async git(args, cwd) {
-      gitCalls.push({ args, cwd });
-      if (args[0] === "cat-file") return "";
-      if (args[0] === "rev-list") return "4\n";
-      return diffOutput;
-    },
-    repoDirForRef: () => "/tmp/repos/pytorch",
-  };
-
-  const result = await createGitInterdiff(deps)(ref, "aaa1111", "bbb2222", ["src/changed.ts", "src/created.ts"]);
-
-  assert.equal(result.totalCommits, 4);
-  assert.equal(result.files.length, 5);
-  assert.deepEqual(gitCalls[0], { args: ["cat-file", "-e", "aaa1111^{commit}"], cwd: "/tmp/repos/pytorch" });
-  assert.deepEqual(gitCalls.find((call) => call.args[0] === "diff")?.args, ["diff", "--no-color", "--find-renames", "aaa1111", "bbb2222", "--", "src/changed.ts", "src/created.ts"]);
-});
-
-test("gitInterdiff reports a missing local commit clearly", async () => {
-  const deps: GitInterdiffDeps = {
+function fakeDeps(handlers: (args: string[]) => string | Promise<string>): GitInterdiffDeps & { gitCalls: string[][] } {
+  const gitCalls: string[][] = [];
+  return {
+    gitCalls,
     exists: () => true,
     async git(args) {
-      if (args[0] === "cat-file") throw new Error("fatal: not a valid object");
-      return "";
+      gitCalls.push(args);
+      return handlers(args);
     },
     repoDirForRef: () => "/tmp/repos/pytorch",
   };
+}
 
-  await assert.rejects(createGitInterdiff(deps)(ref, "aaa1111", "bbb2222", []), /no longer available locally/);
+test("gitInterdiff returns the exact delta when commits were appended", async () => {
+  const deps = fakeDeps((args) => {
+    if (args[0] === "cat-file") return "";
+    if (args.includes("--is-ancestor")) return "";
+    if (args[0] === "rev-list") return "4\n";
+    if (args[0] === "diff") return diffOutput;
+    throw new Error(`unexpected git call: ${args.join(" ")}`);
+  });
+
+  const result = await createGitInterdiff(deps)(ref, "aaa1111", "bbb2222", [currentFile("src/changed.ts")]);
+
+  assert.equal(result.rewritten, false);
+  assert.equal(result.totalCommits, 4);
+  assert.equal(result.files.length, 5);
+  assert.deepEqual(deps.gitCalls.find((args) => args[0] === "diff"), ["diff", "--no-color", "--find-renames", "aaa1111", "bbb2222"]);
+});
+
+test("gitInterdiff filters rewritten history to files whose own patch changed", async () => {
+  const oldDiff = [
+    "diff --git a/src/unchanged.ts b/src/unchanged.ts",
+    "--- a/src/unchanged.ts",
+    "+++ b/src/unchanged.ts",
+    "@@ -1,2 +1,2 @@",
+    " old context",
+    "-before",
+    "+after",
+    "diff --git a/src/edited.ts b/src/edited.ts",
+    "--- a/src/edited.ts",
+    "+++ b/src/edited.ts",
+    "@@ -5,1 +5,1 @@",
+    "+first version",
+    "",
+  ].join("\n");
+  const deps = fakeDeps((args) => {
+    if (args[0] === "cat-file") return "";
+    if (args.includes("--is-ancestor")) throw new Error("not an ancestor");
+    if (args[0] === "merge-base") return "fork0000\n";
+    if (args[0] === "diff") return oldDiff;
+    throw new Error(`unexpected git call: ${args.join(" ")}`);
+  });
+  const currentFiles = [
+    // Same change lines, different hunk offsets/context after the rebase: excluded.
+    currentFile("src/unchanged.ts", "@@ -7,2 +7,2 @@\n new context\n-before\n+after"),
+    // The change itself evolved: included.
+    currentFile("src/edited.ts", "@@ -5,1 +5,1 @@\n+second version"),
+    // New file since the last review: included.
+    currentFile("src/brand-new.ts", "@@ -0,0 +1,1 @@\n+hello"),
+  ];
+
+  const result = await createGitInterdiff(deps)(ref, "aaa1111", "bbb2222", currentFiles);
+
+  assert.equal(result.rewritten, true);
+  assert.equal(result.totalCommits, 0);
+  assert.deepEqual(result.files.map((file) => file.filename), ["src/edited.ts", "src/brand-new.ts"]);
+  assert.deepEqual(deps.gitCalls.find((args) => args[0] === "diff"), ["diff", "--no-color", "--find-renames", "fork0000", "aaa1111"]);
+});
+
+test("gitInterdiff falls back to all current files when no fork point exists", async () => {
+  const deps = fakeDeps((args) => {
+    if (args[0] === "cat-file") return "";
+    if (args.includes("--is-ancestor")) throw new Error("not an ancestor");
+    if (args[0] === "merge-base") throw new Error("no merge base");
+    throw new Error(`unexpected git call: ${args.join(" ")}`);
+  });
+  const currentFiles = [currentFile("a.ts", "+x")];
+
+  const result = await createGitInterdiff(deps)(ref, "aaa1111", "bbb2222", currentFiles);
+
+  assert.equal(result.rewritten, true);
+  assert.deepEqual(result.files, currentFiles);
+});
+
+test("gitInterdiff tries an upstream fetch before declaring the old head lost", async () => {
+  let catFileCalls = 0;
+  const deps = fakeDeps((args) => {
+    if (args[0] === "cat-file") {
+      catFileCalls += 1;
+      throw new Error("fatal: not a valid object");
+    }
+    if (args[0] === "fetch") return "";
+    throw new Error(`unexpected git call: ${args.join(" ")}`);
+  });
+
+  await assert.rejects(createGitInterdiff(deps)(ref, "aaa1111", "bbb2222", []), /no longer available locally or upstream/);
+  assert.equal(catFileCalls, 2);
+  assert.ok(deps.gitCalls.some((args) => args[0] === "fetch" && args.includes("aaa1111")));
   await assert.rejects(createGitInterdiff({ ...deps, exists: () => false })(ref, "aaa1111", "bbb2222", []), /No cached repository/);
 });

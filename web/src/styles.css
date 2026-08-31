@@ -51,6 +51,7 @@
   --control-h-sm: 28px;
   --control-h: 32px;
   --on-accent: #ffffff;
+  --on-success: var(--on-accent);
   --dur-fast: 120ms;
   --dur: 150ms;
   --ease: cubic-bezier(0.3, 0.7, 0.4, 1);
@@ -137,6 +138,205 @@
   --syntax-meta: #6cb6ff;
 }
 
+:root[data-theme="catppuccin-mocha"] {
+  --app-bg: #11111b;
+  --app-panel: #1e1e2e;
+  --app-panel2: #181825;
+  --app-border: #313244;
+  --app-muted: #a6adc8;
+  --app-text: #cdd6f4;
+  --app-accent: #89b4fa;
+  --app-danger: #f38ba8;
+  --app-danger-text: #f9d3dd;
+  --app-success: #a6e3a1;
+  --app-attention: #f9e2af;
+  --app-thread-accent: #cba6f7;
+  --app-link: #74c7ec;
+  --app-code-bg: #181825;
+  color-scheme: dark;
+  --bg: #11111b;
+  --panel: #1e1e2e;
+  --panel2: #181825;
+  --border: #313244;
+  --muted: #a6adc8;
+  --text: #cdd6f4;
+  --accent: #89b4fa;
+  --danger: #f38ba8;
+  --danger-text: #f9d3dd;
+  --success: #a6e3a1;
+  --attention: #f9e2af;
+  --thread-accent: #cba6f7;
+  --link: #74c7ec;
+  --on-accent: #11111b;
+  --fgColor-default: var(--text);
+  --fgColor-muted: var(--muted);
+  --borderColor-default: var(--border);
+  --bgColor-default: var(--panel);
+  --bgColor-muted: var(--panel2);
+  --bgColor-success-muted: rgba(166, 227, 161, 0.14);
+  --bgColor-danger-muted: rgba(243, 139, 168, 0.14);
+  --add: color-mix(in srgb, var(--success) 11%, transparent);
+  --del: color-mix(in srgb, var(--danger) 11%, transparent);
+  --code-bg: #181825;
+  --syntax-keyword: #cba6f7;
+  --syntax-title: #89b4fa;
+  --syntax-string: #a6e3a1;
+  --syntax-number: #fab387;
+  --syntax-comment: #7f849c;
+  --syntax-variable: #eba0ac;
+  --syntax-meta: #94e2d5;
+}
+
+:root[data-theme="gruvbox-dark"] {
+  --app-bg: #1d2021;
+  --app-panel: #282828;
+  --app-panel2: #1d2021;
+  --app-border: #3c3836;
+  --app-muted: #a89984;
+  --app-text: #ebdbb2;
+  --app-accent: #83a598;
+  --app-danger: #fb4934;
+  --app-danger-text: #fdcabb;
+  --app-success: #b8bb26;
+  --app-attention: #fabd2f;
+  --app-thread-accent: #d3869b;
+  --app-link: #8ec07c;
+  --app-code-bg: #32302f;
+  color-scheme: dark;
+  --bg: #1d2021;
+  --panel: #282828;
+  --panel2: #1d2021;
+  --border: #3c3836;
+  --muted: #a89984;
+  --text: #ebdbb2;
+  --accent: #83a598;
+  --danger: #fb4934;
+  --danger-text: #fdcabb;
+  --success: #b8bb26;
+  --attention: #fabd2f;
+  --thread-accent: #d3869b;
+  --link: #8ec07c;
+  --on-accent: #1d2021;
+  --fgColor-default: var(--text);
+  --fgColor-muted: var(--muted);
+  --borderColor-default: var(--border);
+  --bgColor-default: var(--panel);
+  --bgColor-muted: var(--panel2);
+  --bgColor-success-muted: rgba(184, 187, 38, 0.14);
+  --bgColor-danger-muted: rgba(251, 73, 52, 0.14);
+  --add: color-mix(in srgb, var(--success) 10%, transparent);
+  --del: color-mix(in srgb, var(--danger) 11%, transparent);
+  --code-bg: #32302f;
+  --syntax-keyword: #fb4934;
+  --syntax-title: #fabd2f;
+  --syntax-string: #b8bb26;
+  --syntax-number: #d3869b;
+  --syntax-comment: #928374;
+  --syntax-variable: #83a598;
+  --syntax-meta: #8ec07c;
+}
+
+:root[data-theme="nord"] {
+  --on-success: #2e3440;
+  --app-bg: #2e3440;
+  --app-panel: #3b4252;
+  --app-panel2: #2e3440;
+  --app-border: #4c566a;
+  --app-muted: #9aa4bc;
+  --app-text: #e5e9f0;
+  --app-accent: #5e81ac;
+  --app-danger: #bf616a;
+  --app-danger-text: #f2d3d6;
+  --app-success: #a3be8c;
+  --app-attention: #ebcb8b;
+  --app-thread-accent: #b48ead;
+  --app-link: #88c0d0;
+  --app-code-bg: #353c4a;
+  color-scheme: dark;
+  --bg: #2e3440;
+  --panel: #3b4252;
+  --panel2: #2e3440;
+  --border: #4c566a;
+  --muted: #9aa4bc;
+  --text: #e5e9f0;
+  --accent: #5e81ac;
+  --danger: #bf616a;
+  --danger-text: #f2d3d6;
+  --success: #a3be8c;
+  --attention: #ebcb8b;
+  --thread-accent: #b48ead;
+  --link: #88c0d0;
+  --fgColor-default: var(--text);
+  --fgColor-muted: var(--muted);
+  --borderColor-default: var(--border);
+  --bgColor-default: var(--panel);
+  --bgColor-muted: var(--panel2);
+  --bgColor-success-muted: rgba(163, 190, 140, 0.15);
+  --bgColor-danger-muted: rgba(191, 97, 106, 0.17);
+  --add: color-mix(in srgb, var(--success) 12%, transparent);
+  --del: color-mix(in srgb, var(--danger) 13%, transparent);
+  --code-bg: #353c4a;
+  --syntax-keyword: #81a1c1;
+  --syntax-title: #88c0d0;
+  --syntax-string: #a3be8c;
+  --syntax-number: #b48ead;
+  --syntax-comment: #7d879e;
+  --syntax-variable: #d08770;
+  --syntax-meta: #8fbcbb;
+}
+
+:root[data-theme="solarized-light"] {
+  --app-bg: #fdf6e3;
+  --app-panel: #fdf6e3;
+  --app-panel2: #eee8d5;
+  --app-border: #d8cfb0;
+  --app-muted: #657b83;
+  --app-text: #073642;
+  --app-accent: #268bd2;
+  --app-danger: #dc322f;
+  --app-danger-text: #9a1f1c;
+  --app-success: #859900;
+  --app-attention: #b58900;
+  --app-thread-accent: #6c71c4;
+  --app-link: #268bd2;
+  --app-code-bg: #eee8d5;
+  color-scheme: light;
+  --bg: #fdf6e3;
+  --panel: #fdf6e3;
+  --panel2: #eee8d5;
+  --border: #d8cfb0;
+  --muted: #657b83;
+  --text: #073642;
+  --accent: #268bd2;
+  --danger: #dc322f;
+  --danger-text: #9a1f1c;
+  --success: #859900;
+  --attention: #b58900;
+  --thread-accent: #6c71c4;
+  --link: #268bd2;
+  --fgColor-default: var(--text);
+  --fgColor-muted: var(--muted);
+  --borderColor-default: var(--border);
+  --bgColor-default: var(--panel);
+  --bgColor-muted: var(--panel2);
+  --bgColor-success-muted: rgba(133, 153, 0, 0.13);
+  --bgColor-danger-muted: rgba(220, 50, 47, 0.11);
+  --add: color-mix(in srgb, var(--success) 12%, transparent);
+  --del: color-mix(in srgb, var(--danger) 10%, transparent);
+  --code-bg: #eee8d5;
+  --syntax-keyword: #859900;
+  --syntax-title: #268bd2;
+  --syntax-string: #2aa198;
+  --syntax-number: #d33682;
+  --syntax-comment: #93a1a1;
+  --syntax-variable: #cb4b16;
+  --syntax-meta: #268bd2;
+  --shadow-raised: 0 2px 6px rgba(88, 110, 117, 0.16);
+  --shadow-popover: 0 0 0 1px rgba(7, 54, 66, 0.12), 0 8px 24px rgba(88, 110, 117, 0.14);
+  --shadow-modal: 0 0 0 1px rgba(7, 54, 66, 0.12), 0 16px 40px rgba(88, 110, 117, 0.22);
+  --overlay-bg: rgba(7, 54, 66, 0.45);
+}
+
 [data-component="ThemeProvider"] {
   --bg: var(--bgColor-default);
   --panel: var(--bgColor-default);
@@ -154,6 +354,40 @@
   --del: color-mix(in srgb, var(--danger) 7%, transparent);
   --code-bg: var(--bgColor-muted);
   --radius: var(--borderRadius-medium);
+}
+
+/* Custom (non-GitHub) themes: the Primer bridge above would re-derive our
+   tokens from Primer's own scheme, so re-assert them from immutable --app-*
+   aliases and feed Primer's core vars the same palette. */
+:root[data-theme="catppuccin-mocha"] [data-component="ThemeProvider"],
+:root[data-theme="gruvbox-dark"] [data-component="ThemeProvider"],
+:root[data-theme="nord"] [data-component="ThemeProvider"],
+:root[data-theme="solarized-light"] [data-component="ThemeProvider"] {
+  --bg: var(--app-bg);
+  --panel: var(--app-panel);
+  --panel2: var(--app-panel2);
+  --border: var(--app-border);
+  --muted: var(--app-muted);
+  --text: var(--app-text);
+  --accent: var(--app-accent);
+  --danger: var(--app-danger);
+  --danger-text: var(--app-danger-text);
+  --success: var(--app-success);
+  --attention: var(--app-attention);
+  --thread-accent: var(--app-thread-accent);
+  --link: var(--app-link);
+  --code-bg: var(--app-code-bg);
+  --add: color-mix(in srgb, var(--app-success) 11%, transparent);
+  --del: color-mix(in srgb, var(--app-danger) 11%, transparent);
+  --fgColor-default: var(--app-text);
+  --fgColor-muted: var(--app-muted);
+  --fgColor-accent: var(--app-accent);
+  --fgColor-danger: var(--app-danger);
+  --fgColor-success: var(--app-success);
+  --fgColor-attention: var(--app-attention);
+  --borderColor-default: var(--app-border);
+  --bgColor-default: var(--app-panel);
+  --bgColor-muted: var(--app-panel2);
 }
 
 * {
@@ -336,15 +570,14 @@ kbd {
 
 .files-toolbar {
   position: sticky;
-  top: calc(var(--sticky-toolbar-h) + var(--sticky-mode-tabs-h));
+  top: 0;
   z-index: 25;
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 42px;
-  padding: 4px 2px 7px;
+  gap: var(--space-3);
+  height: var(--sticky-toolbar-h);
+  padding: 0 2px;
   border: 0;
   border-bottom: 1px solid var(--border);
   border-radius: 0;
@@ -359,7 +592,26 @@ kbd {
   min-width: 0;
   flex-wrap: nowrap;
   justify-content: flex-end;
+  margin-left: auto;
   overflow-x: auto;
+}
+
+.stale-build-pill {
+  position: fixed;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  padding: 6px 14px;
+  border: 1px solid var(--attention);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--attention) 18%, var(--panel));
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--shadow-popover);
 }
 
 .interdiff-toggle[aria-pressed="true"] {
@@ -410,7 +662,7 @@ kbd {
   min-height: var(--control-h-sm);
   padding: 0 12px;
   border-color: var(--success);
-  color: var(--on-accent);
+  color: var(--on-success);
   background: var(--success);
   font-size: var(--text-sm);
   font-weight: 600;
@@ -418,18 +670,16 @@ kbd {
 }
 
 .review-changes-button:hover {
-  background: color-mix(in srgb, var(--success) 88%, var(--on-accent));
-  border-color: color-mix(in srgb, var(--success) 88%, var(--on-accent));
+  background: color-mix(in srgb, var(--success) 88%, var(--on-success));
+  border-color: color-mix(in srgb, var(--success) 88%, var(--on-success));
 }
 
 .review-layout:not(.side-collapsed) .panel-launch-button {
   display: none;
 }
 
+/* The app toolbar scrolls away; the review bar below is the single sticky surface. */
 .toolbar {
-  position: sticky;
-  top: 0;
-  z-index: 100;
   display: flex;
   gap: 16px;
   align-items: center;
@@ -552,10 +802,12 @@ kbd {
 .side .panel h2:first-child { font-size: 20px; }
 
 .review-page {
-  /* Sticky offset chain: toolbar (A token) → mode tabs → files toolbar → file header.
-     Heights include borders; e2e asserts mode tabs stick at 48px and the chain ordering. */
-  --sticky-mode-tabs-h: 35px;
-  --sticky-files-toolbar-h: 44px;
+  /* One sticky surface: the review bar (mode tabs + files chip + actions) is
+     exactly --sticky-toolbar-h tall at top 0; everything below offsets from it.
+     The old mode-tabs/files-toolbar rows are merged into it, so their heights
+     collapse to zero and the downstream calc() chains keep working. */
+  --sticky-mode-tabs-h: 0px;
+  --sticky-files-toolbar-h: 0px;
   display: grid;
   gap: var(--space-3);
   width: 100%;
@@ -911,23 +1163,20 @@ kbd {
   background: var(--hover-bg);
 }
 
+/* Inline segment inside the sticky review bar; the active underline sits on the bar's bottom edge. */
 .review-mode-tabs {
-  position: sticky;
-  top: var(--sticky-toolbar-h);
-  z-index: 35;
   display: flex;
   gap: var(--space-4);
-  min-height: 34px;
-  align-items: end;
+  align-self: stretch;
+  align-items: stretch;
+  flex-shrink: 0;
   padding: 0 2px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg);
-  box-shadow: 0 6px 12px color-mix(in srgb, var(--bg) 72%, transparent);
 }
 
 .review-mode-tabs button {
-  min-height: 34px;
-  padding: 0 2px 9px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 2px;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -5227,7 +5476,7 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
     height: auto;
     max-height: 70vh;
   }
-  .review-main > .review-mode-tabs { grid-column: 1; grid-row: 3; }
+  .review-main > .review-bar { grid-column: 1; grid-row: 3; }
   .review-main > .files,
   .review-main > .guide-review { grid-column: 1; grid-row: 4; }
 }
@@ -5297,7 +5546,7 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
   .toolbar-actions > .toolbar-link { display: none; }
   .pr-header-strip { display: grid; }
   .pr-header-actions { justify-content: flex-start; }
-  .files-toolbar { align-items: center; flex-direction: row; flex-wrap: wrap; width: 100%; max-width: calc(100vw - 16px); box-sizing: border-box; }
+  .files-toolbar { align-items: center; flex-direction: row; flex-wrap: wrap; width: 100%; max-width: calc(100vw - 16px); box-sizing: border-box; height: auto; min-height: var(--sticky-toolbar-h); }
   .files-toolbar-actions { width: 100%; max-width: 100%; flex: 1 1 100%; gap: 2px; margin-left: auto; justify-content: flex-end; overflow-x: auto; }
   .files-toolbar-actions .small-muted-button { padding-inline: 4px; font-size: 0.75rem; }
   .files-toolbar-actions .review-changes-button { padding-inline: 6px; font-size: 0.75rem; }

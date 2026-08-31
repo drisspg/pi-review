@@ -292,14 +292,16 @@ test("uses a compact files toolbar and collapsible review panel", async ({ page 
   const rows = firstFile.locator(".diff-row");
   await rows.nth(Math.min(30, await rows.count() - 1)).evaluate((row) => row.scrollIntoView({ block: "center" }));
   const stickyPositions = await page.evaluate(() => {
+    const barRect = document.querySelector(".review-bar")!.getBoundingClientRect();
     const modeRect = document.querySelector(".review-mode-tabs")!.getBoundingClientRect();
-    const toolbarRect = document.querySelector(".files-toolbar")!.getBoundingClientRect();
     const fileHeaderRect = document.querySelector(".file .file-summary")!.getBoundingClientRect();
-    return { modeTop: modeRect.top, modeBottom: modeRect.bottom, toolbarTop: toolbarRect.top, toolbarBottom: toolbarRect.bottom, fileHeaderTop: fileHeaderRect.top };
+    return { barTop: barRect.top, barBottom: barRect.bottom, modeTop: modeRect.top, modeBottom: modeRect.bottom, fileHeaderTop: fileHeaderRect.top };
   });
-  expect(stickyPositions.modeTop).toBeLessThanOrEqual(60);
-  expect(stickyPositions.toolbarTop).toBeGreaterThanOrEqual(stickyPositions.modeBottom);
-  expect(stickyPositions.fileHeaderTop).toBeGreaterThanOrEqual(stickyPositions.toolbarBottom);
+  // The single review bar sticks at the top of the viewport with the mode tabs inside it.
+  expect(stickyPositions.barTop).toBeLessThanOrEqual(1);
+  expect(stickyPositions.modeTop).toBeGreaterThanOrEqual(stickyPositions.barTop);
+  expect(stickyPositions.modeBottom).toBeLessThanOrEqual(stickyPositions.barBottom + 1);
+  expect(stickyPositions.fileHeaderTop).toBeGreaterThanOrEqual(stickyPositions.barBottom - 1);
   await expect(firstFile.locator(".file-path")).toBeVisible();
 
   await toolbar.getByRole("button", { name: "Review changes" }).click();
@@ -360,8 +362,11 @@ test("keeps the diff and files toolbar within a mobile viewport", async ({ page 
   await expect(toolbar).toBeVisible();
   expect(await toolbar.evaluate((element) => element.getBoundingClientRect().right)).toBeLessThanOrEqual(await page.evaluate(() => window.innerWidth));
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
-  await expect(toolbar.getByRole("button", { name: "Split view" })).toBeInViewport();
+  await expect(toolbar.getByRole("button", { name: /^View/ })).toBeInViewport();
   await expect(toolbar.getByRole("button", { name: "Review changes" })).toBeInViewport();
+  await toolbar.getByRole("button", { name: /^View/ }).click();
+  await expect(page.getByRole("menuitem", { name: "Split view" })).toBeVisible();
+  await page.keyboard.press("Escape");
   expect((await page.locator(".file").first().boundingBox())?.width).toBeLessThanOrEqual(359);
 });
 
@@ -796,15 +801,19 @@ test("collapses and focuses existing comment threads", async ({ page }) => {
   await expect(thread.locator(".markdown").first()).toBeVisible();
 });
 
-test("collapses all review threads from the files toolbar", async ({ page }) => {
-  await page.getByRole("button", { name: "Collapse review threads" }).click();
-  await expect(page.getByRole("button", { name: "Expand review threads" })).toBeVisible();
+test("collapses all review threads from the view menu", async ({ page }) => {
+  await page.getByRole("button", { name: /^View/ }).click();
+  await page.getByRole("menuitem", { name: "Collapse review threads" }).click();
+  await page.getByRole("button", { name: /^View/ }).click();
+  await expect(page.getByRole("menuitem", { name: "Expand review threads" })).toBeVisible();
+  await page.keyboard.press("Escape");
 
   await openSideTab(page, "Comments");
   const thread = page.locator(".side .github-thread").first();
   await expect(thread).toHaveClass(/minimized/);
 
-  await page.getByRole("button", { name: "Expand review threads" }).click();
+  await page.getByRole("button", { name: /^View/ }).click();
+  await page.getByRole("menuitem", { name: "Expand review threads" }).click();
   await expect(thread).not.toHaveClass(/minimized/);
 });
 
@@ -1079,9 +1088,9 @@ test("runs a separate focus areas review and opens native focus terminals", asyn
   await expect(page.getByRole("main", { name: "Guided review" })).toContainText("Walk map");
   expect(overviewRequests).toBe(1);
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-  const modeBarTop = await page.locator(".review-mode-tabs").evaluate((tabs) => tabs.getBoundingClientRect().top);
-  expect(modeBarTop).toBeGreaterThanOrEqual(47);
-  expect(modeBarTop).toBeLessThanOrEqual(49);
+  const modeBarTop = await page.locator(".review-bar").evaluate((bar) => bar.getBoundingClientRect().top);
+  expect(modeBarTop).toBeGreaterThanOrEqual(-1);
+  expect(modeBarTop).toBeLessThanOrEqual(1);
   expect(guideRequests).toBe(1);
 });
 

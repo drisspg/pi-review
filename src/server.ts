@@ -16,7 +16,7 @@ import { gpuWorkspaceCreateResponse, gpuWorkspaceDeleteResponse, gpuWorkspaceExe
 import { createGitInterdiff } from "./interdiff-git.js";
 import { addIssueComment, addPendingPullRequestReviewThread, compareCommits, createPendingPullRequestReview, editIssueComment, editReviewComment, editReviewSummary, fetchCommitChecks, fetchFileText, fetchPendingPullRequestReview, fetchPullRequestReviewData, replyToReviewComment, submitPullRequestReview } from "./github.js";
 import { logger } from "./logger.js";
-import { parsePullRequestRef } from "./pr.js";
+import { parsePullRequestRef, prKey } from "./pr.js";
 import { createPiApi } from "./pi-api.js";
 import { createPiJobRunner } from "./pi-jobs.js";
 import { createPiTerminalApi } from "./pi-terminal-api.js";
@@ -32,6 +32,7 @@ import { createReviewSubmitRouteApi, defaultReviewSubmitRouteApiDeps } from "./r
 import { createSavedAnalysisApi } from "./saved-analysis-api.js";
 import { createServerRoute, createRequestListener } from "./server-router.js";
 import { createShellApi } from "./shell-api.js";
+import { withTtlCache } from "./ttl-cache.js";
 import { createUsageApi, defaultUsageApiDeps } from "./usage-api.js";
 import { appendDraftReviewComment, clearDraftReview, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, getDraftReview, listAiReviews, listFocusScans, listGuideReviews, listOverviews, listRecentPullRequests, listReviewMemoryRecords, markPullRequestReviewed, removePullRequest, reviewMemoryStats, saveAiReview, saveDraftReview, saveFocusScan, saveGuideReview, saveOverview, saveReviewMemory, saveReviewProfile, setFileViewed, upsertPullRequest } from "./state.js";
 import { cleanupPrWorktree, preparePrWorktree, repoDirForRef, worktreeDirForRef } from "./worktrees.js";
@@ -42,6 +43,11 @@ const execFileAsync = promisify(execFile);
 const port = Number.parseInt(process.env.PI_PR_REVIEW_PORT ?? "", 10) || DEFAULT_PORT;
 const compiledTerminalExtension = fileURLToPath(new URL("./pi-review-terminal-extension.js", import.meta.url));
 const sourceTerminalExtension = fileURLToPath(new URL("./pi-review-terminal-extension.ts", import.meta.url));
+
+// Test servers set PI_REVIEW_PR_CACHE_MS so 50+ opens of the same pinned PR hit GitHub once; 0/unset disables caching.
+const prCacheMs = Number.parseInt(process.env.PI_REVIEW_PR_CACHE_MS ?? "", 10) || 0;
+const cachedFetchPullRequestReviewData = withTtlCache(fetchPullRequestReviewData, (ref) => prKey(ref), prCacheMs);
+const cachedFetchCommitChecks = withTtlCache(fetchCommitChecks, (ref, sha) => `${prKey(ref)}@${sha}`, prCacheMs);
 
 const piJobRunner = createPiJobRunner(askPi);
 const piTerminalManager = createPiTerminalManager({
@@ -74,11 +80,11 @@ const prApi = createPrApi(defaultPrApiDeps({
     git: async (args, cwd) => (await execFileAsync("git", args, { cwd, maxBuffer: 50 * 1024 * 1024 })).stdout,
     repoDirForRef,
   }),
-  fetchCommitChecks,
+  fetchCommitChecks: cachedFetchCommitChecks,
   disposePiSession: async (prKey) => {
     await Promise.all([disposePiSession(prKey), piTerminalManager.disposePr(prKey)]);
   },
-  fetchPullRequestReviewData,
+  fetchPullRequestReviewData: cachedFetchPullRequestReviewData,
   getDraftReview,
   listAiReviews,
   listFocusScans,
@@ -90,10 +96,10 @@ const prApi = createPrApi(defaultPrApiDeps({
   removePullRequest,
   upsertPullRequest,
 }));
-const reviewArchiveApi = createReviewArchiveApi(defaultReviewArchiveApiDeps({ clearDraftReview, fetchPullRequestReviewData, markPullRequestReviewed, saveReviewMemory }));
+const reviewArchiveApi = createReviewArchiveApi(defaultReviewArchiveApiDeps({ clearDraftReview, fetchPullRequestReviewData: cachedFetchPullRequestReviewData, markPullRequestReviewed, saveReviewMemory }));
 const reviewMemoryApi = createReviewMemoryApi({ askPi, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewMemory, saveReviewProfile });
 const reviewPromptApi = createReviewPromptApi({ currentReviewMemoryPrompt });
-const reviewSubmitRouteApi = createReviewSubmitRouteApi(defaultReviewSubmitRouteApiDeps({ clearDraftReview, fetchPullRequestReviewData, markPullRequestReviewed, saveReviewMemory, submitPullRequestReview }));
+const reviewSubmitRouteApi = createReviewSubmitRouteApi(defaultReviewSubmitRouteApiDeps({ clearDraftReview, fetchPullRequestReviewData: cachedFetchPullRequestReviewData, markPullRequestReviewed, saveReviewMemory, submitPullRequestReview }));
 const savedAnalysisApi = createSavedAnalysisApi({ saveAiReview, saveFocusScan, saveGuideReview, saveOverview });
 const shellApi = createShellApi({ listRecentPullRequests, logEntries: logger.entries });
 const usageApi = createUsageApi(defaultUsageApiDeps(logger));

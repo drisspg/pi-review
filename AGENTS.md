@@ -127,10 +127,15 @@ the browser renders pre-edit markup even after a hard reload.
 
 ## Design system (styles.css)
 
-The app has three themes — dark (default), `github-light`, `github-dimmed` — selected via
-`:root[data-theme=…]`. Every theme-able value must route through a CSS custom property; theme
+Themes are selected via `:root[data-theme=…]` and registered in `web/src/lib/theme.ts` (name,
+label, light/dark — the light flag drives Primer colorMode and mermaid darkMode). Seven ship:
+`github-dark` (default), `github-dimmed`, `github-light`, `catppuccin-mocha`, `gruvbox-dark`,
+`nord`, `solarized-light`. Every theme-able value must route through a CSS custom property; theme
 blocks override only what differs. A Primer `[data-component="ThemeProvider"]` block re-maps the
-core vars for Primer-rendered subtrees.
+core vars for Primer-rendered subtrees from Primer's own scheme — which suits the GitHub themes
+only, so non-GitHub themes also define immutable `--app-*` palette aliases and a provider-scoped
+block re-asserts both app tokens and Primer core vars from them (see the block after the bridge).
+`--on-success` exists for themes whose success green needs dark text (Nord).
 
 Token layer (defined once in `:root`; use these, never re-hardcode):
 
@@ -147,8 +152,11 @@ Token layer (defined once in `:root`; use these, never re-hardcode):
   deliberately slightly stronger than deletions — keep that asymmetry).
 - Depth: `--shadow-raised` / `--shadow-popover` / `--shadow-modal` + `--overlay-bg`; shadows only
   on floating layers, all theme-aware.
-- Sticky offsets derive from `--sticky-toolbar-h` via `calc()` (`.review-page` defines the derived
-  `--sticky-mode-tabs-h` / `--sticky-files-toolbar-h` chain). Never reintroduce literal 48/83/127.
+- One sticky surface: the app toolbar is static and the `.review-bar` (mode tabs + files chip +
+  View menu + panel buttons, class also `files-toolbar` for e2e) sticks at top 0, exactly
+  `--sticky-toolbar-h` tall. `--sticky-mode-tabs-h`/`--sticky-files-toolbar-h` are 0px so the
+  downstream `calc()` chains (file headers, guide stop card, side panel) keep deriving from
+  `--sticky-toolbar-h`. Never reintroduce literal 48/83/127.
 
 Component conventions:
 
@@ -175,10 +183,11 @@ Component conventions:
 - Run `npm run test:e2e:fast` (or targeted Playwright tests) when frontend/server wiring changes
   materially. E2e opens the pinned flash-attention PR through the real server + `gh`, and mocks Pi
   endpoints/terminal WebSocket in-page — so it needs network + `gh` auth but no Pi backend.
-- E2e class names and geometry are load-bearing (e.g. `.review-mode-tabs` sticks at exactly the
-  toolbar height; `.focus-area-link-row`, `.draft-card`, `.composer-submit`, terminal textbox
-  roles). When restyling, add classes rather than renaming, and keep rendered sticky offsets
-  identical unless you update the spec.
+- E2e class names and geometry are load-bearing (e.g. `.review-bar` sticks at viewport top with
+  the mode tabs inside it; `.focus-area-link-row`, `.draft-card`, `.composer-submit`, terminal
+  textbox roles; the diff-view/threads toggles live in the review bar's View menu). When
+  restyling, add classes rather than renaming, and keep rendered sticky offsets identical unless
+  you update the spec.
 - Treat e2e failures as real regressions; verify against a clean `HEAD` worktree
   (`git worktree add /tmp/pi-review-head HEAD` + symlinked `node_modules`) before assuming a
   failure is pre-existing. Known machine caveat: on hosts where agent shells cannot spawn Chromium
