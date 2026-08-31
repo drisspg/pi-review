@@ -293,11 +293,13 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
 /** High-frequency polling/infra routes that would drown the usage log without adding signal. */
 const usageIgnoredApiPaths = new Set(["/api/health", "/api/logs", "/api/config", "/api/usage", "/api/pi/review/status", "/api/pi/focus-review/status"]);
 
-export function createRequestListener(route: ServerRoute, logger: ServerLogger, recordUsage?: (name: string, data: Record<string, unknown>) => void): (req: IncomingMessage, res: ServerResponse) => void {
+export function createRequestListener(route: ServerRoute, logger: ServerLogger, recordUsage?: (name: string, data: Record<string, unknown>) => void, assetsVersion?: () => string): (req: IncomingMessage, res: ServerResponse) => void {
   return (req, res) => {
     const startedAt = performance.now();
     const method = req.method ?? "GET";
     const url = req.url ?? "/";
+    // Lets the web client notice when dist-web was rebuilt underneath its tab.
+    if (assetsVersion != null) res.setHeader("x-pi-review-assets", assetsVersion());
     const shouldLogRequest = method !== "GET";
     if (shouldLogRequest) logger.info("http", "request start", { method, url });
     res.on("finish", () => {

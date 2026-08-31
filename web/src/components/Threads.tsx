@@ -123,6 +123,7 @@ function GitHubThreadCard({ id, className = "comment", title, subtitle, status, 
 }
 
 function ThreadReplyBox({ prUrl, kind, commentId, refreshGithubActivity }: { prUrl: string; kind: "issue" | "review"; commentId?: number; refreshGithubActivity: () => Promise<void> }) {
+  const [composing, setComposing] = useState(false);
   const [body, setBody] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -133,6 +134,7 @@ function ThreadReplyBox({ prUrl, kind, commentId, refreshGithubActivity }: { prU
     try {
       await api("/api/comment/reply", { method: "POST", body: JSON.stringify({ prUrl, kind, commentId, body }) });
       setBody("");
+      setComposing(false);
       await refreshGithubActivity();
     } catch (err) {
       setError(errorMessage(err));
@@ -140,7 +142,16 @@ function ThreadReplyBox({ prUrl, kind, commentId, refreshGithubActivity }: { prU
       setSubmitting(false);
     }
   }
-  return <div className="thread-reply thread-reply-box"><MarkdownEditor value={body} onChange={setBody} placeholder="Reply…" ariaLabel="Reply to thread" />{error != null && <Flash variant="danger" className="operation-error" role="alert">Reply failed: {error}</Flash>}<Button className="composer-submit" onClick={() => void submitReply()} disabled={submitting || body.trim().length === 0}>{submitting ? "Replying…" : error == null ? "Reply" : "Retry"}</Button></div>;
+  // Collapsed by default: a full editor under every thread makes the panel read like forms, not conversation.
+  if (!composing) return <div className="thread-reply thread-reply-collapsed"><button type="button" className="thread-reply-trigger" onClick={() => setComposing(true)}>{body.trim().length > 0 ? "Continue reply…" : "Reply…"}</button></div>;
+  return <div className="thread-reply thread-reply-box">
+    <MarkdownEditor autoFocus value={body} onChange={setBody} placeholder="Reply…" ariaLabel="Reply to thread" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setComposing(false); } }} />
+    {error != null && <Flash variant="danger" className="operation-error" role="alert">Reply failed: {error}</Flash>}
+    <div className="thread-reply-actions">
+      <Button variant="muted" onClick={() => setComposing(false)}>Cancel</Button>
+      <Button className="composer-submit" onClick={() => void submitReply()} disabled={submitting || body.trim().length === 0}>{submitting ? "Replying…" : error == null ? "Reply" : "Retry"}</Button>
+    </div>
+  </div>;
 }
 
 export function ExistingComments({ prUrl, comments, issueComments, reviewSummaries, refreshGithubActivity, collapseSignal, commentsCollapsed, toggleAllComments, onJumpToComment }: { prUrl: string; comments: PullReviewComment[]; issueComments: PullIssueComment[]; reviewSummaries: PullRequestReviewSummary[]; refreshGithubActivity: () => Promise<void>; collapseSignal: number; commentsCollapsed: boolean; toggleAllComments: () => void; onJumpToComment?: (target: ReturnType<typeof commentTarget>) => void }) {

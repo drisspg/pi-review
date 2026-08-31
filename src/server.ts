@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer, type ServerResponse } from "node:http";
 import { extname, join, normalize, resolve } from "node:path";
@@ -104,6 +105,23 @@ const savedAnalysisApi = createSavedAnalysisApi({ saveAiReview, saveFocusScan, s
 const shellApi = createShellApi({ listRecentPullRequests, logEntries: logger.entries });
 const usageApi = createUsageApi(defaultUsageApiDeps(logger));
 
+// Identifies the currently served web build so open tabs can notice in-place
+// rebuilds of dist-web; keyed by index.html's mtime so it tracks rebuilds
+// without restarting the server.
+let assetsVersionCache: { mtimeMs: number; value: string } | null = null;
+function assetsVersion(): string {
+  try {
+    const indexPath = join(WEB_ROOT, "index.html");
+    const mtimeMs = statSync(indexPath).mtimeMs;
+    if (assetsVersionCache?.mtimeMs !== mtimeMs) {
+      assetsVersionCache = { mtimeMs, value: createHash("sha1").update(readFileSync(indexPath)).digest("hex").slice(0, 16) };
+    }
+    return assetsVersionCache.value;
+  } catch {
+    return "unbuilt";
+  }
+}
+
 const contentTypes: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
   ".html": "text/html; charset=utf-8",
@@ -149,7 +167,7 @@ const route = createServerRoute({
   usageApi,
 });
 
-const server = createServer(createRequestListener(route, logger, (name, data) => usageApi.record("server", name, data)));
+const server = createServer(createRequestListener(route, logger, (name, data) => usageApi.record("server", name, data), assetsVersion));
 const detachPiTerminalWebSocketServer = attachPiTerminalWebSocketServer(server, piTerminalManager, logger);
 
 let shuttingDown = false;

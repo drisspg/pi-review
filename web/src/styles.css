@@ -596,6 +596,17 @@ kbd {
   overflow-x: auto;
 }
 
+.menu-theme-row {
+  display: flex;
+  margin-top: 4px;
+  padding: 6px 8px 4px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.menu-theme-row select {
+  width: 100%;
+}
+
 .stale-build-pill {
   position: fixed;
   top: 10px;
@@ -2888,9 +2899,33 @@ kbd {
 
 .thread-reply {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
-  align-items: end;
+}
+
+.thread-reply-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Quiet input-shaped affordance; the real editor mounts on click. */
+.thread-reply-trigger {
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--panel2);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: text;
+}
+
+.thread-reply-trigger:hover {
+  border-color: var(--border);
+  color: var(--text);
 }
 
 .thread-reply-box {
@@ -2984,15 +3019,6 @@ kbd {
   overflow: hidden;
 }
 
-.thread-reply > button {
-  grid-column: 2;
-  grid-row: 1;
-  min-height: 34px;
-}
-
-.thread-reply > .operation-error {
-  grid-column: 1 / -1;
-}
 
 .thread-head > div:not(.thread-title):not(.actions) {
   display: grid;

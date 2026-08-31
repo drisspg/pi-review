@@ -22,6 +22,11 @@ async function openFileWithAddedRows(page: Page, minRows: number) {
   throw new Error(`No file has ${minRows} added rows`);
 }
 
+async function goHome(page: Page) {
+  await openTools(page);
+  await page.getByRole("menuitem", { name: "New review" }).click();
+}
+
 async function openTools(page: Page) {
   await page.getByRole("button", { name: /Tools/ }).click();
 }
@@ -125,7 +130,7 @@ test("removes a previous PR from local history", async ({ page }) => {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true }) });
   });
 
-  await page.getByRole("link", { name: "Home" }).click();
+  await goHome(page);
   const firstRow = page.locator(".pr-card").first();
   const key = await firstRow.locator(".pr-card-key").textContent();
   await firstRow.getByTitle("Remove saved PR and cleanup worktree").click();
@@ -180,7 +185,7 @@ test("reopens a previously loaded PR from the client cache", async ({ page }) =>
     await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "cache miss" }) });
   });
 
-  await page.getByRole("link", { name: "Home" }).click();
+  await goHome(page);
   await page.locator(".pr-card").first().locator(".pr-card-body").click();
 
   await expect(page.locator(".review-layout")).toBeVisible();
@@ -190,7 +195,7 @@ test("reopens a previously loaded PR from the client cache", async ({ page }) =>
 });
 
 test("can cancel a slow pull request open", async ({ page }) => {
-  await page.getByRole("link", { name: "Home" }).click();
+  await goHome(page);
   await page.route("**/api/pr/open", async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 500));
     await route.abort();
@@ -206,7 +211,7 @@ test("can cancel a slow pull request open", async ({ page }) => {
 });
 
 test("opens a previous PR from its review link in a separate page", async ({ page, context }) => {
-  await page.getByRole("link", { name: "Home" }).click();
+  await goHome(page);
   const href = await page.locator(".pr-card").first().locator(".pr-card-body").getAttribute("href");
   expect(href).toContain("#/review?pr=");
 
@@ -230,7 +235,8 @@ test("refresh updates pull request activity and landed status", async ({ page })
     await route.fulfill({ response, json: { ...review, pr: { ...review.pr, state: "closed", merged: true } } });
   });
 
-  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await openTools(page);
+  await page.getByRole("menuitem", { name: "Refresh" }).click();
 
   await expect(page.locator(".pr-header-strip .review-status")).toHaveText("Merged");
 });
@@ -239,7 +245,7 @@ test("opens PR description references on GitHub in new tabs", async ({ page, con
   const sourceResponse = await page.request.post("/api/pr/open", { data: { input: prUrl } });
   const sourceReview = await sourceResponse.json() as { pr: Record<string, unknown> } & Record<string, unknown>;
   const linkedPrUrl = "https://github.com/example/stack/pull/190596";
-  await page.getByRole("link", { name: "Home" }).click();
+  await goHome(page);
   await page.route("**/api/pr/open", async (route) => {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ ...sourceReview, pr: { ...sourceReview.pr, key: "github.com/example/stack#190596", url: linkedPrUrl, body: "Stack from ghstack (oldest at bottom):\n\n* #190594\n* [#190595](https://github.com/example/stack/pull/190595)\n* -> #190596" } }) });
   });
@@ -782,7 +788,8 @@ test("keeps failed GitHub comment edits and replies retryable", async ({ page })
   await expect(firstThread.getByLabel("Edit comment")).toHaveValue("preserve this edit");
   await expect(firstThread.getByRole("button", { name: "Retry" })).toBeVisible();
 
-  const replyThread = page.locator(".side .github-thread", { has: page.getByLabel("Reply to thread") }).first();
+  const replyThread = page.locator(".side .github-thread", { has: page.getByRole("button", { name: "Reply…" }) }).first();
+  await replyThread.getByRole("button", { name: "Reply…" }).click();
   await replyThread.getByLabel("Reply to thread").fill("preserve this reply");
   await replyThread.getByRole("button", { name: "Reply" }).click();
   await expect(replyThread.locator(".thread-reply").getByRole("alert")).toContainText("Reply failed: reply rejected");
@@ -818,6 +825,7 @@ test("collapses all review threads from the view menu", async ({ page }) => {
 });
 
 test("switches and persists Primer-backed GitHub themes", async ({ page }) => {
+  await openTools(page);
   const theme = page.getByLabel("Theme");
   const provider = page.locator('[data-component="ThemeProvider"]');
 
@@ -832,6 +840,7 @@ test("switches and persists Primer-backed GitHub themes", async ({ page }) => {
   await theme.selectOption("github-dark");
   await expect(provider).toHaveAttribute("data-dark-theme", "dark");
   await page.reload();
+  await openTools(page);
   await expect(page.getByLabel("Theme")).toHaveValue("github-dark");
 });
 

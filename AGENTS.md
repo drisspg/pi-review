@@ -152,11 +152,13 @@ Token layer (defined once in `:root`; use these, never re-hardcode):
   deliberately slightly stronger than deletions — keep that asymmetry).
 - Depth: `--shadow-raised` / `--shadow-popover` / `--shadow-modal` + `--overlay-bg`; shadows only
   on floating layers, all theme-aware.
-- One sticky surface: the app toolbar is static and the `.review-bar` (mode tabs + files chip +
-  View menu + panel buttons, class also `files-toolbar` for e2e) sticks at top 0, exactly
-  `--sticky-toolbar-h` tall. `--sticky-mode-tabs-h`/`--sticky-files-toolbar-h` are 0px so the
-  downstream `calc()` chains (file headers, guide stop card, side panel) keep deriving from
-  `--sticky-toolbar-h`. Never reintroduce literal 48/83/127.
+- One sticky surface: with a PR open, the `.review-bar` (mode tabs + files chip + View menu +
+  panel buttons + trailing "Tools" kebab menu holding New review / Open on GitHub / Refresh /
+  Tools items / Theme select; class also `files-toolbar` for e2e) sticks at top 0, exactly
+  `--sticky-toolbar-h` tall. The app toolbar renders only on the start page. The
+  `--sticky-mode-tabs-h`/`--sticky-files-toolbar-h` vars are 0px so downstream `calc()` chains
+  (file headers, guide stop card, side panel) keep deriving from `--sticky-toolbar-h`. Never
+  reintroduce literal 48/83/127.
 
 Component conventions:
 
