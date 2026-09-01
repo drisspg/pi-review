@@ -1690,8 +1690,12 @@ function PrSummary({ pr }: { pr: StoredPullRequest }) {
 function focusAreaLocation(area: Pick<FocusArea, "path" | "startLine" | "endLine">): string {  return `${area.path}:${area.startLine === area.endLine ? area.startLine : `${area.startLine}-${area.endLine}`}`;
 }
 
+function OverviewMaximizeButton({ title, maximized, onToggle }: { title: string; maximized: boolean; onToggle: () => void }) {
+  return <Button variant="icon" className="overview-maximize-button" aria-label={`${maximized ? "Restore dashboard from" : "Maximize"} ${title}`} title={maximized ? "Restore dashboard (Esc)" : "Maximize this panel"} onClick={(event) => { event.stopPropagation(); onToggle(); }}>{maximized ? <ScreenNormalIcon size={14} /> : <ScreenFullIcon size={14} />}</Button>;
+}
+
 /** Right-column overview panel that collapses to a header strip so the remaining panels (e.g. the terminal) take the space. */
-function OverviewSidePanel({ id, title, className, ariaLabel, children }: { id: string; title: string; className: string; ariaLabel?: string; children: ReactNode }) {
+function OverviewSidePanel({ id, title, className, ariaLabel, maximized, onToggleMaximize, children }: { id: string; title: string; className: string; ariaLabel?: string; maximized: boolean; onToggleMaximize: () => void; children: ReactNode }) {
   const storageKey = `pi-review-overview-${id}`;
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(storageKey) === "collapsed");
   function toggle() {
@@ -1700,26 +1704,48 @@ function OverviewSidePanel({ id, title, className, ariaLabel, children }: { id: 
       return !current;
     });
   }
-  return <section className={`guide-overview-panel ${className}${collapsed ? " collapsed" : ""}`} aria-label={ariaLabel}>
+  return <section className={`guide-overview-panel ${className}${collapsed && !maximized ? " collapsed" : ""}${maximized ? " maximized" : ""}`} aria-label={ariaLabel}>
     <div className="guide-overview-panel-head" onClick={toggle}>
       <span className="kicker">{title}</span>
-      <Button variant="icon" aria-label={`${collapsed ? "Expand" : "Collapse"} ${title}`} onClick={(event) => { event.stopPropagation(); toggle(); }}>{collapsed ? <ChevronRightIcon size={14} /> : <ChevronDownIcon size={14} />}</Button>
+      <div className="guide-overview-panel-controls">
+        <OverviewMaximizeButton title={title} maximized={maximized} onToggle={onToggleMaximize} />
+        {!maximized && <Button variant="icon" aria-label={`${collapsed ? "Expand" : "Collapse"} ${title}`} onClick={(event) => { event.stopPropagation(); toggle(); }}>{collapsed ? <ChevronRightIcon size={14} /> : <ChevronDownIcon size={14} />}</Button>}
+      </div>
     </div>
     {/* Keep the body mounted so collapsing the terminal doesn't drop its session. */}
-    <div className="guide-overview-panel-body" hidden={collapsed}>{children}</div>
+    <div className="guide-overview-panel-body" hidden={collapsed && !maximized}>{children}</div>
   </section>;
 }
 
+type OverviewPanelId = "tldr" | "schematic" | "map" | "notes" | "terminal";
+
 function OverviewBody({ text, prUrl }: { text: string; prUrl: string }) {
   const sections = parseOverviewSections(text);
+  // One panel can take over the whole overview area; everything else stays mounted but hidden.
+  const [maximized, setMaximized] = useState<OverviewPanelId | null>(null);
+  useEffect(() => {
+    if (maximized == null) return;
+    function restore(event: KeyboardEvent): void {
+      if (event.key === "Escape") setMaximized(null);
+    }
+    window.addEventListener("keydown", restore);
+    return () => window.removeEventListener("keydown", restore);
+  }, [maximized]);
   if (sections == null) return <div className="guide-overview-body"><MarkdownText text={text} fileLinks={{ prUrl }} /></div>;
-  return <div className="guide-overview-grid">
-    <section className="guide-overview-panel guide-overview-tldr"><span className="kicker">TL;DR</span><MarkdownText text={sections.tldr} fileLinks={{ prUrl }} /></section>
-    <section className="guide-overview-panel guide-overview-schematic"><span className="kicker">Schematic</span><MarkdownText text={sections.schematic} fileLinks={{ prUrl }} /></section>
+  const toggle = (panel: OverviewPanelId) => () => setMaximized((current) => current === panel ? null : panel);
+  return <div className={`guide-overview-grid${maximized != null ? " has-maximized" : ""}`}>
+    <section className={`guide-overview-panel guide-overview-tldr${maximized === "tldr" ? " maximized" : ""}`}>
+      <div className="guide-overview-panel-head"><span className="kicker">TL;DR</span><OverviewMaximizeButton title="TL;DR" maximized={maximized === "tldr"} onToggle={toggle("tldr")} /></div>
+      <MarkdownText text={sections.tldr} fileLinks={{ prUrl }} />
+    </section>
+    <section className={`guide-overview-panel guide-overview-schematic${maximized === "schematic" ? " maximized" : ""}`}>
+      <div className="guide-overview-panel-head"><span className="kicker">Schematic</span><OverviewMaximizeButton title="Schematic" maximized={maximized === "schematic"} onToggle={toggle("schematic")} /></div>
+      <MarkdownText text={sections.schematic} fileLinks={{ prUrl }} />
+    </section>
     <div className="guide-overview-side">
-      {sections.changeMap.length > 0 && <OverviewSidePanel id="map" title="Change map" className="guide-overview-map"><MarkdownText text={sections.changeMap} fileLinks={{ prUrl }} /></OverviewSidePanel>}
-      {sections.notes.length > 0 && <OverviewSidePanel id="notes" title="Reviewer notes" className="guide-overview-notes"><MarkdownText text={sections.notes} fileLinks={{ prUrl }} /></OverviewSidePanel>}
-      <OverviewSidePanel id="terminal" title="Pi terminal" className="guide-overview-terminal" ariaLabel="Overview Pi terminal">
+      {sections.changeMap.length > 0 && <OverviewSidePanel id="map" title="Change map" className="guide-overview-map" maximized={maximized === "map"} onToggleMaximize={toggle("map")}><MarkdownText text={sections.changeMap} fileLinks={{ prUrl }} /></OverviewSidePanel>}
+      {sections.notes.length > 0 && <OverviewSidePanel id="notes" title="Reviewer notes" className="guide-overview-notes" maximized={maximized === "notes"} onToggleMaximize={toggle("notes")}><MarkdownText text={sections.notes} fileLinks={{ prUrl }} /></OverviewSidePanel>}
+      <OverviewSidePanel id="terminal" title="Pi terminal" className="guide-overview-terminal" ariaLabel="Overview Pi terminal" maximized={maximized === "terminal"} onToggleMaximize={toggle("terminal")}>
         <InlinePiTerminal session={terminalSessionId("guide", "overview")} context={"You are orienting a reviewer in this pull request from its guide overview. Answer questions about structure and intent, investigate the change, and keep all work grounded in this PR's worktree."} />
       </OverviewSidePanel>
     </div>

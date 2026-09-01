@@ -1450,8 +1450,49 @@ kbd {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
-  cursor: pointer;
   user-select: none;
+}
+
+/* Only the collapsible right-column panels toggle on head click. */
+.guide-overview-side .guide-overview-panel-head {
+  cursor: pointer;
+}
+
+.guide-overview-panel-controls {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+}
+
+/* Maximized panel: takes over the whole overview area at near-viewport height;
+   siblings stay mounted (the terminal keeps its session) but hidden. */
+.guide-overview-grid.has-maximized {
+  display: block;
+}
+
+.guide-overview-grid.has-maximized .guide-overview-panel:not(.maximized) {
+  display: none;
+}
+
+.guide-overview-grid.has-maximized .guide-overview-side {
+  display: contents;
+}
+
+.guide-overview-panel.maximized {
+  min-height: calc(100vh - var(--sticky-toolbar-h) - 140px);
+}
+
+.guide-overview-schematic.maximized .schematic-canvas {
+  height: calc(100vh - var(--sticky-toolbar-h) - 220px) !important;
+}
+
+.guide-overview-terminal.maximized {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.guide-overview-terminal.maximized .guide-overview-panel-body {
+  min-height: calc(100vh - var(--sticky-toolbar-h) - 220px);
 }
 
 .guide-overview-panel-body {

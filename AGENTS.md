@@ -26,7 +26,9 @@ web/src/                React frontend (Vite)
   main.tsx              Almost all screens/components: App, AppToolbar, StartPage/PrCard,
                         ReviewPage, PrHeaderStrip, PrSummary, GuideReview (Review route rail +
                         OverviewBody four-panel dashboard: TL;DR/Schematic/Change map/Reviewer
-                        notes + Pi terminal; reviewed stops persist via guide stepStates),
+                        notes + Pi terminal; any panel can be maximized to fill the overview
+                        (Esc restores; siblings stay mounted so the terminal session survives);
+                        reviewed stops persist via guide stepStates),
                         FileNavigator, FileDiff/DiffRowView, ThreadBox, FocusAreaInline,
                         GitHubDraftReviewPanel, ReviewSummary, AiReviewPanel, and the modals
                         (Pi settings, memory, GPU workspace, sessions, logs)
