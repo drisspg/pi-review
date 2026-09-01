@@ -788,7 +788,7 @@ test("keeps failed GitHub comment edits and replies retryable", async ({ page })
   await expect(firstThread.getByLabel("Edit comment")).toHaveValue("preserve this edit");
   await expect(firstThread.getByRole("button", { name: "Retry" })).toBeVisible();
 
-  const replyThread = page.locator(".side .github-thread", { has: page.getByRole("button", { name: "Reply…" }) }).first();
+  const replyThread = page.locator(".side .github-thread", { has: page.locator(".thread-reply") }).first();
   await replyThread.getByRole("button", { name: "Reply…" }).click();
   await replyThread.getByLabel("Reply to thread").fill("preserve this reply");
   await replyThread.getByRole("button", { name: "Reply" }).click();
