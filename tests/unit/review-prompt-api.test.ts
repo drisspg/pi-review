@@ -117,6 +117,9 @@ test("review prompt API builds copyable review feedback bundles", async () => {
 
   assert.equal(result.purpose, "review-feedback");
   assert.match(result.prompt, /source-of-truth reviewer feedback/);
+  // The engineer writes thread replies; the model only flags threads and explains them.
+  assert.match(result.prompt, /Never draft, suggest, or return reply text/);
+  assert.doesNotMatch(result.prompt, /suggest reply text/);
   assert.match(result.prompt, /PR: org\/repo#1/);
   assert.match(result.prompt, /Inline review comment · @reviewer · src\/a\.ts:4 · unresolved/);
   assert.match(result.prompt, /please handle this edge case/);

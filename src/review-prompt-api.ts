@@ -459,7 +459,9 @@ function reviewFeedbackPrompt(payload: Record<string, unknown>): ReviewPromptRes
     purpose: "review-feedback",
     prompt: `You are helping triage PR review feedback. Use the collected feedback below to produce a concise action plan for the engineer.
 
-Treat GitHub/user comments as source-of-truth reviewer feedback. Treat Pi/AI comments, focus areas, and global feedback as suggestions that should be verified against the code before acting. Deduplicate overlapping points, identify unresolved actionable items, and suggest reply text or code/test follow-ups when there is enough context.
+Treat GitHub/user comments as source-of-truth reviewer feedback. Treat Pi/AI comments, focus areas, and global feedback as suggestions that should be verified against the code before acting. Deduplicate overlapping points, identify unresolved actionable items, and suggest code/test follow-ups when there is enough context.
+
+Never draft, suggest, or return reply text for review threads — replies are written by the engineer, in their own voice. For each thread that needs a human response, flag it as needing a reply and summarize what we think is happening: the reviewer's actual question or concern, the relevant code facts, and whether the concern looks valid, already addressed, or based on a misunderstanding.
 
 # PR review feedback bundle
 
