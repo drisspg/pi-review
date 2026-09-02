@@ -41,9 +41,6 @@ function fakeRuntime(options: { failMutations?: boolean; gitattributes?: string;
         if (args[0] === "api" && key === "/repos/pytorch/pytorch/contents/torch/a.py?ref=head") return { stdout: "line\r\n", stderr: "" };
         throw new Error(`unexpected gh call: ${args.join(" ")}`);
       },
-      async listFileReviews() {
-        return [];
-      },
       async mkdtemp() {
         return "/tmp/pi-review-test";
       },

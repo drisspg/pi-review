@@ -21,6 +21,8 @@ export default defineConfig({
     trace: fast ? "off" : "retain-on-failure",
     screenshot: "only-on-failure",
     video: fast ? "off" : "retain-on-failure",
+    // Sandboxed agent shells on macOS deny Chromium's Mach port bootstrap; single-process mode avoids the helper processes.
+    ...(process.env.PI_REVIEW_E2E_SINGLE_PROCESS === "1" ? { launchOptions: { args: ["--single-process", "--no-sandbox"] } } : {}),
   },
   webServer: {
     command,

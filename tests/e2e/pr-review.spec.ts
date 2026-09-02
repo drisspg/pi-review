@@ -1165,6 +1165,29 @@ test("marking a file viewed collapses it without jumping to the active focus are
   expect(await page.evaluate(() => (window as typeof window & { scrollIntoViewTargets: string[] }).scrollIntoViewTargets)).toEqual([]);
 });
 
+test("keeps a viewed unchanged file collapsed when the review reopens", async ({ page }) => {
+  const row = (await openFileWithAddedRows(page, 1)).first();
+  const file = row.locator("xpath=ancestor::section[contains(concat(' ', normalize-space(@class), ' '), ' file ')][1]");
+  const filePath = await file.locator(".file-path").textContent();
+  if (filePath == null) throw new Error("Missing file path");
+
+  const viewedSaved = page.waitForResponse((response) => response.url().endsWith("/api/file/viewed"));
+  await file.locator(".viewed-toggle input").click();
+  await viewedSaved;
+  await expect(file.locator(".diff-row")).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.locator(".review-layout")).toBeVisible({ timeout: 60_000 });
+  const reopened = page.locator(".file").filter({ has: page.locator(".file-path", { hasText: filePath }) }).first();
+  await expect(reopened.locator(".viewed-toggle input")).toBeChecked();
+  await expect(reopened.locator(".diff-row")).toHaveCount(0);
+
+  // Clear the viewed flag so later tests see the default expanded state.
+  const viewedCleared = page.waitForResponse((response) => response.url().endsWith("/api/file/viewed"));
+  await reopened.locator(".viewed-toggle input").click();
+  await viewedCleared;
+});
+
 test("minimizes focus area links after all are reviewed", async ({ page }) => {
   const rows = await openFileWithAddedRows(page, 2);
   const firstPath = await rows.nth(0).getAttribute("data-path");

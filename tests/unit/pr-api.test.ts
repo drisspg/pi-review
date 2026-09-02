@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createPrApi } from "../../src/pr-api.js";
-import type { AiReviewRecord, DraftReview, FocusScanRecord, GuideReviewRecord, PullRequestRef, PullRequestReviewData, StoredPullRequest } from "../../src/types.js";
+import type { AiReviewRecord, DraftReview, FileReviewState, FocusScanRecord, GuideReviewRecord, PullRequestRef, PullRequestReviewData, StoredPullRequest } from "../../src/types.js";
 
 const ref: PullRequestRef = { host: "github.com", owner: "pytorch", repo: "pytorch", number: 1 };
 
@@ -35,18 +35,20 @@ function reviewData(pr = storedPr()): PullRequestReviewData {
     comments: [],
     issueComments: [],
     reviewSummaries: [],
-    fileReviews: [],
+    fileReviews: [{ prKey: pr.key, path: "a.ts", fingerprint: "fp-a", viewed: false, updatedAt: "then" }],
   };
 }
 
 function fakeDeps() {
   const calls: string[] = [];
+  const storedFileReviews: FileReviewState[] = [];
   const draftReview: DraftReview = { prKey: "github.com/pytorch/pytorch#1", headSha: "head", event: "COMMENT", body: "draft body", comments: [], updatedAt: "now" };
   const focusScan: FocusScanRecord = { id: "focus", prKey: "github.com/pytorch/pytorch#1", headSha: "head", answer: "focus", areaStates: {}, createdAt: "then", updatedAt: "now" };
   const aiReview: AiReviewRecord = { id: "ai", prKey: "github.com/pytorch/pytorch#1", headSha: "head", answer: "ai", createdAt: "then", updatedAt: "now" };
   const guideReview: GuideReviewRecord = { id: "guide", prKey: "github.com/pytorch/pytorch#1", headSha: "head", answer: "guide", createdAt: "then", updatedAt: "now" };
   return {
     calls,
+    storedFileReviews,
     deps: {
       async cleanupPrWorktree(requestRef: PullRequestRef) {
         calls.push(`cleanup:${requestRef.number}`);
@@ -78,6 +80,10 @@ function fakeDeps() {
       async listAiReviews(prKey: string) {
         calls.push(`ai:${prKey}`);
         return [aiReview];
+      },
+      async listFileReviews(prKey: string) {
+        calls.push(`fileReviews:${prKey}`);
+        return storedFileReviews;
       },
       async listFocusScans(prKey: string) {
         calls.push(`focus:${prKey}`);
@@ -153,6 +159,7 @@ test("PR API activity refreshes the worktree, Pi context, and review response", 
     "ai:github.com/pytorch/pytorch#1",
     "guide:github.com/pytorch/pytorch#1",
     "overview:github.com/pytorch/pytorch#1",
+    "fileReviews:github.com/pytorch/pytorch#1",
   ]);
 });
 
@@ -175,7 +182,21 @@ test("PR API open prepares worktree, registers Pi cwd, prewarms sessions, and hy
     "ai:github.com/pytorch/pytorch#1",
     "guide:github.com/pytorch/pytorch#1",
     "overview:github.com/pytorch/pytorch#1",
+    "fileReviews:github.com/pytorch/pytorch#1",
   ]);
+});
+
+test("PR API open resolves viewed flags from stored file reviews only while the fingerprint matches", async () => {
+  const { deps, storedFileReviews } = fakeDeps();
+  storedFileReviews.push({ prKey: "github.com/pytorch/pytorch#1", path: "a.ts", fingerprint: "fp-a", viewed: true, updatedAt: "later" });
+
+  const viewedResponse = await createPrApi(deps).open("url");
+  assert.deepEqual(viewedResponse.fileReviews, [{ prKey: "github.com/pytorch/pytorch#1", path: "a.ts", fingerprint: "fp-a", viewed: true, updatedAt: "later" }]);
+
+  // A stale fingerprint means the file changed since it was viewed, so the mark is dropped.
+  storedFileReviews[0] = { ...storedFileReviews[0], fingerprint: "fp-old" };
+  const staleResponse = await createPrApi(deps).open("url");
+  assert.equal(staleResponse.fileReviews[0]?.viewed, false);
 });
 
 test("PR API interdiff prefers the local repo and filters unsafe file entries", async () => {

@@ -1,6 +1,6 @@
 import { safeDiffPath, type GitInterdiffResult } from "./interdiff-git.js";
 import { parsePullRequestRef, prKey } from "./pr.js";
-import type { AiReviewRecord, CommitChecks, DraftReview, FocusScanRecord, GuideReviewRecord, PullFile, PullRequestRef, PullRequestReviewData, PullRequestReviewResponse, StoredPullRequest } from "./types.js";
+import type { AiReviewRecord, CommitChecks, DraftReview, FileReviewState, FocusScanRecord, GuideReviewRecord, PullFile, PullRequestRef, PullRequestReviewData, PullRequestReviewResponse, StoredPullRequest } from "./types.js";
 
 export type PrApiDeps = {
   cleanupPrWorktree: (ref: PullRequestRef) => Promise<string>;
@@ -11,6 +11,7 @@ export type PrApiDeps = {
   fetchPullRequestReviewData: (ref: PullRequestRef) => Promise<PullRequestReviewData>;
   getDraftReview: (prKey: string) => Promise<DraftReview | null>;
   listAiReviews: (prKey: string) => Promise<AiReviewRecord[]>;
+  listFileReviews: (prKey: string) => Promise<FileReviewState[]>;
   listFocusScans: (prKey: string) => Promise<FocusScanRecord[]>;
   listGuideReviews: (prKey: string) => Promise<GuideReviewRecord[]>;
   listOverviews: (prKey: string) => Promise<GuideReviewRecord[]>;
@@ -46,8 +47,10 @@ export const defaultPrApiDeps = (deps: Omit<PrApiDeps, "parsePullRequestRef">): 
 
 export function createPrApi(deps: PrApiDeps): PrApi {
   async function hydrateReviewResponse(data: PullRequestReviewData, pr: StoredPullRequest, extra: Partial<Pick<PullRequestReviewResponse, "worktreeDir">> = {}): Promise<PullRequestReviewResponse> {
-    const [draftReview, focusScans, aiReviews, guideReviews, overviews] = await Promise.all([deps.getDraftReview(pr.key), deps.listFocusScans(pr.key), deps.listAiReviews(pr.key), deps.listGuideReviews(pr.key), deps.listOverviews(pr.key)]);
-    return { ...data, pr, draftReview, focusScan: focusScans[0] ?? null, focusScans, aiReview: aiReviews[0] ?? null, aiReviews, guideReview: guideReviews.find((review) => review.headSha === pr.headSha) ?? null, overview: overviews.find((record) => record.headSha === pr.headSha) ?? null, ...extra };
+    const [draftReview, focusScans, aiReviews, guideReviews, overviews, storedFileReviews] = await Promise.all([deps.getDraftReview(pr.key), deps.listFocusScans(pr.key), deps.listAiReviews(pr.key), deps.listGuideReviews(pr.key), deps.listOverviews(pr.key), deps.listFileReviews(pr.key)]);
+    // Viewed flags live in local state and the PR fetch may be cached, so resolve them here; a fingerprint mismatch means the file changed and the viewed mark no longer applies.
+    const fileReviews = data.fileReviews.map((review) => storedFileReviews.find((stored) => stored.path === review.path && stored.fingerprint === review.fingerprint) ?? review);
+    return { ...data, fileReviews, pr, draftReview, focusScan: focusScans[0] ?? null, focusScans, aiReview: aiReviews[0] ?? null, aiReviews, guideReview: guideReviews.find((review) => review.headSha === pr.headSha) ?? null, overview: overviews.find((record) => record.headSha === pr.headSha) ?? null, ...extra };
   }
 
   function parse(input: string): { ref: PullRequestRef } {

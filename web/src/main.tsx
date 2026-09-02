@@ -601,7 +601,9 @@ function App() {
   }
 
   function initialOpenFiles(data: OpenResponse): Record<string, boolean> {
-    return Object.fromEntries(data.files.map((file) => [file.filename, !file.generated]));
+    // A viewed flag only survives while the file's fingerprint is unchanged, so viewed here means "already reviewed as-is".
+    const viewed = new Set(data.fileReviews.filter((state) => state.viewed).map((state) => state.path));
+    return Object.fromEntries(data.files.map((file) => [file.filename, !file.generated && !viewed.has(file.filename)]));
   }
 
   function showReview(data: OpenResponse) {

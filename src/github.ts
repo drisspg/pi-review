@@ -8,8 +8,7 @@ import { promisify } from "node:util";
 import { markGeneratedPullFiles, parseGitattributes, type GitattributesRule } from "./gitattributes.js";
 import { logger } from "./logger.js";
 import { prKey } from "./pr.js";
-import { listFileReviews } from "./state.js";
-import type { CommitChecks, FileReviewState, GitHubDraftComment, GitHubDraftCommentInput, GitHubPendingReview, GitHubPendingReviewLookup, PullFile, PullIssueComment, PullRequest, PullRequestRef, PullRequestReviewData, PullRequestReviewDecision, PullRequestReviewSummary, PullReviewComment, StoredPullRequest } from "./types.js";
+import type { CommitChecks, GitHubDraftComment, GitHubDraftCommentInput, GitHubPendingReview, GitHubPendingReviewLookup, PullFile, PullIssueComment, PullRequest, PullRequestRef, PullRequestReviewData, PullRequestReviewDecision, PullRequestReviewSummary, PullReviewComment, StoredPullRequest } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -17,7 +16,6 @@ export type ExecFileOptions = { maxBuffer: number };
 
 export type GitHubRuntime = {
   execFile: (command: string, args: string[], options: ExecFileOptions) => Promise<{ stdout: string; stderr: string }>;
-  listFileReviews: (prKey: string) => Promise<FileReviewState[]>;
   mkdtemp: (prefix: string) => Promise<string>;
   rm: (path: string) => Promise<void>;
   now: () => string;
@@ -45,7 +43,6 @@ const defaultRuntime: GitHubRuntime = {
     const { stdout, stderr } = await execFileAsync(command, args, options);
     return { stdout, stderr };
   },
-  listFileReviews,
   async mkdtemp(prefix) {
     return await mkdtemp(prefix);
   },
@@ -244,17 +241,8 @@ export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): Git
     const reviewSummaries = rawReviewSummaries.filter((review) => review.body.trim().length > 0);
     const pr = toStoredPullRequest(ref, rawPr, files, comments, issueComments, reviewSummaries, reviewDecision, runtime.now(), latestViewerReview(rawReviewSummaries, viewer));
     logger.info("github", "fetched PR review data", { key: pr.key, title: pr.title, files: files.length, reviewComments: comments.length, issueComments: issueComments.length, reviewSummaries: reviewSummaries.length });
-    const storedFileReviews = await runtime.listFileReviews(pr.key);
-    const fileReviews = files.map((file) => {
-      const fingerprint = fileFingerprint(file);
-      return storedFileReviews.find((review) => review.path === file.filename && review.fingerprint === fingerprint) ?? {
-        prKey: pr.key,
-        path: file.filename,
-        fingerprint,
-        viewed: false,
-        updatedAt: runtime.now(),
-      };
-    });
+    // Viewed flags are local mutable state resolved at request time in pr-api; this cached fetch only supplies fingerprints.
+    const fileReviews = files.map((file) => ({ prKey: pr.key, path: file.filename, fingerprint: fileFingerprint(file), viewed: false, updatedAt: runtime.now() }));
     return { pr, raw: rawPr, files, comments, issueComments, reviewSummaries, fileReviews };
   }
 

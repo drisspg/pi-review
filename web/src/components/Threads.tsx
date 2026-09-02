@@ -101,7 +101,12 @@ function GitHubCommentView({ comment, commentKind, prUrl, refreshGithubActivity 
 }
 
 function GitHubThreadCard({ id, className = "comment", title, subtitle, status, href, comments, commentKind, prUrl, refreshGithubActivity, reply, collapseSignal, collapseComments, onJump }: { id?: string; className?: string; title: string; subtitle: string; status?: string | null; href: string; comments: GitHubComment[]; commentKind: CommentKind; prUrl: string; refreshGithubActivity: () => Promise<void>; reply?: React.ReactNode; collapseSignal: number; collapseComments: boolean; onJump?: () => void }) {
-  const [collapsed, setCollapsed] = useState(false);
+  // Resolved threads start compact: they are settled context, not active conversation.
+  const resolved = status === "Resolved";
+  const [collapsed, setCollapsed] = useState(resolved);
+  useEffect(() => {
+    if (resolved) setCollapsed(true);
+  }, [resolved]);
   useEffect(() => {
     if (collapseSignal > 0) setCollapsed(collapseComments);
   }, [collapseSignal, collapseComments]);
