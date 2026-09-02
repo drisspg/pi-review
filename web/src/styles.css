@@ -1945,6 +1945,7 @@ kbd {
 .file {
   min-width: 0;
   padding: 0;
+  scroll-margin-top: calc(var(--sticky-toolbar-h) + var(--sticky-mode-tabs-h) + var(--sticky-files-toolbar-h) + var(--space-2));
   overflow: clip;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
