@@ -87,6 +87,10 @@ test("review prompt API builds chat prompts with typed purposes", async () => {
   assert.equal(inline.purpose, "inline-chat");
   assert.match(inline.prompt, /File: src\/a\.ts\. Lines: 10-12\. Side: RIGHT/);
   assert.match(inline.prompt, /draft_review_comment tool/);
+  // Review chats never edit the checkout; proposed diffs ship as draft comments.
+  assert.match(inline.prompt, /never modify repository files/);
+  assert.match(inline.prompt, /```suggestion block/);
+  assert.doesNotMatch(inline.prompt, /only edit code when the user explicitly asks/);
   assert.match(inline.prompt, /gh pr view <number-or-url>/);
   assert.match(inline.prompt, /Question: why\?/);
   assert.equal(focus.purpose, "focus-chat");

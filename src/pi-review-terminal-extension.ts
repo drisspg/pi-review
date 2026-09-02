@@ -33,11 +33,11 @@ export default function piReviewTerminalExtension(pi: ExtensionAPI) {
     name: "draft_review_comment",
     label: "Draft Review Comment",
     description: target == null
-      ? "Create a private editable Pi Review comment on a changed line. Use this instead of editing source when the user asks to add, leave, post, or write a PR review comment."
-      : `Create a private editable Pi Review comment anchored at ${target.path}:${target.startLine == null || target.startLine === target.line ? target.line : `${target.startLine}-${target.line}`}. Use this instead of editing source when the user asks to comment on this thread.`,
+      ? "Create a private editable Pi Review comment on a changed line. Use this instead of editing source files, both for comment requests and for proposed fixes or diffs."
+      : `Create a private editable Pi Review comment anchored at ${target.path}:${target.startLine == null || target.startLine === target.line ? target.line : `${target.startLine}-${target.line}`}. Use this instead of editing source files, both for comment requests and for proposed fixes or diffs on this thread.`,
     promptSnippet: "Create editable PR review comments without modifying source files",
     promptGuidelines: [
-      "Use draft_review_comment when the user asks to add, leave, post, or write a PR review comment instead of editing repository files; only edit code when the user explicitly asks for a code change.",
+      "Never modify repository files in a Pi Review session; deliver comment requests and proposed fixes or diffs as draft_review_comment drafts instead of editing repository files, with proposed code in the body (a ```suggestion block when it replaces the anchored lines).",
       "For an inline Pi Review thread, draft_review_comment already targets the anchored line or range, so normally provide only the comment body.",
     ],
     parameters: Type.Object({
@@ -81,6 +81,6 @@ export default function piReviewTerminalExtension(pi: ExtensionAPI) {
   });
 
   pi.on("before_agent_start", (event) => ({
-    systemPrompt: `${event.systemPrompt}\n\nPi Review comment semantics: requests to add, leave, post, write, or put a comment on the PR or current line mean creating an editable review draft with draft_review_comment. Do not modify repository files for those requests. Only edit code when the user explicitly asks for a source-code change.`,
+    systemPrompt: `${event.systemPrompt}\n\nPi Review comment semantics: the checkout is a read-only review workspace — never modify repository files. Requests to add, leave, post, write, or put a comment on the PR or current line mean creating an editable review draft with draft_review_comment, and proposed fixes, refactors, or diffs are also delivered as draft_review_comment drafts with the proposed code in the body (a \`\`\`suggestion block when it replaces the anchored lines, otherwise a fenced diff).`,
   }));
 }

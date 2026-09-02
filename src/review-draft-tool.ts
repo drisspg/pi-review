@@ -76,9 +76,9 @@ export function createReviewDraftTool(prKey: string, context: ReviewDraftToolCon
   return defineTool({
     name: "draft_review_comment",
     label: "Draft Review Comment",
-    description: "Create a private local Pi Review draft comment when the user asks to add, leave, post, write, or put a comment on the PR or current line. The draft is editable in the UI and is not published to GitHub.",
+    description: "Create a private local Pi Review draft comment for review feedback or a proposed code change. The draft is editable in the UI and is not published to GitHub.",
     promptSnippet: "Create editable PR review comments without modifying source files",
-    promptGuidelines: ["Use draft_review_comment for PR comment requests instead of editing repository files; only edit code when the user explicitly requests a source-code change."],
+    promptGuidelines: ["Never modify repository files in Pi Review; deliver comment requests and proposed fixes or diffs as draft_review_comment drafts instead of editing repository files, with proposed code in the body (a ```suggestion block when it replaces the anchored lines)."],
     parameters: Type.Object({
       path: Type.String({ description: "Exact changed-file path from the repository root." }),
       line: Type.Integer({ minimum: 1, description: "Absolute ending line number on the selected diff side." }),

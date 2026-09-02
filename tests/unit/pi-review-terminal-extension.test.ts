@@ -36,7 +36,9 @@ test("terminal extension routes inline comment requests to Pi Review", async () 
     } as unknown as ExtensionAPI);
     assert.ok(tool != null);
     assert.match(tool.promptGuidelines?.join("\n") ?? "", /instead of editing repository files/);
-    assert.match(promptHandler?.({ systemPrompt: "base" }).systemPrompt ?? "", /Do not modify repository files/);
+    const systemPrompt = promptHandler?.({ systemPrompt: "base" }).systemPrompt ?? "";
+    assert.match(systemPrompt, /never modify repository files/);
+    assert.match(systemPrompt, /proposed fixes, refactors, or diffs are also delivered as draft_review_comment drafts/);
 
     const result = await tool.execute("call", { body: "Please cover this case." }, undefined, undefined, undefined);
     assert.match(result.content[0].text, /Created editable review draft/);

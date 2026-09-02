@@ -327,7 +327,7 @@ ${changedFiles}`,
   };
 }
 
-const reviewDraftToolInstructions = `In Pi Review, requests to add, leave, post, write, or put a comment on the PR or current line mean creating an editable review draft with draft_review_comment. Do not modify repository files for those requests; only edit code when the user explicitly asks for a source-code change. Call the draft_review_comment tool once for each concrete comment. Draft only comments supported by the current diff, use exact changed-file paths and reviewable diff lines, and write concise comment text in the user's voice. Do not create drafts for ordinary questions or publish anything to GitHub.`;
+const reviewDraftToolInstructions = `In Pi Review, the checkout is a read-only review workspace: never modify repository files. Deliver every proposed change — a fix, refactor, or suggested diff — as an editable review draft with the draft_review_comment tool, with the proposed code in the comment body (a \`\`\`suggestion block when it replaces the anchored lines, otherwise a fenced diff). Requests to add, leave, post, write, or put a comment on the PR or current line also mean draft_review_comment. Call the draft_review_comment tool once for each concrete comment. Draft only comments supported by the current diff, use exact changed-file paths and reviewable diff lines, and write concise comment text in the user's voice. Do not create drafts for ordinary questions or publish anything to GitHub.`;
 
 function aiChatPrompt(payload: Record<string, unknown>): ReviewPromptResponse {
   const prKey = requiredString(payload, "prKey");
