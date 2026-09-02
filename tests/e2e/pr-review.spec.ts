@@ -448,6 +448,23 @@ test("creates, edits, and removes draft comments", async ({ page }) => {
   await expect(page.locator(".review-summary .draft-card")).toHaveCount(0);
 });
 
+test("updates the URL to a shareable line link and restores it on load", async ({ page }) => {
+  const row = (await openFileWithAddedRows(page, 1)).first();
+  const path = await row.getAttribute("data-path");
+  const line = Number.parseInt(await row.getAttribute("data-line") ?? "", 10);
+  if (path == null || !Number.isInteger(line)) throw new Error("Missing diff target");
+  await row.click();
+  await expect.poll(() => page.evaluate(() => window.location.hash)).toContain(`file=${encodeURIComponent(path)}`);
+  await expect.poll(() => page.evaluate(() => window.location.hash)).toContain(`lines=R${line}`);
+
+  // A fresh load of the shared link re-selects the same line and scrolls it into view.
+  await page.reload();
+  await expect(page.locator(".review-layout")).toBeVisible({ timeout: 60_000 });
+  const selected = page.locator(`.diff-row[data-path="${path}"][data-line="${line}"][data-side="RIGHT"]`);
+  await expect(selected).toHaveClass(/selected/, { timeout: 15_000 });
+  await expect(selected).toBeInViewport();
+});
+
 test("pulls private GitHub comments and copies an agent handoff", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   const row = (await openFileWithAddedRows(page, 1)).first();

@@ -56,8 +56,28 @@ function InlinePiTerminal({ session, context, target }: { session: string; conte
 
 const homeHash = "#/";
 
-function reviewHash(input: string): string {
-  return `#/review?pr=${encodeURIComponent(input)}`;
+type LineAnchor = { path: string; side: "RIGHT" | "LEFT"; startLine: number; line: number };
+
+function reviewHash(input: string, target: Target | null = null): string {
+  const base = `#/review?pr=${encodeURIComponent(input)}`;
+  if (target?.line == null) return base;
+  const side = target.side === "LEFT" ? "L" : "R";
+  const start = target.startLine ?? target.line;
+  const lines = start === target.line ? `${side}${target.line}` : `${side}${Math.min(start, target.line)}-${side}${Math.max(start, target.line)}`;
+  return `${base}&file=${encodeURIComponent(target.path)}&lines=${lines}`;
+}
+
+/** GitHub-style shareable line anchor (`…&file=path&lines=R83-R90`) parsed from the current hash. */
+function lineAnchorFromHash(): LineAnchor | null {
+  const hash = window.location.hash;
+  if (!hash.startsWith("#/review")) return null;
+  const params = new URLSearchParams(hash.slice(hash.indexOf("?") + 1));
+  const path = params.get("file");
+  const match = params.get("lines")?.match(/^([LR])(\d+)(?:-[LR]?(\d+))?$/);
+  if (path == null || match == null) return null;
+  const start = Number.parseInt(match[2], 10);
+  const end = match[3] == null ? start : Number.parseInt(match[3], 10);
+  return { path, side: match[1] === "L" ? "LEFT" : "RIGHT", startLine: Math.min(start, end), line: Math.max(start, end) };
 }
 
 function reviewInputFromHash(): string | null {
@@ -465,6 +485,7 @@ function App() {
   const reviewCacheRef = useRef<Map<string, OpenResponse>>(new Map());
   const activeReviewKeyRef = useRef<string | null>(null);
   const pendingOpenRef = useRef<{ input: string; requestId: number } | null>(null);
+  const pendingLineAnchorRef = useRef<LineAnchor | null>(null);
   const openRequestIdRef = useRef(0);
   const openAbortRef = useRef<AbortController | null>(null);
   const [activeFocusAreaId, setActiveFocusAreaId] = useState<string | null>(null);
@@ -501,12 +522,38 @@ function App() {
         goHome();
         return;
       }
+      pendingLineAnchorRef.current = lineAnchorFromHash();
       void openPr(routedInput, { syncLocation: false });
     }
     openRoute();
     window.addEventListener("hashchange", openRoute);
     return () => window.removeEventListener("hashchange", openRoute);
   }, []);
+
+  // Keep the address bar a shareable deep link for the current line selection (GitHub-style, but paste-able to an agent).
+  useEffect(() => {
+    if (review == null || reviewInputFromHash() !== review.pr.url) return;
+    history.replaceState(null, "", reviewHash(review.pr.url, activeTarget));
+  }, [review?.pr.url, activeTarget]);
+
+  // Re-select and scroll to a shared line link once the routed PR's diff rows exist.
+  useEffect(() => {
+    if (review == null || pendingLineAnchorRef.current == null) return;
+    const anchor: LineAnchor = pendingLineAnchorRef.current;
+    pendingLineAnchorRef.current = null;
+    setOpenFiles((current) => current[anchor.path] === false ? { ...current, [anchor.path]: true } : current);
+    let attempts = 0;
+    function tryApply() {
+      const row = document.querySelector<HTMLElement>(`.diff-row[data-path="${CSS.escape(anchor.path)}"][data-line="${anchor.line}"][data-side="${anchor.side}"]`);
+      if (row == null) {
+        if (++attempts < 30) window.setTimeout(tryApply, 100);
+        return;
+      }
+      openThread({ path: anchor.path, line: anchor.line, startLine: anchor.startLine === anchor.line ? null : anchor.startLine, side: anchor.side, hunk: row.dataset.hunk ?? "" });
+      row.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    window.setTimeout(tryApply, 50);
+  }, [review?.pr.key]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -711,7 +758,7 @@ function App() {
   }, [review?.pr.key, review?.pr.headSha, reviewEvent, reviewBody, drafts, draftSaveRetry]);
 
   async function refreshGithubActivity() {
-    if (review == null) return;
+    if (review == null || refreshingActivity) return;
     setRefreshingActivity(true);
     setError(null);
     try {
@@ -722,6 +769,7 @@ function App() {
       showAiReviewRecord(data.aiReview);
       showFocusScanRecord(data.focusScan);
       showGuideReviewRecord(data.guideReview);
+      showOverviewRecord(data.overview);
       await Promise.all([refreshHistory(), refreshLogs()]);
     } catch (err) {
       setError(errorMessage(err));
@@ -1190,7 +1238,7 @@ function App() {
   const reviewBarMenu = review == null ? null : <ActionMenu trigger={<Button variant="icon" className="bar-tools-button" aria-label="Tools"><KebabHorizontalIcon size={16} /></Button>}>
     <ActionMenuItem onSelect={goHome}>New review</ActionMenuItem>
     <ActionMenuItem onSelect={() => window.open(review.pr.url, "_blank", "noreferrer")}>Open on GitHub</ActionMenuItem>
-    <ActionMenuItem onSelect={() => void refreshGithubActivity()}>Refresh</ActionMenuItem>
+    <ActionMenuItem onSelect={() => void refreshGithubActivity()}>{refreshingActivity ? "Refreshing…" : "Refresh"}</ActionMenuItem>
     <ActionMenuItem onSelect={() => setGpuWorkspaceOpen(true)}>GPU workspace</ActionMenuItem>
     <ActionMenuItem title="Pi session settings" onSelect={() => { setSettingsOpen(true); void loadDiagnostics(); }}>Session settings</ActionMenuItem>
     <ActionMenuItem title="Pi session diagnostics" onSelect={() => void loadDiagnostics()}>Session diagnostics</ActionMenuItem>
