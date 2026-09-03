@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { createServer, type ServerResponse } from "node:http";
-import { extname, join, normalize, resolve } from "node:path";
+import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
@@ -14,7 +14,7 @@ import { createDraftReviewApi } from "./draft-review-api.js";
 import { createFileApi, defaultFileApiDeps } from "./file-api.js";
 import { createGitHubDraftReviewApi, defaultGitHubDraftReviewApiDeps } from "./github-draft-review-api.js";
 import { gpuWorkspaceCreateResponse, gpuWorkspaceDeleteResponse, gpuWorkspaceExecResponse, gpuWorkspaceStatusResponse } from "./gpu-workspace-api.js";
-import { createInboxApi } from "./inbox-api.js";
+import { createInboxApi, type InboxSnapshot } from "./inbox-api.js";
 import { createGitInterdiff } from "./interdiff-git.js";
 import { addIssueComment, addPendingPullRequestReviewThread, compareCommits, createPendingPullRequestReview, editIssueComment, editReviewComment, editReviewSummary, fetchCommitChecks, fetchFileText, fetchLatestActivity, fetchNotifications, fetchPendingPullRequestReview, fetchPullRequestReviewData, fetchSubjectSnapshots, fetchViewerLogin, fetchViewerPullRequests, markNotificationDone, replyToReviewComment, submitPullRequestReview, unsubscribeNotification } from "./github.js";
 import { logger } from "./logger.js";
@@ -35,7 +35,7 @@ import { createSavedAnalysisApi } from "./saved-analysis-api.js";
 import { createServerRoute, createRequestListener } from "./server-router.js";
 import { createShellApi } from "./shell-api.js";
 import { withTtlCache } from "./ttl-cache.js";
-import { createUsageApi, defaultUsageApiDeps } from "./usage-api.js";
+import { createUsageApi, defaultUsageApiDeps, defaultUsageLogPath } from "./usage-api.js";
 import { appendDraftReviewComment, clearDraftReview, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, getDraftReview, listAiReviews, listFileReviews, listFocusScans, listGuideReviews, listOverviews, listRecentPullRequests, listReviewMemoryRecords, markPullRequestReviewed, removePullRequest, reviewMemoryStats, saveAiReview, saveDraftReview, saveFocusScan, saveGuideReview, saveOverview, saveReviewMemory, saveReviewProfile, setFileViewed, upsertPullRequest } from "./state.js";
 import { cleanupPrWorktree, preparePrWorktree, repoDirForRef, worktreeDirForRef } from "./worktrees.js";
 
@@ -71,8 +71,32 @@ const fileApi = createFileApi(defaultFileApiDeps(fetchFileText, setFileViewed, a
   await execFileAsync("open", [url]);
 }));
 const githubDraftReviewApi = createGitHubDraftReviewApi(defaultGitHubDraftReviewApiDeps({ addPendingPullRequestReviewThread, createPendingPullRequestReview, fetchPendingPullRequestReview }));
-// GitHub asks pollers to wait 60s between notification reads (X-Poll-Interval); the home page refresh button bypasses this.
-const inboxApi = createInboxApi({ cacheMs: 60_000, fetchLatestActivity, fetchNotifications, fetchSubjectSnapshots, fetchViewerLogin, fetchViewerPullRequests, listRecentPullRequests, markNotificationDone, now: () => new Date().toISOString(), unsubscribeNotification });
+// The inbox snapshot lives next to the state file (like the usage log) so dev/test instances never share one.
+const inboxSnapshotPath = `${defaultUsageLogPath().replace(/\.usage\.jsonl$/, "")}.inbox.json`;
+const inboxApi = createInboxApi({
+  fetchLatestActivity,
+  fetchNotifications,
+  fetchSubjectSnapshots,
+  fetchViewerLogin,
+  fetchViewerPullRequests,
+  listRecentPullRequests,
+  logger,
+  markNotificationDone,
+  now: () => new Date().toISOString(),
+  async readSnapshot() {
+    if (!existsSync(inboxSnapshotPath)) return null;
+    return JSON.parse(await readFile(inboxSnapshotPath, "utf8")) as InboxSnapshot;
+  },
+  // GitHub asks pollers to wait 60s between notification reads (X-Poll-Interval); staleMs matches it.
+  staleMs: 60_000,
+  unsubscribeNotification,
+  async writeSnapshot(snapshot) {
+    await mkdir(dirname(inboxSnapshotPath), { recursive: true });
+    const tempPath = `${inboxSnapshotPath}.${process.pid}.tmp`;
+    await writeFile(tempPath, JSON.stringify(snapshot), "utf8");
+    await rename(tempPath, inboxSnapshotPath);
+  },
+});
 const piApi = createPiApi({ askPi, piActivity, piDiagnostics, piJobRunner, setPiModel });
 const piTerminalApi = createPiTerminalApi({ deleteSession: piTerminalManager.deleteSession });
 const piTerminalDraftApi = createPiTerminalDraftApi({ appendDraftReviewComment, contextForPr: piSessionReviewContext, notifyDraftReview: piTerminalManager.broadcastDraftReview });

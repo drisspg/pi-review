@@ -353,7 +353,10 @@ export type InboxItem = {
 
 export type InboxResponse = {
   login: string | null;
-  fetchedAt: string;
+  /** Null until the first refresh has ever completed; the snapshot persists across server restarts. */
+  fetchedAt: string | null;
+  /** True while a background refresh is running; clients poll until it clears. */
+  refreshing: boolean;
   items: InboxItem[];
   tiers: Record<InboxTier, number>;
   myPrs: ViewerPullRequest[];

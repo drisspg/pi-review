@@ -16,7 +16,9 @@ const TIER_META: Record<InboxTier, { label: string; hint: string }> = {
   resolved: { label: "Resolved", hint: "The PR or issue is already merged or closed." },
 };
 const TIER_ORDER: InboxTier[] = ["needs-you", "review-requests", "your-prs", "fyi", "resolved"];
-const AUTO_REFRESH_MS = 3 * 60 * 1000;
+/** Served from the server's snapshot, so polling is cheap; the server decides when GitHub is re-read. */
+const POLL_IDLE_MS = 60 * 1000;
+const POLL_REFRESHING_MS = 1500;
 const SCOPE_HINT = "gh auth refresh -h github.com -s notifications";
 
 function reasonIcon(item: InboxItem): ReactNode {
@@ -107,7 +109,7 @@ export function InboxPanel({ openPr }: { openPr: (url: string) => Promise<void> 
   const listRef = useRef<HTMLUListElement | null>(null);
 
   const load = useCallback(async (refresh: boolean) => {
-    setLoading(true);
+    if (refresh) setLoading(true);
     try {
       const response = await api<InboxResponse>(`/api/inbox${refresh ? "?refresh=1" : ""}`);
       setData(response);
@@ -119,13 +121,16 @@ export function InboxPanel({ openPr }: { openPr: (url: string) => Promise<void> 
     }
   }, []);
 
+  const refreshing = data?.refreshing ?? false;
   useEffect(() => {
     void load(false);
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") void load(true);
-    }, AUTO_REFRESH_MS);
-    return () => window.clearInterval(timer);
   }, [load]);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void load(false);
+    }, refreshing ? POLL_REFRESHING_MS : POLL_IDLE_MS);
+    return () => window.clearInterval(timer);
+  }, [load, refreshing]);
 
   const items = data?.items ?? [];
   const visible = useMemo(() => (filter === "all" ? items.filter((item) => item.tier !== "resolved") : items.filter((item) => item.tier === filter)), [items, filter]);
@@ -228,7 +233,8 @@ export function InboxPanel({ openPr }: { openPr: (url: string) => Promise<void> 
   });
 
   const total = items.length;
-  const summary = data == null ? null : total === 0 ? "Inbox zero" : `${total} unread · ${counts["needs-you"]} need you · ${counts["review-requests"]} review requests · fetched ${relativeTime(data.fetchedAt)}`;
+  const freshness = data == null ? "" : data.fetchedAt == null ? "loading from GitHub…" : refreshing ? `updated ${relativeTime(data.fetchedAt)} · refreshing…` : `updated ${relativeTime(data.fetchedAt)}`;
+  const summary = data == null ? null : data.fetchedAt == null ? freshness : total === 0 ? `Inbox zero · ${freshness}` : `${total} unread · ${counts["needs-you"]} need you · ${counts["review-requests"]} review requests · ${freshness}`;
 
   return <section className="inbox" aria-label="GitHub inbox">
     <header className="inbox-head">
@@ -236,7 +242,7 @@ export function InboxPanel({ openPr }: { openPr: (url: string) => Promise<void> 
       {summary != null && <span className="inbox-summary">{summary}</span>}
       <div className="inbox-head-actions">
         {resolvedIds.length > 0 && <Button variant="muted" onClick={() => void runAction("/api/inbox/done", resolvedIds, "inbox:clear-resolved")} disabled={resolvedIds.some((id) => busyIds.has(id))}>Clear {resolvedIds.length} resolved</Button>}
-        <Button variant="muted" className={`inbox-refresh${loading ? " loading" : ""}`} onClick={() => void load(true)} disabled={loading} aria-label="Refresh inbox"><SyncIcon size={14} /> Refresh</Button>
+        <Button variant="muted" className={`inbox-refresh${loading || refreshing ? " loading" : ""}`} onClick={() => void load(true)} disabled={loading || refreshing} aria-label="Refresh inbox"><SyncIcon size={14} /> Refresh</Button>
       </div>
     </header>
     {error != null && <p className="inbox-error" role="alert">Could not load notifications: {error}{error.includes("scope") ? <> Run <code>{SCOPE_HINT}</code>.</> : null}</p>}
@@ -248,7 +254,7 @@ export function InboxPanel({ openPr }: { openPr: (url: string) => Promise<void> 
           <button type="button" className={`inbox-tier${filter === "all" ? " active" : ""}`} onClick={() => setFilter("all")}>All<span className="inbox-tier-count">{total - counts.resolved}</span></button>
           {TIER_ORDER.map((tier) => <button key={tier} type="button" className={`inbox-tier tier-${tier}${filter === tier ? " active" : ""}`} title={TIER_META[tier].hint} onClick={() => setFilter(tier)}><DotFillIcon size={12} className="inbox-tier-dot" />{TIER_META[tier].label}<span className="inbox-tier-count">{counts[tier]}</span></button>)}
         </nav>
-        {data == null && loading ? <ul className="inbox-rows inbox-skeleton" aria-busy="true">{Array.from({ length: 6 }, (_, index) => <li key={index} className="inbox-row skeleton"><span className="inbox-skeleton-bar icon" /><span className="inbox-skeleton-lines"><span className="inbox-skeleton-bar" style={{ width: `${55 + (index % 3) * 12}%` }} /><span className="inbox-skeleton-bar short" /></span></li>)}</ul>
+        {data == null || (data.fetchedAt == null && refreshing) ? <ul className="inbox-rows inbox-skeleton" aria-busy="true">{Array.from({ length: 6 }, (_, index) => <li key={index} className="inbox-row skeleton"><span className="inbox-skeleton-bar icon" /><span className="inbox-skeleton-lines"><span className="inbox-skeleton-bar" style={{ width: `${55 + (index % 3) * 12}%` }} /><span className="inbox-skeleton-bar short" /></span></li>)}</ul>
           : visible.length === 0 ? <div className="inbox-empty">{data == null ? "Inbox unavailable." : total === 0 ? <><CheckIcon size={24} /><p>Inbox zero. Nothing on GitHub is waiting on you.</p></> : <p className="muted">Nothing in {filter === "all" ? "the active tiers" : TIER_META[filter].label.toLowerCase()}.</p>}</div>
             : <ul className="inbox-rows" ref={listRef}>
               {visible.map((item) => {
@@ -283,7 +289,7 @@ export function InboxPanel({ openPr }: { openPr: (url: string) => Promise<void> 
           <span>{visible.length} shown</span>
         </footer>
       </div>
-      <MyPullRequests open={data?.myPrs ?? []} closed={data?.recentlyClosedPrs ?? []} loading={data == null && loading} login={data?.login ?? null} />
+      <MyPullRequests open={data?.myPrs ?? []} closed={data?.recentlyClosedPrs ?? []} loading={data == null || (data.fetchedAt == null && refreshing)} login={data?.login ?? null} />
     </div>
   </section>;
 }

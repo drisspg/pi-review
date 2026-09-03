@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { applyLatestActivity, createInboxApi, rankInbox, type InboxApiDeps } from "../../src/inbox-api.js";
+import { applyLatestActivity, buildInboxResponse, createInboxApi, rankInbox, refreshSnapshot, type InboxApiDeps, type InboxSnapshot } from "../../src/inbox-api.js";
 import type { GitHubNotification, InboxSubjectSnapshot, StoredPullRequest, ViewerPullRequest } from "../../src/types.js";
 
 const NOW = "2026-09-03T12:00:00Z";
@@ -34,6 +34,10 @@ function snapshot(overrides: Partial<InboxSubjectSnapshot>): InboxSubjectSnapsho
     updatedAt: NOW,
     ...overrides,
   };
+}
+
+function viewerPr(overrides: Partial<ViewerPullRequest>): ViewerPullRequest {
+  return { key: "o/r#1", repo: "o/r", number: 1, title: "mine", url: "https://github.com/o/r/pull/1", state: "OPEN", closedAt: null, isDraft: false, reviewDecision: null, mergeable: "MERGEABLE", checks: "SUCCESS", failingChecks: [], reviewers: [], updatedAt: NOW, headSha: "h", localPrKey: null, ...overrides };
 }
 
 const localPr = { key: "github.com/o/r#1", url: "https://github.com/o/r/pull/1" } as StoredPullRequest;
@@ -125,18 +129,28 @@ test("applyLatestActivity sinks bot chatter below human pings", () => {
   assert.equal(items[0].latest, null, "input rows are not mutated");
 });
 
-function deps(overrides: Partial<InboxApiDeps> = {}): InboxApiDeps & { calls: string[] } {
+type Harness = InboxApiDeps & { calls: string[]; stored: InboxSnapshot | null; timers: Array<{ callback: () => void; ms: number }>; clock: { now: string }; notifications: GitHubNotification[] };
+
+function harness(overrides: Partial<InboxApiDeps> = {}): Harness {
   const calls: string[] = [];
-  return {
+  const timers: Array<{ callback: () => void; ms: number }> = [];
+  const clock = { now: NOW };
+  const h: Harness = {
     calls,
-    cacheMs: 60_000,
+    stored: null,
+    timers,
+    clock,
+    notifications: [
+      notification({ id: "a", reason: "mention", latestCommentUrl: "https://api.github.com/repos/o/r/issues/comments/1" }),
+      notification({ id: "b", reason: "review_requested", subjectNumber: 2 }),
+    ],
     async fetchNotifications() {
       calls.push("notifications");
-      return [notification({ id: "a", reason: "mention", latestCommentUrl: "https://api.github.com/repos/o/r/issues/comments/1" }), notification({ id: "b", reason: "comment", subjectKind: "other", subjectNumber: null })];
+      return h.notifications;
     },
     async fetchSubjectSnapshots(refs) {
       calls.push(`snapshots:${refs.map((ref) => `${ref.repo}#${ref.number}`).join(",")}`);
-      return [snapshot({})];
+      return refs.map((ref) => snapshot({ key: `${ref.repo}#${ref.number}`, url: `https://github.com/${ref.repo}/pull/${ref.number}` }));
     },
     async fetchLatestActivity(urls, login) {
       calls.push(`latest:${urls.join(",")}:${login}`);
@@ -147,8 +161,7 @@ function deps(overrides: Partial<InboxApiDeps> = {}): InboxApiDeps & { calls: st
     },
     async fetchViewerPullRequests(login, scope) {
       calls.push(`prs:${login}:${scope}`);
-      if (scope === "recently-closed") return [{ key: "o/r#2", repo: "o/r", number: 2, title: "shipped", url: "https://github.com/o/r/pull/2", state: "MERGED", closedAt: NOW, isDraft: false, reviewDecision: "APPROVED", mergeable: "UNKNOWN", checks: "SUCCESS", failingChecks: [], reviewers: [], updatedAt: NOW, headSha: "h2", localPrKey: null } satisfies ViewerPullRequest];
-      return [{ key: "o/r#1", repo: "o/r", number: 1, title: "mine", url: "https://github.com/o/r/pull/1", state: "OPEN", closedAt: null, isDraft: false, reviewDecision: null, mergeable: "MERGEABLE", checks: "SUCCESS", failingChecks: [], reviewers: [], updatedAt: NOW, headSha: "h", localPrKey: null } satisfies ViewerPullRequest];
+      return scope === "open" ? [viewerPr({})] : [viewerPr({ key: "o/r#2", number: 2, title: "shipped", state: "MERGED", closedAt: NOW })];
     },
     async listRecentPullRequests() {
       return [localPr];
@@ -159,75 +172,191 @@ function deps(overrides: Partial<InboxApiDeps> = {}): InboxApiDeps & { calls: st
     async unsubscribeNotification(threadId) {
       calls.push(`mute:${threadId}`);
     },
-    now: () => NOW,
+    async readSnapshot() {
+      calls.push("read");
+      return h.stored;
+    },
+    async writeSnapshot(snapshot) {
+      calls.push("write");
+      h.stored = snapshot;
+    },
+    now: () => clock.now,
+    setTimer(callback, ms) {
+      timers.push({ callback, ms });
+      return () => {
+        const index = timers.findIndex((timer) => timer.callback === callback);
+        if (index >= 0) timers.splice(index, 1);
+      };
+    },
+    staleMs: 60_000,
+    activeWindowMs: 15 * 60_000,
     ...overrides,
   };
+  return h;
 }
 
-test("inbox API batches snapshot lookups, links local PRs, and caches until refresh", async () => {
-  const d = deps();
-  const api = createInboxApi(d);
+function fetchCalls(h: Harness): string[] {
+  return h.calls.filter((call) => !["read", "write"].includes(call));
+}
 
-  const first = await api.inbox();
-  assert.equal(first.login, "viewer");
-  assert.equal(first.items.length, 2);
-  assert.equal(first.myPrs[0].localPrKey, "github.com/o/r#1");
-  assert.deepEqual(first.recentlyClosedPrs.map((pr) => [pr.key, pr.state]), [["o/r#2", "MERGED"]]);
-  assert.deepEqual(first.warnings, []);
-  assert.deepEqual(d.calls, ["notifications", "snapshots:o/r#1", "prs:viewer:open", "prs:viewer:recently-closed", "latest:https://api.github.com/repos/o/r/issues/comments/1:viewer"]);
-  assert.deepEqual(first.items[0].latest, { author: "pytorchmergebot", bot: true, pingsViewer: false, snippet: "merge started", url: "https://api.github.com/repos/o/r/issues/comments/1" });
-  assert.deepEqual(first.items[0].why, ["You were mentioned", "Latest activity is pytorchmergebot"]);
+test("refreshSnapshot fetches everything on first run and only changed threads afterwards", async () => {
+  const h = harness();
+  const first = await refreshSnapshot(h, null);
+  assert.deepEqual(fetchCalls(h), ["notifications", "snapshots:o/r#1,o/r#2", "prs:viewer:open", "prs:viewer:recently-closed", "latest:https://api.github.com/repos/o/r/issues/comments/1:viewer"]);
+  assert.equal(Object.keys(first.subjects).length, 2);
+  assert.equal(first.latest.a?.latest.author, "pytorchmergebot");
+  assert.equal(first.viewerPrs?.closed[0].state, "MERGED");
 
+  h.calls.length = 0;
+  h.clock.now = "2026-09-03T12:01:00Z";
+  h.notifications = [
+    h.notifications[0],
+    { ...h.notifications[1], updatedAt: "2026-09-03T12:00:30Z" },
+    notification({ id: "c", reason: "comment", subjectNumber: 3 }),
+  ];
+  const second = await refreshSnapshot(h, first);
+  assert.deepEqual(fetchCalls(h), ["notifications", "snapshots:o/r#2,o/r#3"], "unchanged thread a keeps its snapshot and latest row; viewer PRs are within TTL");
+  assert.equal(second.subjects["o/r#1"], first.subjects["o/r#1"]);
+  assert.equal(second.latest.a, first.latest.a);
+  assert.equal(second.viewerPrs, first.viewerPrs);
+});
+
+test("refreshSnapshot drops threads that left the inbox and re-checks subjects past their TTL", async () => {
+  const h = harness();
+  const first = await refreshSnapshot(h, null);
+  h.calls.length = 0;
+  h.clock.now = "2026-09-03T12:20:00Z";
+  h.notifications = [h.notifications[0]];
+  const second = await refreshSnapshot(h, first);
+  assert.deepEqual(Object.keys(second.subjects), ["o/r#1"]);
+  assert.deepEqual(fetchCalls(h), ["notifications", "snapshots:o/r#1", "prs:viewer:open", "prs:viewer:recently-closed"]);
+});
+
+test("refreshSnapshot keeps the previous data and records a warning when an enrichment fails", async () => {
+  const h = harness();
+  const first = await refreshSnapshot(h, null);
+  h.fetchViewerPullRequests = async () => {
+    throw new Error("search down");
+  };
+  h.clock.now = "2026-09-03T12:30:00Z";
+  const second = await refreshSnapshot(h, first);
+  assert.deepEqual(second.viewerPrs?.open, first.viewerPrs?.open);
+  assert.deepEqual(second.warnings, ["Could not load your open PRs: search down", "Could not load your recently closed PRs: search down"]);
+});
+
+test("buildInboxResponse links saved reviews and reports refresh state", () => {
+  const snap: InboxSnapshot = { version: 1, login: "viewer", fetchedAt: NOW, notifications: [notification({ id: "a", reason: "mention" })], subjects: { "o/r#1": { at: NOW, snapshot: snapshot({}) } }, latest: {}, viewerPrs: { at: NOW, open: [viewerPr({})], closed: [] }, warnings: ["w"] };
+  const response = buildInboxResponse(snap, [localPr], NOW, true);
+  assert.equal(response.refreshing, true);
+  assert.equal(response.items[0].localPrKey, "github.com/o/r#1");
+  assert.equal(response.myPrs[0].localPrKey, "github.com/o/r#1");
+  assert.deepEqual(response.warnings, ["w"]);
+});
+
+test("inbox API answers immediately, refreshes in the background, and persists the snapshot", async () => {
+  const h = harness();
+  const api = createInboxApi(h);
+
+  const cold = await api.inbox();
+  assert.equal(cold.fetchedAt, null);
+  assert.equal(cold.refreshing, true);
+  assert.deepEqual(cold.items, []);
+
+  await api.settle();
+  assert.equal(h.stored?.notifications.length, 2, "snapshot persisted to disk");
+  const warm = await api.inbox();
+  assert.equal(warm.refreshing, false);
+  assert.equal(warm.fetchedAt, NOW);
+  assert.equal(warm.items.length, 2);
+  assert.equal(warm.items.find((item) => item.id === "a")?.latest?.author, "pytorchmergebot");
+  assert.equal(h.calls.filter((call) => call === "notifications").length, 1, "warm request did not touch GitHub");
+  assert.equal(h.timers.length, 1, "a background refresh is scheduled at the stale boundary");
+  assert.equal(h.timers[0].ms, 60_000);
+});
+
+test("inbox API serves a persisted snapshot across restarts and refreshes it when stale", async () => {
+  const seed = harness();
+  const seedApi = createInboxApi(seed);
+  await seedApi.inbox();
+  await seedApi.settle();
+
+  const h = harness();
+  h.stored = seed.stored;
+  h.clock.now = "2026-09-03T12:05:00Z";
+  const api = createInboxApi(h);
+  const served = await api.inbox();
+  assert.equal(served.items.length, 2, "old snapshot is served instantly");
+  assert.equal(served.fetchedAt, NOW);
+  assert.equal(served.refreshing, true, "…while a refresh runs because it is older than staleMs");
+  await api.settle();
+  assert.equal((await api.inbox()).fetchedAt, "2026-09-03T12:05:00Z");
+});
+
+test("inbox API background timer refreshes while active and stops once idle", async () => {
+  const h = harness();
+  const api = createInboxApi(h);
   await api.inbox();
-  assert.equal(d.calls.length, 5, "second call is served from cache");
+  await api.settle();
+  assert.equal(h.timers.length, 1);
+
+  h.clock.now = "2026-09-03T12:01:00Z";
+  h.timers.shift()?.callback();
+  await api.settle();
+  assert.equal(h.calls.filter((call) => call === "notifications").length, 2);
+  assert.equal(h.timers.length, 1, "rescheduled while within the active window");
+
+  h.clock.now = "2026-09-03T13:00:00Z";
+  h.timers.shift()?.callback();
+  await api.settle();
+  assert.equal(h.timers.length, 0, "no more refreshes once nobody has asked for the inbox in a while");
+});
+
+test("inbox API shares one in-flight refresh and force-refresh bypasses TTLs", async () => {
+  const h = harness();
+  const api = createInboxApi(h);
+  await Promise.all([api.inbox(), api.inbox({ refresh: true }), api.inbox()]);
+  await api.settle();
+  assert.equal(h.calls.filter((call) => call === "notifications").length, 1);
+
+  h.calls.length = 0;
   await api.inbox({ refresh: true });
-  assert.equal(d.calls.length, 10);
+  await api.settle();
+  assert.deepEqual(fetchCalls(h), ["notifications", "snapshots:o/r#1,o/r#2", "prs:viewer:open", "prs:viewer:recently-closed"], "force re-fetches subjects and viewer PRs; latest rows are still keyed by updatedAt");
 });
 
-test("inbox API shares one in-flight load between concurrent callers", async () => {
-  const d = deps({ cacheMs: 0 });
-  const api = createInboxApi(d);
-  const [a, b] = await Promise.all([api.inbox(), api.inbox({ refresh: true })]);
-  assert.equal(a, b);
-  assert.equal(d.calls.filter((call) => call === "notifications").length, 1);
+test("inbox API surfaces a failed refresh as a warning while keeping the last snapshot", async () => {
+  const h = harness();
+  const api = createInboxApi(h);
   await api.inbox();
-  assert.equal(d.calls.filter((call) => call === "notifications").length, 2, "no cache configured, so the next call reloads");
-});
-
-test("inbox API surfaces enrichment failures as warnings instead of failing the inbox", async () => {
-  const api = createInboxApi(deps({
-    async fetchSubjectSnapshots() {
-      throw new Error("graphql down");
-    },
-    async fetchViewerPullRequests() {
-      throw new Error("search down");
-    },
-  }));
-
+  await api.settle();
+  h.fetchNotifications = async () => {
+    throw new Error("gh offline");
+  };
+  await api.inbox({ refresh: true });
+  await api.settle();
   const response = await api.inbox();
   assert.equal(response.items.length, 2);
-  assert.deepEqual(response.myPrs, []);
-  assert.deepEqual(response.warnings, ["Could not load PR/issue state: graphql down", "Could not load your open PRs: search down", "Could not load your recently closed PRs: search down"]);
+  assert.ok(response.warnings.includes("Last refresh failed: gh offline"));
 });
 
-test("inbox API marks threads done and drops them from the cached inbox", async () => {
-  const d = deps();
-  const api = createInboxApi(d);
+test("inbox API marks threads done and drops them from the persisted snapshot", async () => {
+  const h = harness();
+  const api = createInboxApi(h);
   await api.inbox();
+  await api.settle();
 
   assert.deepEqual(await api.done({ threadIds: ["a"] }), { done: ["a"] });
-  assert.ok(d.calls.includes("done:a"));
-  const cached = await api.inbox();
-  assert.deepEqual(cached.items.map((item) => item.id), ["b"]);
-  assert.equal(cached.tiers["needs-you"], 0);
+  assert.ok(h.calls.includes("done:a"));
+  assert.deepEqual(h.stored?.notifications.map((notification) => notification.id), ["b"]);
+  assert.deepEqual((await api.inbox()).items.map((item) => item.id), ["b"]);
 
   assert.deepEqual(await api.mute({ threadId: "b" }), { muted: ["b"] });
-  assert.deepEqual(d.calls.slice(-2), ["mute:b", "done:b"]);
+  assert.deepEqual(h.calls.filter((call) => call.startsWith("mute:") || call.startsWith("done:")), ["done:a", "mute:b", "done:b"]);
   assert.deepEqual((await api.inbox()).items, []);
 });
 
 test("inbox API rejects malformed thread ids", async () => {
-  const api = createInboxApi(deps());
+  const api = createInboxApi(harness());
   await assert.rejects(api.done({}), /threadIds is required/);
   await assert.rejects(api.done({ threadIds: [""] }), /non-empty strings/);
 });

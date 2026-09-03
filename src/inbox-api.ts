@@ -2,6 +2,23 @@ import type { GitHubNotification, InboxItem, InboxLatestActivity, InboxResponse,
 
 export type InboxSubjectRef = { repo: string; number: number; kind: InboxSubjectKind };
 
+/**
+ * Everything the inbox needs to render, persisted between refreshes and across
+ * server restarts. A refresh always re-lists notifications (two cheap calls) but
+ * re-fetches PR/issue state and latest activity only for threads whose
+ * `updatedAt` moved, so steady-state refreshes cost seconds, not the world.
+ */
+export type InboxSnapshot = {
+  version: 1;
+  login: string | null;
+  fetchedAt: string;
+  notifications: GitHubNotification[];
+  subjects: Record<string, { at: string; snapshot: InboxSubjectSnapshot }>;
+  latest: Record<string, { updatedAt: string; latest: InboxLatestActivity }>;
+  viewerPrs: { at: string; open: ViewerPullRequest[]; closed: ViewerPullRequest[] } | null;
+  warnings: string[];
+};
+
 export type InboxApiDeps = {
   fetchNotifications: () => Promise<GitHubNotification[]>;
   fetchSubjectSnapshots: (refs: InboxSubjectRef[]) => Promise<InboxSubjectSnapshot[]>;
@@ -12,18 +29,33 @@ export type InboxApiDeps = {
   listRecentPullRequests: () => Promise<StoredPullRequest[]>;
   markNotificationDone: (threadId: string) => Promise<void>;
   unsubscribeNotification: (threadId: string) => Promise<void>;
+  readSnapshot: () => Promise<InboxSnapshot | null>;
+  writeSnapshot: (snapshot: InboxSnapshot) => Promise<void>;
   now: () => string;
-  /** Serve a cached inbox for this long unless the caller asks for a refresh; 0 disables. */
-  cacheMs?: number;
+  /** Injectable timer so tests can drive background refreshes; defaults to setTimeout. */
+  setTimer?: (callback: () => void, ms: number) => () => void;
+  logger?: { info: (scope: string, message: string, data?: Record<string, unknown>) => void; warn: (scope: string, message: string, data?: Record<string, unknown>) => void };
+  /** A snapshot older than this is served immediately and refreshed in the background. */
+  staleMs?: number;
+  /** Keep refreshing in the background this long after the last request, so reloads stay warm. */
+  activeWindowMs?: number;
 };
 
 export type InboxApi = {
   inbox: (options?: { refresh?: boolean }) => Promise<InboxResponse>;
   done: (payload: Record<string, unknown>) => Promise<{ done: string[] }>;
   mute: (payload: Record<string, unknown>) => Promise<{ muted: string[] }>;
+  /** Waits for any in-flight refresh; tests and shutdown use it, routes never do. */
+  settle: () => Promise<void>;
 };
 
 const HOUR_MS = 60 * 60 * 1000;
+const MINUTE_MS = 60 * 1000;
+const DEFAULT_STALE_MS = 60 * 1000;
+const DEFAULT_ACTIVE_WINDOW_MS = 15 * MINUTE_MS;
+/** PR/issue state can change without a notification (e.g. a merge you are not subscribed to), so re-check periodically. */
+const SUBJECT_TTL_MS = 15 * MINUTE_MS;
+const VIEWER_PRS_TTL_MS = 5 * MINUTE_MS;
 const LATEST_ACTIVITY_LIMIT = 60;
 const ENRICHED_TIERS = new Set<InboxTier>(["needs-you", "your-prs"]);
 const TIERS: InboxTier[] = ["needs-you", "review-requests", "your-prs", "fyi", "resolved"];
@@ -205,84 +237,201 @@ function threadIds(payload: Record<string, unknown>): string[] {
   });
 }
 
-export function createInboxApi(deps: InboxApiDeps): InboxApi {
-  const cacheMs = deps.cacheMs ?? 0;
-  let cached: { at: number; response: InboxResponse } | null = null;
-  // Concurrent callers (a browser tab plus an auto-refresh, or two tabs) share one GitHub round
-  // trip; running them side by side doubles ~90 gh calls and trips GitHub's secondary rate limit.
-  let inFlight: Promise<InboxResponse> | null = null;
+function ageMs(iso: string | null | undefined, nowIso: string): number {
+  if (iso == null) return Number.POSITIVE_INFINITY;
+  return Date.parse(nowIso) - Date.parse(iso);
+}
 
-  async function load(): Promise<InboxResponse> {
-    const warnings: string[] = [];
-    const [notifications, login, localPrs] = await Promise.all([deps.fetchNotifications(), deps.fetchViewerLogin(), deps.listRecentPullRequests()]);
-    const refs = new Map<string, InboxSubjectRef>();
-    for (const notification of notifications) {
-      if (notification.subjectNumber == null || notification.subjectKind === "other") continue;
-      refs.set(subjectKey(notification.repo, notification.subjectNumber), { repo: notification.repo, number: notification.subjectNumber, kind: notification.subjectKind });
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function emptySnapshot(now: string): InboxSnapshot {
+  return { version: 1, login: null, fetchedAt: now, notifications: [], subjects: {}, latest: {}, viewerPrs: null, warnings: [] };
+}
+
+/** Render the served response from a snapshot; ranking is pure and cheap, so it runs per request with the current clock. */
+export function buildInboxResponse(snapshot: InboxSnapshot, localPrs: StoredPullRequest[], nowIso: string, refreshing: boolean): InboxResponse {
+  const localKeys = new Set(localPrs.map((pr) => pr.key));
+  const ranked = rankInbox(snapshot.notifications, Object.values(snapshot.subjects).map((entry) => entry.snapshot), localPrs, nowIso);
+  const latestByThread = new Map(Object.entries(snapshot.latest).map(([id, entry]) => [id, entry.latest] as const));
+  const items = applyLatestActivity(ranked.items, latestByThread);
+  const withLocalKey = (pr: ViewerPullRequest): ViewerPullRequest => ({ ...pr, localPrKey: localKeys.has(localPrKey(pr.repo, pr.number)) ? localPrKey(pr.repo, pr.number) : null });
+  return {
+    login: snapshot.login,
+    fetchedAt: snapshot.fetchedAt,
+    refreshing,
+    items,
+    tiers: tierCounts(items),
+    myPrs: (snapshot.viewerPrs?.open ?? []).map(withLocalKey),
+    recentlyClosedPrs: (snapshot.viewerPrs?.closed ?? []).map(withLocalKey),
+    warnings: snapshot.warnings,
+  };
+}
+
+/**
+ * One incremental refresh: re-list notifications, then fetch only the subject
+ * snapshots and latest-activity rows that are new, changed, or past their TTL.
+ * Everything else is carried over from `previous`.
+ */
+export async function refreshSnapshot(deps: InboxApiDeps, previous: InboxSnapshot | null, options: { force?: boolean } = {}): Promise<InboxSnapshot> {
+  const now = deps.now();
+  const warnings: string[] = [];
+  const [notifications, login] = await Promise.all([deps.fetchNotifications(), deps.fetchViewerLogin()]);
+  const byId = new Map(notifications.map((notification) => [notification.id, notification] as const));
+  const previousById = new Map((previous?.notifications ?? []).map((notification) => [notification.id, notification] as const));
+  const changedIds = new Set(notifications.filter((notification) => previousById.get(notification.id)?.updatedAt !== notification.updatedAt).map((notification) => notification.id));
+
+  const wantedKeys = new Set<string>();
+  const refetch = new Map<string, InboxSubjectRef>();
+  for (const notification of notifications) {
+    if (notification.subjectNumber == null || notification.subjectKind === "other") continue;
+    const key = subjectKey(notification.repo, notification.subjectNumber);
+    wantedKeys.add(key);
+    const known = previous?.subjects[key];
+    if (options.force || known == null || changedIds.has(notification.id) || ageMs(known.at, now) > SUBJECT_TTL_MS) {
+      refetch.set(key, { repo: notification.repo, number: notification.subjectNumber, kind: notification.subjectKind });
     }
-    const viewerPrs = (scope: ViewerPullRequestScope) => (login == null ? Promise.resolve([]) : deps.fetchViewerPullRequests(login, scope).catch((error: unknown) => {
-      warnings.push(`Could not load your ${scope === "open" ? "open" : "recently closed"} PRs: ${error instanceof Error ? error.message : String(error)}`);
-      return [] as ViewerPullRequest[];
-    }));
-    const [snapshots, myPrs, recentlyClosedPrs] = await Promise.all([
-      refs.size === 0 ? Promise.resolve([]) : deps.fetchSubjectSnapshots([...refs.values()]).catch((error: unknown) => {
-        warnings.push(`Could not load PR/issue state: ${error instanceof Error ? error.message : String(error)}`);
-        return [] as InboxSubjectSnapshot[];
-      }),
-      viewerPrs("open"),
-      viewerPrs("recently-closed"),
-    ]);
-    const localKeys = new Set(localPrs.map((pr) => pr.key));
-    const withLocalKey = (pr: ViewerPullRequest): ViewerPullRequest => ({ ...pr, localPrKey: localKeys.has(localPrKey(pr.repo, pr.number)) ? localPrKey(pr.repo, pr.number) : null });
-    const fetchedAt = deps.now();
-    const ranked = rankInbox(notifications, snapshots, localPrs, fetchedAt);
-    const commentUrlByThread = new Map(notifications.filter((notification) => notification.latestCommentUrl != null).map((notification) => [notification.id, notification.latestCommentUrl as string] as const));
-    const enrichable = ranked.items.filter((item) => ENRICHED_TIERS.has(item.tier) && commentUrlByThread.has(item.id)).slice(0, LATEST_ACTIVITY_LIMIT);
-    const latestByUrl = enrichable.length === 0 ? new Map<string, InboxLatestActivity>() : await deps.fetchLatestActivity(enrichable.map((item) => commentUrlByThread.get(item.id) as string), login).catch((error: unknown) => {
-      warnings.push(`Could not load latest activity: ${error instanceof Error ? error.message : String(error)}`);
-      return new Map<string, InboxLatestActivity>();
-    });
-    const latestByThread = new Map<string, InboxLatestActivity>();
-    for (const item of enrichable) {
-      const latest = latestByUrl.get(commentUrlByThread.get(item.id) as string);
-      if (latest != null) latestByThread.set(item.id, latest);
-    }
-    const items = applyLatestActivity(ranked.items, latestByThread);
-    return {
-      login,
-      fetchedAt,
-      items,
-      tiers: tierCounts(items),
-      myPrs: myPrs.map(withLocalKey),
-      recentlyClosedPrs: recentlyClosedPrs.map(withLocalKey),
-      warnings,
-    };
   }
 
-  function dropFromCache(ids: string[]): void {
-    if (cached == null) return;
+  const viewerPrsStale = options.force || previous?.viewerPrs == null || previous.login !== login || ageMs(previous.viewerPrs.at, now) > VIEWER_PRS_TTL_MS;
+  const viewerPrs = (scope: ViewerPullRequestScope): Promise<ViewerPullRequest[] | null> => (login == null ? Promise.resolve([]) : deps.fetchViewerPullRequests(login, scope).catch((error: unknown) => {
+    warnings.push(`Could not load your ${scope === "open" ? "open" : "recently closed"} PRs: ${errorText(error)}`);
+    return null;
+  }));
+  const [freshSnapshots, openPrs, closedPrs] = await Promise.all([
+    refetch.size === 0 ? Promise.resolve([]) : deps.fetchSubjectSnapshots([...refetch.values()]).catch((error: unknown) => {
+      warnings.push(`Could not load PR/issue state: ${errorText(error)}`);
+      return [] as InboxSubjectSnapshot[];
+    }),
+    viewerPrsStale ? viewerPrs("open") : Promise.resolve(null),
+    viewerPrsStale ? viewerPrs("recently-closed") : Promise.resolve(null),
+  ]);
+
+  const subjects: InboxSnapshot["subjects"] = {};
+  for (const key of wantedKeys) {
+    const known = previous?.subjects[key];
+    if (known != null) subjects[key] = known;
+  }
+  for (const snapshot of freshSnapshots) subjects[snapshot.key] = { at: now, snapshot };
+
+  // Latest activity is keyed by (thread, updatedAt): unchanged threads keep their row for free.
+  const latest: InboxSnapshot["latest"] = {};
+  const ranked = rankInbox(notifications, Object.values(subjects).map((entry) => entry.snapshot), [], now);
+  const urlByThread = new Map<string, string>();
+  for (const item of ranked.items) {
+    const notification = byId.get(item.id);
+    if (!ENRICHED_TIERS.has(item.tier) || notification?.latestCommentUrl == null) continue;
+    const known = previous?.latest[item.id];
+    if (known != null && known.updatedAt === notification.updatedAt) latest[item.id] = known;
+    else if (urlByThread.size < LATEST_ACTIVITY_LIMIT) urlByThread.set(item.id, notification.latestCommentUrl);
+  }
+  if (urlByThread.size > 0) {
+    const fetched = await deps.fetchLatestActivity([...urlByThread.values()], login).catch((error: unknown) => {
+      warnings.push(`Could not load latest activity: ${errorText(error)}`);
+      return new Map<string, InboxLatestActivity>();
+    });
+    for (const [id, url] of urlByThread) {
+      const row = fetched.get(url);
+      if (row != null) latest[id] = { updatedAt: byId.get(id)?.updatedAt ?? now, latest: row };
+    }
+  }
+
+  const previousViewerPrs = previous?.viewerPrs ?? null;
+  const viewerPrsNext = !viewerPrsStale
+    ? previousViewerPrs
+    : { at: now, open: openPrs ?? previousViewerPrs?.open ?? [], closed: closedPrs ?? previousViewerPrs?.closed ?? [] };
+
+  deps.logger?.info("inbox", "refresh complete", { notifications: notifications.length, changed: changedIds.size, subjectsFetched: refetch.size, latestFetched: urlByThread.size, viewerPrsRefetched: viewerPrsStale, warnings: warnings.length });
+  return { version: 1, login, fetchedAt: now, notifications, subjects, latest, viewerPrs: viewerPrsNext, warnings };
+}
+
+export function createInboxApi(deps: InboxApiDeps): InboxApi {
+  const staleMs = deps.staleMs ?? DEFAULT_STALE_MS;
+  const activeWindowMs = deps.activeWindowMs ?? DEFAULT_ACTIVE_WINDOW_MS;
+  const setTimer = deps.setTimer ?? ((callback, ms) => {
+    const handle = setTimeout(callback, ms);
+    return () => clearTimeout(handle);
+  });
+  let snapshot: InboxSnapshot | null = null;
+  let loadedFromDisk: Promise<void> | null = null;
+  let inFlight: Promise<void> | null = null;
+  let cancelTimer: (() => void) | null = null;
+  let lastRequestAt: number | null = null;
+  let lastError: string | null = null;
+
+  function loadFromDisk(): Promise<void> {
+    loadedFromDisk ??= deps.readSnapshot().then((stored) => {
+      if (stored?.version === 1 && snapshot == null) snapshot = stored;
+    }).catch((error: unknown) => {
+      deps.logger?.warn("inbox", "could not read persisted inbox", { error: errorText(error) });
+    });
+    return loadedFromDisk;
+  }
+
+  async function persist(next: InboxSnapshot): Promise<void> {
+    snapshot = next;
+    try {
+      await deps.writeSnapshot(next);
+    } catch (error) {
+      deps.logger?.warn("inbox", "could not persist inbox", { error: errorText(error) });
+    }
+  }
+
+  // Keep the snapshot warm while someone is looking: after each refresh, schedule the next one
+  // at the stale boundary, but stop once the page has gone quiet for the active window.
+  function scheduleBackgroundRefresh(): void {
+    cancelTimer?.();
+    cancelTimer = null;
+    if (lastRequestAt == null || Date.parse(deps.now()) - lastRequestAt > activeWindowMs) return;
+    cancelTimer = setTimer(() => {
+      cancelTimer = null;
+      void startRefresh({});
+    }, staleMs);
+  }
+
+  function startRefresh(options: { force?: boolean }): Promise<void> {
+    if (inFlight != null) return inFlight;
+    inFlight = refreshSnapshot(deps, snapshot, options).then(async (next) => {
+      lastError = null;
+      await persist(next);
+    }).catch((error: unknown) => {
+      lastError = errorText(error);
+      deps.logger?.warn("inbox", "refresh failed", { error: lastError });
+    }).finally(() => {
+      inFlight = null;
+      scheduleBackgroundRefresh();
+    });
+    return inFlight;
+  }
+
+  async function dropThreads(ids: string[]): Promise<void> {
+    await loadFromDisk();
+    if (snapshot == null) return;
     const gone = new Set(ids);
-    const items = cached.response.items.filter((item) => !gone.has(item.id));
-    cached = { at: cached.at, response: { ...cached.response, items, tiers: tierCounts(items) } };
+    const latest = { ...snapshot.latest };
+    for (const id of ids) delete latest[id];
+    await persist({ ...snapshot, notifications: snapshot.notifications.filter((notification) => !gone.has(notification.id)), latest });
   }
 
   return {
     async inbox(options) {
-      const now = Date.now();
-      if (!options?.refresh && cached != null && now - cached.at < cacheMs) return cached.response;
-      if (inFlight != null) return inFlight;
-      inFlight = load().then((response) => {
-        if (cacheMs > 0) cached = { at: now, response };
-        return response;
-      }).finally(() => {
-        inFlight = null;
-      });
-      return inFlight;
+      const now = deps.now();
+      lastRequestAt = Date.parse(now);
+      await loadFromDisk();
+      const stale = snapshot == null || options?.refresh === true || ageMs(snapshot.fetchedAt, now) > staleMs;
+      if (stale) void startRefresh({ force: options?.refresh === true });
+      else if (cancelTimer == null && inFlight == null) scheduleBackgroundRefresh();
+      const localPrs = await deps.listRecentPullRequests();
+      const response = buildInboxResponse(snapshot ?? emptySnapshot(now), localPrs, now, inFlight != null);
+      if (snapshot == null) response.fetchedAt = null;
+      if (lastError != null) response.warnings = [...response.warnings, `Last refresh failed: ${lastError}`];
+      return response;
     },
     async done(payload) {
       const ids = threadIds(payload);
       await Promise.all(ids.map((id) => deps.markNotificationDone(id)));
-      dropFromCache(ids);
+      await dropThreads(ids);
       return { done: ids };
     },
     async mute(payload) {
@@ -291,8 +440,12 @@ export function createInboxApi(deps: InboxApiDeps): InboxApi {
         await deps.unsubscribeNotification(id);
         await deps.markNotificationDone(id);
       }));
-      dropFromCache(ids);
+      await dropThreads(ids);
       return { muted: ids };
+    },
+    async settle() {
+      await loadFromDisk();
+      while (inFlight != null) await inFlight;
     },
   };
 }

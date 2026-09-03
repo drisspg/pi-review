@@ -18,7 +18,13 @@ src/                    Node server (TypeScript, ESM, run via tsx)
   inbox-api.ts          Home-page inbox: pure `rankInbox` (GitHub notifications → tiers
                         needs-you / review-requests / your-prs / fyi / resolved, scored by
                         reason + recency + PR state) and `applyLatestActivity` (bot chatter
-                        sinks, direct pings float); `GET /api/inbox` (60s cache, `?refresh=1`),
+                        sinks, direct pings float). Stale-while-revalidate: `GET /api/inbox`
+                        always answers instantly from a persisted snapshot
+                        (`<state>.inbox.json`, survives restarts) and refreshes in the
+                        background when older than 60s (`?refresh=1` forces; clients poll while
+                        `refreshing`). Refreshes are incremental: notifications are re-listed,
+                        but PR/issue state and latest activity are re-fetched only for threads
+                        whose `updatedAt` moved (plus 15-min/5-min TTLs).
                         `POST /api/inbox/done|mute` write through to GitHub
   state.ts              StateStore: JSON persistence of AppState (PRs, drafts, viewed files,
                         AI/guide/focus-scan records, reviewer memory) at PI_REVIEW_STATE_PATH
