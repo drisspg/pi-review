@@ -18,7 +18,7 @@ const TIER_META: Record<InboxTier, { label: string; hint: string }> = {
 const TIER_ORDER: InboxTier[] = ["needs-you", "review-requests", "your-prs", "fyi", "resolved"];
 /** Served from the server's snapshot, so polling is cheap; the server decides when GitHub is re-read. */
 const POLL_IDLE_MS = 60 * 1000;
-const POLL_REFRESHING_MS = 1500;
+const POLL_REFRESHING_MS = 3000;
 const SCOPE_HINT = "gh auth refresh -h github.com -s notifications";
 
 function reasonIcon(item: InboxItem): ReactNode {
@@ -122,15 +122,16 @@ export function InboxPanel({ openPr }: { openPr: (url: string) => Promise<void> 
   }, []);
 
   const refreshing = data?.refreshing ?? false;
+  const filling = refreshing || (data?.backlog ?? 0) > 0;
   useEffect(() => {
     void load(false);
   }, [load]);
   useEffect(() => {
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") void load(false);
-    }, refreshing ? POLL_REFRESHING_MS : POLL_IDLE_MS);
+    }, filling ? POLL_REFRESHING_MS : POLL_IDLE_MS);
     return () => window.clearInterval(timer);
-  }, [load, refreshing]);
+  }, [load, filling]);
 
   const items = data?.items ?? [];
   const visible = useMemo(() => (filter === "all" ? items.filter((item) => item.tier !== "resolved") : items.filter((item) => item.tier === filter)), [items, filter]);
@@ -233,7 +234,8 @@ export function InboxPanel({ openPr }: { openPr: (url: string) => Promise<void> 
   });
 
   const total = items.length;
-  const freshness = data == null ? "" : data.fetchedAt == null ? "loading from GitHub…" : refreshing ? `updated ${relativeTime(data.fetchedAt)} · refreshing…` : `updated ${relativeTime(data.fetchedAt)}`;
+  const backlog = data?.backlog ?? 0;
+  const freshness = data == null ? "" : data.fetchedAt == null ? "loading from GitHub…" : data.pausedUntil != null ? `updated ${relativeTime(data.fetchedAt)} · paused (rate limit)` : backlog > 0 ? `updated ${relativeTime(data.fetchedAt)} · filling in details (${backlog} left)…` : refreshing ? `updated ${relativeTime(data.fetchedAt)} · refreshing…` : `updated ${relativeTime(data.fetchedAt)}`;
   const summary = data == null ? null : data.fetchedAt == null ? freshness : total === 0 ? `Inbox zero · ${freshness}` : `${total} unread · ${counts["needs-you"]} need you · ${counts["review-requests"]} review requests · ${freshness}`;
 
   return <section className="inbox" aria-label="GitHub inbox">

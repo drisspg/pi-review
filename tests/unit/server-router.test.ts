@@ -125,7 +125,7 @@ function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
         return { done: payload.threadIds as string[] };
       },
       async inbox(options) {
-        return { login: "viewer", fetchedAt: "now", refreshing: false, items: [], tiers: { "needs-you": 0, "review-requests": 0, "your-prs": 0, fyi: 0, resolved: 0 }, myPrs: [], recentlyClosedPrs: [], warnings: options?.refresh ? ["refreshed"] : [] };
+        return { login: "viewer", fetchedAt: "now", refreshing: false, backlog: 0, pausedUntil: null, items: [], tiers: { "needs-you": 0, "review-requests": 0, "your-prs": 0, fyi: 0, resolved: 0 }, myPrs: [], recentlyClosedPrs: [], warnings: options?.refresh ? ["refreshed"] : [] };
       },
       async mute(payload) {
         return { muted: payload.threadIds as string[] };

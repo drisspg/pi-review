@@ -22,9 +22,13 @@ src/                    Node server (TypeScript, ESM, run via tsx)
                         always answers instantly from a persisted snapshot
                         (`<state>.inbox.json`, survives restarts) and refreshes in the
                         background when older than 60s (`?refresh=1` forces; clients poll while
-                        `refreshing`). Refreshes are incremental: notifications are re-listed,
-                        but PR/issue state and latest activity are re-fetched only for threads
-                        whose `updatedAt` moved (plus 15-min/5-min TTLs).
+                        `refreshing`/`backlog`). Refresh cycles are incremental AND budgeted
+                        (`REFRESH_BUDGET`: ≤1 GraphQL batch of 40 subjects, ≤6 latest-comment
+                        fetches at concurrency 2, ≤1 viewer-PR search per cycle; the list itself
+                        is re-read at most once per staleMs) because GitHub's secondary rate
+                        limit is per account and shared with the browser. Leftover work is a
+                        backlog drained by 10s continuation cycles; a rate-limit error pauses all
+                        inbox GitHub traffic for 10 min (`pausedUntil`). Never add a burst here.
                         `POST /api/inbox/done|mute` write through to GitHub
   state.ts              StateStore: JSON persistence of AppState (PRs, drafts, viewed files,
                         AI/guide/focus-scan records, reviewer memory) at PI_REVIEW_STATE_PATH

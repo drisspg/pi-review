@@ -9,15 +9,30 @@ export type InboxSubjectRef = { repo: string; number: number; kind: InboxSubject
  * `updatedAt` moved, so steady-state refreshes cost seconds, not the world.
  */
 export type InboxSnapshot = {
-  version: 1;
+  version: 2;
   login: string | null;
+  /** Last time any refresh cycle completed. */
   fetchedAt: string;
+  /** Last time the notification list itself was re-read from GitHub (rate-limited to once per staleMs). */
+  notificationsAt: string;
   notifications: GitHubNotification[];
   subjects: Record<string, { at: string; snapshot: InboxSubjectSnapshot }>;
   latest: Record<string, { updatedAt: string; latest: InboxLatestActivity }>;
-  viewerPrs: { at: string; open: ViewerPullRequest[]; closed: ViewerPullRequest[] } | null;
+  viewerPrs: { openAt: string | null; closedAt: string | null; open: ViewerPullRequest[]; closed: ViewerPullRequest[] };
+  /** Enrichment still owed after the last cycle; the next cycle picks it up. */
+  backlog: number;
   warnings: string[];
 };
+
+/**
+ * Per-cycle GitHub budget. GitHub's secondary rate limit is per account and
+ * shared with the browser, so one inbox refresh must never burst: a cycle
+ * re-lists notifications at most once a minute, fetches one GraphQL batch of
+ * PR/issue state, a handful of latest comments, and at most one viewer-PR
+ * search. Whatever is left over is a backlog the next cycle continues.
+ */
+export const REFRESH_BUDGET = { subjects: 40, latest: 6, viewerPrScopes: 1 } as const;
+export type RefreshResult = { snapshot: InboxSnapshot; rateLimited: boolean };
 
 export type InboxApiDeps = {
   fetchNotifications: () => Promise<GitHubNotification[]>;
@@ -39,6 +54,10 @@ export type InboxApiDeps = {
   staleMs?: number;
   /** Keep refreshing in the background this long after the last request, so reloads stay warm. */
   activeWindowMs?: number;
+  /** Delay between continuation cycles while enrichment backlog remains. */
+  backlogDelayMs?: number;
+  /** How long to stop talking to GitHub after it reports a (secondary) rate limit. */
+  rateLimitPauseMs?: number;
 };
 
 export type InboxApi = {
@@ -53,6 +72,9 @@ const HOUR_MS = 60 * 60 * 1000;
 const MINUTE_MS = 60 * 1000;
 const DEFAULT_STALE_MS = 60 * 1000;
 const DEFAULT_ACTIVE_WINDOW_MS = 15 * MINUTE_MS;
+const DEFAULT_BACKLOG_DELAY_MS = 10 * 1000;
+const DEFAULT_RATE_LIMIT_PAUSE_MS = 10 * MINUTE_MS;
+const CLOSED_PRS_TTL_MS = 30 * MINUTE_MS;
 /** PR/issue state can change without a notification (e.g. a merge you are not subscribed to), so re-check periodically. */
 const SUBJECT_TTL_MS = 15 * MINUTE_MS;
 const VIEWER_PRS_TTL_MS = 5 * MINUTE_MS;
@@ -246,8 +268,20 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** gh error messages embed the whole command; keep only the trailing "gh: HTTP 504"-style reason. */
+function shortError(error: unknown): string {
+  const text = errorText(error);
+  const match = /gh: (.+)$/m.exec(text);
+  return (match?.[1] ?? text).trim().slice(0, 160);
+}
+
+export function isRateLimitError(error: unknown): boolean {
+  const text = errorText(error);
+  return /secondary rate limit|abuse detection|rate limit exceeded|API rate limit|HTTP 429/i.test(text);
+}
+
 function emptySnapshot(now: string): InboxSnapshot {
-  return { version: 1, login: null, fetchedAt: now, notifications: [], subjects: {}, latest: {}, viewerPrs: null, warnings: [] };
+  return { version: 2, login: null, fetchedAt: now, notificationsAt: now, notifications: [], subjects: {}, latest: {}, viewerPrs: { openAt: null, closedAt: null, open: [], closed: [] }, backlog: 0, warnings: [] };
 }
 
 /** Render the served response from a snapshot; ranking is pure and cheap, so it runs per request with the current clock. */
@@ -261,94 +295,112 @@ export function buildInboxResponse(snapshot: InboxSnapshot, localPrs: StoredPull
     login: snapshot.login,
     fetchedAt: snapshot.fetchedAt,
     refreshing,
+    backlog: snapshot.backlog,
+    pausedUntil: null,
     items,
     tiers: tierCounts(items),
-    myPrs: (snapshot.viewerPrs?.open ?? []).map(withLocalKey),
-    recentlyClosedPrs: (snapshot.viewerPrs?.closed ?? []).map(withLocalKey),
+    myPrs: snapshot.viewerPrs.open.map(withLocalKey),
+    recentlyClosedPrs: snapshot.viewerPrs.closed.map(withLocalKey),
     warnings: snapshot.warnings,
   };
 }
 
 /**
- * One incremental refresh: re-list notifications, then fetch only the subject
- * snapshots and latest-activity rows that are new, changed, or past their TTL.
- * Everything else is carried over from `previous`.
+ * One budgeted refresh cycle. The notification list is re-read only when it is
+ * older than `listStaleMs` (so continuation cycles cost nothing there); then
+ * the cycle spends REFRESH_BUDGET on the most valuable missing enrichment:
+ * changed/new subjects first, then the highest-ranked threads without a
+ * latest-activity row, then whichever viewer-PR scope is most overdue.
  */
-export async function refreshSnapshot(deps: InboxApiDeps, previous: InboxSnapshot | null, options: { force?: boolean } = {}): Promise<InboxSnapshot> {
+export async function refreshSnapshot(deps: InboxApiDeps, previous: InboxSnapshot | null, options: { force?: boolean; listStaleMs?: number } = {}): Promise<RefreshResult> {
   const now = deps.now();
   const warnings: string[] = [];
-  const [notifications, login] = await Promise.all([deps.fetchNotifications(), deps.fetchViewerLogin()]);
+  let rateLimited = false;
+  const fail = (label: string, error: unknown): null => {
+    if (isRateLimitError(error)) rateLimited = true;
+    warnings.push(previous != null ? `Could not refresh ${label} (${shortError(error)}); showing what was loaded before.` : `Could not load ${label}: ${shortError(error)}`);
+    return null;
+  };
+
+  const relist = options.force || previous == null || ageMs(previous.notificationsAt, now) > (options.listStaleMs ?? DEFAULT_STALE_MS);
+  const [listed, login] = await Promise.all([
+    relist ? deps.fetchNotifications().catch((error: unknown) => fail("notifications", error)) : Promise.resolve(null),
+    deps.fetchViewerLogin(),
+  ]);
+  const notifications = listed ?? previous?.notifications ?? [];
+  const notificationsAt = listed != null ? now : previous?.notificationsAt ?? now;
   const byId = new Map(notifications.map((notification) => [notification.id, notification] as const));
   const previousById = new Map((previous?.notifications ?? []).map((notification) => [notification.id, notification] as const));
-  const changedIds = new Set(notifications.filter((notification) => previousById.get(notification.id)?.updatedAt !== notification.updatedAt).map((notification) => notification.id));
 
-  const wantedKeys = new Set<string>();
-  const refetch = new Map<string, InboxSubjectRef>();
+  // Subjects: carry over what we know, then queue missing/changed/expired, most recently active first.
+  const subjects: InboxSnapshot["subjects"] = {};
+  const queue: Array<{ ref: InboxSubjectRef; updatedAt: string }> = [];
+  const queued = new Set<string>();
   for (const notification of notifications) {
     if (notification.subjectNumber == null || notification.subjectKind === "other") continue;
     const key = subjectKey(notification.repo, notification.subjectNumber);
-    wantedKeys.add(key);
-    const known = previous?.subjects[key];
-    if (options.force || known == null || changedIds.has(notification.id) || ageMs(known.at, now) > SUBJECT_TTL_MS) {
-      refetch.set(key, { repo: notification.repo, number: notification.subjectNumber, kind: notification.subjectKind });
-    }
-  }
-
-  const viewerPrsStale = options.force || previous?.viewerPrs == null || previous.login !== login || ageMs(previous.viewerPrs.at, now) > VIEWER_PRS_TTL_MS;
-  const viewerPrs = (scope: ViewerPullRequestScope): Promise<ViewerPullRequest[] | null> => (login == null ? Promise.resolve([]) : deps.fetchViewerPullRequests(login, scope).catch((error: unknown) => {
-    warnings.push(`Could not load your ${scope === "open" ? "open" : "recently closed"} PRs: ${errorText(error)}`);
-    return null;
-  }));
-  const [freshSnapshots, openPrs, closedPrs] = await Promise.all([
-    refetch.size === 0 ? Promise.resolve([]) : deps.fetchSubjectSnapshots([...refetch.values()]).catch((error: unknown) => {
-      warnings.push(`Could not load PR/issue state: ${errorText(error)}`);
-      return [] as InboxSubjectSnapshot[];
-    }),
-    viewerPrsStale ? viewerPrs("open") : Promise.resolve(null),
-    viewerPrsStale ? viewerPrs("recently-closed") : Promise.resolve(null),
-  ]);
-
-  const subjects: InboxSnapshot["subjects"] = {};
-  for (const key of wantedKeys) {
     const known = previous?.subjects[key];
     if (known != null) subjects[key] = known;
+    const changed = previousById.get(notification.id)?.updatedAt !== notification.updatedAt;
+    const expired = known != null && ageMs(known.at, now) > SUBJECT_TTL_MS;
+    if ((known == null || changed || expired) && !queued.has(key)) {
+      queued.add(key);
+      queue.push({ ref: { repo: notification.repo, number: notification.subjectNumber, kind: notification.subjectKind }, updatedAt: notification.updatedAt });
+    }
   }
-  for (const snapshot of freshSnapshots) subjects[snapshot.key] = { at: now, snapshot };
+  queue.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const subjectBatch = queue.slice(0, REFRESH_BUDGET.subjects).map((entry) => entry.ref);
+  if (subjectBatch.length > 0) {
+    const fetched = await deps.fetchSubjectSnapshots(subjectBatch).catch((error: unknown) => fail("PR/issue state", error));
+    for (const snapshot of fetched ?? []) subjects[snapshot.key] = { at: now, snapshot };
+  }
+  let backlog = Math.max(0, queue.length - subjectBatch.length);
 
-  // Latest activity is keyed by (thread, updatedAt): unchanged threads keep their row for free.
+  // Latest activity: keyed by (thread, updatedAt); fill the top-ranked gaps first.
   const latest: InboxSnapshot["latest"] = {};
   const ranked = rankInbox(notifications, Object.values(subjects).map((entry) => entry.snapshot), [], now);
-  const urlByThread = new Map<string, string>();
+  const latestQueue: Array<[string, string]> = [];
   for (const item of ranked.items) {
     const notification = byId.get(item.id);
     if (!ENRICHED_TIERS.has(item.tier) || notification?.latestCommentUrl == null) continue;
     const known = previous?.latest[item.id];
     if (known != null && known.updatedAt === notification.updatedAt) latest[item.id] = known;
-    else if (urlByThread.size < LATEST_ACTIVITY_LIMIT) urlByThread.set(item.id, notification.latestCommentUrl);
+    else latestQueue.push([item.id, notification.latestCommentUrl]);
   }
-  if (urlByThread.size > 0) {
-    const fetched = await deps.fetchLatestActivity([...urlByThread.values()], login).catch((error: unknown) => {
-      warnings.push(`Could not load latest activity: ${errorText(error)}`);
-      return new Map<string, InboxLatestActivity>();
-    });
-    for (const [id, url] of urlByThread) {
-      const row = fetched.get(url);
+  const latestBatch = latestQueue.slice(0, REFRESH_BUDGET.latest);
+  if (latestBatch.length > 0) {
+    const fetched = await deps.fetchLatestActivity(latestBatch.map(([, url]) => url), login).catch((error: unknown) => fail("latest activity", error));
+    for (const [id, url] of latestBatch) {
+      const row = fetched?.get(url);
       if (row != null) latest[id] = { updatedAt: byId.get(id)?.updatedAt ?? now, latest: row };
     }
   }
+  backlog += Math.max(0, latestQueue.length - latestBatch.length);
 
-  const previousViewerPrs = previous?.viewerPrs ?? null;
-  const viewerPrsNext = !viewerPrsStale
-    ? previousViewerPrs
-    : { at: now, open: openPrs ?? previousViewerPrs?.open ?? [], closed: closedPrs ?? previousViewerPrs?.closed ?? [] };
+  // Viewer PRs: one search per cycle, whichever scope is most overdue.
+  const viewerPrs = { ...(previous?.viewerPrs ?? emptySnapshot(now).viewerPrs) };
+  if (previous != null && previous.login !== login) Object.assign(viewerPrs, { openAt: null, closedAt: null, open: [], closed: [] });
+  const openDue = login != null && (viewerPrs.openAt == null || ageMs(viewerPrs.openAt, now) > VIEWER_PRS_TTL_MS);
+  const closedDue = login != null && (viewerPrs.closedAt == null || ageMs(viewerPrs.closedAt, now) > CLOSED_PRS_TTL_MS);
+  const scope: ViewerPullRequestScope | null = openDue ? "open" : closedDue ? "recently-closed" : null;
+  if (scope != null && login != null) {
+    const fetched = await deps.fetchViewerPullRequests(login, scope).catch((error: unknown) => fail(scope === "open" ? "your open PRs" : "your recently closed PRs", error));
+    if (fetched != null) {
+      if (scope === "open") Object.assign(viewerPrs, { open: fetched, openAt: now });
+      else Object.assign(viewerPrs, { closed: fetched, closedAt: now });
+    }
+  }
+  if (scope === "open" && closedDue) backlog += 1;
 
-  deps.logger?.info("inbox", "refresh complete", { notifications: notifications.length, changed: changedIds.size, subjectsFetched: refetch.size, latestFetched: urlByThread.size, viewerPrsRefetched: viewerPrsStale, warnings: warnings.length });
-  return { version: 1, login, fetchedAt: now, notifications, subjects, latest, viewerPrs: viewerPrsNext, warnings };
+  deps.logger?.info("inbox", "refresh cycle", { relisted: listed != null, notifications: notifications.length, subjectsFetched: subjectBatch.length, latestFetched: latestBatch.length, viewerScope: scope, backlog, warnings: warnings.length, rateLimited });
+  return { rateLimited, snapshot: { version: 2, login, fetchedAt: now, notificationsAt, notifications, subjects, latest, viewerPrs, backlog, warnings } };
 }
 
 export function createInboxApi(deps: InboxApiDeps): InboxApi {
   const staleMs = deps.staleMs ?? DEFAULT_STALE_MS;
   const activeWindowMs = deps.activeWindowMs ?? DEFAULT_ACTIVE_WINDOW_MS;
+  const backlogDelayMs = deps.backlogDelayMs ?? DEFAULT_BACKLOG_DELAY_MS;
+  const rateLimitPauseMs = deps.rateLimitPauseMs ?? DEFAULT_RATE_LIMIT_PAUSE_MS;
   const setTimer = deps.setTimer ?? ((callback, ms) => {
     const handle = setTimeout(callback, ms);
     return () => clearTimeout(handle);
@@ -359,10 +411,15 @@ export function createInboxApi(deps: InboxApiDeps): InboxApi {
   let cancelTimer: (() => void) | null = null;
   let lastRequestAt: number | null = null;
   let lastError: string | null = null;
+  let pausedUntil: number | null = null;
+
+  function nowMs(): number {
+    return Date.parse(deps.now());
+  }
 
   function loadFromDisk(): Promise<void> {
     loadedFromDisk ??= deps.readSnapshot().then((stored) => {
-      if (stored?.version === 1 && snapshot == null) snapshot = stored;
+      if (stored?.version === 2 && snapshot == null) snapshot = stored;
     }).catch((error: unknown) => {
       deps.logger?.warn("inbox", "could not read persisted inbox", { error: errorText(error) });
     });
@@ -378,25 +435,42 @@ export function createInboxApi(deps: InboxApiDeps): InboxApi {
     }
   }
 
-  // Keep the snapshot warm while someone is looking: after each refresh, schedule the next one
-  // at the stale boundary, but stop once the page has gone quiet for the active window.
+  function paused(): boolean {
+    if (pausedUntil == null) return false;
+    if (nowMs() < pausedUntil) return true;
+    pausedUntil = null;
+    return false;
+  }
+
+  // Keep the snapshot warm while someone is looking: continue quickly while there is backlog,
+  // otherwise wait for the stale boundary, and stop once the page has gone quiet.
   function scheduleBackgroundRefresh(): void {
     cancelTimer?.();
     cancelTimer = null;
-    if (lastRequestAt == null || Date.parse(deps.now()) - lastRequestAt > activeWindowMs) return;
+    if (lastRequestAt == null || nowMs() - lastRequestAt > activeWindowMs) return;
+    const delay = pausedUntil != null ? Math.max(pausedUntil - nowMs(), backlogDelayMs) : (snapshot?.backlog ?? 0) > 0 ? backlogDelayMs : staleMs;
     cancelTimer = setTimer(() => {
       cancelTimer = null;
       void startRefresh({});
-    }, staleMs);
+    }, delay);
   }
 
   function startRefresh(options: { force?: boolean }): Promise<void> {
     if (inFlight != null) return inFlight;
-    inFlight = refreshSnapshot(deps, snapshot, options).then(async (next) => {
+    if (paused()) {
+      scheduleBackgroundRefresh();
+      return Promise.resolve();
+    }
+    inFlight = refreshSnapshot(deps, snapshot, { force: options.force, listStaleMs: staleMs }).then(async (result) => {
       lastError = null;
-      await persist(next);
+      if (result.rateLimited) {
+        pausedUntil = nowMs() + rateLimitPauseMs;
+        deps.logger?.warn("inbox", "GitHub rate limit reported; pausing inbox refreshes", { pauseMs: rateLimitPauseMs });
+      }
+      await persist(result.snapshot);
     }).catch((error: unknown) => {
       lastError = errorText(error);
+      if (isRateLimitError(error)) pausedUntil = nowMs() + rateLimitPauseMs;
       deps.logger?.warn("inbox", "refresh failed", { error: lastError });
     }).finally(() => {
       inFlight = null;
@@ -419,12 +493,16 @@ export function createInboxApi(deps: InboxApiDeps): InboxApi {
       const now = deps.now();
       lastRequestAt = Date.parse(now);
       await loadFromDisk();
-      const stale = snapshot == null || options?.refresh === true || ageMs(snapshot.fetchedAt, now) > staleMs;
+      const stale = snapshot == null || options?.refresh === true || (snapshot.backlog > 0 && inFlight == null) || ageMs(snapshot.fetchedAt, now) > staleMs;
       if (stale) void startRefresh({ force: options?.refresh === true });
       else if (cancelTimer == null && inFlight == null) scheduleBackgroundRefresh();
       const localPrs = await deps.listRecentPullRequests();
       const response = buildInboxResponse(snapshot ?? emptySnapshot(now), localPrs, now, inFlight != null);
       if (snapshot == null) response.fetchedAt = null;
+      if (paused() && pausedUntil != null) {
+        response.pausedUntil = new Date(pausedUntil).toISOString();
+        response.warnings = [...response.warnings, `GitHub reported a rate limit; inbox refreshes are paused until ${new Date(pausedUntil).toLocaleTimeString()}.`];
+      }
       if (lastError != null) response.warnings = [...response.warnings, `Last refresh failed: ${lastError}`];
       return response;
     },

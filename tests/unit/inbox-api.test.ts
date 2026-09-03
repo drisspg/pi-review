@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { applyLatestActivity, buildInboxResponse, createInboxApi, rankInbox, refreshSnapshot, type InboxApiDeps, type InboxSnapshot } from "../../src/inbox-api.js";
+import { applyLatestActivity, buildInboxResponse, createInboxApi, isRateLimitError, rankInbox, refreshSnapshot, REFRESH_BUDGET, type InboxApiDeps, type InboxSnapshot } from "../../src/inbox-api.js";
 import type { GitHubNotification, InboxSubjectSnapshot, StoredPullRequest, ViewerPullRequest } from "../../src/types.js";
 
 const NOW = "2026-09-03T12:00:00Z";
@@ -190,6 +190,8 @@ function harness(overrides: Partial<InboxApiDeps> = {}): Harness {
     },
     staleMs: 60_000,
     activeWindowMs: 15 * 60_000,
+    backlogDelayMs: 10_000,
+    rateLimitPauseMs: 10 * 60_000,
     ...overrides,
   };
   return h;
@@ -199,55 +201,108 @@ function fetchCalls(h: Harness): string[] {
   return h.calls.filter((call) => !["read", "write"].includes(call));
 }
 
-test("refreshSnapshot fetches everything on first run and only changed threads afterwards", async () => {
+function minutesLater(minutes: number): string {
+  return new Date(Date.parse(NOW) + minutes * 60_000).toISOString();
+}
+
+test("refreshSnapshot: first cycle lists, enriches within budget, and fetches only the open PR scope", async () => {
   const h = harness();
-  const first = await refreshSnapshot(h, null);
-  assert.deepEqual(fetchCalls(h), ["notifications", "snapshots:o/r#1,o/r#2", "prs:viewer:open", "prs:viewer:recently-closed", "latest:https://api.github.com/repos/o/r/issues/comments/1:viewer"]);
-  assert.equal(Object.keys(first.subjects).length, 2);
+  const { snapshot: first, rateLimited } = await refreshSnapshot(h, null);
+  assert.equal(rateLimited, false);
+  assert.deepEqual(fetchCalls(h), ["notifications", "snapshots:o/r#1,o/r#2", "latest:https://api.github.com/repos/o/r/issues/comments/1:viewer", "prs:viewer:open"]);
   assert.equal(first.latest.a?.latest.author, "pytorchmergebot");
-  assert.equal(first.viewerPrs?.closed[0].state, "MERGED");
+  assert.deepEqual(first.viewerPrs.open.map((pr) => pr.key), ["o/r#1"]);
+  assert.equal(first.viewerPrs.closedAt, null);
+  assert.equal(first.backlog, 1, "closed PRs are still owed");
 
   h.calls.length = 0;
-  h.clock.now = "2026-09-03T12:01:00Z";
-  h.notifications = [
-    h.notifications[0],
-    { ...h.notifications[1], updatedAt: "2026-09-03T12:00:30Z" },
-    notification({ id: "c", reason: "comment", subjectNumber: 3 }),
-  ];
-  const second = await refreshSnapshot(h, first);
-  assert.deepEqual(fetchCalls(h), ["notifications", "snapshots:o/r#2,o/r#3"], "unchanged thread a keeps its snapshot and latest row; viewer PRs are within TTL");
-  assert.equal(second.subjects["o/r#1"], first.subjects["o/r#1"]);
-  assert.equal(second.latest.a, first.latest.a);
-  assert.equal(second.viewerPrs, first.viewerPrs);
+  h.clock.now = minutesLater(0.2);
+  const { snapshot: second } = await refreshSnapshot(h, first);
+  assert.deepEqual(fetchCalls(h), ["prs:viewer:recently-closed"], "continuation cycle skips the list (fresh) and drains the backlog");
+  assert.equal(second.notificationsAt, first.notificationsAt);
+  assert.equal(second.backlog, 0);
+  assert.equal(second.viewerPrs.closed[0].state, "MERGED");
+});
+
+test("refreshSnapshot re-fetches only changed threads once the list is stale", async () => {
+  const h = harness();
+  const { snapshot: first } = await refreshSnapshot(h, null);
+  h.clock.now = minutesLater(0.5);
+  const { snapshot: second } = await refreshSnapshot(h, first);
+  h.calls.length = 0;
+  h.clock.now = minutesLater(2);
+  h.notifications = [h.notifications[0], { ...h.notifications[1], updatedAt: minutesLater(1.5) }, notification({ id: "c", reason: "comment", subjectNumber: 3 })];
+  const { snapshot: third } = await refreshSnapshot(h, second);
+  assert.deepEqual(fetchCalls(h), ["notifications", "snapshots:o/r#2,o/r#3"], "thread a keeps its snapshot and latest row; viewer PRs are within TTL");
+  assert.equal(third.subjects["o/r#1"], first.subjects["o/r#1"]);
+  assert.equal(third.latest.a, first.latest.a);
+  assert.equal(third.viewerPrs.open, second.viewerPrs.open);
+});
+
+test("refreshSnapshot spends at most the budget per cycle and reports the backlog", async () => {
+  const h = harness();
+  h.notifications = Array.from({ length: 50 }, (_, index) => notification({ id: `n${index}`, reason: "mention", subjectNumber: index + 1, latestCommentUrl: `https://api.github.com/c/${index}`, updatedAt: new Date(Date.parse(NOW) - index * 60_000).toISOString() }));
+  const { snapshot: first } = await refreshSnapshot(h, null);
+  const snapshotCall = h.calls.find((call) => call.startsWith("snapshots:")) ?? "";
+  assert.equal(snapshotCall.split(",").length, REFRESH_BUDGET.subjects);
+  assert.ok(snapshotCall.startsWith("snapshots:o/r#1,o/r#2"), "most recent subjects first");
+  const latestCall = h.calls.find((call) => call.startsWith("latest:")) ?? "";
+  assert.equal(latestCall.split(",").length, REFRESH_BUDGET.latest);
+  assert.equal(first.backlog, (50 - REFRESH_BUDGET.subjects) + (50 - REFRESH_BUDGET.latest) + 1);
+
+  h.calls.length = 0;
+  h.clock.now = minutesLater(0.2);
+  const { snapshot: second } = await refreshSnapshot(h, first);
+  assert.equal(fetchCalls(h)[0], "snapshots:" + Array.from({ length: 10 }, (_, index) => `o/r#${index + 41}`).join(","), "continues with the remaining subjects");
+  assert.equal(Object.keys(second.subjects).length, 50);
+  assert.equal(second.backlog, 50 - 2 * REFRESH_BUDGET.latest);
 });
 
 test("refreshSnapshot drops threads that left the inbox and re-checks subjects past their TTL", async () => {
   const h = harness();
-  const first = await refreshSnapshot(h, null);
+  const { snapshot: first } = await refreshSnapshot(h, null);
   h.calls.length = 0;
-  h.clock.now = "2026-09-03T12:20:00Z";
+  h.clock.now = minutesLater(20);
   h.notifications = [h.notifications[0]];
-  const second = await refreshSnapshot(h, first);
+  const { snapshot: second } = await refreshSnapshot(h, first);
   assert.deepEqual(Object.keys(second.subjects), ["o/r#1"]);
-  assert.deepEqual(fetchCalls(h), ["notifications", "snapshots:o/r#1", "prs:viewer:open", "prs:viewer:recently-closed"]);
+  assert.deepEqual(fetchCalls(h), ["notifications", "snapshots:o/r#1", "prs:viewer:open"]);
 });
 
-test("refreshSnapshot keeps the previous data and records a warning when an enrichment fails", async () => {
+test("refreshSnapshot keeps previous data, records warnings, and flags rate limits", async () => {
   const h = harness();
-  const first = await refreshSnapshot(h, null);
+  const { snapshot: first } = await refreshSnapshot(h, null);
   h.fetchViewerPullRequests = async () => {
-    throw new Error("search down");
+    throw new Error("Command failed: gh api graphql -f query=... \ngh: HTTP 504");
   };
-  h.clock.now = "2026-09-03T12:30:00Z";
-  const second = await refreshSnapshot(h, first);
-  assert.deepEqual(second.viewerPrs?.open, first.viewerPrs?.open);
-  assert.deepEqual(second.warnings, ["Could not load your open PRs: search down", "Could not load your recently closed PRs: search down"]);
+  h.clock.now = minutesLater(30);
+  const { snapshot: second, rateLimited } = await refreshSnapshot(h, first);
+  assert.equal(rateLimited, false);
+  assert.deepEqual(second.viewerPrs.open, first.viewerPrs.open);
+  assert.deepEqual(second.warnings, ["Could not refresh your open PRs (HTTP 504); showing what was loaded before."]);
+
+  h.fetchNotifications = async () => {
+    throw new Error("gh: You have exceeded a secondary rate limit. Please wait a few minutes before you try again. (HTTP 403)");
+  };
+  h.clock.now = minutesLater(32);
+  const limited = await refreshSnapshot(h, second);
+  assert.equal(limited.rateLimited, true);
+  assert.equal(limited.snapshot.notifications.length, 2, "previous list is kept when the re-list fails");
+  assert.match(limited.snapshot.warnings[0], /^Could not refresh notifications \(You have exceeded a secondary rate limit/);
+});
+
+test("isRateLimitError recognises GitHub's primary and secondary limit messages", () => {
+  assert.equal(isRateLimitError(new Error("gh: You have exceeded a secondary rate limit")), true);
+  assert.equal(isRateLimitError(new Error("gh: API rate limit exceeded for user ID 1 (HTTP 403)")), true);
+  assert.equal(isRateLimitError(new Error("gh: HTTP 429")), true);
+  assert.equal(isRateLimitError(new Error("gh: HTTP 504")), false);
 });
 
 test("buildInboxResponse links saved reviews and reports refresh state", () => {
-  const snap: InboxSnapshot = { version: 1, login: "viewer", fetchedAt: NOW, notifications: [notification({ id: "a", reason: "mention" })], subjects: { "o/r#1": { at: NOW, snapshot: snapshot({}) } }, latest: {}, viewerPrs: { at: NOW, open: [viewerPr({})], closed: [] }, warnings: ["w"] };
+  const snap: InboxSnapshot = { version: 2, login: "viewer", fetchedAt: NOW, notificationsAt: NOW, notifications: [notification({ id: "a", reason: "mention" })], subjects: { "o/r#1": { at: NOW, snapshot: snapshot({}) } }, latest: {}, viewerPrs: { openAt: NOW, closedAt: null, open: [viewerPr({})], closed: [] }, backlog: 3, warnings: ["w"] };
   const response = buildInboxResponse(snap, [localPr], NOW, true);
   assert.equal(response.refreshing, true);
+  assert.equal(response.backlog, 3);
   assert.equal(response.items[0].localPrKey, "github.com/o/r#1");
   assert.equal(response.myPrs[0].localPrKey, "github.com/o/r#1");
   assert.deepEqual(response.warnings, ["w"]);
@@ -265,13 +320,29 @@ test("inbox API answers immediately, refreshes in the background, and persists t
   await api.settle();
   assert.equal(h.stored?.notifications.length, 2, "snapshot persisted to disk");
   const warm = await api.inbox();
-  assert.equal(warm.refreshing, false);
   assert.equal(warm.fetchedAt, NOW);
   assert.equal(warm.items.length, 2);
   assert.equal(warm.items.find((item) => item.id === "a")?.latest?.author, "pytorchmergebot");
-  assert.equal(h.calls.filter((call) => call === "notifications").length, 1, "warm request did not touch GitHub");
-  assert.equal(h.timers.length, 1, "a background refresh is scheduled at the stale boundary");
-  assert.equal(h.timers[0].ms, 60_000);
+  assert.equal(h.calls.filter((call) => call === "notifications").length, 1, "warm request did not re-list");
+  assert.equal(warm.backlog, 1, "closed PRs still owed");
+  assert.equal(warm.refreshing, true, "a request while backlog remains kicks off the continuation");
+  await api.settle();
+  assert.equal((await api.inbox()).backlog, 0);
+  assert.equal(h.timers.at(-1)?.ms, 60_000, "with no backlog the next background refresh waits for the stale boundary");
+});
+
+test("inbox API schedules quick continuation cycles while backlog remains", async () => {
+  const h = harness();
+  h.notifications = Array.from({ length: 50 }, (_, index) => notification({ id: `n${index}`, reason: "mention", subjectNumber: index + 1 }));
+  const api = createInboxApi(h);
+  await api.inbox();
+  await api.settle();
+  assert.equal(h.timers.length, 1);
+  assert.equal(h.timers[0].ms, 10_000, "backlog → continue in 10s, not 60s");
+  h.clock.now = minutesLater(0.2);
+  h.timers.shift()?.callback();
+  await api.settle();
+  assert.equal(Object.keys(h.stored?.subjects ?? {}).length, 50);
 });
 
 test("inbox API serves a persisted snapshot across restarts and refreshes it when stale", async () => {
@@ -279,17 +350,28 @@ test("inbox API serves a persisted snapshot across restarts and refreshes it whe
   const seedApi = createInboxApi(seed);
   await seedApi.inbox();
   await seedApi.settle();
+  await seedApi.settle();
 
   const h = harness();
   h.stored = seed.stored;
-  h.clock.now = "2026-09-03T12:05:00Z";
+  h.clock.now = minutesLater(5);
   const api = createInboxApi(h);
   const served = await api.inbox();
   assert.equal(served.items.length, 2, "old snapshot is served instantly");
   assert.equal(served.fetchedAt, NOW);
   assert.equal(served.refreshing, true, "…while a refresh runs because it is older than staleMs");
   await api.settle();
-  assert.equal((await api.inbox()).fetchedAt, "2026-09-03T12:05:00Z");
+  assert.equal((await api.inbox()).fetchedAt, minutesLater(5));
+});
+
+test("inbox API ignores snapshots written by an older format", async () => {
+  const h = harness();
+  h.stored = { version: 1 } as unknown as InboxSnapshot;
+  const api = createInboxApi(h);
+  const cold = await api.inbox();
+  assert.equal(cold.fetchedAt, null);
+  await api.settle();
+  assert.equal(h.stored?.version, 2);
 });
 
 test("inbox API background timer refreshes while active and stops once idle", async () => {
@@ -297,21 +379,25 @@ test("inbox API background timer refreshes while active and stops once idle", as
   const api = createInboxApi(h);
   await api.inbox();
   await api.settle();
-  assert.equal(h.timers.length, 1);
-
-  h.clock.now = "2026-09-03T12:01:00Z";
+  h.clock.now = minutesLater(0.3);
   h.timers.shift()?.callback();
   await api.settle();
-  assert.equal(h.calls.filter((call) => call === "notifications").length, 2);
+  assert.equal(h.timers.length, 1);
+  assert.equal(h.timers[0].ms, 60_000);
+
+  h.clock.now = minutesLater(1.5);
+  h.timers.shift()?.callback();
+  await api.settle();
+  assert.equal(h.calls.filter((call) => call === "notifications").length, 2, "stale list re-read on the timer");
   assert.equal(h.timers.length, 1, "rescheduled while within the active window");
 
-  h.clock.now = "2026-09-03T13:00:00Z";
+  h.clock.now = minutesLater(60);
   h.timers.shift()?.callback();
   await api.settle();
   assert.equal(h.timers.length, 0, "no more refreshes once nobody has asked for the inbox in a while");
 });
 
-test("inbox API shares one in-flight refresh and force-refresh bypasses TTLs", async () => {
+test("inbox API shares one in-flight refresh and force-refresh re-lists notifications", async () => {
   const h = harness();
   const api = createInboxApi(h);
   await Promise.all([api.inbox(), api.inbox({ refresh: true }), api.inbox()]);
@@ -321,22 +407,42 @@ test("inbox API shares one in-flight refresh and force-refresh bypasses TTLs", a
   h.calls.length = 0;
   await api.inbox({ refresh: true });
   await api.settle();
-  assert.deepEqual(fetchCalls(h), ["notifications", "snapshots:o/r#1,o/r#2", "prs:viewer:open", "prs:viewer:recently-closed"], "force re-fetches subjects and viewer PRs; latest rows are still keyed by updatedAt");
+  assert.equal(fetchCalls(h)[0], "notifications", "force re-lists even though the list is fresh");
+  assert.ok(!fetchCalls(h).some((call) => call.startsWith("snapshots:")), "unchanged subjects are not re-fetched even on force");
 });
 
-test("inbox API surfaces a failed refresh as a warning while keeping the last snapshot", async () => {
+test("inbox API pauses GitHub traffic after a rate limit and says so", async () => {
   const h = harness();
   const api = createInboxApi(h);
   await api.inbox();
   await api.settle();
+  await api.settle();
   h.fetchNotifications = async () => {
-    throw new Error("gh offline");
+    throw new Error("gh: You have exceeded a secondary rate limit (HTTP 403)");
   };
+  h.clock.now = minutesLater(2);
   await api.inbox({ refresh: true });
   await api.settle();
-  const response = await api.inbox();
-  assert.equal(response.items.length, 2);
-  assert.ok(response.warnings.includes("Last refresh failed: gh offline"));
+  const calls = h.calls.filter((call) => call === "notifications").length;
+
+  h.clock.now = minutesLater(3);
+  const paused = await api.inbox({ refresh: true });
+  await api.settle();
+  assert.equal(paused.pausedUntil, minutesLater(12));
+  assert.ok(paused.warnings.some((warning) => warning.startsWith("GitHub reported a rate limit; inbox refreshes are paused")));
+  assert.equal(paused.items.length, 2, "last good snapshot still served");
+  assert.equal(h.calls.filter((call) => call === "notifications").length, calls, "no GitHub calls while paused");
+  assert.equal(h.timers.at(-1)?.ms, 9 * 60_000, "next attempt waits for the pause to end");
+
+  h.fetchNotifications = async () => {
+    h.calls.push("notifications");
+    return h.notifications;
+  };
+  h.clock.now = minutesLater(13);
+  const resumed = await api.inbox({ refresh: true });
+  assert.equal(resumed.pausedUntil, null);
+  await api.settle();
+  assert.equal(h.calls.filter((call) => call === "notifications").length, calls + 1);
 });
 
 test("inbox API marks threads done and drops them from the persisted snapshot", async () => {

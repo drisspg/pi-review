@@ -17,6 +17,7 @@ export type ExecFileOptions = { maxBuffer: number };
 
 export type GitHubRuntime = {
   execFile: (command: string, args: string[], options: ExecFileOptions) => Promise<{ stdout: string; stderr: string }>;
+  sleep: (ms: number) => Promise<void>;
   mkdtemp: (prefix: string) => Promise<string>;
   rm: (path: string) => Promise<void>;
   now: () => string;
@@ -58,10 +59,16 @@ const defaultRuntime: GitHubRuntime = {
     await rm(path, { recursive: true, force: true });
   },
   now: () => new Date().toISOString(),
+  sleep: (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms)),
   async writeFile(path, data) {
     await writeFile(path, data, "utf8");
   },
 };
+
+function isServerError(error: unknown): boolean {
+  const text = `${error instanceof Error ? error.message : String(error)} ${String((error as { stderr?: unknown })?.stderr ?? "")}`;
+  return /HTTP 50[0-9]\b/.test(text);
+}
 
 type ReviewThreadGraphql = { data?: { repository?: { pullRequest?: { reviewThreads?: { nodes?: Array<{ id: string; isResolved: boolean; comments?: { nodes?: Array<{ databaseId: number | null }> } }> } } } } };
 type ReviewDecisionGraphql = { data?: { repository?: { pullRequest?: { reviewDecision?: PullRequestReviewDecision } } } };
@@ -222,7 +229,8 @@ function toViewerPullRequest(node: ViewerPullGraphql): ViewerPullRequest | null 
 }
 
 const KNOWN_BOTS = new Set(["pytorchmergebot", "pytorch-bot", "facebook-github-bot", "github-actions", "dependabot", "codecov", "meta-codesync"]);
-const LATEST_ACTIVITY_CONCURRENCY = 6;
+// Low on purpose: GitHub's secondary rate limit counts concurrent requests per account, browser included.
+const LATEST_ACTIVITY_CONCURRENCY = 2;
 const RECENTLY_CLOSED_DAYS = 14;
 
 function isBotLogin(user: LatestCommentRest["user"]): boolean {
@@ -283,13 +291,22 @@ export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): Git
     }
   }
 
-  async function ghGraphql<T>(query: string, variables: Record<string, string | number>, scope: string, options: { allowPartial?: boolean } = {}): Promise<T> {
+  async function ghGraphql<T>(query: string, variables: Record<string, string | number>, scope: string, options: { allowPartial?: boolean; retryOnServerError?: boolean } = {}): Promise<T> {
     const startedAt = performance.now();
     const args = ["api", "graphql", "-f", `query=${query}`];
     for (const [key, value] of Object.entries(variables)) args.push(typeof value === "number" ? "-F" : "-f", `${key}=${value}`);
     logger.info("github", `${scope} start`);
+    const run = () => runtime.execFile("gh", args, { maxBuffer: 50 * 1024 * 1024 });
     try {
-      const { stdout, stderr } = await runtime.execFile("gh", args, { maxBuffer: 50 * 1024 * 1024 }).catch((error: unknown) => {
+      const { stdout, stderr } = await run().catch(async (error: unknown) => {
+        // Heavy search queries occasionally 502/504 at GitHub's edge; one retry after a short pause usually succeeds.
+        if (options.retryOnServerError && isServerError(error)) {
+          logger.warn("github", `${scope} retrying after server error`, { error: error instanceof Error ? error.message.slice(-40) : String(error) });
+          await runtime.sleep(1500);
+          return run();
+        }
+        throw error;
+      }).catch((error: unknown) => {
         // gh exits non-zero when a GraphQL response carries partial errors but still prints the JSON body.
         const partialStdout = typeof (error as { stdout?: unknown })?.stdout === "string" ? (error as { stdout: string }).stdout : "";
         if (options.allowPartial && partialStdout.trim().startsWith("{")) return { stdout: partialStdout, stderr: "" };
@@ -556,15 +573,15 @@ export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): Git
   }
 
   async function fetchViewerPullRequests(login: string, scope: ViewerPullRequestScope): Promise<ViewerPullRequest[]> {
-    const query = `query($q: String!, $after: String) { search(query: $q, type: ISSUE, first: 50, after: $after) { pageInfo { hasNextPage endCursor } nodes { ... on PullRequest { number url state merged closedAt mergedAt isDraft reviewDecision updatedAt author { login } title mergeable headRefOid repository { nameWithOwner } reviewRequests(first: 10) { nodes { requestedReviewer { ... on User { login } ... on Team { name } } } } commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 100) { nodes { ... on CheckRun { name conclusion status } ... on StatusContext { context state } } } } } } } } } } }`;
+    const query = `query($q: String!, $after: String) { search(query: $q, type: ISSUE, first: 25, after: $after) { pageInfo { hasNextPage endCursor } nodes { ... on PullRequest { number url state merged closedAt mergedAt isDraft reviewDecision updatedAt author { login } title mergeable headRefOid repository { nameWithOwner } reviewRequests(first: 10) { nodes { requestedReviewer { ... on User { login } ... on Team { name } } } } commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 60) { nodes { ... on CheckRun { name conclusion status } ... on StatusContext { context state } } } } } } } } } } }`;
     const since = new Date(Date.parse(runtime.now()) - RECENTLY_CLOSED_DAYS * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const filter = scope === "open" ? "is:open" : `is:closed closed:>=${since}`;
     const prs: ViewerPullRequest[] = [];
     let after: string | null = null;
-    for (let page = 0; page < 3; page += 1) {
+    for (let page = 0; page < 2; page += 1) {
       const variables: Record<string, string> = { q: `is:pr archived:false author:${login} ${filter} sort:updated-desc` };
       if (after != null) variables.after = after;
-      const data: ViewerPullsGraphql = await ghGraphql<ViewerPullsGraphql>(query, variables, `viewer ${scope} PRs page ${page + 1}`, { allowPartial: true });
+      const data: ViewerPullsGraphql = await ghGraphql<ViewerPullsGraphql>(query, variables, `viewer ${scope} PRs page ${page + 1}`, { allowPartial: true, retryOnServerError: true });
       for (const node of data.search?.nodes ?? []) {
         const pr = toViewerPullRequest(node);
         if (pr != null) prs.push(pr);

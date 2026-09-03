@@ -357,6 +357,10 @@ export type InboxResponse = {
   fetchedAt: string | null;
   /** True while a background refresh is running; clients poll until it clears. */
   refreshing: boolean;
+  /** Enrichment (PR state, latest comments, PR board) still being filled in by later cycles. */
+  backlog: number;
+  /** Set while refreshes are paused after GitHub reported a rate limit. */
+  pausedUntil: string | null;
   items: InboxItem[];
   tiers: Record<InboxTier, number>;
   myPrs: ViewerPullRequest[];
