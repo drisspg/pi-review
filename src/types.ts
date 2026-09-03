@@ -272,3 +272,91 @@ export type AppState = {
   reviewMemory: ReviewMemoryRecord[];
   reviewProfile: ReviewMemoryProfile | null;
 };
+
+// Home-page inbox: GitHub notifications ranked into triage tiers plus the viewer's own open PRs.
+export type CheckRollupState = "SUCCESS" | "FAILURE" | "ERROR" | "PENDING" | "EXPECTED" | null;
+export type InboxSubjectKind = "pr" | "issue" | "other";
+export type InboxSubjectState = "OPEN" | "CLOSED" | "MERGED" | null;
+
+/** One raw GitHub notification thread, normalized from `GET /notifications`. */
+export type GitHubNotification = {
+  id: string;
+  reason: string;
+  unread: boolean;
+  updatedAt: string;
+  repo: string;
+  subjectKind: InboxSubjectKind;
+  subjectNumber: number | null;
+  subjectTitle: string;
+  latestCommentUrl: string | null;
+};
+
+/** Current state of a notification's PR/issue, batched through GraphQL so closed threads can be demoted. */
+export type InboxSubjectSnapshot = {
+  key: string;
+  kind: InboxSubjectKind;
+  url: string;
+  state: InboxSubjectState;
+  isDraft: boolean;
+  author: string | null;
+  reviewDecision: PullRequestReviewDecision;
+  checks: CheckRollupState;
+  updatedAt: string | null;
+};
+
+export type ViewerPullRequestScope = "open" | "recently-closed";
+
+export type ViewerPullRequest = {
+  key: string;
+  repo: string;
+  number: number;
+  title: string;
+  url: string;
+  state: "OPEN" | "MERGED" | "CLOSED";
+  closedAt: string | null;
+  isDraft: boolean;
+  reviewDecision: PullRequestReviewDecision;
+  mergeable: "MERGEABLE" | "CONFLICTING" | "UNKNOWN";
+  checks: CheckRollupState;
+  failingChecks: string[];
+  reviewers: string[];
+  updatedAt: string;
+  headSha: string;
+  localPrKey: string | null;
+};
+
+export type InboxTier = "needs-you" | "review-requests" | "your-prs" | "fyi" | "resolved";
+
+/** Who acted last on a thread; resolved from the notification's latest_comment_url for the top tiers only. */
+export type InboxLatestActivity = { author: string | null; bot: boolean; pingsViewer: boolean; snippet: string; url: string };
+
+export type InboxItem = {
+  id: string;
+  tier: InboxTier;
+  score: number;
+  reason: string;
+  title: string;
+  repo: string;
+  number: number | null;
+  kind: InboxSubjectKind;
+  url: string;
+  updatedAt: string;
+  state: InboxSubjectState;
+  isDraft: boolean;
+  author: string | null;
+  reviewDecision: PullRequestReviewDecision;
+  checks: CheckRollupState;
+  localPrKey: string | null;
+  latest: InboxLatestActivity | null;
+  why: string[];
+};
+
+export type InboxResponse = {
+  login: string | null;
+  fetchedAt: string;
+  items: InboxItem[];
+  tiers: Record<InboxTier, number>;
+  myPrs: ViewerPullRequest[];
+  recentlyClosedPrs: ViewerPullRequest[];
+  warnings: string[];
+};

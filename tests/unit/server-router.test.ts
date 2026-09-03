@@ -120,6 +120,17 @@ function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
     async gpuWorkspaceStatusResponse() {
       return { workspace: null };
     },
+    inboxApi: {
+      async done(payload) {
+        return { done: payload.threadIds as string[] };
+      },
+      async inbox(options) {
+        return { login: "viewer", fetchedAt: "now", items: [], tiers: { "needs-you": 0, "review-requests": 0, "your-prs": 0, fyi: 0, resolved: 0 }, myPrs: [], recentlyClosedPrs: [], warnings: options?.refresh ? ["refreshed"] : [] };
+      },
+      async mute(payload) {
+        return { muted: payload.threadIds as string[] };
+      },
+    },
     logger,
     piApi: {
       async ask(payload) {
@@ -275,6 +286,21 @@ test("server route parses JSON and dispatches POST feature routes", async () => 
   assert.equal(res.statusCode, 200);
   assert.deepEqual(jsonBody(res), { answer: "answer" });
   assert.deepEqual(calls, [{ prKey: "pr", prompt: "prompt" }]);
+});
+
+test("server route serves the inbox and forwards refresh + done payloads", async () => {
+  const route = createServerRoute(baseDeps());
+
+  const cached = await routeRequest(route, "GET", "/api/inbox");
+  assert.equal(cached.statusCode, 200);
+  assert.deepEqual((jsonBody(cached) as { warnings: string[] }).warnings, []);
+
+  const refreshed = await routeRequest(route, "GET", "/api/inbox?refresh=1");
+  assert.deepEqual((jsonBody(refreshed) as { warnings: string[] }).warnings, ["refreshed"]);
+
+  const done = await routeRequest(route, "POST", "/api/inbox/done", { threadIds: ["t1", "t2"] });
+  assert.equal(done.statusCode, 200);
+  assert.deepEqual(jsonBody(done), { done: ["t1", "t2"] });
 });
 
 test("server route gets local draft reviews", async () => {

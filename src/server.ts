@@ -14,8 +14,9 @@ import { createDraftReviewApi } from "./draft-review-api.js";
 import { createFileApi, defaultFileApiDeps } from "./file-api.js";
 import { createGitHubDraftReviewApi, defaultGitHubDraftReviewApiDeps } from "./github-draft-review-api.js";
 import { gpuWorkspaceCreateResponse, gpuWorkspaceDeleteResponse, gpuWorkspaceExecResponse, gpuWorkspaceStatusResponse } from "./gpu-workspace-api.js";
+import { createInboxApi } from "./inbox-api.js";
 import { createGitInterdiff } from "./interdiff-git.js";
-import { addIssueComment, addPendingPullRequestReviewThread, compareCommits, createPendingPullRequestReview, editIssueComment, editReviewComment, editReviewSummary, fetchCommitChecks, fetchFileText, fetchPendingPullRequestReview, fetchPullRequestReviewData, replyToReviewComment, submitPullRequestReview } from "./github.js";
+import { addIssueComment, addPendingPullRequestReviewThread, compareCommits, createPendingPullRequestReview, editIssueComment, editReviewComment, editReviewSummary, fetchCommitChecks, fetchFileText, fetchLatestActivity, fetchNotifications, fetchPendingPullRequestReview, fetchPullRequestReviewData, fetchSubjectSnapshots, fetchViewerLogin, fetchViewerPullRequests, markNotificationDone, replyToReviewComment, submitPullRequestReview, unsubscribeNotification } from "./github.js";
 import { logger } from "./logger.js";
 import { parsePullRequestRef, prKey } from "./pr.js";
 import { createPiApi } from "./pi-api.js";
@@ -70,6 +71,8 @@ const fileApi = createFileApi(defaultFileApiDeps(fetchFileText, setFileViewed, a
   await execFileAsync("open", [url]);
 }));
 const githubDraftReviewApi = createGitHubDraftReviewApi(defaultGitHubDraftReviewApiDeps({ addPendingPullRequestReviewThread, createPendingPullRequestReview, fetchPendingPullRequestReview }));
+// GitHub asks pollers to wait 60s between notification reads (X-Poll-Interval); the home page refresh button bypasses this.
+const inboxApi = createInboxApi({ cacheMs: 60_000, fetchLatestActivity, fetchNotifications, fetchSubjectSnapshots, fetchViewerLogin, fetchViewerPullRequests, listRecentPullRequests, markNotificationDone, now: () => new Date().toISOString(), unsubscribeNotification });
 const piApi = createPiApi({ askPi, piActivity, piDiagnostics, piJobRunner, setPiModel });
 const piTerminalApi = createPiTerminalApi({ deleteSession: piTerminalManager.deleteSession });
 const piTerminalDraftApi = createPiTerminalDraftApi({ appendDraftReviewComment, contextForPr: piSessionReviewContext, notifyDraftReview: piTerminalManager.broadcastDraftReview });
@@ -153,6 +156,7 @@ const route = createServerRoute({
   gpuWorkspaceDeleteResponse,
   gpuWorkspaceExecResponse,
   gpuWorkspaceStatusResponse,
+  inboxApi,
   logger,
   piApi,
   piTerminalApi,

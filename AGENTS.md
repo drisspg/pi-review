@@ -14,10 +14,16 @@ src/                    Node server (TypeScript, ESM, run via tsx)
   *-api.ts              One injectable module per feature contract (pr, comment, draft-review,
                         review-prompt, review-submit, review-memory, saved-analysis, file,
                         gpu-workspace, pi, pi-terminal, ask-stream, review-archive, shell,
-                        usage, blame, …)
+                        usage, blame, inbox, …)
+  inbox-api.ts          Home-page inbox: pure `rankInbox` (GitHub notifications → tiers
+                        needs-you / review-requests / your-prs / fyi / resolved, scored by
+                        reason + recency + PR state) and `applyLatestActivity` (bot chatter
+                        sinks, direct pings float); `GET /api/inbox` (60s cache, `?refresh=1`),
+                        `POST /api/inbox/done|mute` write through to GitHub
   state.ts              StateStore: JSON persistence of AppState (PRs, drafts, viewed files,
                         AI/guide/focus-scan records, reviewer memory) at PI_REVIEW_STATE_PATH
-  github.ts             gh api / GraphQL calls (PR data, pending reviews, comments)
+  github.ts             gh api / GraphQL calls (PR data, pending reviews, comments,
+                        notifications + batched PR/issue snapshots + viewer open PRs)
   worktrees.ts          Per-PR git worktree reuse
   pi-session.ts         Pi agent sessions (ask, prewarm, activity, diagnostics, model select)
   pi-terminal*.ts       Native Pi terminals (node-pty + WebSocket), persisted across reloads
@@ -29,7 +35,8 @@ web/src/                React frontend (Vite)
                         notes + Pi terminal; any panel can be maximized to fill the overview
                         (Esc restores; siblings stay mounted so the terminal session survives);
                         reviewed stops persist via guide stepStates),
-                        FileNavigator, FileDiff/DiffRowView, ThreadBox, FocusAreaInline,
+                        FileNavigator, FileDiff/DiffRowView (files marked viewed-and-unchanged
+                        start collapsed), ThreadBox, FocusAreaInline,
                         GitHubDraftReviewPanel, ReviewSummary, AiReviewPanel, and the modals
                         (Pi settings, memory, GPU workspace, sessions, logs)
   styles.css            Single stylesheet, ~5k lines. Order: design tokens + 3 theme blocks →
@@ -38,7 +45,11 @@ web/src/                React frontend (Vite)
                         markdown → review summary/drafts → start page → Pi panel → modals →
                         media queries → mermaid/schematic/file snippets
   components/           Small shared pieces (Button→.ui-button, Modal→ModalShell, ActionMenu,
-                        Tabs, Threads, Markdown*, Mermaid, SchematicDiagram, PiTerminal)
+                        Tabs, Threads (resolved GitHub threads start collapsed), Markdown*,
+                        Mermaid, SchematicDiagram, PiTerminal, Inbox (start-page triage list +
+                        "Your PRs" board grouped per collapsible repo, newest first, Open / Closed
+                        (last 14 days) tabs; j/k ← → m g keyboard triage; opening a PR row marks its thread
+                        done))
   lib/                  diff parsing, comment helpers, guide steps, overview panel sections
                         (overview.ts parses the code-walk prompt's four-section contract, with a
                         free-form fallback), schematic.ts (typed JSON contract behind fenced
@@ -102,6 +113,11 @@ Backend contract endpoints should stay cheap enough for iterative agent prototyp
 route adds filesystem, GitHub, Pi/LLM, GPU, or subprocess work, keep the expensive part explicit
 in the contract and test the pure transformation/validation layer separately.
 
+`fetchPullRequestReviewData` may be served from the TTL cache (`PI_REVIEW_PR_CACHE_MS`), so it
+must stay a pure GitHub snapshot: local mutable state (e.g. viewed-file flags) is overlaid at
+request time in `pr-api.ts` `hydrateReviewResponse`, keyed by file fingerprint so a changed file
+drops its stale viewed mark.
+
 ## Frontend / UX iteration workflow
 
 For CSS/markup work, drive the running app with `agent-browser` (see
@@ -154,7 +170,7 @@ Token layer (defined once in `:root`; use these, never re-hardcode):
   deliberately slightly stronger than deletions — keep that asymmetry).
 - Depth: `--shadow-raised` / `--shadow-popover` / `--shadow-modal` + `--overlay-bg`; shadows only
   on floating layers, all theme-aware.
-- One sticky surface: with a PR open, the `.review-bar` (mode tabs + files chip + View menu +
+- One sticky surface: with a PR open, the `.review-bar` (`π` home link + mode tabs + files chip + View menu +
   panel buttons + trailing "Tools" kebab menu holding New review / Open on GitHub / Refresh /
   Tools items / Theme select; class also `files-toolbar` for e2e) sticks at top 0, exactly
   `--sticky-toolbar-h` tall. The app toolbar renders only on the start page. The
@@ -195,8 +211,10 @@ Component conventions:
 - Treat e2e failures as real regressions; verify against a clean `HEAD` worktree
   (`git worktree add /tmp/pi-review-head HEAD` + symlinked `node_modules`) before assuming a
   failure is pre-existing. Known machine caveat: on hosts where agent shells cannot spawn Chromium
-  (`bootstrap_check_in … Permission denied`), run with a wrapper config that adds
-  `launchOptions: { args: ["--single-process", "--no-sandbox"] }` and one test per invocation;
+  (`bootstrap_check_in … Permission denied`), set `PI_REVIEW_E2E_SINGLE_PROCESS=1` (adds
+  `--single-process --no-sandbox` launch args in playwright.config.ts) and run one test per
+  invocation — start the server once yourself and use `PI_REVIEW_FAST_TESTS=1` per-test runs so
+  it's reused;
   under that harness, "minimizes focus area links" and "copies local draft comments" fail on
   `HEAD` too — everything else must pass. Never store wrapper configs or state you care about in
   `test-results/` (Playwright wipes it at startup).

@@ -7,6 +7,7 @@ import type { CommentApi } from "./comment-api.js";
 import type { DraftReviewApi } from "./draft-review-api.js";
 import type { FileApi } from "./file-api.js";
 import type { GitHubDraftReviewApi } from "./github-draft-review-api.js";
+import type { InboxApi } from "./inbox-api.js";
 import type { PiApi } from "./pi-api.js";
 import type { PiTerminalApi } from "./pi-terminal-api.js";
 import type { PiTerminalDraftApi } from "./pi-terminal-draft-api.js";
@@ -34,6 +35,7 @@ export type ServerRouteDeps = {
   gpuWorkspaceDeleteResponse: (payload: Record<string, unknown>) => Promise<Record<string, unknown>>;
   gpuWorkspaceExecResponse: (payload: Record<string, unknown>) => Promise<Record<string, unknown>>;
   gpuWorkspaceStatusResponse: (payload: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  inboxApi: InboxApi;
   logger: ServerLogger;
   piApi: PiApi;
   piTerminalApi: PiTerminalApi;
@@ -75,6 +77,8 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
     "/api/file/text": (payload) => deps.fileApi.text(payload),
     "/api/focus-scan/save": (payload) => deps.savedAnalysisApi.saveFocusScan(payload),
     "/api/gpu/workspaces/status": (payload) => deps.gpuWorkspaceStatusResponse(payload),
+    "/api/inbox/done": (payload) => deps.inboxApi.done(payload),
+    "/api/inbox/mute": (payload) => deps.inboxApi.mute(payload),
     "/api/guide-review/save": (payload) => deps.savedAnalysisApi.saveGuideReview(payload),
     "/api/overview/save": (payload) => deps.savedAnalysisApi.saveOverview(payload),
     "/api/pi/diagnostics": (payload) => deps.piApi.diagnostics(payload),
@@ -115,6 +119,11 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
 
     if (req.method === "GET" && url.pathname === "/api/prs") {
       sendJson(res, 200, await deps.shellApi.prs());
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/inbox") {
+      sendJson(res, 200, await deps.inboxApi.inbox({ refresh: url.searchParams.get("refresh") === "1" }));
       return;
     }
 
