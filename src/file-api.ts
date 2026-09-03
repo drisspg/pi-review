@@ -2,10 +2,12 @@ import { sep, resolve } from "node:path";
 
 import { parsePullRequestRef } from "./pr.js";
 import type { FileReviewState, PullRequestRef } from "./types.js";
-import { worktreeDirForRef } from "./worktrees.js";
+import { repoDirForRef, worktreeDirForRef } from "./worktrees.js";
 
 export type FileApiDeps = {
   fetchFileText: (ref: PullRequestRef, path: string, sha: string) => Promise<string>;
+  /** `git show <sha>:<path>` in the PR's local clone; null when the clone or object is unavailable. */
+  readLocalFileText: (ref: PullRequestRef, path: string, sha: string) => Promise<string | null>;
   now: () => string;
   openUrl: (url: string) => Promise<void>;
   parsePullRequestRef: (input: string) => PullRequestRef;
@@ -19,8 +21,17 @@ export type FileApi = {
   open: (payload: Record<string, unknown>) => Promise<{ target: string }>;
 };
 
-export const defaultFileApiDeps = (fetchFileText: FileApiDeps["fetchFileText"], setFileViewed: FileApiDeps["setFileViewed"], openUrl: FileApiDeps["openUrl"]): FileApiDeps => ({
+export const defaultFileApiDeps = (fetchFileText: FileApiDeps["fetchFileText"], setFileViewed: FileApiDeps["setFileViewed"], openUrl: FileApiDeps["openUrl"], git: (args: string[], cwd: string) => Promise<string>, exists: (path: string) => boolean): FileApiDeps => ({
   fetchFileText,
+  async readLocalFileText(ref, path, sha) {
+    const repoDir = repoDirForRef(ref);
+    if (!exists(repoDir) || !/^[0-9a-f]{7,40}$/i.test(sha)) return null;
+    try {
+      return (await git(["show", `${sha}:${path}`], repoDir)).replace(/\r\n/g, "\n");
+    } catch {
+      return null;
+    }
+  },
   now: () => new Date().toISOString(),
   openUrl,
   parsePullRequestRef,
@@ -56,7 +67,9 @@ export function createFileApi(deps: FileApiDeps): FileApi {
   async function text(payload: Record<string, unknown>): Promise<{ text: string }> {
     const ref = refFromPayload(payload, deps.parsePullRequestRef);
     if (typeof payload.path !== "string" || typeof payload.sha !== "string") throw new Error("Expected path and sha");
-    return { text: await deps.fetchFileText(ref, payload.path, payload.sha) };
+    // The PR clone already has base and head objects; reading locally keeps file text off GitHub's rate budget.
+    const local = await deps.readLocalFileText(ref, payload.path, payload.sha);
+    return { text: local ?? await deps.fetchFileText(ref, payload.path, payload.sha) };
   }
 
   async function open(payload: Record<string, unknown>): Promise<{ target: string }> {

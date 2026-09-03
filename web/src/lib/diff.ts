@@ -29,6 +29,18 @@ function nextPythonTripleString(line: string, active: string | null): string | n
   }
 }
 
+/** Python-only for now: seed texts let a hunk that starts mid-docstring highlight as a string. */
+export type PatchSeedTexts = { oldText?: string | null; newText?: string | null };
+
+/** Triple-quote state just before `line` (1-based), scanning the file from the top. */
+export function tripleStringStateBefore(text: string | null | undefined, line: number): string | null {
+  if (text == null || line <= 1) return null;
+  let state: string | null = null;
+  const lines = text.split("\n");
+  for (let index = 0; index < Math.min(line - 1, lines.length); index += 1) state = nextPythonTripleString(lines[index], state);
+  return state;
+}
+
 function rowHasKind(row: DiffRow, kind: string): boolean {
   return row.kind.split(" ").includes(kind);
 }
@@ -46,7 +58,7 @@ function rowsWithFullHunks(rows: DiffRow[]): DiffRow[] {
   return nextRows;
 }
 
-export function parsePatchRows(patch: string | undefined): DiffRow[] {
+export function parsePatchRows(patch: string | undefined, seeds?: PatchSeedTexts): DiffRow[] {
   if (patch == null) return [];
   const rows: DiffRow[] = [];
   let oldLine = 0;
@@ -60,8 +72,8 @@ export function parsePatchRows(patch: string | undefined): DiffRow[] {
       oldLine = Number.parseInt(hunk[1], 10);
       newLine = Number.parseInt(hunk[2], 10);
       currentHunk = line;
-      oldTripleString = null;
-      newTripleString = null;
+      oldTripleString = tripleStringStateBefore(seeds?.oldText, oldLine);
+      newTripleString = tripleStringStateBefore(seeds?.newText, newLine);
       rows.push({ kind: "hunk", oldLine: null, newLine: null, text: line, hunk: currentHunk });
     } else if (line.startsWith("+")) {
       const row = diffRowWithSyntax({ kind: "added", oldLine: null, newLine, text: line, hunk: currentHunk }, newTripleString);

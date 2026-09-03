@@ -47,7 +47,7 @@ export type ServerRouteDeps = {
   reviewSubmitRouteApi: ReviewSubmitRouteApi;
   savedAnalysisApi: SavedAnalysisApi;
   sendStatic: (res: ServerResponse, pathname: string, head?: boolean) => Promise<void>;
-  serverConfig: () => { autoReviews: boolean };
+  serverConfig: () => { autoReviews: boolean; localFileText?: boolean };
   shellApi: ShellApi;
   usageApi: { recordClientEvents: (payload: Record<string, unknown>) => { recorded: number } };
 };

@@ -69,7 +69,7 @@ const commentApi = createCommentApi(defaultCommentApiDeps({ addIssueComment, edi
 const draftReviewApi = createDraftReviewApi({ clearDraftReview, getDraftReview, now: () => new Date().toISOString(), saveDraftReview });
 const fileApi = createFileApi(defaultFileApiDeps(fetchFileText, setFileViewed, async (url) => {
   await execFileAsync("open", [url]);
-}));
+}, async (args, cwd) => (await execFileAsync("git", args, { cwd, maxBuffer: 50 * 1024 * 1024 })).stdout, existsSync));
 const githubDraftReviewApi = createGitHubDraftReviewApi(defaultGitHubDraftReviewApiDeps({ addPendingPullRequestReviewThread, createPendingPullRequestReview, fetchPendingPullRequestReview }));
 // The inbox snapshot lives next to the state file (like the usage log) so dev/test instances never share one.
 const inboxSnapshotPath = `${defaultUsageLogPath().replace(/\.usage\.jsonl$/, "")}.inbox.json`;
@@ -169,7 +169,8 @@ async function sendStatic(res: ServerResponse, pathname: string, head = false): 
 }
 
 const route = createServerRoute({
-  serverConfig: () => ({ autoReviews: process.env.PI_REVIEW_DISABLE_AUTO_REVIEWS !== "1" }),
+  // localFileText advertises that /api/file/text is served from the PR clone, so the web app may fetch file text freely.
+  serverConfig: () => ({ autoReviews: process.env.PI_REVIEW_DISABLE_AUTO_REVIEWS !== "1", localFileText: true }),
   askStreamApi,
   blameApi,
   commentApi,

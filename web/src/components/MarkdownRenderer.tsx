@@ -6,8 +6,9 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkGemoji from "remark-gemoji";
 import remarkGfm from "remark-gfm";
 
-import { api, errorMessage, openFileInEditor } from "../api";
+import { errorMessage, openFileInEditor } from "../api";
 import { writeClipboard } from "../lib/dom";
+import { loadFileText } from "../lib/file-text";
 import { highlightedHtml, languageForPath } from "../lib/highlight";import { prUrlForNumber } from "../lib/pr";
 import { Button } from "./Button";
 import { InlineSnippetsContext, type FileLinkContext } from "./MarkdownContext";
@@ -26,20 +27,6 @@ const pullRequestReferenceUrlPrefix = "/pi-review-pr/";
 type FileReference = { path: string; line: number; endLine?: number };
 
 const SNIPPET_CONTEXT_LINES = 2;
-const fileTextCache = new Map<string, Promise<string>>();
-
-async function loadFileText(prUrl: string, path: string, sha: string): Promise<string> {
-  const key = `${prUrl}::${sha}::${path}`;
-  const existing = fileTextCache.get(key);
-  if (existing != null) return existing;
-  const promise = api<{ text: string }>("/api/file/text", { method: "POST", body: JSON.stringify({ prUrl, path, sha }) }).then((response) => response.text).catch((err) => {
-    fileTextCache.delete(key);
-    throw err;
-  });
-  fileTextCache.set(key, promise);
-  return promise;
-}
-
 function InlineFileSnippet({ context, reference }: { context: FileLinkContext; reference: FileReference }) {
   const [state, setState] = React.useState<{ status: "loading" | "ready" | "error"; lines?: string[]; error?: string }>({ status: "loading" });
   const [collapsed, setCollapsed] = React.useState(false);

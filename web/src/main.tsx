@@ -13,7 +13,8 @@ import { InboxPanel } from "./components/Inbox";
 import { ExistingComments, ExistingReviewThread } from "./components/Threads";
 import type { PiTerminalTarget } from "./components/PiTerminal";
 import { buildDiffAnnotationIndex, commentTarget, commentThreadDomId, diffAnnotationTargetKey, targetKey, targetLabel, type DiffAnnotationIndex } from "./lib/comments";
-import { contextRowsFromText, hunkNewStart, isTargetInSelection, lastNewLine, parsePatchRows, parsePatchSetSections, targetFromPoint, targetFromRow } from "./lib/diff";
+import { contextRowsFromText, hunkNewStart, isTargetInSelection, lastNewLine, parsePatchRows, parsePatchSetSections, targetFromPoint, targetFromRow, type PatchSeedTexts } from "./lib/diff";
+import { loadFileText } from "./lib/file-text";
 import { writeClipboard } from "./lib/dom";
 import { parseFocusAreas } from "./lib/focus";
 import { parseGuideChapters, type GuideChapter } from "./lib/guide";
@@ -37,10 +38,18 @@ type OpenPrOptions = {
 const PiTerminal = React.lazy(async () => ({ default: (await import("./components/PiTerminal")).PiTerminal }));
 const PiTerminalPrContext = createContext<{ prKey: string; headSha: string; onDraftReview: (draftReview: DraftReview) => void } | null>(null);
 
-let autoReviewsPromise: Promise<boolean> | null = null;
+type ServerConfig = { autoReviews: boolean; localFileText?: boolean };
+let serverConfigPromise: Promise<ServerConfig> | null = null;
+function serverConfig(): Promise<ServerConfig> {
+  serverConfigPromise ??= api<ServerConfig>("/api/config").catch(() => ({ autoReviews: true }));
+  return serverConfigPromise;
+}
 function autoReviewsEnabled(): Promise<boolean> {
-  autoReviewsPromise ??= api<{ autoReviews: boolean }>("/api/config").then((config) => config.autoReviews).catch(() => true);
-  return autoReviewsPromise;
+  return serverConfig().then((config) => config.autoReviews);
+}
+/** Only servers that read file text from the local clone may be asked for it speculatively; older ones would hit GitHub per file. */
+function localFileTextAvailable(): Promise<boolean> {
+  return serverConfig().then((config) => config.localFileText === true);
 }
 
 function terminalSessionId(prefix: string, value: string): string {
@@ -2088,9 +2097,38 @@ type RowPlumbingProps = {
   setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"];
 };
 
+/**
+ * A hunk that starts inside a Python docstring cannot know it from the patch
+ * alone, so for Python files whose hunks start past line 1 we read the base and
+ * head file text (served from the local clone) and seed the parser with the
+ * triple-quote state at each hunk start.
+ */
+function usePatchSeedTexts(file: PullFile, pr: StoredPullRequest): PatchSeedTexts | undefined {
+  const needsSeeds = useMemo(() => languageForPath(file.filename) === "python" && (file.patch ?? "").split("\n").some((line) => { const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)/.exec(line); return hunk != null && (Number.parseInt(hunk[1], 10) > 1 || Number.parseInt(hunk[2], 10) > 1); }), [file.filename, file.patch]);
+  const [seeds, setSeeds] = useState<PatchSeedTexts | undefined>(undefined);
+  useEffect(() => {
+    if (!needsSeeds) return;
+    let cancelled = false;
+    const hasRemoved = (file.patch ?? "").split("\n").some((line) => line.startsWith("-") && !line.startsWith("---"));
+    const wantOld = hasRemoved && file.status !== "added";
+    void localFileTextAvailable().then((available) => {
+      if (!available || cancelled) return null;
+      return Promise.all([
+        wantOld ? loadFileText(pr.url, file.previous_filename ?? file.filename, pr.baseSha).catch(() => null) : Promise.resolve(null),
+        file.status === "removed" ? Promise.resolve(null) : loadFileText(pr.url, file.filename, pr.headSha).catch(() => null),
+      ]).then(([oldText, newText]) => {
+        if (!cancelled && (oldText != null || newText != null)) setSeeds({ oldText, newText });
+      });
+    });
+    return () => { cancelled = true; };
+  }, [needsSeeds, file.filename, file.previous_filename, file.status, file.patch, pr.url, pr.baseSha, pr.headSha]);
+  return seeds;
+}
+
 function FileDiff({ file, review, openFiles, setOpenFiles, expandedNeighborRows, expandNeighbor, setThreads, setViewed, drafts, setDrafts, editingDraftId, setEditingDraftId, dragSelection, beginDrag, updateDrag, finishDrag, handleRowClick, refreshGithubActivity, commentCollapseSignal, commentsCollapsed, diffViewMode, focusAreas, activeFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds }: Omit<DiffProps, "threads" | "setActiveFocusAreaId"> & { file: PullFile }) {
   const annotations = useContext(DiffAnnotationsContext);
-  const rows = useMemo(() => parsePatchRows(file.patch), [file.patch]);
+  const seedTexts = usePatchSeedTexts(file, review.pr);
+  const rows = useMemo(() => parsePatchRows(file.patch, seedTexts), [file.patch, seedTexts]);
   const patchSetSections = useMemo(() => parsePatchSetSections(file.patch), [file.patch]);
   const fileReview = review.fileReviews.find((state) => state.path === file.filename);
   const open = openFiles[file.filename] ?? true;

@@ -19,6 +19,10 @@ function fakeDeps() {
         textRequests.push({ ref: requestRef, path, sha });
         return "file text";
       },
+      localText: null as string | null,
+      async readLocalFileText(_ref: PullRequestRef, _path: string, _sha: string) {
+        return this.localText;
+      },
       now() {
         return "2026-06-04T00:00:00.000Z";
       },
@@ -80,4 +84,16 @@ test("file API open rejects paths escaping the PR worktree", async () => {
 
   await assert.rejects(createFileApi(deps).open({ prUrl: "https://github.com/pytorch/pytorch/pull/1", path: "../other.ts" }), /escapes PR worktree/);
   assert.deepEqual(openedUrls, []);
+});
+
+test("file API prefers the local clone for file text and falls back to GitHub", async () => {
+  const fake = fakeDeps();
+  fake.deps.localText = "local text";
+  const api = createFileApi(fake.deps);
+  assert.deepEqual(await api.text({ prUrl: "https://github.com/pytorch/pytorch/pull/1", path: "a.py", sha: "abc" }), { text: "local text" });
+  assert.equal(fake.textRequests.length, 0, "no GitHub fetch when the clone has the object");
+
+  fake.deps.localText = null;
+  assert.deepEqual(await api.text({ prUrl: "https://github.com/pytorch/pytorch/pull/1", path: "a.py", sha: "abc" }), { text: "file text" });
+  assert.equal(fake.textRequests.length, 1);
 });

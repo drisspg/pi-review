@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parsePatchRows, parsePatchSetSections } from "../../web/src/lib/diff.js";
+import { parsePatchRows, parsePatchSetSections, tripleStringStateBefore } from "../../web/src/lib/diff.js";
 
 test("patchset parser unwraps added patch files into inner sections", () => {
   const sections = parsePatchSetSections(`@@ -0,0 +1,12 @@
@@ -99,4 +99,20 @@ test("patchset parser ignores ordinary patches", () => {
   assert.deepEqual(parsePatchSetSections(`@@ -1 +1 @@
 -old
 +new`), []);
+});
+
+test("patch rows seed the docstring state at a hunk that starts mid-docstring", () => {
+  const newText = ["def f():", '    """', "    Given an expr with a single symbol.", '    """', "    if x:", "        return None", ""].join("\n");
+  const patch = ["@@ -3,4 +3,4 @@ def f():", "     Given an expr with a single symbol.", '     """', "-    if x:", "+    if not x:", "         return None"].join("\n");
+  const unseeded = parsePatchRows(patch);
+  assert.equal(unseeded.find((row) => row.text.includes("Given an expr"))?.syntaxContext, undefined, "without file text the parser cannot know it is inside a docstring");
+
+  const rows = parsePatchRows(patch, { newText, oldText: newText.replace("if not x", "if x") });
+  assert.equal(rows.find((row) => row.text.includes("Given an expr"))?.syntaxContext, "string");
+  assert.equal(rows.find((row) => row.text.includes('"""'))?.syntaxContext, "string", "the closing quotes still render as string");
+  assert.equal(rows.find((row) => row.text.includes("if not x"))?.syntaxContext, undefined);
+  assert.equal(rows.find((row) => row.text.includes("return None"))?.syntaxContext, undefined);
+  assert.equal(tripleStringStateBefore(newText, 3), '"""');
+  assert.equal(tripleStringStateBefore(newText, 5), null);
+  assert.equal(tripleStringStateBefore(null, 3), null);
 });
