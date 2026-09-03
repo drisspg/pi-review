@@ -9,6 +9,7 @@ import piReviewTerminalExtension from "../../src/pi-review-terminal-extension.js
 test("terminal extension routes inline comment requests to Pi Review", async () => {
   let tool: { promptGuidelines?: string[]; execute: (...args: unknown[]) => Promise<{ content: Array<{ text: string }> }> } | null = null;
   let promptHandler: ((event: { systemPrompt: string }) => { systemPrompt: string }) | null = null;
+  let toolCallHandler: ((event: { toolName: string }) => { block: boolean; reason?: string } | undefined) | null = null;
   const requests: unknown[] = [];
   const server = createServer((request, response) => {
     let body = "";
@@ -32,13 +33,26 @@ test("terminal extension routes inline comment requests to Pi Review", async () 
   try {
     piReviewTerminalExtension({
       registerTool(definition) { tool = definition as typeof tool; },
-      on(event, handler) { if (event === "before_agent_start") promptHandler = handler as typeof promptHandler; },
+      on(event, handler) {
+        if (event === "before_agent_start") promptHandler = handler as typeof promptHandler;
+        if (event === "tool_call") toolCallHandler = handler as typeof toolCallHandler;
+      },
     } as unknown as ExtensionAPI);
     assert.ok(tool != null);
     assert.match(tool.promptGuidelines?.join("\n") ?? "", /instead of editing repository files/);
     const systemPrompt = promptHandler?.({ systemPrompt: "base" }).systemPrompt ?? "";
     assert.match(systemPrompt, /never modify repository files/);
     assert.match(systemPrompt, /proposed fixes, refactors, or diffs are also delivered as draft_review_comment drafts/);
+
+    // Review checkouts are read-only: file-editing tools are hard-blocked, inspection tools pass through.
+    assert.ok(toolCallHandler != null);
+    for (const toolName of ["edit", "write"]) {
+      const blocked = toolCallHandler({ toolName });
+      assert.equal(blocked?.block, true);
+      assert.match(blocked?.reason ?? "", /draft_review_comment/);
+    }
+    assert.equal(toolCallHandler({ toolName: "read" }), undefined);
+    assert.equal(toolCallHandler({ toolName: "bash" }), undefined);
 
     const result = await tool.execute("call", { body: "Please cover this case." }, undefined, undefined, undefined);
     assert.match(result.content[0].text, /Created editable review draft/);

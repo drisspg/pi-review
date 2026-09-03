@@ -81,6 +81,11 @@ export default function piReviewTerminalExtension(pi: ExtensionAPI) {
   });
 
   pi.on("before_agent_start", (event) => ({
-    systemPrompt: `${event.systemPrompt}\n\nPi Review comment semantics: the checkout is a read-only review workspace — never modify repository files. Requests to add, leave, post, write, or put a comment on the PR or current line mean creating an editable review draft with draft_review_comment, and proposed fixes, refactors, or diffs are also delivered as draft_review_comment drafts with the proposed code in the body (a \`\`\`suggestion block when it replaces the anchored lines, otherwise a fenced diff).`,
+    systemPrompt: `${event.systemPrompt}\n\nPi Review comment semantics: the checkout is a read-only review workspace — never modify repository files (the edit and write tools are blocked in this session). Requests to add, leave, post, write, or put a comment on the PR or current line mean creating an editable review draft with draft_review_comment, and proposed fixes, refactors, or diffs are also delivered as draft_review_comment drafts with the proposed code in the body (a \`\`\`suggestion block when it replaces the anchored lines, otherwise a fenced diff).`,
   }));
+
+  pi.on("tool_call", (event) => {
+    if (event.toolName !== "edit" && event.toolName !== "write") return;
+    return { block: true, reason: "Pi Review checkouts are read-only. Propose this change as a draft review comment instead: call draft_review_comment with the proposed code in the body (a ```suggestion block when it replaces the anchored lines, otherwise a fenced diff)." };
+  });
 }
