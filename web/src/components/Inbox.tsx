@@ -293,7 +293,7 @@ export function InboxPanel({ openPr }: { openPr: (url: string) => Promise<void> 
           <span>{visible.length} shown</span>
         </footer>
       </div>
-      <MyPullRequests open={data?.myPrs ?? []} closed={data?.recentlyClosedPrs ?? []} loading={data == null || (data.fetchedAt == null && refreshing)} login={data?.login ?? null} />
+      <MyPullRequests open={data?.myPrs ?? []} closed={data?.recentlyClosedPrs ?? []} loading={data == null || (data.fetchedAt == null && refreshing)} login={data?.login ?? null} openPr={openPr} />
     </div>
   </section>;
 }
@@ -309,7 +309,7 @@ function readCollapsedRepos(): Set<string> {
   }
 }
 
-function MyPullRequests({ open, closed, loading, login }: { open: ViewerPullRequest[]; closed: ViewerPullRequest[]; loading: boolean; login: string | null }) {
+function MyPullRequests({ open, closed, loading, login, openPr }: { open: ViewerPullRequest[]; closed: ViewerPullRequest[]; loading: boolean; login: string | null; openPr: (url: string) => Promise<void> }) {
   const [view, setView] = useState<MyPrView>("open");
   const [collapsedRepos, setCollapsedRepos] = useState<Set<string>>(readCollapsedRepos);
   function toggleRepo(repo: string): void {
@@ -345,13 +345,16 @@ function MyPullRequests({ open, closed, loading, login }: { open: ViewerPullRequ
           </h4>
           {!collapsed && group.prs.map((pr) => {
             const status = myPrStatus(pr);
-            return <a key={pr.key} className={`my-pr-row${view === "open" && needsAttention(pr) ? " attention" : ""}`} href={pr.url} target="_blank" rel="noopener" title={pr.failingChecks.length > 0 ? `Failing: ${pr.failingChecks.slice(0, 5).join("\n")}` : undefined}>
+            return <div key={pr.key} className={`my-pr-row${view === "open" && needsAttention(pr) ? " attention" : ""}`} title={pr.failingChecks.length > 0 ? `Failing: ${pr.failingChecks.slice(0, 5).join("\n")}` : undefined}>
               <span className={`my-pr-status status-${status.tone}`}>{status.icon}</span>
-              <span className="my-pr-body">
+              <a className="my-pr-body" href={pr.url} onClick={(event) => { if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey) return; event.preventDefault(); logUsage("inbox:open-my-pr", { state: pr.state }); void openPr(pr.url); }}>
                 <span className="my-pr-title">{pr.title}</span>
                 <span className="my-pr-meta"><span>#{pr.number}</span>{pr.isDraft && pr.state === "OPEN" && <span>draft</span>}{status.details.map((detail) => <span key={detail}>{detail}</span>)}<span>{relativeTime(pr.updatedAt)}</span></span>
+              </a>
+              <span className="my-pr-actions">
+                <Button variant="icon" title="Open on GitHub" aria-label={`Open ${pr.title} on GitHub`} onClick={() => window.open(pr.url, "_blank", "noopener")}><LinkExternalIcon size={16} /></Button>
               </span>
-            </a>;
+            </div>;
           })}
         </section>;
       })}
