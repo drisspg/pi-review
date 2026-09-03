@@ -1407,7 +1407,7 @@ function groupPrsByStatus(prs: StoredPullRequest[]): { needsReview: StoredPullRe
   const done: StoredPullRequest[] = [];
   for (const pr of sorted) {
     const status = reviewStatus(pr);
-    if (status.tone === "success" || status.tone === "danger") done.push(pr);
+    if (status.tone === "success" || status.tone === "danger" || status.tone === "merged") done.push(pr);
     else if (pr.lastReviewEvent === "COMMENT" && pr.lastReviewedHeadSha === pr.headSha) inProgress.push(pr);
     else needsReview.push(pr);
   }
@@ -2341,7 +2341,7 @@ ${thread.target.hunk.slice(0, 4_000)}`;
 }
 
 function reviewStatus(pr: StoredPullRequest): { label: string; tone: string } {
-  if (pr.merged === true) return { label: "Merged", tone: "success" };
+  if (pr.merged === true) return { label: "Merged", tone: "merged" };
   if (pr.state === "closed") return { label: "Closed", tone: "danger" };
   if (pr.reviewDecision === "APPROVED") return { label: "Approved", tone: "success" };
   if (pr.reviewDecision === "CHANGES_REQUESTED") return { label: "Changes requested", tone: "danger" };
@@ -2349,7 +2349,7 @@ function reviewStatus(pr: StoredPullRequest): { label: string; tone: string } {
   if (pr.lastReviewedHeadSha !== pr.headSha) return { label: "Needs review", tone: "pending" };
   if (pr.lastReviewEvent === "APPROVE") return { label: "Approved", tone: "success" };
   if (pr.lastReviewEvent === "REQUEST_CHANGES") return { label: "Changes requested", tone: "danger" };
-  return { label: "Reviewed", tone: "success" };
+  return { label: "Reviewed", tone: "open" };
 }
 
 /** Shared copy-button state: busy flag, transient "copied" confirmation, and the last failure. */

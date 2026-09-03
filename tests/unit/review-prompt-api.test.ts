@@ -161,7 +161,10 @@ test("review prompt API validates mode and required inputs", async () => {
   await assert.rejects(api().build({ mode: "focus-chat", prKey: "pr", path: "p", startLine: 1, body: "b", question: "q" }), /Expected focus range/);
   await assert.rejects(api().build({ mode: "review-feedback", prKey: "pr", userComments: [{ body: "" }] }), /Expected userComments\.body/);
   await assert.rejects(api().build({ mode: "review-feedback", prKey: "pr", aiComments: [{ role: "pi" }] }), /Expected aiComments role and text/);
-  await assert.rejects(api().build({ mode: "review-feedback", prKey: "pr", focusAreas: [{ path: "p", body: "b", startLine: 1 }] }), /Expected focusAreas location and body/);
+  await assert.rejects(api().build({ mode: "review-feedback", prKey: "pr", focusAreas: [{ path: "p", body: "b", startLine: 1 }] }), /Expected focusAreas location/);
+  // A scan can emit a location with a title but no description; the copy must not fail on it.
+  const bodyless = await api().build({ mode: "review-feedback", prKey: "pr", focusAreas: [{ path: "src/a.ts", startLine: 4, endLine: 4, title: "edge case", body: "" }] });
+  assert.match(bodyless.prompt, /### 1\. src\/a\.ts:4 — edge case\n\n/);
   await assert.rejects(api().build({ mode: "github-draft-handoff", prKey: "pr", comments: [] }), /Expected GitHub draft comments/);
   await assert.rejects(api().build({ mode: "github-draft-handoff", prKey: "pr", comments: [{ path: "p", body: "" }] }), /Expected GitHub draft comment location and body/);
 });

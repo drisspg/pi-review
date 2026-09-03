@@ -111,11 +111,11 @@ function promptAiMessages(payload: Record<string, unknown>): PromptAiMessage[] {
 function promptFocusAreas(payload: Record<string, unknown>): PromptFocusArea[] {
   return optionalRecords(payload, "focusAreas").map((record) => {
     const path = optionalRecordString(record, "path");
-    const body = optionalRecordString(record, "body");
     const startLine = record.startLine;
     const endLine = record.endLine;
-    if (path == null || body == null || typeof startLine !== "number" || typeof endLine !== "number") throw new Error("Expected focusAreas location and body");
-    return { body, endLine, path, startLine, title: optionalRecordString(record, "title") ?? "Focus area", viewed: record.viewed === true };
+    if (path == null || typeof startLine !== "number" || typeof endLine !== "number") throw new Error("Expected focusAreas location");
+    // A focus scan can list a location with only a title (or nothing after it); that is still a valid area.
+    return { body: optionalRecordString(record, "body") ?? "", endLine, path, startLine, title: optionalRecordString(record, "title") ?? "Focus area", viewed: record.viewed === true };
   });
 }
 
@@ -403,7 +403,7 @@ function formatFocusAreas(areas: PromptFocusArea[]): string {
   if (areas.length === 0) return "No parsed focus areas were captured.";
   return areas.map((area, index) => {
     const range = area.startLine === area.endLine ? String(area.startLine) : `${area.startLine}-${area.endLine}`;
-    return `### ${index + 1}. ${area.path}:${range} — ${area.title}\n${area.body}`;
+    return `### ${index + 1}. ${area.path}:${range} — ${area.title}${area.body.length > 0 ? `\n${area.body}` : ""}`;
   }).join("\n\n");
 }
 

@@ -3,10 +3,13 @@
   --bg: #0d1117;
   --panel: #161b22;
   --panel2: #0d1117;
+  /* Page canvas behind the review: a step darker than --bg so file cards (--panel) read as distinct blocks. */
+  --canvas: color-mix(in srgb, var(--bg) 72%, black);
   --border: #30363d;
   --muted: #8b949e;
   --text: #e6edf3;
   --accent: #2f81f7;
+  --done: #a371f7;
   --danger: #f85149;
   --danger-text: #ffd1d1;
   --success: #3fb950;
@@ -71,10 +74,12 @@
   --bg: #ffffff;
   --panel: #ffffff;
   --panel2: #f6f8fa;
+  --canvas: color-mix(in srgb, var(--bg) 94%, var(--text));
   --border: #d0d7de;
   --muted: #57606a;
   --text: #24292f;
   --accent: #0969da;
+  --done: #8250df;
   --danger: #cf222e;
   --danger-text: #82071e;
   --success: #1a7f37;
@@ -113,6 +118,7 @@
   --muted: #adbac7;
   --text: #cdd9e5;
   --accent: #539bf5;
+  --done: #986ee2;
   --danger: #f47067;
   --danger-text: #ffd8d3;
   --success: #57ab5a;
@@ -146,6 +152,7 @@
   --app-muted: #a6adc8;
   --app-text: #cdd6f4;
   --app-accent: #89b4fa;
+  --app-done: #cba6f7;
   --app-danger: #f38ba8;
   --app-danger-text: #f9d3dd;
   --app-success: #a6e3a1;
@@ -161,6 +168,7 @@
   --muted: #a6adc8;
   --text: #cdd6f4;
   --accent: #89b4fa;
+  --done: #cba6f7;
   --danger: #f38ba8;
   --danger-text: #f9d3dd;
   --success: #a6e3a1;
@@ -195,6 +203,7 @@
   --app-muted: #a89984;
   --app-text: #ebdbb2;
   --app-accent: #83a598;
+  --app-done: #d3869b;
   --app-danger: #fb4934;
   --app-danger-text: #fdcabb;
   --app-success: #b8bb26;
@@ -210,6 +219,7 @@
   --muted: #a89984;
   --text: #ebdbb2;
   --accent: #83a598;
+  --done: #d3869b;
   --danger: #fb4934;
   --danger-text: #fdcabb;
   --success: #b8bb26;
@@ -245,6 +255,7 @@
   --app-muted: #9aa4bc;
   --app-text: #e5e9f0;
   --app-accent: #5e81ac;
+  --app-done: #b48ead;
   --app-danger: #bf616a;
   --app-danger-text: #f2d3d6;
   --app-success: #a3be8c;
@@ -260,6 +271,7 @@
   --muted: #9aa4bc;
   --text: #e5e9f0;
   --accent: #5e81ac;
+  --done: #b48ead;
   --danger: #bf616a;
   --danger-text: #f2d3d6;
   --success: #a3be8c;
@@ -293,6 +305,7 @@
   --app-muted: #657b83;
   --app-text: #073642;
   --app-accent: #268bd2;
+  --app-done: #6c71c4;
   --app-danger: #dc322f;
   --app-danger-text: #9a1f1c;
   --app-success: #859900;
@@ -304,10 +317,12 @@
   --bg: #fdf6e3;
   --panel: #fdf6e3;
   --panel2: #eee8d5;
+  --canvas: color-mix(in srgb, var(--bg) 94%, var(--text));
   --border: #d8cfb0;
   --muted: #657b83;
   --text: #073642;
   --accent: #268bd2;
+  --done: #6c71c4;
   --danger: #dc322f;
   --danger-text: #9a1f1c;
   --success: #859900;
@@ -345,6 +360,7 @@
   --muted: var(--fgColor-muted);
   --text: var(--fgColor-default);
   --accent: var(--fgColor-accent);
+  --done: var(--fgColor-done);
   --danger: var(--fgColor-danger);
   --danger-text: var(--fgColor-danger);
   --success: var(--fgColor-success);
@@ -370,6 +386,7 @@
   --muted: var(--app-muted);
   --text: var(--app-text);
   --accent: var(--app-accent);
+  --done: var(--app-done);
   --danger: var(--app-danger);
   --danger-text: var(--app-danger-text);
   --success: var(--app-success);
@@ -382,6 +399,7 @@
   --fgColor-default: var(--app-text);
   --fgColor-muted: var(--app-muted);
   --fgColor-accent: var(--app-accent);
+  --fgColor-done: var(--app-done);
   --fgColor-danger: var(--app-danger);
   --fgColor-success: var(--app-success);
   --fgColor-attention: var(--app-attention);
@@ -811,6 +829,10 @@ kbd {
 .panel h2 { font-size: 15px; }
 .side .panel h2 { font-size: 16px; }
 .side .panel h2:first-child { font-size: 20px; }
+
+body:has(.review-page) {
+  background: var(--canvas);
+}
 
 .review-page {
   /* One sticky surface: the review bar (mode tabs + files chip + actions) is
@@ -2819,6 +2841,208 @@ kbd {
   padding: 10px;
 }
 
+/* GitHub-style comment timeline: 14px body, slim tinted header, no card-in-card for review events. */
+.github-comment-timeline {
+  padding: var(--space-2) var(--space-3);
+}
+
+.github-comment-timeline.headless {
+  padding: 0;
+}
+
+.github-comment {
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: var(--space-2);
+  padding-bottom: var(--space-3);
+}
+
+.github-comment:last-child {
+  padding-bottom: var(--space-1);
+}
+
+.github-comment:not(:last-child)::before {
+  left: 13px;
+  top: 30px;
+}
+
+.github-comment .avatar {
+  width: 28px;
+  height: 28px;
+  font-size: var(--text-xs);
+}
+
+.github-comment.bot .avatar {
+  color: var(--muted);
+  border-color: var(--border);
+  background: var(--panel2);
+}
+
+.github-comment-header {
+  min-height: var(--control-h-sm);
+  padding: 2px var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.github-comment-header strong {
+  font-weight: 600;
+}
+
+.github-comment-meta {
+  gap: var(--space-2);
+  flex: 1;
+  align-items: baseline;
+}
+
+.github-comment-meta strong,
+.github-comment-meta .comment-time {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.github-comment-preview {
+  flex: 1 1 0;
+  min-width: 0;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.github-comment-actions {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+.github-comment:hover .github-comment-actions,
+.github-comment-actions:focus-within,
+.github-comment.bot .github-comment-actions {
+  opacity: 1;
+}
+
+.github-comment.folded .github-comment-header {
+  border-bottom: 0;
+  border-radius: var(--radius-md);
+}
+
+.github-comment-body .markdown {
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  font-size: var(--text-lg);
+  line-height: 1.5;
+}
+
+/* Review events: the thread head names reviewer + verdict, so the body is just the review text. */
+.github-comment.headless {
+  display: block;
+  padding-bottom: 0;
+}
+
+.github-comment.headless .github-comment-body {
+  position: relative;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.github-comment.headless .github-comment-edit-button {
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-2);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+.github-comment.headless:hover .github-comment-edit-button,
+.github-comment.headless .github-comment-edit-button:focus-visible {
+  opacity: 1;
+}
+
+.github-comment.headless .github-comment-edit {
+  padding: var(--space-2) var(--space-3);
+}
+
+.github-thread.review-event > .thread-head {
+  border-left: 3px solid var(--border);
+}
+
+/* Review events carry a name, verb, date, and verdict; let them wrap instead of clipping the verdict. */
+.github-thread.review-event .thread-title > div {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
+.github-thread.review-event .thread-title strong {
+  white-space: normal;
+}
+
+.github-thread.review-event.review-approved > .thread-head {
+  border-left-color: var(--success);
+}
+
+.github-thread.review-event.review-changes_requested > .thread-head {
+  border-left-color: var(--danger);
+}
+
+.github-thread .thread-title span {
+  font-family: var(--font-system);
+}
+
+.github-thread .thread-title > div > span:not(.thread-status) {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.thread-status.approved {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 45%, var(--border));
+}
+
+.thread-status.changes-requested {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+}
+
+/* Inline HTML that GitHub comments rely on. */
+.markdown details {
+  margin: 0 0 0.75rem;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+}
+
+.markdown details > summary {
+  cursor: pointer;
+  padding: var(--space-1) 0;
+}
+
+.markdown details[open] > summary {
+  margin-bottom: var(--space-1);
+}
+
+.markdown details > :last-child {
+  margin-bottom: var(--space-1);
+}
+
+.markdown img {
+  max-width: 100%;
+  vertical-align: middle;
+}
+
+.markdown sub img,
+.markdown sup img {
+  height: 1.1em;
+  width: auto;
+}
+
+.markdown hr {
+  height: 1px;
+  margin: var(--space-4) 0;
+  border: 0;
+  background: var(--border);
+}
+
 .local-thread {
   max-width: 1180px;
   margin-right: auto;
@@ -3325,6 +3549,19 @@ button.fold:hover {
   border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+/* PR lifecycle mirrors GitHub: open = blue, merged = purple, closed = red. */
+.review-status.open {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.review-status.merged {
+  border-color: color-mix(in srgb, var(--done) 45%, var(--border));
+  color: var(--done);
+  background: color-mix(in srgb, var(--done) 12%, transparent);
 }
 
 .panel select {
@@ -4079,7 +4316,9 @@ button.fold:hover {
 
 .pr-card.status-success,
 .pr-card.status-pending,
-.pr-card.status-danger {
+.pr-card.status-danger,
+.pr-card.status-open,
+.pr-card.status-merged {
   border-left: 0;
 }
 
@@ -4396,6 +4635,7 @@ button.fold:hover {
 }
 
 .inbox-flag.danger { color: var(--danger); }
+.inbox-flag.done { color: var(--done); }
 .inbox-flag.success { color: var(--success); }
 .inbox-flag.attention { color: var(--attention); }
 
@@ -4668,6 +4908,7 @@ button.fold:hover {
 }
 
 .my-pr-status.status-danger { color: var(--danger); }
+.my-pr-status.status-done { color: var(--done); }
 .my-pr-status.status-success { color: var(--success); }
 .my-pr-status.status-attention { color: var(--attention); }
 .my-pr-status.status-muted { color: var(--muted); }

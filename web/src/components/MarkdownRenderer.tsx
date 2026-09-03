@@ -1,6 +1,9 @@
 import { CheckIcon, CopyIcon } from "@primer/octicons-react";
 import React, { lazy, Suspense, useState } from "react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+import remarkGemoji from "remark-gemoji";
 import remarkGfm from "remark-gfm";
 
 import { api, errorMessage, openFileInEditor } from "../api";
@@ -86,7 +89,30 @@ function InlineFileSnippet({ context, reference }: { context: FileLinkContext; r
   </span>;
 }
 
-const remarkPlugins = [remarkGfm, remarkFileReferenceLinks, remarkPullRequestLinks];
+const remarkPlugins = [remarkGfm, remarkGemoji, remarkFileReferenceLinks, remarkPullRequestLinks];
+
+/**
+ * GitHub comments (especially bot comments) lean on inline HTML: <details>,
+ * <summary>, <sub><img …>, <!-- markers -->. Render it like GitHub does, but
+ * through an allowlist so a comment can never inject scripts or styles.
+ */
+const sanitizeSchema = {
+  ...defaultSchema,
+  tagNames: [...(defaultSchema.tagNames ?? []), "details", "summary", "sub", "sup", "kbd", "picture", "source", "u", "ins", "del", "mark"],
+  attributes: {
+    ...defaultSchema.attributes,
+    "*": [...(defaultSchema.attributes?.["*"] ?? []), "align", "title", "width", "height"],
+    details: ["open"],
+    img: [...(defaultSchema.attributes?.img ?? []), "src", "alt", "width", "height", "align", "loading"],
+    source: ["srcSet", "media", "type"],
+    a: [...(defaultSchema.attributes?.a ?? []), "target", "rel"],
+  },
+  protocols: {
+    ...defaultSchema.protocols,
+    href: [...(defaultSchema.protocols?.href ?? []), "pi-review-file"],
+  },
+};
+const rehypePlugins = [rehypeRaw, [rehypeSanitize, sanitizeSchema]] as unknown as NonNullable<React.ComponentProps<typeof ReactMarkdown>["rehypePlugins"]>;
 
 /** Default sanitization strips unknown protocols, which would empty our internal file-reference hrefs. */
 function markdownUrlTransform(url: string): string {
@@ -109,7 +135,7 @@ export function MarkdownTextRenderer({ text, fileLinks }: { text: string; fileLi
       a: (props: MarkdownAnchorProps) => <MarkdownAnchor {...props} fileLinks={mergedFileLinks} />,
     };
   }, [prUrl, headSha, snippets]);
-  return <div className="markdown"><ReactMarkdown remarkPlugins={remarkPlugins} components={components} urlTransform={markdownUrlTransform}>{text}</ReactMarkdown></div>;
+  return <div className="markdown"><ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components} urlTransform={markdownUrlTransform}>{text}</ReactMarkdown></div>;
 }
 
 type MarkdownCodeProps = { className?: string; children?: React.ReactNode; fileLinks?: FileLinkContext };

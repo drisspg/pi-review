@@ -37,10 +37,12 @@ function reasonIcon(item: InboxItem): ReactNode {
   }
 }
 
-function itemFlags(item: InboxItem): Array<{ label: string; tone: "danger" | "success" | "attention" | "muted" }> {
-  const flags: Array<{ label: string; tone: "danger" | "success" | "attention" | "muted" }> = [];
-  if (item.state === "MERGED") flags.push({ label: "merged", tone: "muted" });
-  else if (item.state === "CLOSED") flags.push({ label: "closed", tone: "muted" });
+type Tone = "danger" | "success" | "attention" | "muted" | "done";
+
+function itemFlags(item: InboxItem): Array<{ label: string; tone: Tone }> {
+  const flags: Array<{ label: string; tone: Tone }> = [];
+  if (item.state === "MERGED") flags.push({ label: "merged", tone: "done" });
+  else if (item.state === "CLOSED") flags.push({ label: "closed", tone: "danger" });
   if (item.isDraft) flags.push({ label: "draft", tone: "muted" });
   if (item.checks === "FAILURE" || item.checks === "ERROR") flags.push({ label: "CI failing", tone: "danger" });
   else if (item.checks === "PENDING") flags.push({ label: "CI running", tone: "attention" });
@@ -71,9 +73,9 @@ function groupByRepo(prs: ViewerPullRequest[]): Array<{ repo: string; prs: Viewe
   return [...byRepo.entries()].map(([repo, list]) => ({ repo, prs: list }));
 }
 
-function myPrStatus(pr: ViewerPullRequest): { icon: ReactNode; tone: "danger" | "success" | "attention" | "muted"; details: string[] } {
+function myPrStatus(pr: ViewerPullRequest): { icon: ReactNode; tone: Tone; details: string[] } {
   const details: string[] = [];
-  if (pr.state === "MERGED") return { icon: <GitMergeIcon size={14} />, tone: "success", details: [`merged ${relativeTime(pr.closedAt)}`] };
+  if (pr.state === "MERGED") return { icon: <GitMergeIcon size={14} />, tone: "done", details: [`merged ${relativeTime(pr.closedAt)}`] };
   if (pr.state === "CLOSED") return { icon: <GitPullRequestClosedIcon size={14} />, tone: "danger", details: [`closed ${relativeTime(pr.closedAt)}`] };
   if (pr.mergeable === "CONFLICTING") details.push("merge conflicts");
   if (pr.checks === "FAILURE" || pr.checks === "ERROR") details.push(pr.failingChecks.length > 0 ? `${pr.failingChecks.length} failing check${pr.failingChecks.length === 1 ? "" : "s"}` : "CI failing");
