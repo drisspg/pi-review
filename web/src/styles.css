@@ -4542,6 +4542,57 @@ button.fold:hover {
   color: var(--muted);
 }
 
+/* PR / issue kind filter sits at the end of the tier row as a flat segmented control. */
+.inbox-kinds {
+  display: inline-flex;
+  margin-left: auto;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.inbox-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: calc(var(--control-h-sm) - 2px);
+  padding: 0 var(--space-3);
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.inbox-kind + .inbox-kind {
+  border-left: 1px solid var(--border);
+}
+
+.inbox-kind:hover {
+  color: var(--text);
+  background: var(--hover-bg);
+}
+
+.inbox-kind.active {
+  color: var(--text);
+  background: var(--selected-bg);
+}
+
+.inbox-row-ref {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.inbox-row-ref.kind-issue svg {
+  color: var(--success);
+}
+
+.inbox-row-ref.kind-pr svg {
+  color: var(--accent);
+}
+
 .inbox-tier.active .inbox-tier-count {
   color: var(--accent);
 }

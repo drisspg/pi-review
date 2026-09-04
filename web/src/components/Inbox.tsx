@@ -106,6 +106,7 @@ export function InboxPanel({ openPr }: { openPr: (url: string) => Promise<void> 
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [filter, setFilter] = useState<TierFilter>("all");
+  const [kindFilter, setKindFilter] = useState<"all" | "pr" | "issue">("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busyIds, setBusyIds] = useState<Set<string>>(() => new Set());
   const listRef = useRef<HTMLUListElement | null>(null);
@@ -136,7 +137,11 @@ export function InboxPanel({ openPr }: { openPr: (url: string) => Promise<void> 
   }, [load, filling]);
 
   const items = data?.items ?? [];
-  const visible = useMemo(() => (filter === "all" ? items.filter((item) => item.tier !== "resolved") : items.filter((item) => item.tier === filter)), [items, filter]);
+  const visible = useMemo(() => {
+    const byTier = filter === "all" ? items.filter((item) => item.tier !== "resolved") : items.filter((item) => item.tier === filter);
+    return kindFilter === "all" ? byTier : byTier.filter((item) => item.kind === kindFilter);
+  }, [items, filter, kindFilter]);
+  const kindCounts = useMemo(() => ({ pr: items.filter((item) => item.kind === "pr" && item.tier !== "resolved").length, issue: items.filter((item) => item.kind === "issue" && item.tier !== "resolved").length }), [items]);
   const resolvedIds = useMemo(() => items.filter((item) => item.tier === "resolved").map((item) => item.id), [items]);
   const counts = data?.tiers ?? { "needs-you": 0, "review-requests": 0, "your-prs": 0, fyi: 0, resolved: 0 };
   const selected = visible.find((item) => item.id === selectedId) ?? null;
@@ -257,6 +262,11 @@ export function InboxPanel({ openPr }: { openPr: (url: string) => Promise<void> 
         <nav className="inbox-tiers" aria-label="Filter inbox by tier">
           <button type="button" className={`inbox-tier${filter === "all" ? " active" : ""}`} onClick={() => setFilter("all")}>All<span className="inbox-tier-count">{total - counts.resolved}</span></button>
           {TIER_ORDER.map((tier) => <button key={tier} type="button" className={`inbox-tier tier-${tier}${filter === tier ? " active" : ""}`} title={TIER_META[tier].hint} onClick={() => setFilter(tier)}><DotFillIcon size={12} className="inbox-tier-dot" />{TIER_META[tier].label}<span className="inbox-tier-count">{counts[tier]}</span></button>)}
+          <span className="inbox-kinds" role="group" aria-label="Filter by kind">
+            <button type="button" className={`inbox-kind${kindFilter === "all" ? " active" : ""}`} onClick={() => setKindFilter("all")}>All</button>
+            <button type="button" className={`inbox-kind${kindFilter === "pr" ? " active" : ""}`} onClick={() => setKindFilter("pr")}><GitPullRequestIcon size={12} /> PRs<span className="inbox-tier-count">{kindCounts.pr}</span></button>
+            <button type="button" className={`inbox-kind${kindFilter === "issue" ? " active" : ""}`} onClick={() => setKindFilter("issue")}><IssueOpenedIcon size={12} /> Issues<span className="inbox-tier-count">{kindCounts.issue}</span></button>
+          </span>
         </nav>
         {data == null || (data.fetchedAt == null && refreshing) ? <ul className="inbox-rows inbox-skeleton" aria-busy="true">{Array.from({ length: 6 }, (_, index) => <li key={index} className="inbox-row skeleton"><span className="inbox-skeleton-bar icon" /><span className="inbox-skeleton-lines"><span className="inbox-skeleton-bar" style={{ width: `${55 + (index % 3) * 12}%` }} /><span className="inbox-skeleton-bar short" /></span></li>)}</ul>
           : visible.length === 0 ? <div className="inbox-empty">{data == null ? "Inbox unavailable." : total === 0 ? <><CheckIcon size={24} /><p>Inbox zero. Nothing on GitHub is waiting on you.</p></> : <p className="muted">Nothing in {filter === "all" ? "the active tiers" : TIER_META[filter].label.toLowerCase()}.</p>}</div>
@@ -272,7 +282,7 @@ export function InboxPanel({ openPr }: { openPr: (url: string) => Promise<void> 
                       {flags.length > 0 && <span className="inbox-row-flags">{flags.map((flag) => <span key={flag.label} className={`inbox-flag ${flag.tone}`}>{flag.label}</span>)}</span>}
                     </div>
                     <div className="inbox-row-meta">
-                      <span className="inbox-row-ref">{item.repo}{item.number != null ? `#${item.number}` : ""}</span>
+                      <span className={`inbox-row-ref kind-${item.kind}`} title={item.kind === "issue" ? "Issue" : item.kind === "pr" ? "Pull request" : "Other"}>{item.kind === "issue" ? <IssueOpenedIcon size={12} /> : item.kind === "pr" ? <GitPullRequestIcon size={12} /> : null}{item.repo}{item.number != null ? `#${item.number}` : ""}</span>
                       {item.author != null && item.reason !== "author" && <span>by {item.author}</span>}
                       <span>{item.why.join(" · ")}</span>
                       <span>{relativeTime(item.updatedAt)}</span>
