@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 
 import { createGpuWorkspaceTool } from "./gpu-workspace-tool.js";
 import { logger } from "./logger.js";
+import { DEFAULT_PI_MODEL_ID, DEFAULT_PI_MODEL_PROVIDER } from "./pi-defaults.js";
 import { parsePullRequestKey } from "./pr.js";
 import { createReviewDraftTool, type ReviewDraftToolContext } from "./review-draft-tool.js";
 import type { PiPromptEvent } from "./types.js";
@@ -25,8 +26,6 @@ type MessageLike = {
 
 type ThinkingLevel = AgentSession["thinkingLevel"];
 
-const DEFAULT_PI_MODEL_PROVIDER = "openai-codex";
-const DEFAULT_PI_MODEL_ID = "gpt-5.6-sol";
 const DEFAULT_PI_THINKING_LEVEL: ThinkingLevel = "high";
 const PI_THINKING_LEVEL_BY_PURPOSE: Record<string, ThinkingLevel> = {
   "chat": "medium",
