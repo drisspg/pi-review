@@ -17,11 +17,11 @@ The old `/api/pi/review` and `/api/pi/focus-review` job routes have been replace
 2. PR open/refresh/cleanup is serialized per PR. A revision transition invalidates analysis observers and SDK queues, disposes SDK sessions and terminals, then replaces the worktree. Sending a termination signal alone is not proof that a terminal exited.
 3. Completed artifacts persist independently of browser navigation. In-memory run status is bounded and is not restart-durable; after restart, reopen the PR to load saved artifacts and start unfinished work again.
 4. Results have immutable content, revision, creation time, and provenance (run, analysis version, actual model, effort). Reviewer progress is patched separately by artifact ID and cannot make old results current.
-5. A focus scan is clean only after a successful explicit `No focus areas found.` response. Unparseable output is invalid, never clean. Generated focus/guide locations must be reviewable in the captured diff. Raw invalid output remains in run diagnostics.
+5. A focus scan is clean only after a successful explicit `No focus areas found.` conclusion with no parsed findings. Preceding investigation notes are preserved in the UI. Unparseable output is invalid, never clean. Generated focus/guide range endpoints must be reviewable in the captured diff, but may span different hunks; only publishable inline comments require a single hunk. Raw invalid output remains in run diagnostics.
 6. Streaming commentary is separate from the settled final assistant answer. Successful SDK retries do not inherit an earlier attempt's failure.
 7. New findings start unreviewed. A nearby old location is not evidence that the reviewer already handled a new concern.
 
-`ANALYSIS_VERSION` in `src/analysis-types.ts` is the freshness version for prompt and validation changes. Increment it when changing these contracts. Legacy saved artifacts without provenance are regenerated on the next automatic analysis.
+`ANALYSIS_VERSION` in `src/analysis-types.ts` is the freshness version for prompt and validation changes. Increment it when prompt or validation changes require regenerating previously successful artifacts. Legacy saved artifacts without provenance are regenerated on the next automatic analysis.
 
 ## Validation
 

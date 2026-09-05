@@ -8,6 +8,8 @@ test("only an explicit empty result is clean", () => {
     assert.equal(focusReviewHasNoFindings(text), false, text);
   }
   assert.equal(focusReviewHasNoFindings("No focus areas found."), true);
+  assert.equal(focusReviewHasNoFindings("Checked nearby tests. Could not run CUDA locally.No focus areas found."), true);
+  assert.equal(focusReviewHasNoFindings("- Makefile:12 — Build target fails\nNo focus areas found."), false);
 });
 
 test("focus locations support extensionless files", () => {

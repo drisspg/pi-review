@@ -2434,7 +2434,7 @@ function AiReviewPanel({ prKey, prUrl, focusPanel, review, aiReviewHistory, aiRe
       </div>
     </div>
     <div className="pi-review-findings">
-      {!focusReview.running && !focusReview.error && focusReviewHasNoFindings(focusReview.text) && <Flash variant="success" className="focus-review-note clean" role="status"><strong>✓ Focus scan clean.</strong><span>All scanned up for this pass.</span></Flash>}
+      {!focusReview.running && !focusReview.error && focusReviewHasNoFindings(focusReview.text) && <Flash variant="success" className="focus-review-note clean" role="status"><strong>✓ Focus scan clean.</strong><span>No focus areas reported for this pass.</span>{focusReview.text.trim().toLowerCase() !== "no focus areas found." && <details><summary>Scan notes</summary><MarkdownText text={focusReview.text} fileLinks={{ prUrl }} /></details>}</Flash>}
       {!focusReview.running && (focusReview.error || (focusReview.text.trim().length > 0 && !focusReviewHasNoFindings(focusReview.text) && focusAreas.length === 0)) && <Flash variant="warning" role="alert"><strong>Focus scan could not be validated.</strong><p>{focusReview.error ?? focusReview.text}</p>{focusReview.rawAnswer && <details><summary>Raw response</summary><pre>{focusReview.rawAnswer}</pre></details>}</Flash>}
       {focusAreaLinks}
       {reviewMessages.length > 0 && <div className="ai-chat-messages ai-review-response">{reviewMessages.map((message, index) => <GeneralReviewEntry key={index} message={message} prUrl={prUrl} />)}</div>}

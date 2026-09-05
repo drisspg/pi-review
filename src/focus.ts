@@ -32,7 +32,7 @@ export function parseFocusAreas(text: string): FocusArea[] {
   return areas;
 }
 
-/** Only an explicit successful empty answer counts as a clean legacy scan. */
+/** Accept an explicit empty conclusion after scan notes, but never hide parsed findings. */
 export function focusReviewHasNoFindings(text: string): boolean {
-  return /^No focus areas found\.$/i.test(text.trim());
+  return /\bNo focus areas found\.\s*$/i.test(text) && parseFocusAreas(text).length === 0;
 }

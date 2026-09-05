@@ -1318,6 +1318,18 @@ test("keeps a clean focus scan compact when the Pi panel is focused", async ({ p
   expect(terminalBox.height).toBeGreaterThan(500);
 });
 
+test("accepts a clean focus conclusion and preserves investigation limitations", async ({ page }) => {
+  await mockNativeTerminal(page);
+  await mockAnalysis(page, "focus-review", "Checked nearby tests. Could not independently rerun CUDA/NCCL on macOS.No focus areas found.");
+  await openSideTab(page, "Pi");
+  const panel = page.locator(".ai-review");
+  await panel.getByRole("button", { name: /Focus scan|Refresh focus scan/ }).click();
+  await expect(panel).toContainText("Focus scan clean");
+  await expect(panel.getByRole("alert")).toHaveCount(0);
+  await panel.getByText("Scan notes", { exact: true }).click();
+  await expect(panel.locator(".focus-review-note .markdown")).toContainText("Could not independently rerun CUDA/NCCL on macOS.");
+});
+
 for (const status of ["failed", "invalid"] as const) {
   test(`does not show ${status} focus scans as clean and exposes the diagnostic`, async ({ page }) => {
     await mockAnalysis(page, "focus-review", "No focus areas found.");

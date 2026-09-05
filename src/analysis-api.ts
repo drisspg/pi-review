@@ -34,7 +34,10 @@ class InvalidAnalysisError extends Error {}
 function validateLocations(context: ReviewDraftToolContext, areas: ReturnType<typeof parseFocusAreas>): void {
   for (const area of areas) {
     try {
-      validateReviewDraftTarget(context, { path: area.path, startLine: area.startLine, line: area.endLine, body: area.title });
+      // Analysis connects locations; only a publishable GitHub comment needs one contiguous hunk.
+      for (const line of new Set([area.startLine, area.endLine])) {
+        validateReviewDraftTarget(context, { path: area.path, line, body: area.title });
+      }
     } catch (error) {
       throw new InvalidAnalysisError(error instanceof Error ? error.message : String(error));
     }

@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { createAnalysisApi, type AnalysisApiDeps } from "../../src/analysis-api.js";
 import { ANALYSIS_VERSION, type AnalysisRun } from "../../src/analysis-types.js";
-import type { ReviewDraftToolContext } from "../../src/review-draft-tool.js";
+import { validateReviewDraftTarget, type ReviewDraftToolContext } from "../../src/review-draft-tool.js";
 
 const context: ReviewDraftToolContext = { headSha: "head", files: [{ filename: "Makefile", status: "modified", additions: 2, deletions: 0, changes: 2, patch: "@@ -1 +1,3 @@\n target:\n+\techo build\n+\techo done" }] };
 
@@ -78,6 +78,30 @@ test("extensionless file findings are validated and returned as typed areas", as
   assert.equal(run.result?.kind, "focus-review");
   if (run.result?.kind === "focus-review") assert.equal(run.result.areas[0].path, "Makefile");
 });
+
+test("a clean focus scan may include an investigation summary before its conclusion", async () => {
+  const answer = "Checked the routing algebra, staged backward contracts, nightly collective autograd support, and nearby tests. The PR reports 14 passing two-GPU tests plus GB200 graph validation; I couldn’t independently rerun CUDA/NCCL tests on this macOS host. No high-signal concern survived the read-only investigation.No focus areas found.";
+  const f = fixture(answer);
+  const { run } = await createAnalysisApi(f.deps).start({ prKey: "pr", headSha: "head", kind: "focus-review" });
+  await settled(run);
+  assert.equal(run.status, "complete");
+  assert.equal(run.result?.record.answer, answer);
+  if (run.result?.kind === "focus-review") assert.deepEqual(run.result.areas, []);
+});
+
+for (const kind of ["guide-review", "focus-review"] as const) {
+  test(`${kind} ranges may connect two reviewable diff hunks`, async () => {
+    const location = "- Makefile:2-21 — Follow the build path\nCheck how setup connects to the later target.";
+    const f = fixture(kind === "guide-review" ? `## Review guide\n### 1. Build lifecycle\n${location}` : `## Focus areas\n${location}`);
+    const twoHunks = { ...context, files: [{ ...context.files[0], patch: "@@ -1,3 +1,3 @@\n target:\n-\techo old\n+\techo new\n context\n@@ -20,3 +20,3 @@\n later:\n-\techo before\n+\techo after\n end" }] };
+    f.setContext(twoHunks);
+    const { run } = await createAnalysisApi(f.deps).start({ prKey: "pr", headSha: "head", kind });
+    await settled(run);
+    assert.equal(run.status, "complete", run.error);
+    assert.equal(f.saved.length, 1);
+    assert.throws(() => validateReviewDraftTarget(twoHunks, { path: "Makefile", startLine: 2, line: 21, body: "Actual inline comment" }), /same diff hunk/);
+  });
+}
 
 test("refresh invalidates old work before it can save", async () => {
   const f = fixture();
