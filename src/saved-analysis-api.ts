@@ -1,6 +1,9 @@
+import type { StateStore } from "./state.js";
 import type { AiReviewMessageRecord, AiReviewRecord, FocusAreaReviewState, FocusScanRecord, GuideReviewRecord } from "./types.js";
 
 export type SavedAnalysisApiDeps = {
+  updateFocusScanProgress: StateStore["updateFocusScanProgress"];
+  updateGuideReviewProgress: StateStore["updateGuideReviewProgress"];
   saveAiReview: (review: Omit<AiReviewRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<AiReviewRecord, "id" | "createdAt">>) => Promise<AiReviewRecord>;
   saveFocusScan: (scan: Omit<FocusScanRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<FocusScanRecord, "id" | "createdAt">>) => Promise<FocusScanRecord>;
   saveOverview: (record: Omit<GuideReviewRecord, "id" | "createdAt" | "updatedAt" | "stepStates">) => Promise<GuideReviewRecord>;
@@ -8,6 +11,8 @@ export type SavedAnalysisApiDeps = {
 };
 
 export type SavedAnalysisApi = {
+  updateFocusScanProgress: (payload: Record<string, unknown>) => Promise<{ scan: FocusScanRecord }>;
+  updateGuideReviewProgress: (payload: Record<string, unknown>) => Promise<{ guide: GuideReviewRecord }>;
   saveFocusScan: (payload: Record<string, unknown>) => Promise<{ scan: FocusScanRecord }>;
   saveAiReview: (payload: Record<string, unknown>) => Promise<{ review: AiReviewRecord }>;
   saveGuideReview: (payload: Record<string, unknown>) => Promise<{ guide: GuideReviewRecord }>;
@@ -24,6 +29,18 @@ function aiReviewMessagesFromPayload(payload: Record<string, unknown>): AiReview
 }
 
 export function createSavedAnalysisApi(deps: SavedAnalysisApiDeps): SavedAnalysisApi {
+  /** Accept identity and progress only; never forward artifact content from the caller. */
+  async function updateFocusScanProgress(payload: Record<string, unknown>): Promise<{ scan: FocusScanRecord }> {
+    if (typeof payload.prKey !== "string" || typeof payload.id !== "string") throw new Error("Expected focus progress payload");
+    return { scan: await deps.updateFocusScanProgress({ prKey: payload.prKey, id: payload.id, areaStates: focusAreaStatesFromPayload(payload) }) };
+  }
+
+  /** Accept identity and progress only; never forward artifact content from the caller. */
+  async function updateGuideReviewProgress(payload: Record<string, unknown>): Promise<{ guide: GuideReviewRecord }> {
+    if (typeof payload.prKey !== "string" || typeof payload.id !== "string" || payload.stepStates == null || typeof payload.stepStates !== "object" || Array.isArray(payload.stepStates)) throw new Error("Expected guide progress payload");
+    return { guide: await deps.updateGuideReviewProgress({ prKey: payload.prKey, id: payload.id, stepStates: payload.stepStates as NonNullable<GuideReviewRecord["stepStates"]> }) };
+  }
+
   async function saveFocusScan(payload: Record<string, unknown>): Promise<{ scan: FocusScanRecord }> {
     if (typeof payload.prKey !== "string" || typeof payload.headSha !== "string" || typeof payload.answer !== "string") throw new Error("Expected focus scan payload");
     return {
@@ -45,6 +62,7 @@ export function createSavedAnalysisApi(deps: SavedAnalysisApiDeps): SavedAnalysi
   async function saveGuideReview(payload: Record<string, unknown>): Promise<{ guide: GuideReviewRecord }> {
     if (typeof payload.prKey !== "string" || typeof payload.headSha !== "string" || typeof payload.answer !== "string") throw new Error("Expected guide review payload");
     const record: Parameters<SavedAnalysisApiDeps["saveGuideReview"]>[0] = { prKey: payload.prKey, headSha: payload.headSha, answer: payload.answer };
+    if (typeof payload.id === "string") record.id = payload.id;
     if (payload.stepStates != null) {
       if (typeof payload.stepStates !== "object" || Array.isArray(payload.stepStates)) throw new Error("Expected guide review payload");
       record.stepStates = payload.stepStates as GuideReviewRecord["stepStates"];
@@ -65,5 +83,5 @@ export function createSavedAnalysisApi(deps: SavedAnalysisApiDeps): SavedAnalysi
     };
   }
 
-  return { saveFocusScan, saveAiReview, saveGuideReview, saveOverview };
+  return { updateFocusScanProgress, updateGuideReviewProgress, saveFocusScan, saveAiReview, saveGuideReview, saveOverview };
 }

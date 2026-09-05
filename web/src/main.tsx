@@ -2,7 +2,7 @@ import React, { createContext, ReactNode, useContext, useEffect, useMemo, useRef
 import { createRoot } from "react-dom/client";
 import { ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, GitPullRequestIcon, KebabHorizontalIcon, ScreenFullIcon, ScreenNormalIcon, XIcon } from "@primer/octicons-react";
 import { BaseStyles, Checkbox, Flash, Radio, Select, Textarea, TextInput, ThemeProvider } from "@primer/react";
-import { api, askPi as askPiApi, errorMessage, isStaleBuild, logUsage, subscribeStaleBuild } from "./api";
+import { api, errorMessage, isStaleBuild, logUsage, subscribeStaleBuild } from "./api";
 import { ActionMenu, ActionMenuItem } from "./components/ActionMenu";
 import { Button } from "./components/Button";
 import { CodeText, InlineSnippetsProvider, MarkdownText } from "./components/Markdown";
@@ -16,7 +16,9 @@ import { buildDiffAnnotationIndex, commentTarget, commentThreadDomId, diffAnnota
 import { contextRowsFromText, hunkNewStart, isTargetInSelection, lastNewLine, parsePatchRows, parsePatchSetSections, targetFromPoint, targetFromRow, type PatchSeedTexts } from "./lib/diff";
 import { loadFileText } from "./lib/file-text";
 import { writeClipboard } from "./lib/dom";
-import { parseFocusAreas } from "./lib/focus";
+import { focusReviewHasNoFindings, parseFocusAreas } from "./lib/focus";
+import { AnalysisError, runAnalysis } from "./lib/analysis";
+import type { AnalysisKind } from "../../src/analysis-types";
 import { parseGuideChapters, type GuideChapter } from "./lib/guide";
 import { parseOverviewSections } from "./lib/overview";
 import { languageForPath } from "./lib/highlight";
@@ -181,10 +183,6 @@ type PiPanelProps = {
   saveFocusScan: (answer: string, viewedIds: Record<string, boolean>, collapsedIds: Record<string, boolean>) => Promise<string | null>;
 };
 
-function focusReviewHasNoFindings(text: string): boolean {
-  return text.trim().length > 0 && parseFocusAreas(text).length === 0;
-}
-
 function generalReviewMessage(text: string): AiReviewMessage {
   return { role: "pi", kind: "general-review", title: "General review", text };
 }
@@ -306,7 +304,7 @@ function reviewFeedbackPromptPayload(review: OpenResponse, drafts: DraftComment[
 }
 
 function upsertHistoryRecord<T extends { id: string; updatedAt: string; createdAt: string }>(records: T[], record: T): T[] {
-  return [record, ...records.filter((stored) => stored.id !== record.id)].sort((a, b) => (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt));
+  return [record, ...records.filter((stored) => stored.id !== record.id)].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 function draftLocation(draft: DraftComment): string {
@@ -355,91 +353,17 @@ function focusAreaKey(area: FocusArea): string {
   return `${area.path}:${area.startLine}-${area.endLine}`;
 }
 
-function focusAreaFromKey(key: string): Pick<FocusArea, "path" | "startLine" | "endLine"> | null {
-  const match = /^(.*):(\d+)-(\d+)$/.exec(key);
-  if (match == null) return null;
-  return { path: match[1], startLine: Number.parseInt(match[2], 10), endLine: Number.parseInt(match[3], 10) };
-}
-
-function lineRangeOverlapScore(left: Pick<FocusArea, "startLine" | "endLine">, right: Pick<FocusArea, "startLine" | "endLine">): number {
-  const overlap = Math.max(0, Math.min(left.endLine, right.endLine) - Math.max(left.startLine, right.startLine) + 1);
-  return overlap / Math.max(1, Math.min(left.endLine - left.startLine + 1, right.endLine - right.startLine + 1));
-}
-
-function findFocusState(area: FocusArea, states: Record<string, FocusAreaReviewState>): FocusAreaReviewState | undefined {
-  const exact = states[focusAreaKey(area)];
-  if (exact != null) return exact;
-  let best: { score: number; distance: number; state: FocusAreaReviewState } | null = null;
-  for (const [key, state] of Object.entries(states)) {
-    const previous = focusAreaFromKey(key);
-    if (previous == null || previous.path !== area.path) continue;
-    const score = lineRangeOverlapScore(area, previous);
-    const distance = Math.min(Math.abs(area.startLine - previous.startLine), Math.abs(area.endLine - previous.endLine));
-    if (score < 0.5 && distance > 50) continue;
-    if (best == null || score > best.score || (score === best.score && distance < best.distance)) best = { score, distance, state };
-  }
-  return best?.state;
-}
-
 function statesFromFocusAreas(areas: FocusArea[], viewedIds: Record<string, boolean>, collapsedIds: Record<string, boolean>, previous: Record<string, FocusAreaReviewState> = {}): Record<string, FocusAreaReviewState> {
   const now = new Date().toISOString();
   return Object.fromEntries(areas.map((area) => {
     const key = focusAreaKey(area);
-    const previousState = findFocusState(area, previous);
+    const previousState = previous[focusAreaKey(area)];
     return [key, { viewed: viewedIds[area.id] ?? previousState?.viewed ?? false, collapsed: collapsedIds[area.id] ?? previousState?.collapsed ?? false, updatedAt: now }];
   }));
 }
 
 function idsFromFocusStates(areas: FocusArea[], states: Record<string, FocusAreaReviewState>, field: "viewed" | "collapsed"): Record<string, boolean> {
-  return Object.fromEntries(areas.filter((area) => findFocusState(area, states)?.[field] === true).map((area) => [area.id, true]));
-}
-
-function focusScanHistoryPrompt(answer: string, states: Record<string, FocusAreaReviewState>): string {
-  const areas = parseFocusAreas(answer);
-  if (areas.length === 0) return "No previous focus scan findings are stored.";
-  return areas.map((area, index) => {
-    const state = findFocusState(area, states);
-    const status = state?.viewed ? "reviewed" : "unreviewed";
-    return `${index + 1}. ${status}: ${area.path}:${area.startLine}-${area.endLine} — ${area.title}`;
-  }).join("\n");
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
-}
-
-/** Start a background Pi review job and poll it to completion, reporting activity while it runs. */
-async function runPiJob(endpoint: "review" | "focus-review", label: string, prKey: string, prompt: string, onActivity: (activity: PiAgentActivity | undefined) => void): Promise<string | undefined> {
-  const { job } = await api<{ job: { id: string } }>(`/api/pi/${endpoint}`, { method: "POST", body: JSON.stringify({ prKey, prompt }) });
-  for (;;) {
-    await sleep(800);
-    const { job: status } = await api<{ job: { status: "running" | "complete" | "failed"; answer?: string; error?: string; activity?: PiAgentActivity } }>(`/api/pi/${endpoint}/status`, { method: "POST", body: JSON.stringify({ jobId: job.id }) });
-    if (status.status === "running") {
-      onActivity(status.activity);
-      continue;
-    }
-    if (status.status === "failed") throw new Error(status.error ?? `${label} failed`);
-    if (status.status !== "complete") throw new Error(`${label} returned an unknown job status`);
-    return status.answer;
-  }
-}
-
-async function loadPiAgentActivityForPr(prKey: string, purpose: string, fallback: PiAgentActivity | null): Promise<PiAgentActivity | null> {
-  const data = await api<{ diagnostics: { sessions?: unknown[] } }>("/api/pi/diagnostics", { method: "POST", body: JSON.stringify({ prKey }) });
-  const session = data.diagnostics.sessions?.find((item): item is Record<string, unknown> => typeof item === "object" && item != null && (item as Record<string, unknown>).purpose === purpose);
-  return session == null ? fallback : diagnosticsAgentActivity(session, fallback);
-}
-
-function startPiAgentActivityPolling(prKey: string, purpose: string, onActivity: (activity: PiAgentActivity | null) => void, fallback: PiAgentActivity | null): () => void {
-  let cancelled = false;
-  const pollActivity = async () => {
-    while (!cancelled) {
-      await sleep(1000);
-      if (!cancelled) onActivity(await loadPiAgentActivityForPr(prKey, purpose, fallback));
-    }
-  };
-  void pollActivity();
-  return () => { cancelled = true; };
+  return Object.fromEntries(areas.filter((area) => states[focusAreaKey(area)]?.[field] === true).map((area) => [area.id, true]));
 }
 
 function highlightFocusAreas(areas: FocusArea[], activeId: string | null, collapsedIds: Record<string, boolean>): void {
@@ -494,6 +418,8 @@ function App() {
   const [viewedFocusAreaIds, setViewedFocusAreaIds] = useState<Record<string, boolean>>({});
   const reviewCacheRef = useRef<Map<string, OpenResponse>>(new Map());
   const activeReviewKeyRef = useRef<string | null>(null);
+  const activeReviewHeadRef = useRef<string | null>(null);
+  const analysisObserversRef = useRef<Partial<Record<AnalysisKind, number>>>({});
   const pendingOpenRef = useRef<{ input: string; requestId: number } | null>(null);
   const pendingLineAnchorRef = useRef<LineAnchor | null>(null);
   const openRequestIdRef = useRef(0);
@@ -571,20 +497,6 @@ function App() {
   }, [theme]);
 
   const focusAreas = useMemo(() => parseFocusAreas(focusReview.text), [focusReview.text]);
-  useEffect(() => {
-    if (focusAreas.length === 0) return;
-    setOpenFiles((current) => {
-      const next = { ...current };
-      let changed = false;
-      for (const area of focusAreas) {
-        if (next[area.path] !== true) {
-          next[area.path] = true;
-          changed = true;
-        }
-      }
-      return changed ? next : current;
-    });
-  }, [focusAreas]);
   useEffect(() => highlightFocusAreas(focusAreas, activeFocusAreaId, collapsedFocusAreaIds), [focusAreas, activeFocusAreaId, collapsedFocusAreaIds, openFiles, expandedNeighborRows]);
   useEffect(() => setCollapsedFocusAreaIds((current) => Object.fromEntries(Object.entries(current).filter(([id]) => focusAreas.some((area) => area.id === id)))), [focusAreas]);
 
@@ -653,7 +565,7 @@ function App() {
     setFocusReview({ running: false, text: record?.answer ?? "" });
     setFocusScanId(record?.id ?? null);
     setViewedFocusAreaIds(idsFromFocusStates(savedAreas, record?.areaStates ?? {}, "viewed"));
-    setActiveFocusAreaId(savedAreas[0]?.id ?? null);
+    setActiveFocusAreaId(null);
     setCollapsedFocusAreaIds(idsFromFocusStates(savedAreas, record?.areaStates ?? {}, "collapsed"));
   }
 
@@ -665,6 +577,7 @@ function App() {
 
   function showReview(data: OpenResponse) {
     activeReviewKeyRef.current = data.pr.key;
+    activeReviewHeadRef.current = data.pr.headSha;
     setReview(data);
     setInput(data.pr.url);
     setOpenFiles(initialOpenFiles(data));
@@ -771,15 +684,19 @@ function App() {
     if (review == null || refreshingActivity) return;
     setRefreshingActivity(true);
     setError(null);
+    const requestId = openRequestIdRef.current;
     try {
       const data = await api<OpenResponse>("/api/pr/activity", { method: "POST", body: JSON.stringify({ input: review.pr.url }) });
+      if (requestId !== openRequestIdRef.current || activeReviewKeyRef.current !== data.pr.key) return;
       cacheReview(data);
+      activeReviewHeadRef.current = data.pr.headSha;
       setReview(data);
       setOpenFiles((current) => ({ ...initialOpenFiles(data), ...current }));
       showAiReviewRecord(data.aiReview);
       showFocusScanRecord(data.focusScan);
       showGuideReviewRecord(data.guideReview);
       showOverviewRecord(data.overview);
+      void runAutomaticPiReviews(data);
       await Promise.all([refreshHistory(), refreshLogs()]);
     } catch (err) {
       setError(errorMessage(err));
@@ -836,35 +753,27 @@ function App() {
     setReview(nextReview);
   }
 
-  async function saveFocusScan(answer: string, viewedIds: Record<string, boolean>, collapsedIds: Record<string, boolean>, id = focusScanId): Promise<string | null> {
-    if (review == null) return id;
-    return await saveFocusScanFor(review, answer, viewedIds, collapsedIds, id);
-  }
-
-  async function saveFocusScanFor(targetReview: OpenResponse, answer: string, viewedIds: Record<string, boolean>, collapsedIds: Record<string, boolean>, id: string | null): Promise<string | null> {
-    if (answer.trim().length === 0) return id;
-    const { scan } = await api<{ scan: FocusScanRecord }>("/api/focus-scan/save", { method: "POST", body: JSON.stringify({ id, prKey: targetReview.pr.key, headSha: targetReview.pr.headSha, answer, areaStates: statesFromFocusAreas(parseFocusAreas(answer), viewedIds, collapsedIds) }) });
-    if (activeReviewKeyRef.current === targetReview.pr.key) setFocusScanId(scan.id);
-    updateCachedReview(targetReview.pr.key, (current) => ({ ...current, focusScan: scan, focusScans: upsertHistoryRecord(current.focusScans, scan) }));
-    return scan.id;
+  async function saveFocusScan(_answer: string, viewedIds: Record<string, boolean>, collapsedIds: Record<string, boolean>, id = focusScanId): Promise<string | null> {
+    const record = review?.focusScans.find((scan) => scan.id === id);
+    if (record == null) return id;
+    try {
+      const { scan } = await api<{ scan: FocusScanRecord }>("/api/focus-scan/progress", { method: "POST", body: JSON.stringify({ id: record.id, prKey: record.prKey, areaStates: statesFromFocusAreas(parseFocusAreas(record.answer), viewedIds, collapsedIds) }) });
+      updateCachedReview(record.prKey, (current) => ({ ...current, focusScan: current.focusScan?.id === scan.id ? scan : current.focusScan, focusScans: upsertHistoryRecord(current.focusScans, scan) }));
+      return scan.id;
+    } catch (err) {
+      setError(`Saving focus progress failed: ${errorMessage(err)}`);
+      return id;
+    }
   }
 
   function saveGuideProgress(viewedIds: Record<string, boolean>): void {
     const record = review?.guideReview;
-    if (review == null || record == null || record.answer !== guideReview.text) return;
+    if (record == null || record.answer !== guideReview.text) return;
     const now = new Date().toISOString();
     const stepStates = Object.fromEntries(parseGuideChapters(record.answer).flatMap((chapter) => chapter.steps).map((step) => [step.id, { reviewed: viewedIds[step.id] === true, updatedAt: now }]));
-    void api<{ guide: GuideReviewRecord }>("/api/guide-review/save", { method: "POST", body: JSON.stringify({ prKey: record.prKey, headSha: record.headSha, answer: record.answer, stepStates }) })
-      .then(({ guide }) => updateCachedReview(record.prKey, (current) => ({ ...current, guideReview: guide })))
-      .catch(() => undefined);
-  }
-
-  async function saveAiReviewFor(targetReview: OpenResponse, answer: string, messages: AiReviewMessage[], id: string | null = targetReview.aiReview?.id ?? null): Promise<string | null> {
-    if (answer.trim().length === 0) return id;
-    const { review: savedReview } = await api<{ review: AiReviewRecord }>("/api/ai-review/save", { method: "POST", body: JSON.stringify({ id, prKey: targetReview.pr.key, headSha: targetReview.pr.headSha, answer, messages }) });
-    const nextReview = updateCachedReview(targetReview.pr.key, (current) => ({ ...current, aiReview: savedReview, aiReviews: upsertHistoryRecord(current.aiReviews, savedReview) }));
-    if (activeReviewKeyRef.current === targetReview.pr.key && nextReview != null) setAiReviewId(savedReview.id);
-    return savedReview.id;
+    void api<{ guide: GuideReviewRecord }>("/api/guide-review/progress", { method: "POST", body: JSON.stringify({ prKey: record.prKey, id: record.id, stepStates }) })
+      .then(({ guide }) => updateCachedReview(record.prKey, (current) => current.guideReview?.id === guide.id ? { ...current, guideReview: guide } : current))
+      .catch((err) => setError(`Saving guide progress failed: ${errorMessage(err)}`));
   }
 
   function collapseThreads() {
@@ -1006,156 +915,87 @@ function App() {
     await writeClipboard(prompt);
   }
 
-  /** Warm everything a reviewer needs on open: findings, focus scan, and the guide walkthrough. */
+  /** The backend decides freshness and joins existing work, including after navigation/reload. */
   async function runAutomaticPiReviews(nextReview: OpenResponse) {
     if (!(await autoReviewsEnabled())) return;
-    const aiReviewUpToDate = nextReview.aiReview != null && nextReview.aiReview.headSha === nextReview.pr.headSha && nextReview.aiReview.answer.trim().length > 0;
-    const focusScanUpToDate = nextReview.focusScan != null && nextReview.focusScan.headSha === nextReview.pr.headSha && nextReview.focusScan.answer.trim().length > 0;
-    const guideUpToDate = nextReview.guideReview != null && nextReview.guideReview.headSha === nextReview.pr.headSha && nextReview.guideReview.answer.trim().length > 0;
-    const overviewUpToDate = nextReview.overview != null && nextReview.overview.headSha === nextReview.pr.headSha && nextReview.overview.answer.trim().length > 0;
-    await Promise.all([
-      aiReviewUpToDate ? Promise.resolve() : runAiReviewFor(nextReview, true),
-      focusScanUpToDate ? Promise.resolve() : runFocusReviewFor(nextReview, true),
-      guideUpToDate ? Promise.resolve() : runGuideReviewFor(nextReview),
-      overviewUpToDate ? Promise.resolve() : runOverviewFor(nextReview),
-    ]);
-    await refreshLogs();
+    await Promise.all((['main-review', 'focus-review', 'guide-review', 'code-walk'] as const).map((kind) => runAnalysisFor(nextReview, kind, false)));
   }
 
   async function runAiReview() {
-    if (review == null || aiReview.running) return;
-    await runAiReviewFor(review, false);
-  }
-
-  async function runGuideReview() {
-    if (review == null || guideReview.running) return;
-    await runGuideReviewFor(review);
-  }
-
-  async function runGuideReviewFor(targetReview: OpenResponse) {
-    if (guideReview.running) return;
-    const initialActivity = runningAgentActivity();
-    let cancelActivityPolling: () => void = () => undefined;
-    setGuideReview({ running: true, text: "", activity: initialActivity });
-    try {
-      const { prompt, purpose } = await buildPiPrompt({ mode: "guide-review", prKey: targetReview.pr.key, prTitle: targetReview.pr.title, files: targetReview.files });
-      cancelActivityPolling = startPiAgentActivityPolling(targetReview.pr.key, purpose, (activity) => {
-        if (activeReviewKeyRef.current === targetReview.pr.key) setGuideReview((current) => ({ ...current, activity: activity ?? current.activity ?? null }));
-      }, initialActivity);
-      const setAnswer = (answer: string) => {
-        if (activeReviewKeyRef.current === targetReview.pr.key) setGuideReview((current) => ({ running: true, text: "", activity: streamingAgentActivity(current.activity, answer) }));
-      };
-      const answer = await askPiApi({ prKey: targetReview.pr.key, prompt, purpose }, setAnswer);
-      cancelActivityPolling();
-      if (activeReviewKeyRef.current !== targetReview.pr.key) return;
-      setGuideReview({ running: false, text: answer, activity: null });
-      try {
-        const { guide } = await api<{ guide: GuideReviewRecord }>("/api/guide-review/save", { method: "POST", body: JSON.stringify({ prKey: targetReview.pr.key, headSha: targetReview.pr.headSha, answer }) });
-        updateCachedReview(targetReview.pr.key, (current) => ({ ...current, guideReview: guide }));
-      } catch (err) {
-        setError(`Saving guide failed: ${errorMessage(err)}`);
-      }
-      await refreshLogs();
-    } catch (err) {
-      cancelActivityPolling();
-      if (activeReviewKeyRef.current !== targetReview.pr.key) return;
-      setGuideReview({ running: false, text: `Guide generation failed: ${errorMessage(err)}`, activity: null });
-    }
-  }
-
-  async function runOverview() {
-    if (review == null || overview.running) return;
-    await runOverviewFor(review);
-  }
-
-  async function runOverviewFor(targetReview: OpenResponse) {
-    if (overview.running) return;
-    const initialActivity = runningAgentActivity();
-    let cancelActivityPolling: () => void = () => undefined;
-    setOverview({ running: true, text: "", error: null, activity: initialActivity });
-    try {
-      const { prompt, purpose } = await buildPiPrompt({ mode: "code-walk", prKey: targetReview.pr.key, prTitle: targetReview.pr.title, files: targetReview.files });
-      cancelActivityPolling = startPiAgentActivityPolling(targetReview.pr.key, purpose, (activity) => {
-        if (activeReviewKeyRef.current === targetReview.pr.key) setOverview((current) => ({ ...current, activity: activity ?? current.activity ?? null }));
-      }, initialActivity);
-      const setAnswer = (answer: string) => {
-        if (activeReviewKeyRef.current !== targetReview.pr.key) return;
-        setOverview((current) => ({ running: true, text: "", error: null, activity: streamingAgentActivity(current.activity, answer) }));
-      };
-      const answer = await askPiApi({ prKey: targetReview.pr.key, prompt, purpose }, setAnswer);
-      cancelActivityPolling();
-      if (activeReviewKeyRef.current !== targetReview.pr.key) return;
-      setOverview({ running: false, text: answer, error: null, activity: null });
-      try {
-        const { overview: saved } = await api<{ overview: GuideReviewRecord }>("/api/overview/save", { method: "POST", body: JSON.stringify({ prKey: targetReview.pr.key, headSha: targetReview.pr.headSha, answer }) });
-        updateCachedReview(targetReview.pr.key, (current) => ({ ...current, overview: saved }));
-      } catch (err) {
-        setError(`Saving overview failed: ${errorMessage(err)}`);
-      }
-      await refreshLogs();
-    } catch (err) {
-      cancelActivityPolling();
-      if (activeReviewKeyRef.current !== targetReview.pr.key) return;
-      setOverview((current) => ({ running: false, text: current.text, error: errorMessage(err), activity: null }));
-    }
-  }
-
-  async function runAiReviewFor(targetReview: OpenResponse, background: boolean) {
-    updateAiReview((current) => ({ ...current, running: true, text: background ? current.text : "", messages: background ? current.messages : [], activity: null }));
-    const visibleAiReview = targetReview.pr.key === review?.pr.key ? currentGeneralReviewText(aiReview) : "";
-    const previousAiReview = visibleAiReview || targetReview.aiReview?.answer.trim() || "No previous full review is stored.";
-    const previousFocusAreas = targetReview.focusScan == null ? "No previous focus scan findings are stored." : focusScanHistoryPrompt(targetReview.focusScan.answer, targetReview.focusScan.areaStates);
-    try {
-      const { prompt } = await buildPiPrompt({ mode: "main-review", prKey: targetReview.pr.key, previousAiReview, previousFocusAreas, files: targetReview.files });
-      const answer = (await runPiJob("review", "AI review", targetReview.pr.key, prompt, (activity) => {
-        if (activeReviewKeyRef.current === targetReview.pr.key) updateAiReview((current) => ({ ...current, activity: activity ?? current.activity ?? null }));
-      })) ?? "AI review completed without output.";
-      if (activeReviewKeyRef.current !== targetReview.pr.key) return;
-      const nextMessages = [generalReviewMessage(answer)];
-      updateAiReview((current) => ({ ...current, running: false, text: answer, messages: nextMessages, activity: null }));
-      void saveAiReviewFor(targetReview, answer, nextMessages, null);
-    } catch (err) {
-      if (activeReviewKeyRef.current !== targetReview.pr.key) return;
-      const text = `AI review failed: ${errorMessage(err)}`;
-      updateAiReview((current) => ({ ...current, running: false, text, messages: [generalReviewMessage(text)], activity: null }));
-    }
+    if (review != null && !aiReview.running) await runAnalysisFor(review, "main-review", true);
   }
 
   async function runFocusReview() {
-    if (review == null || focusReview.running) return;
-    await runFocusReviewFor(review, false);
+    if (review != null && !focusReview.running) await runAnalysisFor(review, "focus-review", true);
   }
 
-  async function runFocusReviewFor(targetReview: OpenResponse, background: boolean) {
-    setFocusReview((current) => ({ ...current, running: true, text: background ? current.text : "", activity: null }));
-    if (!background) {
-      setViewedFocusAreaIds({});
-      setActiveFocusAreaId(null);
-      setCollapsedFocusAreaIds({});
-    }
-    const previousScan = targetReview.focusScan;
-    const previousFocusAreas = previousScan == null ? "No previous focus scan findings are stored." : focusScanHistoryPrompt(previousScan.answer, previousScan.areaStates);
+  async function runGuideReview() {
+    if (review != null && !guideReview.running) await runAnalysisFor(review, "guide-review", true);
+  }
+
+  async function runOverview() {
+    if (review != null && !overview.running) await runAnalysisFor(review, "code-walk", true);
+  }
+
+  /** Render a run without owning its execution, result validation, or persistence. */
+  async function runAnalysisFor(target: OpenResponse, kind: AnalysisKind, force: boolean) {
+    const observer = (analysisObserversRef.current[kind] ?? 0) + 1;
+    analysisObserversRef.current[kind] = observer;
+    const isCurrent = () => activeReviewKeyRef.current === target.pr.key && activeReviewHeadRef.current === target.pr.headSha && analysisObserversRef.current[kind] === observer;
+    if (!isCurrent()) return;
+    const activity = runningAgentActivity();
+    const onActivity = (next: PiAgentActivity | undefined) => {
+      if (!isCurrent()) return;
+      const update = { running: true, activity: next ?? activity };
+      switch (kind) {
+        case "main-review": updateAiReview((current) => ({ ...current, ...update })); break;
+        case "focus-review": setFocusReview((current) => ({ ...current, ...update, error: undefined, rawAnswer: undefined })); break;
+        case "guide-review": setGuideReview((current) => ({ ...current, ...update })); break;
+        case "code-walk": setOverview((current) => ({ ...current, ...update, error: null })); break;
+      }
+    };
+    onActivity(activity);
     try {
-      const { prompt } = await buildPiPrompt({ mode: "focus-review", prKey: targetReview.pr.key, prTitle: targetReview.pr.title, previousFocusAreas, files: targetReview.files });
-      const answer = (await runPiJob("focus-review", "Focus review", targetReview.pr.key, prompt, (activity) => {
-        if (activeReviewKeyRef.current === targetReview.pr.key) setFocusReview((current) => ({ ...current, activity: activity ?? current.activity ?? null }));
-      })) ?? "Focus scan completed without output.";
-      if (activeReviewKeyRef.current !== targetReview.pr.key) return;
-      const nextAreas = parseFocusAreas(answer);
-      const inheritedStates = statesFromFocusAreas(focusAreas, viewedFocusAreaIds, collapsedFocusAreaIds);
-      const nextViewedIds = idsFromFocusStates(nextAreas, inheritedStates, "viewed");
-      const nextCollapsedIds = idsFromFocusStates(nextAreas, inheritedStates, "collapsed");
-      setFocusReview((current) => ({ ...current, running: false, text: answer, activity: null }));
-      setViewedFocusAreaIds(nextViewedIds);
-      setCollapsedFocusAreaIds(nextCollapsedIds);
-      // Background warms must not auto-activate an area: activation mounts its inline
-      // terminal and spawns a real Pi session the reviewer never asked for.
-      if (!background) setActiveFocusAreaId(nextAreas[0]?.id ?? null);
-      void saveFocusScanFor(targetReview, answer, nextViewedIds, nextCollapsedIds, null);
+      const result = await runAnalysis(target.pr.key, target.pr.headSha, kind, force, onActivity, isCurrent);
+      if (result == null || !isCurrent()) return;
+      updateCachedReview(target.pr.key, (current) => {
+        if (current.pr.headSha !== result.record.headSha) return current;
+        switch (result.kind) {
+          case "main-review": return { ...current, aiReview: result.record, aiReviews: upsertHistoryRecord(current.aiReviews, result.record) };
+          case "focus-review": return { ...current, focusScan: result.record, focusScans: upsertHistoryRecord(current.focusScans, result.record) };
+          case "guide-review": return { ...current, guideReview: result.record };
+          case "code-walk": return { ...current, overview: result.record };
+        }
+      });
+      switch (result.kind) {
+        case "main-review": showAiReviewRecord(result.record); break;
+        case "guide-review": showGuideReviewRecord(result.record); break;
+        case "code-walk": showOverviewRecord(result.record); break;
+        case "focus-review":
+          setFocusReview({ running: false, text: result.record.answer });
+          setFocusScanId(result.record.id);
+          setViewedFocusAreaIds(idsFromFocusStates(result.areas, result.record.areaStates, "viewed"));
+          setCollapsedFocusAreaIds(idsFromFocusStates(result.areas, result.record.areaStates, "collapsed"));
+          // Background analysis must not mount an unsolicited terminal.
+          if (force) {
+            setOpenFiles((current) => ({ ...current, ...Object.fromEntries(result.areas.map((area) => [area.path, true])) }));
+            setActiveFocusAreaId(result.areas[0]?.id ?? null);
+          }
+          break;
+      }
     } catch (err) {
-      if (activeReviewKeyRef.current !== targetReview.pr.key) return;
-      const text = `Focus review failed: ${errorMessage(err)}`;
-      setFocusReview((current) => ({ ...current, running: false, text, activity: null }));
+      if (!isCurrent()) return;
+      const message = errorMessage(err);
+      switch (kind) {
+        case "main-review": {
+          const text = `AI review failed: ${message}`;
+          updateAiReview(() => ({ running: false, text, messages: [generalReviewMessage(text)] }));
+          break;
+        }
+        case "focus-review": setFocusReview({ running: false, text: "", error: message, rawAnswer: err instanceof AnalysisError ? err.rawAnswer : undefined }); break;
+        case "guide-review": setGuideReview({ running: false, text: `Guide generation failed: ${message}` }); break;
+        case "code-walk": setOverview({ running: false, text: "", error: message }); break;
+      }
     }
   }
 
@@ -1205,6 +1045,9 @@ function App() {
       try {
         await api("/api/pr/cleanup", { method: "POST", body: JSON.stringify({ input: pr.url || prUrlFromKey(pr.key) }) });
         removedKeys.push(pr.key);
+        for (const [cacheKey, cached] of reviewCacheRef.current) {
+          if (cached.pr.key === pr.key) reviewCacheRef.current.delete(cacheKey);
+        }
       } catch (error) {
         failures.push(`${pr.key}: ${errorMessage(error)}`);
       }
@@ -1446,32 +1289,6 @@ function PrCard({ pr, openPr, cleanupPrs, selecting, selected, toggleSelected }:
 function runningAgentActivity(): PiAgentActivity {
   const now = new Date().toISOString();
   return { status: "running", label: "starting agent", elapsedMs: 0, idleMs: 0, answerChars: 0, startedAt: now, lastActivityAt: now };
-}
-
-function streamingAgentActivity(current: PiAgentActivity | null | undefined, answer: string): PiAgentActivity {
-  const now = new Date().toISOString();
-  return { ...(current ?? runningAgentActivity()), status: "running", label: answer.length > 0 ? "streaming response" : "thinking", answerChars: answer.length, lastActivityAt: now };
-}
-
-function diagnosticsAgentActivity(session: Record<string, unknown>, fallback: PiAgentActivity | null): PiAgentActivity | null {
-  const state = session.promptState as Record<string, unknown> | null | undefined;
-  if (state == null) return fallback;
-  const activeTools = Array.isArray(session.activeTools) ? session.activeTools.filter((tool): tool is string => typeof tool === "string") : [];
-  const status = typeof state.status === "string" ? state.status as PiAgentActivity["status"] : "running";
-  let label = "thinking";
-  if (activeTools.length > 0) label = `using ${activeTools.join(", ")}`;
-  else if (status === "queued") label = "queued";
-  else if (session.isStreaming === true) label = "streaming response";
-  return {
-    status,
-    label,
-    elapsedMs: typeof state.elapsedMs === "number" ? state.elapsedMs : fallback?.elapsedMs ?? 0,
-    idleMs: typeof state.lastActivityAt === "string" ? Date.now() - Date.parse(state.lastActivityAt) : fallback?.idleMs ?? 0,
-    answerChars: typeof state.answerChars === "number" ? state.answerChars : fallback?.answerChars ?? 0,
-    startedAt: typeof state.startedAt === "string" ? state.startedAt : fallback?.startedAt,
-    lastActivityAt: typeof state.lastActivityAt === "string" ? state.lastActivityAt : fallback?.lastActivityAt,
-    detail: typeof state.detail === "string" ? state.detail : fallback?.detail,
-  };
 }
 
 function compactDuration(ms: number | null | undefined): string {
@@ -2617,7 +2434,8 @@ function AiReviewPanel({ prKey, prUrl, focusPanel, review, aiReviewHistory, aiRe
       </div>
     </div>
     <div className="pi-review-findings">
-      {focusReviewHasNoFindings(focusReview.text) && <Flash variant="success" className="focus-review-note clean" role="status"><strong>✓ Focus scan clean.</strong><span>All scanned up for this pass.</span></Flash>}
+      {!focusReview.running && !focusReview.error && focusReviewHasNoFindings(focusReview.text) && <Flash variant="success" className="focus-review-note clean" role="status"><strong>✓ Focus scan clean.</strong><span>All scanned up for this pass.</span></Flash>}
+      {!focusReview.running && (focusReview.error || (focusReview.text.trim().length > 0 && !focusReviewHasNoFindings(focusReview.text) && focusAreas.length === 0)) && <Flash variant="warning" role="alert"><strong>Focus scan could not be validated.</strong><p>{focusReview.error ?? focusReview.text}</p>{focusReview.rawAnswer && <details><summary>Raw response</summary><pre>{focusReview.rawAnswer}</pre></details>}</Flash>}
       {focusAreaLinks}
       {reviewMessages.length > 0 && <div className="ai-chat-messages ai-review-response">{reviewMessages.map((message, index) => <GeneralReviewEntry key={index} message={message} prUrl={prUrl} />)}</div>}
     </div>

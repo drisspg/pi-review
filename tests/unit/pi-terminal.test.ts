@@ -20,7 +20,7 @@ class FakeProcess {
   resize(cols: number, rows: number) { this.resizes.push([cols, rows]); }
   pause() { this.pauses += 1; }
   resume() { this.resumes += 1; }
-  kill() { this.killed = true; }
+  kill() { this.killed = true; this.exitListener({ exitCode: 0 }); }
   onData(listener: (data: string) => void) { this.dataListener = listener; return { dispose() {} }; }
   onExit(listener: (event: { exitCode: number; signal?: number }) => void) { this.exitListener = listener; return { dispose() {} }; }
 }
@@ -255,5 +255,90 @@ test("a disconnecting slow peer releases flow control", async () => {
 
   peer.closeListener();
   assert.equal(fake.resumes, 1);
+  await manager.dispose();
+});
+
+test("concurrent attaches share one PTY and disposal invalidates pending startup", async () => {
+  let spawns = 0;
+  const manager = createPiTerminalManager({
+    cwdForPr: () => "/tmp/pr-worktree",
+    sessionRoot: "/tmp/pi-review-terminal-lifecycle-test",
+    spawn: () => { spawns += 1; return new FakeProcess() as never; },
+  });
+  const request = { prKey: "github.com/org/repo#1", session: "main" };
+  await Promise.all([manager.attach(new FakePeer(), request), manager.attach(new FakePeer(), request)]);
+  assert.equal(spawns, 1);
+  await manager.disposePr(request.prKey);
+  const peer = new FakePeer();
+  const attaching = manager.attach(peer, request);
+  await manager.disposePr(request.prKey);
+  await attaching;
+  assert.equal(spawns, 1);
+  assert.equal(peer.messages.some((message) => message.type === "ready"), false);
+  await manager.dispose();
+});
+
+test("PTY reuse checks revision and rejects a stale browser revision", async () => {
+  const processes: FakeProcess[] = [];
+  const manager = createPiTerminalManager({
+    cwdForPr: () => "/tmp/pr-worktree",
+    sessionRoot: "/tmp/pi-review-terminal-revision-test",
+    spawn: () => { const process = new FakeProcess(); processes.push(process); return process as never; },
+  });
+  const request = { prKey: "github.com/org/repo#1", session: "main" };
+  await manager.attach(new FakePeer(), { ...request, headSha: "aaaaaaa" });
+  await manager.attach(new FakePeer(), { ...request, headSha: "bbbbbbb" });
+  assert.equal(processes.length, 2);
+  assert.equal(processes[0].killed, true);
+  await manager.dispose();
+  const validated = createPiTerminalManager({ cwdForPr: () => "/tmp/pr-worktree", headShaForPr: () => "bbbbbbb", spawn: () => { throw new Error("must not spawn"); } });
+  const stale = new FakePeer();
+  await validated.attach(stale, { ...request, headSha: "aaaaaaa" });
+  assert.ok(stale.messages.some((message) => message.type === "error" && /stale/.test(message.message)));
+  await validated.dispose();
+});
+
+test("a terminal that exits after a shutdown timeout releases the transition barrier", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const process = new FakeProcess();
+  process.kill = () => { process.killed = true; };
+  const manager = createPiTerminalManager({ cwdForPr: () => "/tmp/pr-worktree", sessionRoot: "/tmp/pi-review-terminal-late-exit-test", spawn: () => process as never });
+  const request = { prKey: "github.com/org/repo#1", session: "main" };
+  await manager.attach(new FakePeer(), request);
+  const disposal = manager.disposePr(request.prKey);
+  const rejected = assert.rejects(disposal, /did not exit/);
+  await new Promise((resolve) => setImmediate(resolve));
+  t.mock.timers.tick(5000);
+  await rejected;
+  const blocked = new FakePeer();
+  await manager.attach(blocked, request);
+  assert.equal(blocked.messages.some((message) => message.type === "ready"), false);
+  process.exitListener({ exitCode: 0 });
+  await new Promise((resolve) => setImmediate(resolve));
+  await manager.disposePr(request.prKey);
+  await manager.dispose();
+});
+
+test("PR disposal waits for PTY exit before permitting checkout replacement", async () => {
+  const process = new FakeProcess();
+  process.kill = () => { process.killed = true; };
+  const manager = createPiTerminalManager({
+    cwdForPr: () => "/tmp/pr-worktree",
+    sessionRoot: "/tmp/pi-review-terminal-exit-test",
+    spawn: () => process as never,
+  });
+  const request = { prKey: "github.com/org/repo#1", session: "main" };
+  await manager.attach(new FakePeer(), request);
+  let disposed = false;
+  const disposing = manager.disposePr(request.prKey).then(() => { disposed = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(process.killed, true);
+  assert.equal(disposed, false);
+  const reconnect = new FakePeer();
+  await manager.attach(reconnect, request);
+  assert.equal(reconnect.messages.some((message) => message.type === "ready"), false);
+  process.exitListener({ exitCode: 0 });
+  await disposing;
+  assert.equal(disposed, true);
   await manager.dispose();
 });

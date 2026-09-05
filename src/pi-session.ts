@@ -1,5 +1,4 @@
-import { AuthStorage, createAgentSession, type AgentSession, type AgentSessionEvent, ModelRegistry, SessionManager } from "@earendil-works/pi-coding-agent";
-import { existsSync } from "node:fs";
+import { createAgentSession, type AgentSession, type AgentSessionEvent, ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
@@ -7,10 +6,8 @@ import { resolve } from "node:path";
 import { createGpuWorkspaceTool } from "./gpu-workspace-tool.js";
 import { logger } from "./logger.js";
 import { DEFAULT_PI_MODEL_ID, DEFAULT_PI_MODEL_PROVIDER } from "./pi-defaults.js";
-import { parsePullRequestKey } from "./pr.js";
 import { createReviewDraftTool, type ReviewDraftToolContext } from "./review-draft-tool.js";
 import type { PiPromptEvent } from "./types.js";
-import { worktreeDirForRef } from "./worktrees.js";
 
 type TextPart = {
   text?: string;
@@ -56,6 +53,8 @@ const PI_TOOLS_BY_PURPOSE: Record<string, string[]> = {
   "test-pr": REVIEW_TOOLS,
 };
 
+const generationByPr = new Map<string, number>();
+const disposalsByPr = new Map<string, Promise<void>>();
 const sessions = new Map<string, Promise<AgentSession>>();
 const cwdByPr = new Map<string, string>();
 const reviewContextByPr = new Map<string, ReviewDraftToolContext>();
@@ -112,14 +111,21 @@ function sessionDirForPr(prKey: string, purpose = "chat"): string {
   return resolve(homedir(), ".pi", "agent", "state", "pi-pr-review", "pi-sessions", sessionKeyForPr(prKey, purpose));
 }
 
-/** Return the registered checkout, or an existing persisted worktree after a server restart. */
+/** Only registered checkouts may host PR work; persisted directories may be stale. */
 export function piSessionCwd(prKey: string): string | null {
-  const registered = cwdByPr.get(prKey);
-  if (registered != null) return registered;
-  const ref = parsePullRequestKey(prKey);
-  if (ref == null) return null;
-  const persisted = worktreeDirForRef(ref);
-  return existsSync(persisted) ? persisted : null;
+  return cwdByPr.get(prKey) ?? null;
+}
+
+/** Invalidate queued and running callers synchronously before asynchronous teardown. */
+function invalidatePiSession(prKey: string): void {
+  generationByPr.set(prKey, (generationByPr.get(prKey) ?? 0) + 1);
+  cwdByPr.delete(prKey);
+  reviewContextByPr.delete(prKey);
+}
+
+/** Reject continuations captured before a checkout transition. */
+function assertGeneration(prKey: string, generation: number): void {
+  if ((generationByPr.get(prKey) ?? 0) !== generation) throw new Error("Pi session invalidated by a pull request transition.");
 }
 
 /** Return the current diff contract used by PR-scoped review tools. */
@@ -129,6 +135,7 @@ export function piSessionReviewContext(prKey: string): ReviewDraftToolContext | 
 
 /** Register the checkout and current diff used by PR-scoped conversational tools. */
 export async function registerPiSessionContext(prKey: string, cwd: string, context: ReviewDraftToolContext): Promise<void> {
+  await disposalsByPr.get(prKey);
   const existingCwd = cwdByPr.get(prKey);
   const existingContext = reviewContextByPr.get(prKey);
   if (existingCwd != null && (existingCwd !== cwd || existingContext?.headSha !== context.headSha)) await disposePiSession(prKey);
@@ -136,21 +143,27 @@ export async function registerPiSessionContext(prKey: string, cwd: string, conte
   reviewContextByPr.set(prKey, context);
 }
 
-let sharedModelRegistry: ReturnType<typeof ModelRegistry.create> | null = null;
+let sharedModelRuntime: Promise<ModelRuntime> | null = null;
 
-function getModelRegistry(): ReturnType<typeof ModelRegistry.create> {
-  sharedModelRegistry ??= ModelRegistry.create(AuthStorage.create());
-  return sharedModelRegistry;
+/** Share model catalogs and credentials across review sessions. */
+function getModelRuntime(): Promise<ModelRuntime> {
+  sharedModelRuntime ??= ModelRuntime.create().catch((error) => {
+    sharedModelRuntime = null;
+    throw error;
+  });
+  return sharedModelRuntime;
 }
 
 async function createSession(prKey: string, purpose = "chat"): Promise<AgentSession> {
-  const cwd = cwdByPr.get(prKey) ?? process.cwd();
+  // Profile distillation is deliberately global and has no PR checkout.
+  const cwd = cwdByPr.get(prKey) ?? (prKey === "review-memory" && purpose === "review-memory-distill" ? process.cwd() : null);
+  if (cwd == null) throw new Error("Open this pull request before starting Pi work.");
   const sessionDir = sessionDirForPr(prKey, purpose);
   await mkdir(sessionDir, { recursive: true });
   const startedAt = performance.now();
   logger.info("pi", "create session", { prKey, purpose, cwd, sessionDir });
-  const modelRegistry = getModelRegistry();
-  const model = modelRegistry.find(DEFAULT_PI_MODEL_PROVIDER, DEFAULT_PI_MODEL_ID);
+  const modelRuntime = await getModelRuntime();
+  const model = modelRuntime.getModel(DEFAULT_PI_MODEL_PROVIDER, DEFAULT_PI_MODEL_ID);
   if (model == null) throw new Error(`Default Pi Review model not found: ${DEFAULT_PI_MODEL_PROVIDER}/${DEFAULT_PI_MODEL_ID}`);
   const thinkingLevel = PI_THINKING_LEVEL_BY_PURPOSE[purpose] ?? DEFAULT_PI_THINKING_LEVEL;
   const scopedTools = PI_TOOLS_BY_PURPOSE[purpose];
@@ -160,7 +173,7 @@ async function createSession(prKey: string, purpose = "chat"): Promise<AgentSess
   const { session } = await createAgentSession({
     cwd,
     model,
-    modelRegistry,
+    modelRuntime,
     sessionManager: SessionManager.create(cwd, sessionDir),
     thinkingLevel,
     ...(scopedTools == null
@@ -172,10 +185,15 @@ async function createSession(prKey: string, purpose = "chat"): Promise<AgentSess
 }
 
 function getSession(prKey: string, purpose = "chat"): Promise<AgentSession> {
+  if (disposalsByPr.has(prKey)) return Promise.reject(new Error("Pi session is being disposed."));
+  if (!generationByPr.has(prKey)) generationByPr.set(prKey, 0);
   const sessionKey = sessionKeyForPr(prKey, purpose);
   const existing = sessions.get(sessionKey);
   if (existing != null) return existing;
-  const created = createSession(prKey, purpose);
+  const created = createSession(prKey, purpose).catch((error) => {
+    if (sessions.get(sessionKey) === created) sessions.delete(sessionKey);
+    throw error;
+  });
   sessions.set(sessionKey, created);
   return created;
 }
@@ -267,7 +285,7 @@ export async function piDiagnostics(prKey: string): Promise<Record<string, unkno
     sessionName: session.sessionName ?? null,
     model: modelLabel(session.model),
     thinkingLevel: session.thinkingLevel ?? null,
-    availableModels: session.modelRegistry.getAvailable().map((model) => ({ provider: model.provider, id: model.id, name: model.name })),
+    availableModels: (await session.modelRuntime.getAvailable()).map((model) => ({ provider: model.provider, id: model.id, name: model.name })),
     availableThinkingLevels: session.getAvailableThinkingLevels(),
     activeTools: session.getActiveToolNames(),
     tools: session.getAllTools().map(({ name, sourceInfo }) => ({ name, source: sourceInfo })),
@@ -277,7 +295,7 @@ export async function piDiagnostics(prKey: string): Promise<Record<string, unkno
 }
 
 export async function setPiModel(prKey: string, provider: string, modelId: string, thinkingLevel?: string): Promise<Record<string, unknown>> {
-  const model = getModelRegistry().find(provider, modelId);
+  const model = (await getModelRuntime()).getModel(provider, modelId);
   if (model == null) throw new Error(`Unknown model ${provider}/${modelId}`);
   if (thinkingLevel != null && thinkingLevel.length > 0 && !isThinkingLevel(thinkingLevel)) throw new Error(`Unknown thinking level ${thinkingLevel}`);
   const prSessions = await Promise.all(sessionEntriesForPr(prKey).map(([, sessionPromise]) => sessionPromise));
@@ -289,34 +307,38 @@ export async function setPiModel(prKey: string, provider: string, modelId: strin
   return piDiagnostics(prKey);
 }
 
-export async function disposePiSession(prKey: string): Promise<void> {
+export function disposePiSession(prKey: string): Promise<void> {
+  invalidatePiSession(prKey);
+  const existingDisposal = disposalsByPr.get(prKey);
+  if (existingDisposal != null) return existingDisposal;
   const prefix = sessionPrefixForPr(prKey);
   const sessionEntries = sessionEntriesForPr(prKey);
   for (const [sessionKey] of sessionEntries) sessions.delete(sessionKey);
-  cwdByPr.delete(prKey);
-  reviewContextByPr.delete(prKey);
   deleteEntriesWithPrefix(lastPromptByPr, prefix);
   deleteEntriesWithPrefix(promptQueueByPr, prefix);
   deleteEntriesWithPrefix(promptStateByPr, prefix);
-  for (const [, sessionPromise] of sessionEntries) {
-    const session = await sessionPromise;
-    await session.abort();
-    session.dispose();
-  }
+  const disposal = (async () => {
+    const settled = await Promise.allSettled(sessionEntries.map(([, pending]) => pending));
+    await Promise.all(settled.map(async (result) => {
+      if (result.status !== "fulfilled") return;
+      try {
+        await result.value.abort();
+      } finally {
+        result.value.dispose();
+      }
+    }));
+  })();
+  disposalsByPr.set(prKey, disposal);
+  // A failed abort must remain a barrier to registering a replacement checkout.
+  void disposal.then(() => {
+    if (disposalsByPr.get(prKey) === disposal) disposalsByPr.delete(prKey);
+  }).catch(() => undefined);
+  return disposal;
 }
 
 export async function disposePiSessions(): Promise<void> {
-  const settled = await Promise.allSettled([...sessions.values()]);
-  sessions.clear();
-  for (const result of settled) {
-    if (result.status !== "fulfilled") continue;
-    try {
-      await result.value.abort();
-      result.value.dispose();
-    } catch (error) {
-      logger.debug("pi", "dispose ignored failure", { error: error instanceof Error ? error.message : String(error) });
-    }
-  }
+  const keys = new Set([...generationByPr.keys(), ...cwdByPr.keys()]);
+  await Promise.all([...keys].map(disposePiSession));
 }
 
 function sessionEventFromUnknown(event: unknown): AgentSessionEvent | null {
@@ -429,14 +451,15 @@ function errorFromMessage(message: unknown): string | null {
   return errorMessage ?? "Assistant stopped with an error.";
 }
 
-async function runPiPrompt(prKey: string, prompt: string, purpose = "chat", onDelta?: (delta: string) => void, onEvent?: (event: PiPromptEvent) => void): Promise<string> {
+async function runPiPrompt(prKey: string, prompt: string, generation: number, purpose = "chat", onDelta?: (delta: string) => void, onEvent?: (event: PiPromptEvent) => void): Promise<string> {
   const startedAt = performance.now();
   const sessionKey = sessionKeyForPr(prKey, purpose);
   const session = await getSession(prKey, purpose);
   let answer = "";
-  let latestAssistantText = "";
-  let latestAssistantError: string | null = null;
+  assertGeneration(prKey, generation);
+  const previousMessages = new Set(session.messages);
   const unsubscribe = session.subscribe((event) => {
+    if ((generationByPr.get(prKey) ?? 0) !== generation) return;
     const now = new Date().toISOString();
     const message = messageFromSessionEvent(event);
     const toolDetail = toolCallDetailFromMessage(message);
@@ -444,9 +467,6 @@ async function runPiPrompt(prKey: string, prompt: string, purpose = "chat", onDe
     if (promptEvent != null) onEvent?.(promptEvent);
     const previousState = promptStateByPr.get(sessionKey);
     if (previousState != null) promptStateByPr.set(sessionKey, { ...previousState, lastActivityAt: now, ...(toolDetail != null ? { detail: toolDetail } : {}) });
-    const assistantText = textFromMessage(message);
-    if (assistantText.trim().length > 0) latestAssistantText = assistantText;
-    latestAssistantError = errorFromMessage(message) ?? latestAssistantError;
     const delta = textDeltaFromSessionEvent(event);
     if (delta.length === 0) return;
     answer += delta;
@@ -458,19 +478,18 @@ async function runPiPrompt(prKey: string, prompt: string, purpose = "chat", onDe
   logger.info("pi", "prompt start", { prKey, purpose, chars: prompt.length });
   try {
     await session.prompt(prompt);
-    const finalAnswer = answer.trim() || latestAssistantText.trim();
-    if (latestAssistantError != null) {
-      logger.error("pi", "prompt model error", { prKey, purpose, ms: Math.round(performance.now() - startedAt), error: latestAssistantError });
-      throw new Error(`Pi model error: ${latestAssistantError}`);
-    }
+    assertGeneration(prKey, generation);
+    const finalAnswer = piFinalAssistantAnswer(session.messages.filter((message) => !previousMessages.has(message)));
     logger.info("pi", "prompt complete", { prKey, purpose, ms: Math.round(performance.now() - startedAt), answerChars: finalAnswer.length, streamedAnswerChars: answer.length });
-    return finalAnswer || "Pi completed without assistant text.";
+    return finalAnswer;
   } finally {
     unsubscribe();
   }
 }
 
 export async function askPi(prKey: string, prompt: string, purpose = "chat", onDelta?: (delta: string) => void, onEvent?: (event: PiPromptEvent) => void): Promise<string> {
+  const generation = generationByPr.get(prKey) ?? 0;
+  generationByPr.set(prKey, generation);
   const sessionKey = sessionKeyForPr(prKey, purpose);
   const previous = promptQueueByPr.get(sessionKey) ?? Promise.resolve();
   const queuedAt = new Date().toISOString();
@@ -482,17 +501,43 @@ export async function askPi(prKey: string, prompt: string, purpose = "chat", onD
   }));
   promptQueueByPr.set(sessionKey, queued);
   await ready;
+  try {
+    assertGeneration(prKey, generation);
+  } catch (error) {
+    releaseQueue();
+    throw error;
+  }
   const startedAt = new Date().toISOString();
   promptStateByPr.set(sessionKey, { status: "running", purpose, chars: prompt.length, queuedAt: promptStateByPr.get(sessionKey)?.queuedAt ?? startedAt, startedAt, lastActivityAt: startedAt });
   try {
-    const answer = await runPiPrompt(prKey, prompt, purpose, onDelta, onEvent);
+    const answer = await runPiPrompt(prKey, prompt, generation, purpose, onDelta, onEvent);
+    assertGeneration(prKey, generation);
     promptStateByPr.set(sessionKey, { ...promptStateByPr.get(sessionKey)!, status: "complete", finishedAt: new Date().toISOString(), answerChars: answer.length });
     return answer;
   } catch (error) {
-    promptStateByPr.set(sessionKey, { ...promptStateByPr.get(sessionKey)!, status: "failed", finishedAt: new Date().toISOString(), error: error instanceof Error ? error.message : String(error) });
+    if ((generationByPr.get(prKey) ?? 0) === generation) promptStateByPr.set(sessionKey, { ...promptStateByPr.get(sessionKey)!, status: "failed", finishedAt: new Date().toISOString(), error: error instanceof Error ? error.message : String(error) });
     throw error;
   } finally {
     releaseQueue();
     if (promptQueueByPr.get(sessionKey) === queued) promptQueueByPr.delete(sessionKey);
   }
+}
+
+/** Select the settled final assistant artifact, not commentary or a failed retry attempt. */
+export function piFinalAssistantAnswer(messages: readonly unknown[]): string {
+  const finalMessage = [...messages].reverse().find((message) => typeof message === "object" && message != null && (message as MessageLike).role === "assistant") as MessageLike | undefined;
+  const error = errorFromMessage(finalMessage);
+  if (error != null) throw new Error(`Pi model error: ${error}`);
+  if (finalMessage?.stopReason === "aborted") throw new Error("Pi prompt aborted.");
+  const answer = textFromMessage(finalMessage).trim();
+  if (answer.length === 0) throw new Error("Pi completed without assistant text.");
+  return answer;
+}
+
+/** Capture the actual session policy for persisted analysis provenance. */
+export async function piRunModel(prKey: string, purpose: string): Promise<{ model: string; thinkingLevel: string }> {
+  const generation = generationByPr.get(prKey) ?? 0;
+  const session = await getSession(prKey, purpose);
+  assertGeneration(prKey, generation);
+  return { model: modelLabel(session.model) ?? "unknown", thinkingLevel: session.thinkingLevel };
 }

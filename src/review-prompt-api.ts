@@ -259,7 +259,9 @@ ${previousAiReview}
 Previous focus scan state:
 ${previousFocusAreas}
 
-For reruns, do not repeat substantially identical findings from the previous full review or reviewed focus items unless the current diff materially changes the concern. Prefer genuinely new, unresolved, or still-unreviewed issues. If prior concerns now appear addressed, summarize that briefly instead of re-reporting them as findings.
+Inspect the relevant implementation, callers, and tests before reporting a concern. Attempt to disprove each candidate; report only concrete problems supported by current code. Complete ordinary read-only investigation without asking for approval. Do not modify source files or publish comments. If evidence is unavailable, state the limitation rather than claiming the code was checked.
+
+Previous reviews are context, not proof. Re-check prior concerns against this revision: keep still-valid findings and omit addressed ones. A viewed checkbox or previous report does not establish that a defect was fixed.
 
 ${patchSummary(promptFiles(payload))}`,
   };
@@ -280,7 +282,7 @@ async function focusReviewPrompt(payload: Record<string, unknown>, deps: ReviewP
 
 Investigate before reporting. For every candidate, inspect the surrounding implementation, nearby precedent, tests, and relevant language or build-system semantics, then actively try to disprove the concern. Suppress it when the behavior is standard, matches adjacent code, preserves an intentional user override, is answered by the diff or repository, or depends only on a speculative future scenario. A technically true observation is not a focus area unless it exposes a realistic failure mode or a consequential unresolved design choice.
 
-Do not flag stale generated state, old build directories, prior cache entries, or other incremental-environment residue merely because a clean configuration picks up the new behavior. Treat clean configuration as the normal contract unless the repository explicitly guarantees in-place migration, CI demonstrably reuses that state, or stale state causes a correctness failure rather than only missing an optimization. In particular, do not recommend forcing a cached build option when that would remove a supported user override without evidence that the project intends to forbid the override.
+Respect supported user overrides and the repository's documented environment contract. Report migration or cached-state concerns only when they expose a supported workflow's realistic failure. Complete ordinary read-only investigation without asking for approval; do not modify source files or publish comments. If investigation is blocked, explain the limitation instead of returning a clean result.
 
 Do not manufacture questions to fill the list. "Could this be intentional?", "should this be different?", and similar questions are not findings without concrete evidence that the current behavior is wrong or risky. Prefer no findings over a weak finding.
 
@@ -290,7 +292,7 @@ ${reviewMemory}
 Previous focus scan state:
 ${previousFocusAreas}
 
-If a finding is substantially the same as a previous reviewed finding, do not return it again unless the current diff materially changes the concern. If it is substantially the same as a previous unreviewed finding, keep it and use the closest current location. Prefer surfacing genuinely new or still-unreviewed findings over re-listing already-reviewed ones.
+Re-check previous findings against this revision and retain concerns that remain valid. Being previously reported or viewed does not mean a defect is resolved. Use the closest current reviewable location; omit concerns that are now addressed.
 
 Return markdown with a "Focus areas" list. Start each item with a clickable-style location in this exact format: \`path:startLine-endLine — short title\` or \`path:line — short title\`. Then state the evidence, realistic impact, and the specific unresolved reviewer question. Avoid generic praise and blocking language unless there is strong evidence. If no candidate survives investigation, return exactly: \`No focus areas found.\`
 

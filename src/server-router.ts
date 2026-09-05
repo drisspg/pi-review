@@ -1,3 +1,4 @@
+import type { AnalysisApi } from "./analysis-api.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import { inputFromBody, isLocalOrigin, type JsonValue, MalformedJsonError, readBody, recordFromBody, sendJson } from "./http.js";
@@ -25,6 +26,7 @@ export type ServerLogger = {
 };
 
 export type ServerRouteDeps = {
+  analysisApi: AnalysisApi;
   askStreamApi: { stream: (res: AskStreamResponse, payload: Record<string, unknown>) => Promise<void> };
   blameApi: BlameApi;
   commentApi: CommentApi;
@@ -66,6 +68,10 @@ async function inputFromRequest(req: IncomingMessage): Promise<string> {
 
 export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
   const jsonPostHandlers: Record<string, JsonPostHandler> = {
+    "/api/analysis/start": (payload) => deps.analysisApi.start(payload),
+    "/api/analysis/status": (payload) => deps.analysisApi.status(payload),
+    "/api/focus-scan/progress": (payload) => deps.savedAnalysisApi.updateFocusScanProgress(payload),
+    "/api/guide-review/progress": (payload) => deps.savedAnalysisApi.updateGuideReviewProgress(payload),
     "/api/ai-review/save": (payload) => deps.savedAnalysisApi.saveAiReview(payload),
     "/api/ask": (payload) => deps.piApi.ask(payload),
     "/api/comment/edit": (payload) => deps.commentApi.edit(payload),
@@ -83,10 +89,8 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
     "/api/overview/save": (payload) => deps.savedAnalysisApi.saveOverview(payload),
     "/api/pi/diagnostics": (payload) => deps.piApi.diagnostics(payload),
     "/api/pi/draft-comment": (payload) => deps.piTerminalDraftApi.add(payload),
-    "/api/pi/focus-review/status": (payload) => deps.piApi.jobStatus(payload),
     "/api/pi/model": (payload) => deps.piApi.setModel(payload),
     "/api/pi/prompt": (payload) => deps.reviewPromptApi.build(payload),
-    "/api/pi/review/status": (payload) => deps.piApi.jobStatus(payload),
     "/api/pi/terminal/delete": (payload) => deps.piTerminalApi.remove(payload),
     "/api/pr/checks": (payload) => deps.prApi.checks(payload),
     "/api/pr/interdiff": (payload) => deps.prApi.interdiff(payload),
@@ -228,22 +232,6 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
       return;
     }
 
-    if (req.method === "POST" && url.pathname === "/api/pi/review") {
-      const payload = await recordFromRequest(req);
-      const response = await deps.piApi.startReviewJob(payload, "main-review");
-      deps.logger.info("api", "main review job started", { prKey: payload.prKey, jobId: response.job.id });
-      sendJson(res, 202, response);
-      return;
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/pi/focus-review") {
-      const payload = await recordFromRequest(req);
-      const response = await deps.piApi.startReviewJob(payload, "focus-review");
-      deps.logger.info("api", "focus review job started", { prKey: payload.prKey, jobId: response.job.id });
-      sendJson(res, 202, response);
-      return;
-    }
-
     if (req.method === "POST" && url.pathname === "/api/gpu/workspaces") {
       const payload = await recordFromRequest(req);
       deps.logger.info("api", "gpu workspace requested", { prUrl: payload.prUrl, gpuType: payload.gpuType });
@@ -300,7 +288,7 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
 }
 
 /** High-frequency polling/infra routes that would drown the usage log without adding signal. */
-const usageIgnoredApiPaths = new Set(["/api/health", "/api/logs", "/api/config", "/api/usage", "/api/pi/review/status", "/api/pi/focus-review/status"]);
+const usageIgnoredApiPaths = new Set(["/api/health", "/api/logs", "/api/config", "/api/usage", "/api/analysis/status"]);
 
 export function createRequestListener(route: ServerRoute, logger: ServerLogger, recordUsage?: (name: string, data: Record<string, unknown>) => void, assetsVersion?: () => string): (req: IncomingMessage, res: ServerResponse) => void {
   return (req, res) => {

@@ -62,8 +62,9 @@ test("review prompt API injects memory for main and focus review prompts", async
   assert.match(focus.prompt, /Previous focus scan state:\nold focus/);
   assert.match(focus.prompt, /actively try to disprove the concern/);
   assert.match(focus.prompt, /preserves an intentional user override/);
-  assert.match(focus.prompt, /Treat clean configuration as the normal contract/);
-  assert.match(focus.prompt, /do not recommend forcing a cached build option/);
+  assert.match(focus.prompt, /Respect supported user overrides/);
+  assert.match(focus.prompt, /If investigation is blocked, explain the limitation instead of returning a clean result/);
+  assert.match(main.prompt, /A viewed checkbox or previous report does not establish that a defect was fixed/);
   assert.match(focus.prompt, /Prefer no findings over a weak finding/);
   assert.match(focus.prompt, /No focus areas found\./);
 });

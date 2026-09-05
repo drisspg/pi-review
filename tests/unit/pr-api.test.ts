@@ -151,8 +151,9 @@ test("PR API activity refreshes the worktree, Pi context, and review response", 
   assert.deepEqual(calls, [
     "parse:url",
     "fetch:1",
-    "upsert:github.com/pytorch/pytorch#1",
+    "dispose:github.com/pytorch/pytorch#1",
     "prepare:1:git@github.com:pytorch/pytorch.git:head",
+    "upsert:github.com/pytorch/pytorch#1",
     "context:github.com/pytorch/pytorch#1:/tmp/worktree:head:a.ts",
     "draft:github.com/pytorch/pytorch#1",
     "focus:github.com/pytorch/pytorch#1",
@@ -173,8 +174,9 @@ test("PR API open prepares worktree, registers Pi cwd, prewarms sessions, and hy
   assert.deepEqual(calls, [
     "parse:url",
     "fetch:1",
-    "upsert:github.com/pytorch/pytorch#1",
+    "dispose:github.com/pytorch/pytorch#1",
     "prepare:1:git@github.com:pytorch/pytorch.git:head",
+    "upsert:github.com/pytorch/pytorch#1",
     "context:github.com/pytorch/pytorch#1:/tmp/worktree:head:a.ts",
     "prewarm:github.com/pytorch/pytorch#1:main-review,focus-review",
     "draft:github.com/pytorch/pytorch#1",
@@ -280,4 +282,32 @@ test("PR API interdiff and checks reject malformed payloads", async () => {
   await assert.rejects(prApi.interdiff({ prUrl: "url", sinceSha: "not a sha", headSha: "def5678" }), /sinceSha/);
   await assert.rejects(prApi.interdiff({ prUrl: "url", sinceSha: "abc1234" }), /headSha/);
   await assert.rejects(prApi.checks({ prUrl: "url" }), /sha/);
+});
+
+test("PR transitions serialize refresh and cleanup, disposing only before revision replacement", async () => {
+  const { deps, calls } = fakeDeps();
+  let headSha = "first";
+  deps.fetchPullRequestReviewData = async () => {
+    calls.push(`fetch:${headSha}`);
+    return reviewData(storedPr({ headSha }));
+  };
+  const api = createPrApi(deps);
+  await api.open("url");
+  calls.length = 0;
+  await api.activity("url");
+  assert.equal(calls.some((call) => call.startsWith("dispose:")), false);
+  headSha = "second";
+  calls.length = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  deps.disposePiSession = async () => { calls.push("dispose:start"); await gate; calls.push("dispose:end"); };
+  const refreshing = api.activity("url");
+  const cleaning = api.cleanup("url");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(calls.includes("dispose:start"));
+  assert.equal(calls.some((call) => call.startsWith("prepare:") || call.startsWith("cleanup:")), false);
+  release();
+  await Promise.all([refreshing, cleaning]);
+  assert.ok(calls.indexOf("dispose:end") < calls.findIndex((call) => call.startsWith("prepare:")));
+  assert.ok(calls.findIndex((call) => call.startsWith("context:")) < calls.indexOf("cleanup:1"));
 });

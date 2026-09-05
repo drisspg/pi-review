@@ -163,6 +163,7 @@ export type FocusAreaReviewState = {
 };
 
 export type FocusScanRecord = {
+  provenance?: import("./analysis-types.js").AnalysisProvenance;
   id: string;
   prKey: string;
   headSha: string;
@@ -192,6 +193,7 @@ type GuideStepState = {
 };
 
 export type GuideReviewRecord = {
+  provenance?: import("./analysis-types.js").AnalysisProvenance;
   id: string;
   prKey: string;
   headSha: string;

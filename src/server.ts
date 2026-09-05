@@ -20,12 +20,12 @@ import { addIssueComment, addPendingPullRequestReviewThread, compareCommits, cre
 import { logger } from "./logger.js";
 import { parsePullRequestRef, prKey } from "./pr.js";
 import { createPiApi } from "./pi-api.js";
-import { createPiJobRunner } from "./pi-jobs.js";
+import { createAnalysisApi } from "./analysis-api.js";
 import { createPiTerminalApi } from "./pi-terminal-api.js";
 import { createPiTerminalDraftApi } from "./pi-terminal-draft-api.js";
 import { createPiTerminalManager } from "./pi-terminal.js";
 import { attachPiTerminalWebSocketServer } from "./pi-terminal-websocket.js";
-import { askPi, disposePiSession, disposePiSessions, piActivity, piDiagnostics, piSessionCwd, piSessionReviewContext, prewarmPiSession, registerPiSessionContext, setPiModel } from "./pi-session.js";
+import { askPi, disposePiSession, disposePiSessions, piActivity, piDiagnostics, piSessionCwd, piSessionReviewContext, piRunModel, prewarmPiSession, registerPiSessionContext, setPiModel } from "./pi-session.js";
 import { createPrApi, defaultPrApiDeps } from "./pr-api.js";
 import { createReviewArchiveApi, defaultReviewArchiveApiDeps } from "./review-archive-api.js";
 import { createReviewMemoryApi } from "./review-memory-api.js";
@@ -36,7 +36,7 @@ import { createServerRoute, createRequestListener } from "./server-router.js";
 import { createShellApi } from "./shell-api.js";
 import { withTtlCache } from "./ttl-cache.js";
 import { createUsageApi, defaultUsageApiDeps, defaultUsageLogPath } from "./usage-api.js";
-import { appendDraftReviewComment, clearDraftReview, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, getDraftReview, listAiReviews, listFileReviews, listFocusScans, listGuideReviews, listOverviews, listRecentPullRequests, listReviewMemoryRecords, markPullRequestReviewed, removePullRequest, reviewMemoryStats, saveAiReview, saveDraftReview, saveFocusScan, saveGuideReview, saveOverview, saveReviewMemory, saveReviewProfile, setFileViewed, upsertPullRequest } from "./state.js";
+import { appendDraftReviewComment, clearDraftReview, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, getDraftReview, listAiReviews, listFileReviews, listFocusScans, listGuideReviews, listOverviews, listRecentPullRequests, listReviewMemoryRecords, markPullRequestReviewed, removePullRequest, reviewMemoryStats, saveAiReview, saveDraftReview, saveFocusScan, saveGuideReview, saveOverview, saveReviewMemory, saveReviewProfile, setFileViewed, updateFocusScanProgress, updateGuideReviewProgress, upsertPullRequest } from "./state.js";
 import { cleanupPrWorktree, preparePrWorktree, repoDirForRef, worktreeDirForRef } from "./worktrees.js";
 
 const DEFAULT_PORT = 43133;
@@ -51,10 +51,21 @@ const prCacheMs = Number.parseInt(process.env.PI_REVIEW_PR_CACHE_MS ?? "", 10) |
 const cachedFetchPullRequestReviewData = withTtlCache(fetchPullRequestReviewData, (ref) => prKey(ref), prCacheMs);
 const cachedFetchCommitChecks = withTtlCache(fetchCommitChecks, (ref, sha) => `${prKey(ref)}@${sha}`, prCacheMs);
 
-const piJobRunner = createPiJobRunner(askPi);
+const reviewPromptApi = createReviewPromptApi({ currentReviewMemoryPrompt });
+const analysisApi = createAnalysisApi({
+  contextForPr: piSessionReviewContext,
+  listRecentPullRequests, listAiReviews, listFocusScans, listGuideReviews, listOverviews,
+  buildPrompt: reviewPromptApi.build,
+  askPi,
+  modelForRun: piRunModel,
+  activity: piActivity,
+  saveAiReview, saveFocusScan, saveGuideReview, saveOverview,
+  record: (name, data) => usageApi.record("server", name, data),
+});
 const piTerminalManager = createPiTerminalManager({
   apiUrl: `http://127.0.0.1:${port}`,
   cwdForPr: piSessionCwd,
+  headShaForPr: (key) => piSessionReviewContext(key)?.headSha ?? null,
   extensionPath: existsSync(compiledTerminalExtension) ? compiledTerminalExtension : sourceTerminalExtension,
   logger,
 });
@@ -97,7 +108,7 @@ const inboxApi = createInboxApi({
     await rename(tempPath, inboxSnapshotPath);
   },
 });
-const piApi = createPiApi({ askPi, piActivity, piDiagnostics, piJobRunner, setPiModel });
+const piApi = createPiApi({ askPi, piDiagnostics, setPiModel });
 const piTerminalApi = createPiTerminalApi({ deleteSession: piTerminalManager.deleteSession });
 const piTerminalDraftApi = createPiTerminalDraftApi({ appendDraftReviewComment, contextForPr: piSessionReviewContext, notifyDraftReview: piTerminalManager.broadcastDraftReview });
 const prApi = createPrApi(defaultPrApiDeps({
@@ -110,6 +121,7 @@ const prApi = createPrApi(defaultPrApiDeps({
   }),
   fetchCommitChecks: cachedFetchCommitChecks,
   disposePiSession: async (prKey) => {
+    analysisApi.invalidate(prKey);
     await Promise.all([disposePiSession(prKey), piTerminalManager.disposePr(prKey)]);
   },
   fetchPullRequestReviewData: cachedFetchPullRequestReviewData,
@@ -120,16 +132,15 @@ const prApi = createPrApi(defaultPrApiDeps({
   listGuideReviews,
   listOverviews,
   preparePrWorktree,
-  prewarmPiSession,
+  prewarmPiSession: process.env.PI_REVIEW_DISABLE_AUTO_REVIEWS === "1" ? () => undefined : prewarmPiSession,
   registerPiSessionContext,
   removePullRequest,
   upsertPullRequest,
 }));
 const reviewArchiveApi = createReviewArchiveApi(defaultReviewArchiveApiDeps({ clearDraftReview, fetchPullRequestReviewData: cachedFetchPullRequestReviewData, markPullRequestReviewed, saveReviewMemory }));
 const reviewMemoryApi = createReviewMemoryApi({ askPi, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewMemory, saveReviewProfile });
-const reviewPromptApi = createReviewPromptApi({ currentReviewMemoryPrompt });
 const reviewSubmitRouteApi = createReviewSubmitRouteApi(defaultReviewSubmitRouteApiDeps({ clearDraftReview, fetchPullRequestReviewData: cachedFetchPullRequestReviewData, markPullRequestReviewed, saveReviewMemory, submitPullRequestReview }));
-const savedAnalysisApi = createSavedAnalysisApi({ saveAiReview, saveFocusScan, saveGuideReview, saveOverview });
+const savedAnalysisApi = createSavedAnalysisApi({ saveAiReview, saveFocusScan, saveGuideReview, saveOverview, updateFocusScanProgress, updateGuideReviewProgress });
 const shellApi = createShellApi({ listRecentPullRequests, logEntries: logger.entries });
 const usageApi = createUsageApi(defaultUsageApiDeps(logger));
 
@@ -171,6 +182,7 @@ async function sendStatic(res: ServerResponse, pathname: string, head = false): 
 const route = createServerRoute({
   // localFileText advertises that /api/file/text is served from the PR clone, so the web app may fetch file text freely.
   serverConfig: () => ({ autoReviews: process.env.PI_REVIEW_DISABLE_AUTO_REVIEWS !== "1", localFileText: true }),
+  analysisApi,
   askStreamApi,
   blameApi,
   commentApi,

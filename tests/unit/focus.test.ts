@@ -1,7 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parseFocusAreas } from "../../web/src/lib/focus.js";
+import { focusReviewHasNoFindings, parseFocusAreas } from "../../web/src/lib/focus.js";
+
+test("only an explicit empty result is clean", () => {
+  for (const text of ["", "Focus review failed: Model not found", "Pi completed without assistant text.", "- Makefile:12 — Build target fails"]) {
+    assert.equal(focusReviewHasNoFindings(text), false, text);
+  }
+  assert.equal(focusReviewHasNoFindings("No focus areas found."), true);
+});
+
+test("focus locations support extensionless files", () => {
+  assert.deepEqual(parseFocusAreas("- Makefile:12 — Build target fails\n- .github/CODEOWNERS:4 — Wrong owner").map((area) => area.path), ["Makefile", ".github/CODEOWNERS"]);
+});
 
 test("focus parser ignores incidental file references in finding prose", () => {
   const areas = parseFocusAreas(`## Focus areas

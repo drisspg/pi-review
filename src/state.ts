@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 
 import type { AiReviewRecord, AppState, DraftReview, FileReviewState, FocusScanRecord, GuideReviewRecord, ReviewMemoryProfile, ReviewMemoryRecord, StoredPullRequest } from "./types.js";
 
@@ -55,6 +56,8 @@ export type StateStore = {
   saveDraftReview: (review: DraftReview) => Promise<DraftReview>;
   appendDraftReviewComment: (prKey: string, headSha: string, comment: Omit<DraftReview["comments"][number], "id">) => Promise<{ draftReview: DraftReview; comment: DraftReview["comments"][number]; created: boolean }>;
   clearDraftReview: (prKey: string) => Promise<void>;
+  updateFocusScanProgress: (input: Pick<FocusScanRecord, "prKey" | "id" | "areaStates">) => Promise<FocusScanRecord>;
+  updateGuideReviewProgress: (input: Pick<GuideReviewRecord, "prKey" | "id"> & { stepStates: NonNullable<GuideReviewRecord["stepStates"]> }) => Promise<GuideReviewRecord>;
   listFocusScans: (prKey: string) => Promise<FocusScanRecord[]>;
   saveFocusScan: (scan: Omit<FocusScanRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<FocusScanRecord, "id" | "createdAt">>) => Promise<FocusScanRecord>;
   listAiReviews: (prKey: string) => Promise<AiReviewRecord[]>;
@@ -99,6 +102,17 @@ function normalizeState(state: Partial<AppState>): AppState {
 function reviewMemoryLocation(comment: ReviewMemoryRecord["comments"][number]): string {
   const line = comment.line == null ? "file" : comment.startLine != null && comment.startLine !== comment.line ? `${comment.startLine}-${comment.line}` : `${comment.line}`;
   return `${comment.path}:${line}`;
+}
+
+/** Reject legacy saves that try to rewrite a completed artifact. */
+function assertImmutableAnalysis(previous: object | null | undefined, incoming: object): void {
+  if (previous == null) return;
+  for (const [key, value] of Object.entries(incoming)) {
+    if (value === undefined || key === "updatedAt" || key === "areaStates" || key === "stepStates") continue;
+    if (!isDeepStrictEqual(value, Reflect.get(previous, key))) {
+      throw new Error("Saved analysis is immutable; create a new artifact instead");
+    }
+  }
 }
 
 /** Keep at most `maxPerPr` records per PR, preserving order (newest first). */
@@ -266,6 +280,8 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
 
   async function saveDraftReview(review: DraftReview): Promise<DraftReview> {
     return mutateState(async (state) => {
+      const currentHead = state.prs.find((pr) => pr.key === review.prKey)?.headSha;
+      if (currentHead != null && currentHead !== review.headSha) throw new Error("Stale draft save: refresh the PR before saving this review");
       state.draftReviews = [review, ...state.draftReviews.filter((stored) => stored.prKey !== review.prKey)];
       await writeState(state);
       return review;
@@ -275,7 +291,11 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
   /** Atomically append a model-created comment without replacing the user's review fields. */
   async function appendDraftReviewComment(prKey: string, headSha: string, input: Omit<DraftReview["comments"][number], "id">): Promise<{ draftReview: DraftReview; comment: DraftReview["comments"][number]; created: boolean }> {
     return mutateState(async (state) => {
-      const existing = state.draftReviews.find((review) => review.prKey === prKey && review.headSha === headSha);
+      const existing = state.draftReviews.find((review) => review.prKey === prKey);
+      const currentHead = state.prs.find((pr) => pr.key === prKey)?.headSha;
+      if ((currentHead != null && currentHead !== headSha) || (existing != null && existing.headSha !== headSha)) {
+        throw new Error("Stale draft append: HEAD no longer matches the current PR or draft");
+      }
       const duplicate = existing?.comments.find((comment) => comment.path === input.path && comment.line === input.line && comment.startLine === input.startLine && comment.side === input.side && comment.body === input.body);
       if (existing != null && duplicate != null) return { draftReview: existing, comment: duplicate, created: false };
       const comment = { id: `pi-${runtime.uuid()}`, ...input };
@@ -301,88 +321,110 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
   }
 
   async function listFocusScans(prKey: string): Promise<FocusScanRecord[]> {
-    return (await readState()).focusScans.filter((scan) => scan.prKey === prKey).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return (await readState()).focusScans.filter((scan) => scan.prKey === prKey).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
+  /** Save a new generation, or update only progress on an unchanged legacy artifact. */
   async function saveFocusScan(scan: Omit<FocusScanRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<FocusScanRecord, "id" | "createdAt">>): Promise<FocusScanRecord> {
     return mutateState(async (state) => {
       const previous = scan.id == null ? null : state.focusScans.find((stored) => stored.id === scan.id);
+      assertImmutableAnalysis(previous, scan);
       const now = runtime.now();
       const next: FocusScanRecord = {
-        id: scan.id ?? runtime.uuid(),
-        prKey: scan.prKey,
-        headSha: scan.headSha,
-        answer: scan.answer,
+        ...scan,
+        ...previous,
         areaStates: scan.areaStates,
+        id: scan.id ?? runtime.uuid(),
         createdAt: previous?.createdAt ?? scan.createdAt ?? now,
         updatedAt: now,
       };
-      state.focusScans = capRecordsPerPr([next, ...state.focusScans.filter((stored) => stored.id !== next.id)], maxFocusScansPerPr);
+      state.focusScans = capRecordsPerPr([next, ...state.focusScans.filter((stored) => stored.id !== next.id)].sort((a, b) => b.createdAt.localeCompare(a.createdAt)), maxFocusScansPerPr);
+      await writeState(state);
+      return next;
+    });
+  }
+
+  /** Patch progress by artifact identity without changing its generation or provenance. */
+  async function updateFocusScanProgress(input: Parameters<StateStore["updateFocusScanProgress"]>[0]): Promise<FocusScanRecord> {
+    return mutateState(async (state) => {
+      const index = state.focusScans.findIndex((stored) => stored.prKey === input.prKey && stored.id === input.id);
+      if (index === -1) throw new Error("Saved analysis not found");
+      const next = { ...state.focusScans[index], areaStates: input.areaStates, updatedAt: runtime.now() };
+      state.focusScans[index] = next;
       await writeState(state);
       return next;
     });
   }
 
   async function listAiReviews(prKey: string): Promise<AiReviewRecord[]> {
-    return (await readState()).aiReviews.filter((review) => review.prKey === prKey).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return (await readState()).aiReviews.filter((review) => review.prKey === prKey).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
   async function saveAiReview(review: Omit<AiReviewRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<AiReviewRecord, "id" | "createdAt">>): Promise<AiReviewRecord> {
     return mutateState(async (state) => {
       const previous = review.id == null ? null : state.aiReviews.find((stored) => stored.id === review.id);
+      assertImmutableAnalysis(previous, review);
       const now = runtime.now();
       const next: AiReviewRecord = {
+        ...review,
+        ...previous,
         id: review.id ?? runtime.uuid(),
-        prKey: review.prKey,
-        headSha: review.headSha,
-        answer: review.answer,
-        messages: review.messages,
         createdAt: previous?.createdAt ?? review.createdAt ?? now,
         updatedAt: now,
       };
-      state.aiReviews = capRecordsPerPr([next, ...state.aiReviews.filter((stored) => stored.id !== next.id)], maxAiReviewsPerPr);
+      state.aiReviews = capRecordsPerPr([next, ...state.aiReviews.filter((stored) => stored.id !== next.id)].sort((a, b) => b.createdAt.localeCompare(a.createdAt)), maxAiReviewsPerPr);
       await writeState(state);
       return next;
     });
   }
 
   async function listGuideReviews(prKey: string): Promise<GuideReviewRecord[]> {
-    return (await readState()).guideReviews.filter((review) => review.prKey === prKey).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return (await readState()).guideReviews.filter((review) => review.prKey === prKey).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
+  /** Save a new generation, or update only progress on an unchanged legacy artifact. */
   async function saveGuideReview(review: Omit<GuideReviewRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<GuideReviewRecord, "id" | "createdAt">>): Promise<GuideReviewRecord> {
     return mutateState(async (state) => {
-      const previous = state.guideReviews.find((stored) => stored.id === review.id || (stored.prKey === review.prKey && stored.headSha === review.headSha));
+      const previous = review.id == null ? null : state.guideReviews.find((stored) => stored.id === review.id);
+      assertImmutableAnalysis(previous, review);
       const now = runtime.now();
       const next: GuideReviewRecord = {
-        id: previous?.id ?? review.id ?? runtime.uuid(),
-        prKey: review.prKey,
-        headSha: review.headSha,
-        answer: review.answer,
-        stepStates: review.stepStates ?? (previous != null && previous.answer === review.answer ? previous.stepStates : undefined),
+        ...review,
+        ...previous,
+        stepStates: review.stepStates ?? previous?.stepStates,
+        id: review.id ?? runtime.uuid(),
         createdAt: previous?.createdAt ?? review.createdAt ?? now,
         updatedAt: now,
       };
-      state.guideReviews = capRecordsPerPr([next, ...state.guideReviews.filter((stored) => stored.id !== next.id)], maxGuideReviewsPerPr);
+      state.guideReviews = capRecordsPerPr([next, ...state.guideReviews.filter((stored) => stored.id !== next.id)].sort((a, b) => b.createdAt.localeCompare(a.createdAt)), maxGuideReviewsPerPr);
+      await writeState(state);
+      return next;
+    });
+  }
+
+  /** Patch progress by artifact identity without changing its generation or provenance. */
+  async function updateGuideReviewProgress(input: Parameters<StateStore["updateGuideReviewProgress"]>[0]): Promise<GuideReviewRecord> {
+    return mutateState(async (state) => {
+      const index = state.guideReviews.findIndex((stored) => stored.prKey === input.prKey && stored.id === input.id);
+      if (index === -1) throw new Error("Saved analysis not found");
+      const next = { ...state.guideReviews[index], stepStates: input.stepStates, updatedAt: runtime.now() };
+      state.guideReviews[index] = next;
       await writeState(state);
       return next;
     });
   }
 
   async function listOverviews(prKey: string): Promise<GuideReviewRecord[]> {
-    return (await readState()).overviews.filter((record) => record.prKey === prKey).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return (await readState()).overviews.filter((record) => record.prKey === prKey).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
   async function saveOverview(record: Omit<GuideReviewRecord, "id" | "createdAt" | "updatedAt" | "stepStates">): Promise<GuideReviewRecord> {
     return mutateState(async (state) => {
-      const previous = state.overviews.find((stored) => stored.prKey === record.prKey && stored.headSha === record.headSha);
       const now = runtime.now();
       const next: GuideReviewRecord = {
-        id: previous?.id ?? runtime.uuid(),
-        prKey: record.prKey,
-        headSha: record.headSha,
-        answer: record.answer,
-        createdAt: previous?.createdAt ?? now,
+        ...record,
+        id: runtime.uuid(),
+        createdAt: now,
         updatedAt: now,
       };
       state.overviews = capRecordsPerPr([next, ...state.overviews.filter((stored) => stored.id !== next.id)], maxGuideReviewsPerPr);
@@ -414,7 +456,7 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
     });
   }
 
-  return { readState, currentReviewMemoryDistillationSource, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewProfile, listRecentPullRequests, upsertPullRequest, markPullRequestReviewed, listFileReviews, setFileViewed, getDraftReview, saveDraftReview, appendDraftReviewComment, clearDraftReview, listFocusScans, saveFocusScan, listAiReviews, saveAiReview, listGuideReviews, saveGuideReview, listOverviews, saveOverview, saveReviewMemory, currentReviewMemoryPrompt, removePullRequest };
+  return { readState, currentReviewMemoryDistillationSource, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewProfile, listRecentPullRequests, upsertPullRequest, markPullRequestReviewed, listFileReviews, setFileViewed, getDraftReview, saveDraftReview, appendDraftReviewComment, clearDraftReview, updateFocusScanProgress, updateGuideReviewProgress, listFocusScans, saveFocusScan, listAiReviews, saveAiReview, listGuideReviews, saveGuideReview, listOverviews, saveOverview, saveReviewMemory, currentReviewMemoryPrompt, removePullRequest };
 }
 
 export const {
@@ -443,4 +485,6 @@ export const {
   saveReviewProfile,
   setFileViewed,
   upsertPullRequest,
+  updateFocusScanProgress,
+  updateGuideReviewProgress,
 } = createStateStore();

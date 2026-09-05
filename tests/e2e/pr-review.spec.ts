@@ -1,4 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
+import type { AnalysisKind, AnalysisResult, AnalysisRun } from "../../src/analysis-types";
+import { parseFocusAreas } from "../../src/focus";
+import { parseGuideChapters } from "../../src/guide";
 
 test.describe.configure({ mode: "serial" });
 
@@ -46,19 +49,34 @@ async function openReviewForm(page: Page) {
   if (await startReview.count() > 0) await startReview.click();
 }
 
-async function mockAskPi(page: Page, answerForPrompt: (body: { prompt?: string }) => string | string[], sessionEventsForPrompt?: (body: { prompt?: string }) => Record<string, unknown>[]) {
-  await page.route(/\/api\/ask\/stream$/, async (route) => {
-    const request = route.request().postDataJSON() as { prompt?: string };
-    const output = answerForPrompt(request);
-    const deltas = Array.isArray(output) ? output : [output];
-    const answer = deltas.join("");
-    const sessionEvents = (sessionEventsForPrompt?.(request) ?? []).map((event) => `event: session\ndata: ${JSON.stringify(event)}\n\n`).join("");
-    const deltaEvents = deltas.map((delta) => `event: delta\ndata: ${JSON.stringify({ delta })}\n\n`).join("");
-    await route.fulfill({ contentType: "text/event-stream", body: `${sessionEvents}${deltaEvents}event: done\ndata: ${JSON.stringify({ answer })}\n\n` });
+/** Mock execution while persisting real local artifacts so progress and reload use the server contract. */
+async function mockAnalysis(page: Page, kind: AnalysisKind, answer: string | (() => string)) {
+  let run: AnalysisRun | undefined;
+  await page.route("**/api/analysis/start", async (route) => {
+    const input = route.request().postDataJSON() as { prKey: string; headSha: string; kind: AnalysisKind; force: boolean };
+    if (input.kind !== kind) return route.fallback();
+    const text = typeof answer === "function" ? answer() : answer;
+    const endpoints = {
+      "main-review": ["ai-review", "review"],
+      "focus-review": ["focus-scan", "scan"],
+      "guide-review": ["guide-review", "guide"],
+      "code-walk": ["overview", "overview"],
+    } as const;
+    const [endpoint, field] = endpoints[kind];
+    const saved = await page.request.post(`/api/${endpoint}/save`, {
+      data: { prKey: input.prKey, headSha: input.headSha, answer: text, areaStates: {}, stepStates: {} },
+    });
+    expect(saved.ok()).toBe(true);
+    const record = (await saved.json())[field];
+    const result: AnalysisResult = kind === "focus-review"
+      ? { kind, record, areas: parseFocusAreas(text) }
+      : kind === "guide-review" ? { kind, record, chapters: parseGuideChapters(text) } : { kind, record };
+    run = { id: `mock-${kind}-${record.id}`, prKey: input.prKey, headSha: input.headSha, kind, status: "complete", startedAt: record.createdAt, result };
+    await route.fulfill({ json: { run: { ...run, status: "running", result: undefined } } });
   });
-  await page.route(/\/api\/ask$/, async (route) => {
-    const output = answerForPrompt(route.request().postDataJSON() as { prompt?: string });
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ answer: Array.isArray(output) ? output.join("") : output }) });
+  await page.route("**/api/analysis/status", async (route) => {
+    if (run == null || route.request().postDataJSON().runId !== run.id) return route.fallback();
+    await route.fulfill({ json: { run } });
   });
 }
 
@@ -110,10 +128,12 @@ async function loadDraftReviewFromTerminal(page: Page, comments: Array<{ id: str
 
 test.beforeEach(async ({ page }) => {
   openedPr = null;
+  // Unexpected analysis must never escape to live Pi, including after a reload.
+  await page.route("**/api/analysis/{start,status}", (route) => route.fulfill({ status: 500, json: { error: "Unmocked analysis request" } }));
   await page.goto("/");
   await page.locator("input").first().fill(prUrl);
   const responsePromise = page.waitForResponse((response) => response.url().endsWith("/api/pr/open") && response.request().method() === "POST");
-  await page.getByRole("button", { name: "Open" }).click();
+  await page.getByRole("button", { name: "Open", exact: true }).click();
   const response = await responsePromise;
   openedPr = (await response.json() as { pr: { key: string; headSha: string } }).pr;
   await expect(page.locator(".review-layout")).toBeVisible({ timeout: 60_000 });
@@ -122,6 +142,66 @@ test.beforeEach(async ({ page }) => {
 test.afterEach(async ({ request }) => {
   if (openedPr == null) return;
   await request.post("/api/draft-review/save", { data: { prKey: openedPr.key, headSha: openedPr.headSha, event: "COMMENT", body: "", comments: [] } });
+});
+
+test("reopens a cleaned PR through the server instead of the client cache", async ({ page }) => {
+  page.on("dialog", (dialog) => dialog.accept());
+  await page.route("**/api/pr/cleanup", (route) => route.fulfill({ json: { ok: true } }));
+  await goHome(page);
+  await page.locator(".pr-card").first().getByTitle("Remove saved PR and cleanup worktree").click();
+  await page.locator("input").first().fill(prUrl);
+  const reopened = page.waitForResponse((response) => response.url().endsWith("/api/pr/open"));
+  await page.getByRole("button", { name: "Open", exact: true }).click();
+  expect((await reopened).ok()).toBe(true);
+  await expect(page.locator(".review-layout")).toBeVisible();
+});
+
+test("analysis remains usable after refreshing to a new HEAD", async ({ page }) => {
+  await mockNativeTerminal(page);
+  const headSha = "ffffffffffffffffffffffffffffffffffffffff";
+  await page.route("**/api/pr/activity", async (route) => {
+    const response = await route.fetch();
+    const data = await response.json();
+    await route.fulfill({ json: { ...data, pr: { ...data.pr, headSha } } });
+  });
+  const requestedHeads: string[] = [];
+  await page.route("**/api/analysis/start", async (route) => {
+    const input = route.request().postDataJSON();
+    requestedHeads.push(input.headSha);
+    const record = { id: "refreshed", prKey: input.prKey, headSha: input.headSha, answer: "Review of the refreshed revision.", createdAt: "now", updatedAt: "now" };
+    await route.fulfill({ json: { run: { id: "refreshed", prKey: input.prKey, headSha: input.headSha, kind: "main-review", status: "complete", startedAt: "now", result: { kind: "main-review", record } } } });
+  });
+  await openTools(page);
+  const refreshed = page.waitForResponse((response) => response.url().endsWith("/api/pr/activity"));
+  await page.getByRole("menuitem", { name: "Refresh", exact: true }).click();
+  await refreshed;
+  await openSideTab(page, "Pi");
+  await page.getByRole("button", { name: /Full review|Refresh findings/ }).click();
+  await expect(page.locator(".ai-review")).toContainText("Review of the refreshed revision.");
+  expect(requestedHeads).toEqual([headSha]);
+});
+
+test("a late refresh does not reopen the PR after navigation", async ({ page }) => {
+  let release!: () => void;
+  let received!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const started = new Promise<void>((resolve) => { received = resolve; });
+  await page.route("**/api/pr/activity", async (route) => {
+    const response = await route.fetch();
+    received();
+    await gate;
+    await route.fulfill({ response });
+  });
+  await openTools(page);
+  await page.getByRole("menuitem", { name: "Refresh", exact: true }).click();
+  await started;
+  await goHome(page);
+  const finished = page.waitForResponse((response) => response.url().endsWith("/api/pr/activity"));
+  release();
+  await finished;
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await expect(page.getByRole("heading", { name: "Review a pull request" })).toBeVisible();
+  await expect(page.locator(".review-layout")).toHaveCount(0);
 });
 
 test("removes a previous PR from local history", async ({ page }) => {
@@ -202,7 +282,7 @@ test("can cancel a slow pull request open", async ({ page }) => {
   });
 
   await page.locator("input").first().fill("https://github.com/example/repo/pull/999");
-  await page.getByRole("button", { name: "Open" }).click();
+  await page.getByRole("button", { name: "Open", exact: true }).click();
   await expect(page.getByRole("button", { name: "Cancel" })).toBeVisible();
   await page.getByRole("button", { name: "Cancel" }).click();
 
@@ -250,7 +330,7 @@ test("opens PR description references on GitHub in new tabs", async ({ page, con
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ ...sourceReview, pr: { ...sourceReview.pr, key: "github.com/example/stack#190596", url: linkedPrUrl, body: "Stack from ghstack (oldest at bottom):\n\n* #190594\n* [#190595](https://github.com/example/stack/pull/190595)\n* -> #190596" } }) });
   });
   await page.locator("input").first().fill(linkedPrUrl);
-  await page.getByRole("button", { name: "Open" }).click();
+  await page.getByRole("button", { name: "Open", exact: true }).click();
   await expect(page.locator(".review-layout")).toBeVisible();
   await page.getByRole("button", { name: "Expand PR summary" }).click();
 
@@ -821,7 +901,7 @@ test("collapses and focuses existing comment threads", async ({ page }) => {
   await thread.getByLabel("Collapse thread").click();
   await expect(thread.locator(".markdown")).toHaveCount(0);
   await expect(thread.getByLabel("Expand thread")).toBeVisible();
-  await thread.getByRole("button", { name: /Conversation thread|Review summary|Review thread/ }).click();
+  await thread.getByLabel("Expand thread").click();
   await expect(thread.locator(".markdown").first()).toBeVisible();
 });
 
@@ -1021,12 +1101,7 @@ test("runs a separate focus areas review and opens native focus terminals", asyn
   await page.locator(".file").first().locator(".file-summary-left").click();
   await expect(page.locator(".file").first().locator(".diff-row")).toHaveCount(0);
 
-  await page.route(/\/api\/pi\/focus-review\/status$/, async (route) => {
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { status: "complete", answer: `## Focus areas\n1. convention mismatch\n- ${path}:${line}-${Number.parseInt(line, 10) + 1} — check whether this matches local tiling conventions.` } }) });
-  });
-  await page.route(/\/api\/pi\/focus-review$/, async (route) => {
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { id: "focus-job" } }) });
-  });
+  await mockAnalysis(page, "focus-review", `## Focus areas\n1. convention mismatch\n- ${path}:${line}-${Number.parseInt(line, 10) + 1} — check whether this matches local tiling conventions.`);
 
   await openSideTab(page, "Pi");
   await page.getByRole("button", { name: "Focus scan" }).click();
@@ -1048,11 +1123,11 @@ test("runs a separate focus areas review and opens native focus terminals", asyn
 
   let guideRequests = 0;
   let overviewRequests = 0;
-  await mockAskPi(page, (body) => {
-    if ((body.prompt ?? "").includes("show-me skill style")) {
-      overviewRequests += 1;
-      return "## TL;DR\nOrient reviewers with the Walk map below.\n## Schematic\n```schematic\n{\"title\": \"Dispatch path\", \"groups\": [{\"id\": \"api\", \"label\": \"API surface\"}], \"nodes\": [{\"id\": \"toolbar\", \"label\": \"Toolbar\", \"detail\": \"entry point\", \"ref\": \"csrc/flash_attn/flash_api.cpp:10\", \"kind\": \"entry\", \"group\": \"api\"}, {\"id\": \"modal\", \"label\": \"Modal\", \"kind\": \"core\"}], \"edges\": [{\"from\": \"toolbar\", \"to\": \"modal\", \"label\": \"opens\", \"kind\": \"call\"}]}\n```\n```mermaid\nflowchart LR\n  Toolbar -->|opens| Modal\n```\n## Change map\n- `csrc/flash_attn/flash_api.cpp` — core dispatch change\n## Reviewer notes\n- Start at the dispatch condition";
-    }
+  await mockAnalysis(page, "code-walk", () => {
+    overviewRequests += 1;
+    return "## TL;DR\nOrient reviewers with the Walk map below.\n## Schematic\n```schematic\n{\"title\": \"Dispatch path\", \"groups\": [{\"id\": \"api\", \"label\": \"API surface\"}], \"nodes\": [{\"id\": \"toolbar\", \"label\": \"Toolbar\", \"detail\": \"entry point\", \"ref\": \"csrc/flash_attn/flash_api.cpp:10\", \"kind\": \"entry\", \"group\": \"api\"}, {\"id\": \"modal\", \"label\": \"Modal\", \"kind\": \"core\"}], \"edges\": [{\"from\": \"toolbar\", \"to\": \"modal\", \"label\": \"opens\", \"kind\": \"call\"}]}\n```\n```mermaid\nflowchart LR\n  Toolbar -->|opens| Modal\n```\n## Change map\n- `csrc/flash_attn/flash_api.cpp` — core dispatch change\n## Reviewer notes\n- Start at the dispatch condition";
+  });
+  await mockAnalysis(page, "guide-review", () => {
     guideRequests += 1;
     return `## Review guide\n### 1. Core path\nFollow the implementation from selection through validation.\n- ${path}:${line}-${Number.parseInt(line, 10) + 1} — Core implementation\n  Start with the changed tiling condition and follow how it selects the implementation path.\n- ${path}:${line} — Validation path\n  Finish by checking that tests cover the intended behavior.`;
   });
@@ -1071,14 +1146,14 @@ test("runs a separate focus areas review and opens native focus terminals", asyn
   await page.setViewportSize({ width: 820, height: 900 });
   expect(await guide.locator(".guide-workspace").evaluate((workspace) => getComputedStyle(workspace).gridTemplateColumns.split(" ").length)).toBe(1);
   await expect(guide.locator(".guide-live-diff .pi-native-terminal.compact")).toBeVisible();
-  const progressSave = page.waitForResponse((response) => response.url().endsWith("/api/guide-review/save"));
+  const progressSave = page.waitForResponse((response) => response.url().endsWith("/api/guide-review/progress"));
   await guide.getByRole("checkbox", { name: "Reviewed" }).first().click();
-  await progressSave;
+  expect((await progressSave).ok()).toBe(true);
   await expect(guide).toContainText("1/2");
   await expect(guide.locator(".guide-active-stop")).toContainText("Validation path");
-  const completeSave = page.waitForResponse((response) => response.url().endsWith("/api/guide-review/save"));
+  const completeSave = page.waitForResponse((response) => response.url().endsWith("/api/guide-review/progress"));
   await guide.getByRole("button", { name: /Walkthrough complete/ }).click();
-  await completeSave;
+  expect((await completeSave).ok()).toBe(true);
   await expect(guide).toContainText("2/2");
 
   await page.keyboard.press("k");
@@ -1129,17 +1204,7 @@ test("marking a file viewed collapses it without jumping to the active focus are
   await focusFile.locator(".file-summary-left").click();
   await expect(focusFile.locator(".diff-row")).toHaveCount(0);
 
-  await page.route(/\/api\/pi\/focus-review\/status$/, async (route) => {
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { status: "complete", answer: `## Focus areas\n1. active finding\n- ${focusPath}:${focusLine}-${Number.parseInt(focusLine, 10) + 1} — check this line.` } }) });
-  });
-  await page.route(/\/api\/pi\/focus-review$/, async (route) => {
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { id: "focus-no-jump-job" } }) });
-  });
-  await page.route("**/api/focus-scan/save", async (route) => {
-    const request = route.request().postDataJSON() as { prKey: string; headSha: string; answer: string; areaStates: Record<string, unknown> };
-    const now = new Date().toISOString();
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ scan: { id: "focus-no-jump-scan", ...request, createdAt: now, updatedAt: now } }) });
-  });
+  await mockAnalysis(page, "focus-review", `## Focus areas\n1. active finding\n- ${focusPath}:${focusLine}-${Number.parseInt(focusLine, 10) + 1} — check this line.`);
   await page.route("**/api/file/viewed", async (route) => {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true }) });
   });
@@ -1213,21 +1278,17 @@ test("minimizes focus area links after all are reviewed", async ({ page }) => {
   const secondLine = await rows.nth(1).getAttribute("data-line");
   if (firstPath == null || firstLine == null || secondPath == null || secondLine == null) throw new Error("Missing diff row targets");
 
-  await page.route(/\/api\/pi\/focus-review\/status$/, async (route) => {
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { status: "complete", answer: `## Focus areas\n1. first finding\n- ${firstPath}:${firstLine} — check first.\n2. second finding\n- ${secondPath}:${secondLine} — check second.` } }) });
-  });
-  await page.route(/\/api\/pi\/focus-review$/, async (route) => {
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { id: "focus-minimize-job" } }) });
-  });
-  await page.route("**/api/focus-scan/save", async (route) => {
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ scan: { id: "focus-minimize-scan" } }) });
-  });
+  await mockAnalysis(page, "focus-review", `## Focus areas\n1. first finding\n- ${firstPath}:${firstLine} — check first.\n2. second finding\n- ${secondPath}:${secondLine} — check second.`);
 
   await openSideTab(page, "Pi");
   await page.getByRole("button", { name: "Focus scan" }).click();
   await expect(page.locator(".focus-area-link-row")).toHaveCount(2);
+  const firstProgress = page.waitForResponse((response) => response.url().endsWith("/api/focus-scan/progress"));
   await page.locator(".focus-area-check input").nth(0).click();
+  expect((await firstProgress).ok()).toBe(true);
+  const secondProgress = page.waitForResponse((response) => response.url().endsWith("/api/focus-scan/progress"));
   await page.locator(".focus-area-check input").nth(1).click();
+  expect((await secondProgress).ok()).toBe(true);
 
   await expect(page.locator(".focus-area-links")).toContainText("2/2 focus areas reviewed");
   await expect(page.locator(".focus-area-link-row")).toHaveCount(0);
@@ -1236,12 +1297,7 @@ test("minimizes focus area links after all are reviewed", async ({ page }) => {
 });
 
 test("keeps a clean focus scan compact when the Pi panel is focused", async ({ page }) => {
-  await page.route(/\/api\/pi\/focus-review\/status$/, async (route) => {
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { status: "complete", answer: "No focus areas found. All good." } }) });
-  });
-  await page.route(/\/api\/pi\/focus-review$/, async (route) => {
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { id: "clean-focus-job" } }) });
-  });
+  await mockAnalysis(page, "focus-review", "No focus areas found.");
 
   await page.setViewportSize({ width: 1600, height: 1200 });
   await openSideTab(page, "Pi");
@@ -1262,6 +1318,32 @@ test("keeps a clean focus scan compact when the Pi panel is focused", async ({ p
   expect(terminalBox.height).toBeGreaterThan(500);
 });
 
+for (const status of ["failed", "invalid"] as const) {
+  test(`does not show ${status} focus scans as clean and exposes the diagnostic`, async ({ page }) => {
+    await mockAnalysis(page, "focus-review", "No focus areas found.");
+    await openSideTab(page, "Pi");
+    const panel = page.locator(".ai-review");
+    await panel.getByRole("button", { name: /Focus scan|Refresh focus scan/ }).click();
+    await expect(panel).toContainText("Focus scan clean");
+
+    const diagnostic = status === "failed" ? "Focus analysis provider failed." : "Focus response did not contain valid locations or an explicit empty result.";
+    const rawAnswer = "No focus areas found. All good.";
+    await page.route("**/api/analysis/start", async (route) => {
+      const input = route.request().postDataJSON();
+      if (input.kind !== "focus-review") return route.fallback();
+      const run: AnalysisRun = { id: `focus-${status}`, prKey: input.prKey, headSha: input.headSha, kind: "focus-review", status, startedAt: new Date().toISOString(), error: diagnostic, rawAnswer };
+      await route.fulfill({ json: { run } });
+    });
+    await panel.getByRole("button", { name: /Focus scan|Refresh focus scan/ }).click();
+    const alert = panel.getByRole("alert");
+    await expect(alert).toContainText("Focus scan could not be validated.");
+    await expect(alert).toContainText(diagnostic);
+    await expect(panel.getByText("Focus scan clean", { exact: false })).toHaveCount(0);
+    await alert.getByText("Raw response", { exact: true }).click();
+    await expect(alert.locator("pre")).toHaveText(rawAnswer);
+  });
+}
+
 test("runs the right-sidebar Pi review beside the native terminal", async ({ page }) => {
   await mockNativeTerminal(page);
   await page.setViewportSize({ width: 2000, height: 1000 });
@@ -1271,12 +1353,7 @@ test("runs the right-sidebar Pi review beside the native terminal", async ({ pag
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ target: "opened" }) });
   });
   let reviewAnswer = "- **Correctness:** inspect `csrc/flash_attn/src/flash_fwd_kernel.h:1276`.";
-  await page.route(/\/api\/pi\/review\/status$/, async (route) => {
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { status: "complete", answer: reviewAnswer } }) });
-  });
-  await page.route(/\/api\/pi\/review$/, async (route) => {
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { id: "review-job" } }) });
-  });
+  await mockAnalysis(page, "main-review", () => reviewAnswer);
 
   await openSideTab(page, "Pi");
   await page.getByRole("button", { name: /Full review|Refresh findings/ }).click();
@@ -1330,18 +1407,8 @@ test("copies local draft comments in a feedback prompt from the Review tab", asy
     }
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ prompt: `prompt for ${String(body.mode)}`, purpose: String(body.mode) }) });
   });
-  await page.route(/\/api\/pi\/review\/status$/, async (route) => {
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { status: "complete", answer: "Global feedback from Pi." } }) });
-  });
-  await page.route(/\/api\/pi\/review$/, async (route) => {
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { id: "copy-review-job" } }) });
-  });
-  await page.route(/\/api\/pi\/focus-review\/status$/, async (route) => {
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { status: "complete", answer: `## Focus areas\n- ${path}:${line} — copied focus area\nCheck this focused spot.` } }) });
-  });
-  await page.route(/\/api\/pi\/focus-review$/, async (route) => {
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ job: { id: "copy-focus-job" } }) });
-  });
+  await mockAnalysis(page, "main-review", "Global feedback from Pi.");
+  await mockAnalysis(page, "focus-review", `## Focus areas\n- ${path}:${line} — copied focus area\nCheck this focused spot.`);
   await loadDraftReviewFromTerminal(page, [{ id: "feedback-draft", path, line: lineNumber, side: "RIGHT", body: "Keep this local feedback out of GitHub." }]);
   await openSideTab(page, "Review");
   await expect(page.locator(".review-summary .draft-card", { hasText: "Keep this local feedback out of GitHub." })).toBeVisible();

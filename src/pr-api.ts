@@ -46,11 +46,25 @@ function prUrlFromPayload(payload: Record<string, unknown>): string {
 export const defaultPrApiDeps = (deps: Omit<PrApiDeps, "parsePullRequestRef">): PrApiDeps => ({ ...deps, parsePullRequestRef });
 
 export function createPrApi(deps: PrApiDeps): PrApi {
+  const transitions = new Map<string, Promise<unknown>>();
+  const registeredHeads = new Map<string, string>();
+
+  /** Serialize checkout transitions, including fetching the snapshot they publish. */
+  function transition<T>(ref: PullRequestRef, operation: () => Promise<T>): Promise<T> {
+    const key = prKey(ref);
+    const pending = (transitions.get(key) ?? Promise.resolve()).catch(() => undefined).then(operation);
+    transitions.set(key, pending);
+    void pending.finally(() => {
+      if (transitions.get(key) === pending) transitions.delete(key);
+    }).catch(() => undefined);
+    return pending;
+  }
+
   async function hydrateReviewResponse(data: PullRequestReviewData, pr: StoredPullRequest, extra: Partial<Pick<PullRequestReviewResponse, "worktreeDir">> = {}): Promise<PullRequestReviewResponse> {
     const [draftReview, focusScans, aiReviews, guideReviews, overviews, storedFileReviews] = await Promise.all([deps.getDraftReview(pr.key), deps.listFocusScans(pr.key), deps.listAiReviews(pr.key), deps.listGuideReviews(pr.key), deps.listOverviews(pr.key), deps.listFileReviews(pr.key)]);
     // Viewed flags live in local state and the PR fetch may be cached, so resolve them here; a fingerprint mismatch means the file changed and the viewed mark no longer applies.
     const fileReviews = data.fileReviews.map((review) => storedFileReviews.find((stored) => stored.path === review.path && stored.fingerprint === review.fingerprint) ?? review);
-    return { ...data, fileReviews, pr, draftReview, focusScan: focusScans[0] ?? null, focusScans, aiReview: aiReviews[0] ?? null, aiReviews, guideReview: guideReviews.find((review) => review.headSha === pr.headSha) ?? null, overview: overviews.find((record) => record.headSha === pr.headSha) ?? null, ...extra };
+    return { ...data, fileReviews, pr, draftReview, focusScan: focusScans.find((scan) => scan.headSha === pr.headSha) ?? null, focusScans, aiReview: aiReviews.find((review) => review.headSha === pr.headSha) ?? null, aiReviews, guideReview: guideReviews.find((review) => review.headSha === pr.headSha) ?? null, overview: overviews.find((record) => record.headSha === pr.headSha) ?? null, ...extra };
   }
 
   function parse(input: string): { ref: PullRequestRef } {
@@ -60,29 +74,40 @@ export function createPrApi(deps: PrApiDeps): PrApi {
   async function cleanup(input: string): Promise<{ ok: true; prKey: string; worktreeDir: string }> {
     const ref = deps.parsePullRequestRef(input);
     const key = prKey(ref);
-    await deps.disposePiSession(key);
-    const worktreeDir = await deps.cleanupPrWorktree(ref);
-    await deps.removePullRequest(key);
-    return { ok: true, prKey: key, worktreeDir };
+    return transition(ref, async () => {
+      registeredHeads.delete(key);
+      await deps.disposePiSession(key);
+      const worktreeDir = await deps.cleanupPrWorktree(ref);
+      await deps.removePullRequest(key);
+      return { ok: true, prKey: key, worktreeDir };
+    });
   }
 
-  async function activity(input: string): Promise<PullRequestReviewResponse> {
+  /** Dispose old-revision consumers before worktree preparation can replace their cwd. */
+  function refresh(input: string, prewarm: boolean): Promise<PullRequestReviewResponse> {
     const ref = deps.parsePullRequestRef(input);
-    const data = await deps.fetchPullRequestReviewData(ref);
-    const pr = await deps.upsertPullRequest(data.pr);
-    const worktreeDir = await deps.preparePrWorktree(ref, data.raw.base.repo.clone_url, data.pr.headSha);
-    await deps.registerPiSessionContext(pr.key, worktreeDir, { headSha: pr.headSha, files: data.files });
-    return hydrateReviewResponse(data, pr, { worktreeDir });
+    return transition(ref, async () => {
+      const data = await deps.fetchPullRequestReviewData(ref);
+      const key = prKey(ref);
+      if (registeredHeads.get(key) !== data.pr.headSha) {
+        registeredHeads.delete(key);
+        await deps.disposePiSession(key);
+      }
+      const worktreeDir = await deps.preparePrWorktree(ref, data.raw.base.repo.clone_url, data.pr.headSha);
+      const pr = await deps.upsertPullRequest(data.pr);
+      await deps.registerPiSessionContext(pr.key, worktreeDir, { headSha: pr.headSha, files: data.files });
+      registeredHeads.set(key, pr.headSha);
+      if (prewarm) deps.prewarmPiSession(pr.key, ["main-review", "focus-review"]);
+      return hydrateReviewResponse(data, pr, { worktreeDir });
+    });
   }
 
-  async function open(input: string): Promise<PullRequestReviewResponse> {
-    const ref = deps.parsePullRequestRef(input);
-    const data = await deps.fetchPullRequestReviewData(ref);
-    const pr = await deps.upsertPullRequest(data.pr);
-    const worktreeDir = await deps.preparePrWorktree(ref, data.raw.base.repo.clone_url, data.pr.headSha);
-    await deps.registerPiSessionContext(pr.key, worktreeDir, { headSha: pr.headSha, files: data.files });
-    deps.prewarmPiSession(pr.key, ["main-review", "focus-review"]);
-    return hydrateReviewResponse(data, pr, { worktreeDir });
+  function activity(input: string): Promise<PullRequestReviewResponse> {
+    return refresh(input, false);
+  }
+
+  function open(input: string): Promise<PullRequestReviewResponse> {
+    return refresh(input, true);
   }
 
   /** The current PR file list (with GitHub patches) the client already holds, for the rewritten-history signature compare. */

@@ -133,6 +133,11 @@ function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
       async settle() {},
     },
     logger,
+    analysisApi: {
+      async start(payload) { return { run: { id: "run", prKey: String(payload.prKey), headSha: String(payload.headSha), kind: "main-review", status: "running", startedAt: "now" } }; },
+      async status() { return { run: { id: "run", prKey: "pr", headSha: "head", kind: "main-review", status: "running", startedAt: "now" } }; },
+      invalidate() {},
+    },
     piApi: {
       async ask(payload) {
         return { answer: `ask:${payload.prompt}` };
@@ -140,14 +145,8 @@ function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
       async diagnostics() {
         return { diagnostics: { ok: true } };
       },
-      async jobStatus() {
-        return { job: { id: "job", prKey: "pr", startedAt: "now", status: "running" } };
-      },
       async setModel() {
         return { diagnostics: { ok: true } };
-      },
-      async startReviewJob(payload, purpose) {
-        return { job: { id: `job:${purpose}:${payload.prKey}`, prKey: String(payload.prKey), startedAt: "now", status: "running" } };
       },
     },
     piTerminalApi: {
@@ -207,6 +206,8 @@ function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
       },
     },
     savedAnalysisApi: {
+      async updateFocusScanProgress() { return { scan: { answer: "answer", areaStates: {}, createdAt: "now", headSha: "head", id: "scan", prKey: "pr", updatedAt: "now" } }; },
+      async updateGuideReviewProgress() { return { guide: { answer: "answer", createdAt: "now", headSha: "head", id: "guide", prKey: "pr", updatedAt: "now" } }; },
       async saveAiReview() {
         return { review: { answer: "answer", createdAt: "now", headSha: "head", id: "ai", prKey: "pr", updatedAt: "now" } };
       },
@@ -270,13 +271,7 @@ test("server route parses JSON and dispatches POST feature routes", async () => 
       async diagnostics() {
         throw new Error("unused");
       },
-      async jobStatus() {
-        throw new Error("unused");
-      },
       async setModel() {
-        throw new Error("unused");
-      },
-      async startReviewJob() {
         throw new Error("unused");
       },
     },
@@ -440,13 +435,13 @@ test("server route exposes backend prompt contracts", async () => {
   assert.deepEqual(jsonBody(res), { prompt: "prompt:guide-review", purpose: "guide-review" });
 });
 
-test("server route uses route-specific status codes", async () => {
+test("server route starts backend-owned analysis", async () => {
   const route = createServerRoute(baseDeps());
 
-  const res = await routeRequest(route, "POST", "/api/pi/review", { prKey: "pr", prompt: "prompt" });
+  const res = await routeRequest(route, "POST", "/api/analysis/start", { prKey: "pr", headSha: "head", kind: "main-review" });
 
-  assert.equal(res.statusCode, 202);
-  assert.deepEqual(jsonBody(res), { job: { id: "job:main-review:pr", prKey: "pr", startedAt: "now", status: "running" } });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(jsonBody(res), { run: { id: "run", prKey: "pr", headSha: "head", kind: "main-review", startedAt: "now", status: "running" } });
 });
 
 test("server route delegates GET and HEAD misses to static handler", async () => {
@@ -514,7 +509,7 @@ test("request listener records API usage but skips polling and non-API paths", a
   await dispatch("GET", "/api/prs?limit=5");
   await dispatch("GET", "/api/health");
   await dispatch("POST", "/api/usage", { events: [] });
-  await dispatch("POST", "/api/pi/review/status", { jobId: "job" });
+  await dispatch("POST", "/api/analysis/status", { runId: "run" });
   await dispatch("OPTIONS", "/api/ask");
   await dispatch("GET", "/assets/app.js");
 

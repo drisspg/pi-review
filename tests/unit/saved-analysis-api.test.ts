@@ -12,13 +12,23 @@ function fakeDeps() {
   const focusInputs: Array<Parameters<ReturnType<typeof createSavedAnalysisApi>["saveFocusScan"]>[0]> = [];
   const aiInputs: Array<Parameters<ReturnType<typeof createSavedAnalysisApi>["saveAiReview"]>[0]> = [];
   const guideInputs: Array<Parameters<ReturnType<typeof createSavedAnalysisApi>["saveGuideReview"]>[0]> = [];
+  const progressInputs: Array<Record<string, unknown>> = [];
   const overviewInputs: Array<Record<string, unknown>> = [];
   return {
+    progressInputs,
     focusInputs,
     aiInputs,
     guideInputs,
     overviewInputs,
     deps: {
+      async updateFocusScanProgress(input: Pick<FocusScanRecord, "prKey" | "id" | "areaStates">) {
+        progressInputs.push(input);
+        return { ...input, headSha: "old", answer: "saved", createdAt: "then", updatedAt: "now" };
+      },
+      async updateGuideReviewProgress(input: Pick<GuideReviewRecord, "prKey" | "id"> & { stepStates: NonNullable<GuideReviewRecord["stepStates"]> }) {
+        progressInputs.push(input);
+        return { ...input, headSha: "old", answer: "saved", createdAt: "then", updatedAt: "now" };
+      },
       async saveFocusScan(scan: Omit<FocusScanRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<FocusScanRecord, "id" | "createdAt">>) {
         focusInputs.push(scan as Record<string, unknown>);
         return { ...scan, id: scan.id ?? "focus-id", createdAt: scan.createdAt ?? "then", updatedAt: "now" } as FocusScanRecord;
@@ -97,4 +107,32 @@ test("saved analysis API validates AI and guide review payloads", async () => {
 
   await assert.rejects(api.saveAiReview({ prKey: "pr", headSha: "head" }), /Expected AI review payload/);
   await assert.rejects(api.saveGuideReview({ prKey: "pr", headSha: "head" }), /Expected guide review payload/);
+});
+
+
+test("progress API forwards identity and progress without caller artifact content", async () => {
+  const { deps, progressInputs } = fakeDeps();
+  const api = createSavedAnalysisApi(deps);
+  const stepStates = { stop: { reviewed: true, updatedAt: "now" } };
+  const scan = await api.updateFocusScanProgress({ prKey: "pr", id: "old-focus", areaStates, headSha: "new", answer: "overwrite" });
+  const guide = await api.updateGuideReviewProgress({ prKey: "pr", id: "old-guide", stepStates, headSha: "new", answer: "overwrite" });
+  assert.deepEqual(progressInputs, [{ prKey: "pr", id: "old-focus", areaStates }, { prKey: "pr", id: "old-guide", stepStates }]);
+  assert.equal(scan.scan.headSha, "old");
+  assert.equal(guide.guide.answer, "saved");
+});
+
+test("progress API requires an artifact id and progress object", async () => {
+  const { deps, progressInputs } = fakeDeps();
+  const api = createSavedAnalysisApi(deps);
+  await assert.rejects(api.updateFocusScanProgress({ prKey: "pr", areaStates }), /Expected/);
+  await assert.rejects(api.updateFocusScanProgress({ prKey: "pr", id: "id", areaStates: [] }), /Expected/);
+  await assert.rejects(api.updateGuideReviewProgress({ prKey: "pr", stepStates: {} }), /Expected/);
+  await assert.rejects(api.updateGuideReviewProgress({ prKey: "pr", id: "id", stepStates: null }), /Expected/);
+  assert.deepEqual(progressInputs, []);
+});
+
+test("legacy guide saves forward explicit identity for immutable validation", async () => {
+  const { deps, guideInputs } = fakeDeps();
+  await createSavedAnalysisApi(deps).saveGuideReview({ prKey: "pr", id: "old", headSha: "head", answer: "guide" });
+  assert.equal(guideInputs[0].id, "old");
 });

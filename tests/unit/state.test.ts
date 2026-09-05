@@ -161,7 +161,7 @@ test("saveDraftReview replaces the PR draft and persists empty drafts", async ()
   assert.equal((await store.readState()).draftReviews.length, 1);
 });
 
-test("appendDraftReviewComment preserves review fields, avoids duplicates, and resets stale heads", async () => {
+test("appendDraftReviewComment preserves review fields, avoids duplicates, and rejects mismatched draft heads", async () => {
   const existing = { prKey: "pr", headSha: "head", event: "REQUEST_CHANGES" as const, body: "overall", comments: [{ id: "local-1", path: "a.ts", line: 4, side: "RIGHT" as const, body: "existing" }], updatedAt: "first" };
   const { runtime } = fakeRuntime({ ...emptyState(), draftReviews: [existing] });
   const store = createStateStore(runtime, paths);
@@ -169,7 +169,7 @@ test("appendDraftReviewComment preserves review fields, avoids duplicates, and r
 
   const created = await store.appendDraftReviewComment("pr", "head", input);
   const duplicate = await store.appendDraftReviewComment("pr", "head", input);
-  const nextHead = await store.appendDraftReviewComment("pr", "next", { ...input, body: "new head" });
+  await assert.rejects(store.appendDraftReviewComment("pr", "next", { ...input, body: "new head" }), /Stale draft append/);
 
   assert.equal(created.created, true);
   assert.equal(created.comment.id, "pi-uuid-1");
@@ -178,14 +178,7 @@ test("appendDraftReviewComment preserves review fields, avoids duplicates, and r
   assert.deepEqual(created.draftReview.comments.map((comment) => comment.body), ["existing", "model draft"]);
   assert.equal(duplicate.created, false);
   assert.equal(duplicate.comment.id, created.comment.id);
-  assert.deepEqual(nextHead.draftReview, {
-    prKey: "pr",
-    headSha: "next",
-    event: "COMMENT",
-    body: "",
-    comments: [{ id: "pi-uuid-3", ...input, body: "new head" }],
-    updatedAt: "2026-06-04T00:00:00.000Z",
-  });
+  assert.deepEqual(await store.getDraftReview("pr"), created.draftReview);
 });
 
 test("clearDraftReview removes only the submitted PR draft", async () => {
@@ -200,15 +193,15 @@ test("clearDraftReview removes only the submitted PR draft", async () => {
   assert.deepEqual(await store.getDraftReview("second"), second);
 });
 
-test("saveOverview replaces the cached overview for the same head", async () => {
+test("saveOverview preserves generations for the same head", async () => {
   const { runtime } = fakeRuntime(emptyState());
   const store = createStateStore(runtime, paths);
 
   const first = await store.saveOverview({ prKey: "pr", headSha: "head", answer: "first" });
   const second = await store.saveOverview({ prKey: "pr", headSha: "head", answer: "second" });
 
-  assert.equal(second.id, first.id);
-  assert.equal((await store.listOverviews("pr")).length, 1);
+  assert.notEqual(second.id, first.id);
+  assert.equal((await store.listOverviews("pr")).length, 2);
   assert.equal((await store.listOverviews("pr"))[0].answer, "second");
 });
 
@@ -217,7 +210,7 @@ test("saveGuideReview persists step states and drops them when the answer change
   const store = createStateStore(runtime, paths);
 
   const saved = await store.saveGuideReview({ prKey: "pr", headSha: "head", answer: "guide", stepStates: { "s1": { reviewed: true, updatedAt: "t1" } } });
-  const progressOnly = await store.saveGuideReview({ prKey: "pr", headSha: "head", answer: "guide" });
+  const progressOnly = await store.saveGuideReview({ id: saved.id, prKey: "pr", headSha: "head", answer: "guide" });
   const regenerated = await store.saveGuideReview({ prKey: "pr", headSha: "head", answer: "different" });
 
   assert.deepEqual(saved.stepStates, { s1: { reviewed: true, updatedAt: "t1" } });
@@ -225,15 +218,15 @@ test("saveGuideReview persists step states and drops them when the answer change
   assert.equal(regenerated.stepStates, undefined);
 });
 
-test("saveGuideReview replaces the cached guide for the same head", async () => {
+test("saveGuideReview preserves generations for the same head", async () => {
   const { runtime } = fakeRuntime(emptyState());
   const store = createStateStore(runtime, paths);
 
   const first = await store.saveGuideReview({ prKey: "pr", headSha: "head", answer: "first" });
   const second = await store.saveGuideReview({ prKey: "pr", headSha: "head", answer: "second" });
 
-  assert.equal(second.id, first.id);
-  assert.equal((await store.listGuideReviews("pr")).length, 1);
+  assert.notEqual(second.id, first.id);
+  assert.equal((await store.listGuideReviews("pr")).length, 2);
   assert.equal((await store.listGuideReviews("pr"))[0].answer, "second");
 });
 
@@ -248,7 +241,7 @@ test("saveFocusScan updates existing records and caps scans per PR", async () =>
   assert.equal(saved.id, "uuid-1");
   assert.equal(scans.length, 20);
   assert.equal(scans[0]?.answer, "new");
-  assert.equal(scans.some((scan) => scan.id === "old-19"), false);
+  assert.equal(scans.some((scan) => scan.id === "old-0"), false);
 });
 
 test("upsertPullRequest backfills reviewed head from the newest review memory record", async () => {
@@ -259,4 +252,65 @@ test("upsertPullRequest backfills reviewed head from the newest review memory re
 
   assert.equal(saved.lastReviewedHeadSha, "archived-head");
   assert.equal(saved.lastReviewEvent, "COMMENT");
+});
+
+for (const kind of ["focus", "guide"] as const) {
+  test(`${kind} progress preserves historical identity and generation order`, async () => {
+    const { runtime } = fakeRuntime();
+    const store = createStateStore(runtime, paths);
+    const save = kind === "focus" ? store.saveFocusScan : store.saveGuideReview;
+    const provenance = { runId: "run-old", version: 1, model: "test-model", thinkingLevel: "medium" };
+    const first = await save({ prKey: "pr", headSha: "old", answer: "old answer", areaStates: {}, createdAt: "2026-01-01", provenance });
+    assert.deepEqual(first.provenance, provenance);
+    const second = await save({ prKey: "pr", headSha: "new", answer: "new answer", areaStates: {}, createdAt: "2026-02-01" });
+    const updated = kind === "focus"
+      ? await store.updateFocusScanProgress({ prKey: "pr", id: first.id, areaStates: { a: { viewed: true, collapsed: true, updatedAt: "now" } } })
+      : await store.updateGuideReviewProgress({ prKey: "pr", id: first.id, stepStates: { a: { reviewed: true, updatedAt: "now" } } });
+    assert.equal(updated.headSha, "old");
+    assert.equal(updated.answer, "old answer");
+    assert.equal(updated.createdAt, first.createdAt);
+    assert.deepEqual(updated.provenance, provenance);
+    const records = kind === "focus" ? await store.listFocusScans("pr") : await store.listGuideReviews("pr");
+    assert.deepEqual(records.map((record) => record.id), [second.id, first.id]);
+    await assert.rejects(save({ ...first, headSha: "new", areaStates: {} }), /immutable/i);
+    await assert.rejects(save({ ...first, answer: "changed", areaStates: {} }), /immutable/i);
+    await assert.rejects(save({ ...first, provenance: { ...provenance, runId: "another-run" }, areaStates: {} }), /immutable/i);
+    await assert.rejects(save({ ...first, createdAt: "later", areaStates: {} }), /immutable/i);
+    const before = await store.readState();
+    await assert.rejects(kind === "focus"
+      ? store.updateFocusScanProgress({ prKey: "other", id: first.id, areaStates: {} })
+      : store.updateGuideReviewProgress({ prKey: "other", id: first.id, stepStates: {} }), /not found/i);
+    assert.deepEqual(await store.readState(), before);
+  });
+}
+
+test("draft append checks current HEAD after queued PR and human draft mutations", async () => {
+  const { runtime } = fakeRuntime();
+  const store = createStateStore(runtime, paths);
+  const current = pr({ headSha: "new" });
+  const input = { path: "a.ts", line: 1, side: "RIGHT" as const, body: "stale model" };
+  const draft = { prKey: current.key, headSha: "new", event: "APPROVE" as const, body: "human", comments: [{ ...input, body: "human", id: "human" }], updatedAt: "human time" };
+  const writes = [store.upsertPullRequest(current), store.saveDraftReview(draft)];
+  await assert.rejects(store.appendDraftReviewComment(current.key, "old", input), /stale/i);
+  await Promise.all(writes);
+  assert.deepEqual(await store.getDraftReview(current.key), draft);
+  await assert.rejects(store.saveDraftReview({ ...draft, headSha: "old", body: "delayed autosave" }), /Stale draft save/);
+  assert.deepEqual(await store.getDraftReview(current.key), draft);
+  await store.clearDraftReview(current.key);
+  await assert.rejects(store.appendDraftReviewComment(current.key, "old", input), /stale/i);
+  assert.equal(await store.getDraftReview(current.key), null);
+  assert.equal((await store.appendDraftReviewComment(current.key, "new", input)).created, true);
+});
+
+test("AI review saves preserve immutable content and provenance", async () => {
+  const { runtime } = fakeRuntime();
+  const store = createStateStore(runtime, paths);
+  const provenance = { runId: "run", version: 1, model: "test-model", thinkingLevel: "medium" };
+  const first = await store.saveAiReview({ prKey: "pr", headSha: "head", answer: "answer", provenance, messages: [{ role: "pi", text: "answer" }] });
+  const saved = await store.saveAiReview({ id: first.id, prKey: "pr", headSha: "head", answer: "answer" });
+  assert.deepEqual(saved, first);
+  await assert.rejects(store.saveAiReview({ ...first, answer: "changed" }), /immutable/i);
+  await assert.rejects(store.saveAiReview({ ...first, messages: [] }), /immutable/i);
+  await assert.rejects(store.saveAiReview({ ...first, provenance: { ...provenance, version: 2 } }), /immutable/i);
+  assert.deepEqual(await store.listAiReviews("pr"), [first]);
 });
