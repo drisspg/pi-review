@@ -16,7 +16,7 @@ import { createGitHubDraftReviewApi, defaultGitHubDraftReviewApiDeps } from "./g
 import { gpuWorkspaceCreateResponse, gpuWorkspaceDeleteResponse, gpuWorkspaceExecResponse, gpuWorkspaceStatusResponse } from "./gpu-workspace-api.js";
 import { createInboxApi, type InboxSnapshot } from "./inbox-api.js";
 import { createGitInterdiff } from "./interdiff-git.js";
-import { addIssueComment, addPendingPullRequestReviewThread, compareCommits, createPendingPullRequestReview, editIssueComment, editReviewComment, editReviewSummary, fetchCommitChecks, fetchFileText, fetchLatestActivity, fetchNotifications, fetchPendingPullRequestReview, fetchPullRequestReviewData, fetchSubjectSnapshots, fetchViewerLogin, fetchViewerPullRequests, markNotificationDone, replyToReviewComment, submitPullRequestReview, unsubscribeNotification } from "./github.js";
+import { addIssueComment, addPendingPullRequestReviewThread, compareCommits, createPendingPullRequestReview, editIssueComment, editReviewComment, editReviewSummary, fetchCommitChecks, fetchFileText, fetchLatestActivity, fetchNotifications, fetchPendingPullRequestReview, fetchPullRequestReviewData, fetchSubjectSnapshots, fetchViewerLogin, fetchViewerPullRequests, markNotificationDone, replyToReviewComment, setReviewThreadResolved, submitPullRequestReview, unsubscribeNotification } from "./github.js";
 import { logger } from "./logger.js";
 import { parsePullRequestRef, prKey } from "./pr.js";
 import { createPiApi } from "./pi-api.js";
@@ -76,7 +76,7 @@ const blameApi = createBlameApi({
   parsePullRequestRef,
   worktreeDirForRef,
 });
-const commentApi = createCommentApi(defaultCommentApiDeps({ addIssueComment, editIssueComment, editReviewComment, editReviewSummary, replyToReviewComment }));
+const commentApi = createCommentApi(defaultCommentApiDeps({ addIssueComment, editIssueComment, editReviewComment, editReviewSummary, replyToReviewComment, setReviewThreadResolved }));
 const draftReviewApi = createDraftReviewApi({ clearDraftReview, getDraftReview, now: () => new Date().toISOString(), saveDraftReview });
 const fileApi = createFileApi(defaultFileApiDeps(fetchFileText, setFileViewed, async (url) => {
   await execFileAsync("open", [url]);

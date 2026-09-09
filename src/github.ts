@@ -38,6 +38,7 @@ export type GitHubClient = {
   editReviewComment: (ref: PullRequestRef, commentId: number, body: string) => Promise<unknown>;
   editIssueComment: (ref: PullRequestRef, commentId: number, body: string) => Promise<unknown>;
   editReviewSummary: (ref: PullRequestRef, reviewId: number, body: string) => Promise<unknown>;
+  setReviewThreadResolved: (ref: PullRequestRef, threadId: string, resolved: boolean) => Promise<{ id: string; isResolved: boolean }>;
   fetchViewerLogin: () => Promise<string | null>;
   fetchNotifications: () => Promise<GitHubNotification[]>;
   fetchSubjectSnapshots: (refs: InboxSubjectRef[]) => Promise<InboxSubjectSnapshot[]>;
@@ -535,6 +536,21 @@ export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): Git
     return ghApiPatch(ref, `${apiBase(ref)}/reviews/${reviewId}`, { body }, "edit review summary");
   }
 
+  /** Validate PR ownership before applying an explicit, retry-safe thread resolution. */
+  async function setReviewThreadResolved(ref: PullRequestRef, threadId: string, resolved: boolean): Promise<{ id: string; isResolved: boolean }> {
+    if (ref.host !== "github.com") throw new Error("Review thread resolution currently supports github.com only");
+    const query = `query($id: ID!) { node(id: $id) { ... on PullRequestReviewThread { pullRequest { number repository { nameWithOwner } } } } }`;
+    const data = await ghGraphql<{ node?: { pullRequest?: { number: number; repository: { nameWithOwner: string } } } }>(query, { id: threadId }, "validate review thread");
+    const pull = data.node?.pullRequest;
+    if (pull?.number !== ref.number || pull.repository.nameWithOwner.toLowerCase() !== `${ref.owner}/${ref.repo}`.toLowerCase()) throw new Error("Review thread does not belong to this pull request");
+    const operation = resolved ? "resolveReviewThread" : "unresolveReviewThread";
+    const mutation = `mutation($threadId: ID!) { ${operation}(input: {threadId: $threadId}) { thread { id isResolved } } }`;
+    const result = await ghGraphql<Record<string, { thread?: { id: string; isResolved: boolean } }>>(mutation, { threadId }, "set review thread resolution");
+    const thread = result[operation]?.thread;
+    if (thread?.id !== threadId || thread.isResolved !== resolved) throw new Error("GitHub did not confirm the requested thread state");
+    return thread;
+  }
+
   async function fetchNotifications(): Promise<GitHubNotification[]> {
     const pages = await ghApiArgs<unknown>(["--paginate", "--slurp", "notifications?per_page=100"]);
     const raw = (Array.isArray(pages) ? pages : []).flatMap((page) => (Array.isArray(page) ? page : [page])) as NotificationRest[];
@@ -614,7 +630,7 @@ export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): Git
     await ghApiArgs<unknown>(["--method", "DELETE", `/notifications/threads/${encodeURIComponent(threadId)}/subscription`]);
   }
 
-  return { fetchPullRequestReviewData, compareCommits, fetchCommitChecks, fetchFileText, fetchPendingPullRequestReview, createPendingPullRequestReview, addPendingPullRequestReviewThread, submitPullRequestReview, replyToReviewComment, addIssueComment, editReviewComment, editIssueComment, editReviewSummary, fetchViewerLogin, fetchNotifications, fetchSubjectSnapshots, fetchViewerPullRequests, fetchLatestActivity, markNotificationDone, unsubscribeNotification };
+  return { fetchPullRequestReviewData, compareCommits, fetchCommitChecks, fetchFileText, fetchPendingPullRequestReview, createPendingPullRequestReview, addPendingPullRequestReviewThread, submitPullRequestReview, replyToReviewComment, addIssueComment, editReviewComment, editIssueComment, editReviewSummary, setReviewThreadResolved, fetchViewerLogin, fetchNotifications, fetchSubjectSnapshots, fetchViewerPullRequests, fetchLatestActivity, markNotificationDone, unsubscribeNotification };
 }
 
 const defaultClient = createGitHubClient();
@@ -665,6 +681,11 @@ export async function editReviewComment(ref: PullRequestRef, commentId: number, 
 
 export async function editIssueComment(ref: PullRequestRef, commentId: number, body: string): Promise<unknown> {
   return defaultClient.editIssueComment(ref, commentId, body);
+}
+
+/** Apply a user-requested resolution to an existing GitHub review thread. */
+export async function setReviewThreadResolved(ref: PullRequestRef, threadId: string, resolved: boolean): Promise<{ id: string; isResolved: boolean }> {
+  return defaultClient.setReviewThreadResolved(ref, threadId, resolved);
 }
 
 export async function editReviewSummary(ref: PullRequestRef, reviewId: number, body: string): Promise<unknown> {

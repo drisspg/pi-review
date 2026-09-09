@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { ANALYSIS_VERSION, type AnalysisKind, type AnalysisProvenance, type AnalysisResult, type AnalysisRun } from "./analysis-types.js";
 import { focusReviewHasNoFindings, parseFocusAreas } from "./focus.js";
 import { parseGuideChapters } from "./guide.js";
-import { validateReviewDraftTarget, type ReviewDraftToolContext } from "./review-draft-tool.js";
+import type { ReviewDraftToolContext } from "./review-draft-tool.js";
 import type { ReviewPromptApi } from "./review-prompt-api.js";
 import type { SavedAnalysisApiDeps } from "./saved-analysis-api.js";
 import type { AiReviewRecord, FocusScanRecord, GuideReviewRecord, StoredPullRequest } from "./types.js";
@@ -30,16 +30,16 @@ export type AnalysisApi = {
 
 class InvalidAnalysisError extends Error {}
 
-/** Validate generated locations against the immutable diff before publishing a result. */
+/** Validate HEAD-file navigation references, not publishable GitHub comment anchors. */
 function validateLocations(context: ReviewDraftToolContext, areas: ReturnType<typeof parseFocusAreas>): void {
   for (const area of areas) {
-    try {
-      // Analysis connects locations; only a publishable GitHub comment needs one contiguous hunk.
-      for (const line of new Set([area.startLine, area.endLine])) {
-        validateReviewDraftTarget(context, { path: area.path, line, body: area.title });
-      }
-    } catch (error) {
-      throw new InvalidAnalysisError(error instanceof Error ? error.message : String(error));
+    const file = context.files.find((candidate) => candidate.filename === area.path);
+    if (file == null) throw new InvalidAnalysisError(`${area.path} is not a changed file in the current PR.`);
+    if (file.status === "removed") throw new InvalidAnalysisError(`${area.path} has no HEAD file for analysis navigation.`);
+    // Full-file navigation loads HEAD text on demand. A partial/missing patch cannot establish
+    // EOF bounds, and surrounding code outside its hunks is a legitimate analysis destination.
+    if (!Number.isSafeInteger(area.startLine) || !Number.isSafeInteger(area.endLine) || area.startLine < 1 || area.endLine < area.startLine) {
+      throw new InvalidAnalysisError(`${area.path}: analysis lines must be positive safe integers in ascending order.`);
     }
   }
 }

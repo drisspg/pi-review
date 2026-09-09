@@ -68,6 +68,9 @@ function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
       },
     },
     commentApi: {
+      async resolve() {
+        return { result: { id: "thread-1", isResolved: true } };
+      },
       async edit() {
         return { result: "edit" };
       },

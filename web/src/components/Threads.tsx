@@ -160,8 +160,32 @@ function GitHubCommentView({ comment, commentKind, prUrl, refreshGithubActivity,
 
 function GitHubThreadCard({ id, className = "comment", title, subtitle, status, href, comments, commentKind, prUrl, refreshGithubActivity, reply, collapseSignal, collapseComments, onJump }: { id?: string; className?: string; title: string; subtitle: string; status?: string | null; href: string; comments: GitHubComment[]; commentKind: CommentKind; prUrl: string; refreshGithubActivity: () => Promise<void>; reply?: React.ReactNode; collapseSignal: number; collapseComments: boolean; onJump?: () => void }) {
   // Resolved threads start compact: they are settled context, not active conversation.
-  const resolved = status === "Resolved";
+  const threadId = commentKind === "review" ? (comments as PullReviewComment[]).find((comment) => comment.thread_id)?.thread_id : undefined;
+  const [resolvedOverride, setResolvedOverride] = useState<boolean | null>(null);
+  const [resolving, setResolving] = useState(false);
+  const [resolveError, setResolveError] = useState<string | null>(null);
+  useEffect(() => { setResolvedOverride(null); setResolveError(null); }, [threadId, status]);
+  const resolved = resolvedOverride ?? status === "Resolved";
+  const displayStatus = threadId == null ? status : resolved ? "Resolved" : "Unresolved";
   const [collapsed, setCollapsed] = useState(resolved);
+
+  /** Update only after GitHub confirms; a failed refresh must not undo a successful mutation. */
+  async function changeResolution() {
+    if (threadId == null || resolving) return;
+    setResolving(true);
+    setResolveError(null);
+    try {
+      const { result } = await api<{ result: { id: string; isResolved: boolean } }>("/api/comment/resolve", { method: "POST", body: JSON.stringify({ prUrl, threadId, resolved: !resolved }) });
+      setResolvedOverride(result.isResolved);
+      setCollapsed(result.isResolved);
+      try { await refreshGithubActivity(); } catch (error) { setResolveError(`Thread updated, but refresh failed: ${errorMessage(error)}`); }
+    } catch (error) {
+      setCollapsed(false);
+      setResolveError(`Could not update thread: ${errorMessage(error)}`);
+    } finally {
+      setResolving(false);
+    }
+  }
   useEffect(() => {
     if (resolved) setCollapsed(true);
   }, [resolved]);
@@ -175,12 +199,14 @@ function GitHubThreadCard({ id, className = "comment", title, subtitle, status, 
     <div className={`thread-head${titleAction != null ? " jumpable" : ""}`}>
       <div className="thread-title">
         <Button variant="icon" aria-label={collapsed ? "Expand thread" : "Collapse thread"} aria-expanded={!collapsed} title={collapsed ? "Expand GitHub thread" : "Collapse GitHub thread"} onClick={(event) => { event.stopPropagation(); setCollapsed(!collapsed); }}>{collapsed ? <ChevronRightIcon size={16} /> : <ChevronDownIcon size={16} />}</Button>
-        <div className={titleAction != null ? "thread-title-link" : undefined} {...titleActionProps}><strong>{title}</strong><span>{subtitle}</span>{status != null && <span className={`thread-status ${status.toLowerCase().replace(/\s+/g, "-")}`}>{status}</span>}</div>
+        <div className={titleAction != null ? "thread-title-link" : undefined} {...titleActionProps}><strong>{title}</strong><span>{subtitle}</span>{displayStatus != null && <span className={`thread-status ${displayStatus.toLowerCase().replace(/\s+/g, "-")}`}>{displayStatus}</span>}</div>
       </div>
       <div className="actions">
+        {threadId != null && <Button variant="muted" className="small-muted-button" disabled={resolving} title={resolved ? "Reopen this thread on GitHub" : "Resolve this thread on GitHub"} onClick={() => void changeResolution()}>{resolving ? "Saving…" : resolved ? "Reopen" : "Resolve"}</Button>}
         <a href={href} target="_blank" rel="noreferrer" className="thread-github-link" aria-label="Open thread on GitHub" title="Open thread on GitHub" onClick={(event) => event.stopPropagation()}><LinkExternalIcon size={14} /></a>
       </div>
     </div>
+    {resolveError != null && <Flash variant="danger" role="alert">{resolveError}</Flash>}
     {!collapsed && body}
   </div>;
 }

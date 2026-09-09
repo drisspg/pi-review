@@ -11,6 +11,10 @@ function fakeDeps() {
   return {
     calls,
     deps: {
+      async setReviewThreadResolved(requestRef: PullRequestRef, threadId: string, resolved: boolean) {
+        calls.push(`resolve:${requestRef.number}:${threadId}:${resolved}`);
+        return { id: threadId, isResolved: resolved };
+      },
       async addIssueComment(requestRef: PullRequestRef, body: string) {
         calls.push(`addIssue:${requestRef.number}:${body}`);
         return { ok: "addIssue" };
@@ -62,6 +66,18 @@ test("comment API edit dispatches by comment kind", async () => {
   assert.deepEqual(await api.edit({ kind: "review-summary", commentId: 2, body: " summary " }), { result: { ok: "editSummary" } });
   assert.deepEqual(await api.edit({ kind: "review", commentId: 3, body: " review " }), { result: { ok: "editReview" } });
   assert.deepEqual(calls, ["ref", "editIssue:1:1:issue", "ref", "editSummary:1:2:summary", "ref", "editReview:1:3:review"]);
+});
+
+test("comment API sets explicit resolution and rejects malformed requests before mutation", async () => {
+  const { deps, calls } = fakeDeps();
+  const api = createCommentApi(deps);
+  for (const resolved of [true, false]) {
+    assert.deepEqual(await api.resolve({ threadId: "thread-1", resolved }), { result: { id: "thread-1", isResolved: resolved } });
+  }
+  assert.deepEqual(calls, ["ref", "resolve:1:thread-1:true", "ref", "resolve:1:thread-1:false"]);
+  await assert.rejects(api.resolve({ threadId: " ", resolved: true }), /Expected threadId/);
+  await assert.rejects(api.resolve({ threadId: "thread-1", resolved: "true" }), /Expected resolved boolean/);
+  assert.equal(calls.filter((call) => call.startsWith("resolve:")).length, 2);
 });
 
 test("comment API validates body, comment id, and edit kind", async () => {

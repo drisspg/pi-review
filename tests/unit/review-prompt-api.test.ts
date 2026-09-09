@@ -46,6 +46,10 @@ test("review prompt API builds conceptual guide walkthroughs", async () => {
   assert.match(result.prompt, /not filesystem order/);
   assert.match(result.prompt, /path:startLine-endLine/);
   assert.match(result.prompt, /Do not pad to a minimum, impose a fixed maximum/);
+  assert.match(result.prompt, /full-file navigation references, not publishable comment anchors/);
+  assert.match(result.prompt, /surrounding unchanged code outside the supplied patch/);
+  assert.match(result.prompt, /Inspect the HEAD file before citing lines/);
+  assert.doesNotMatch(result.prompt, /reviewable changed line/);
   assert.match(result.prompt, /Every stop must earn its place/);
   assert.match(result.prompt, /Never emit one stop per hunk, per file/);
   assert.match(result.prompt, /Always explain how the implementation fits together/);
@@ -66,6 +70,8 @@ test("review prompt API injects memory for main and focus review prompts", async
   assert.match(focus.prompt, /If investigation is blocked, explain the limitation instead of returning a clean result/);
   assert.match(main.prompt, /A viewed checkbox or previous report does not establish that a defect was fixed/);
   assert.match(focus.prompt, /Prefer no findings over a weak finding/);
+  assert.match(focus.prompt, /full-file navigation references, not publishable comment anchors/);
+  assert.match(focus.prompt, /do not guess line numbers or anchor at deleted files/);
   assert.match(focus.prompt, /No focus areas found\./);
 });
 

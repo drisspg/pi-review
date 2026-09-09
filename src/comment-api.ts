@@ -2,6 +2,7 @@ import { refFromBody } from "./http.js";
 import type { PullRequestRef } from "./types.js";
 
 export type CommentApiDeps = {
+  setReviewThreadResolved: (ref: PullRequestRef, threadId: string, resolved: boolean) => Promise<{ id: string; isResolved: boolean }>;
   addIssueComment: (ref: PullRequestRef, body: string) => Promise<unknown>;
   editIssueComment: (ref: PullRequestRef, commentId: number, body: string) => Promise<unknown>;
   editReviewComment: (ref: PullRequestRef, commentId: number, body: string) => Promise<unknown>;
@@ -11,6 +12,7 @@ export type CommentApiDeps = {
 };
 
 export type CommentApi = {
+  resolve: (payload: Record<string, unknown>) => Promise<{ result: { id: string; isResolved: boolean } }>;
   reply: (payload: Record<string, unknown>) => Promise<{ result: unknown }>;
   edit: (payload: Record<string, unknown>) => Promise<{ result: unknown }>;
 };
@@ -45,5 +47,13 @@ export function createCommentApi(deps: CommentApiDeps): CommentApi {
     return { result: await deps.editReviewComment(ref, commentId, body) };
   }
 
-  return { reply, edit };
+  /** Set an explicit thread state; retrying a request never toggles it accidentally. */
+  async function resolve(payload: Record<string, unknown>) {
+    const ref = deps.refFromBody(payload);
+    if (typeof payload.threadId !== "string" || !payload.threadId.trim()) throw new Error("Expected threadId");
+    if (typeof payload.resolved !== "boolean") throw new Error("Expected resolved boolean");
+    return { result: await deps.setReviewThreadResolved(ref, payload.threadId, payload.resolved) };
+  }
+
+  return { reply, edit, resolve };
 }

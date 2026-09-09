@@ -60,7 +60,7 @@ test("simultaneous requests join one run, including forced refreshes", async () 
 });
 
 test("invalid output and invalid anchors never persist or count as clean", async () => {
-  for (const answer of ["I could not complete this scan.", "Pi completed without assistant text.", "- other.ts:2 — Bug", "- Makefile:99 — Bug"]) {
+  for (const answer of ["I could not complete this scan.", "Pi completed without assistant text.", "- other.ts:2 — Bug", "- Makefile:0 — Bug", "- Makefile:9007199254740992 — Bug"]) {
     const f = fixture(answer);
     const { run } = await createAnalysisApi(f.deps).start({ prKey: "pr", headSha: "head", kind: "focus-review" });
     await settled(run);
@@ -90,6 +90,32 @@ test("a clean focus scan may include an investigation summary before its conclus
 });
 
 for (const kind of ["guide-review", "focus-review"] as const) {
+  test(`${kind} navigates surrounding HEAD code without requiring a reviewable patch`, async () => {
+    for (const patch of [context.files[0].patch, undefined]) {
+      const location = "- model.py:542-550 — Follow the caller\nInspect surrounding implementation.";
+      const f = fixture(kind === "guide-review" ? `## Review guide\n### 1. Call path\n${location}` : `## Focus areas\n${location}`);
+      const navigationContext = { ...context, files: [{ ...context.files[0], filename: "model.py", patch }] };
+      f.setContext(navigationContext);
+      const { run } = await createAnalysisApi(f.deps).start({ prKey: "pr", headSha: "head", kind });
+      await settled(run);
+      assert.equal(run.status, "complete", run.error);
+      assert.equal(f.saved.length, 1);
+      const areas = run.result?.kind === "guide-review" ? run.result.chapters[0].steps : run.result?.kind === "focus-review" ? run.result.areas : [];
+      assert.deepEqual(areas.map(({ path, startLine, endLine }) => ({ path, startLine, endLine })), [{ path: "model.py", startLine: 542, endLine: 550 }]);
+      assert.throws(() => validateReviewDraftTarget(navigationContext, { path: "model.py", line: 542, body: "Actual inline comment" }), /not reviewable|patch.*unavailable/);
+    }
+  });
+
+  test(`${kind} rejects deleted-file navigation targets`, async () => {
+    const location = "- Makefile:2 — Removed code";
+    const f = fixture(kind === "guide-review" ? `## Review guide\n### 1. Removal\n${location}` : location);
+    f.setContext({ ...context, files: [{ ...context.files[0], status: "removed" }] });
+    const { run } = await createAnalysisApi(f.deps).start({ prKey: "pr", headSha: "head", kind });
+    await settled(run);
+    assert.equal(run.status, "invalid");
+    assert.equal(f.saved.length, 0);
+  });
+
   test(`${kind} ranges may connect two reviewable diff hunks`, async () => {
     const location = "- Makefile:2-21 — Follow the build path\nCheck how setup connects to the later target.";
     const f = fixture(kind === "guide-review" ? `## Review guide\n### 1. Build lifecycle\n${location}` : `## Focus areas\n${location}`);

@@ -2531,7 +2531,7 @@ body:has(.review-page) {
   display: none;
 }
 
-.inline-thread.existing.github-thread.minimized .actions {
+.inline-thread.existing.github-thread.minimized .thread-github-link {
   display: none;
 }
 
@@ -2561,10 +2561,6 @@ body:has(.review-page) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.inline-thread.focus-area-minimized .thread-title span {
-  display: none;
 }
 
 .github-thread.minimized .ui-button-icon,

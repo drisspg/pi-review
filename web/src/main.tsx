@@ -141,6 +141,7 @@ type DiffProps = {
 };
 
 const DiffAnnotationsContext = createContext<DiffAnnotationIndex>(buildDiffAnnotationIndex([], [], {}, []));
+const FocusResolutionContext = createContext<{ viewedIds: Record<string, boolean>; saving: boolean; toggle: (area: FocusArea) => Promise<void> } | null>(null);
 
 type GitHubDraftControls = {
   review: GitHubPendingReview | null;
@@ -755,14 +756,18 @@ function App() {
 
   async function saveFocusScan(_answer: string, viewedIds: Record<string, boolean>, collapsedIds: Record<string, boolean>, id = focusScanId): Promise<string | null> {
     const record = review?.focusScans.find((scan) => scan.id === id);
-    if (record == null) return id;
+    if (record == null) {
+      setError("Saving focus progress failed: the focus scan is no longer available.");
+      return null;
+    }
+    setError(null);
     try {
       const { scan } = await api<{ scan: FocusScanRecord }>("/api/focus-scan/progress", { method: "POST", body: JSON.stringify({ id: record.id, prKey: record.prKey, areaStates: statesFromFocusAreas(parseFocusAreas(record.answer), viewedIds, collapsedIds) }) });
       updateCachedReview(record.prKey, (current) => ({ ...current, focusScan: current.focusScan?.id === scan.id ? scan : current.focusScan, focusScans: upsertHistoryRecord(current.focusScans, scan) }));
       return scan.id;
     } catch (err) {
       setError(`Saving focus progress failed: ${errorMessage(err)}`);
-      return id;
+      return null;
     }
   }
 
@@ -1368,6 +1373,29 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { r
     updateDrag: (target) => { if (target.side !== "LEFT") props.updateDrag(target); },
     finishDrag: (target) => props.finishDrag(target.side === "LEFT" && props.dragSelection != null ? props.dragSelection.current : target),
   };
+  const [savingFocusResolution, setSavingFocusResolution] = useState(false);
+  const focusResolutionPending = useRef(false);
+  const activeFocusScan = useRef(props.piPanel.focusScanId);
+  activeFocusScan.current = props.piPanel.focusScanId;
+  /** Resolve/dismiss a finding using the scan's existing viewed state; reopen also expands it. */
+  async function toggleFocusResolution(area: FocusArea): Promise<void> {
+    if (focusResolutionPending.current) return;
+    focusResolutionPending.current = true;
+    setSavingFocusResolution(true);
+    const viewed = !props.piPanel.viewedFocusIds[area.id];
+    const viewedIds = { ...props.piPanel.viewedFocusIds, [area.id]: viewed };
+    const collapsedIds = { ...props.collapsedFocusAreaIds, [area.id]: viewed };
+    try {
+      const saved = await props.piPanel.saveFocusScan(props.piPanel.focusReview.text, viewedIds, collapsedIds);
+      if (saved != null && activeFocusScan.current === saved) {
+        props.piPanel.setViewedFocusIds(viewedIds);
+        props.setCollapsedFocusAreaIds(collapsedIds);
+      }
+    } finally {
+      focusResolutionPending.current = false;
+      setSavingFocusResolution(false);
+    }
+  }
   const draftCount = props.drafts.length;
   const piActivity = props.piPanel.review.messages.length + (props.piPanel.review.text.length > 0 && props.piPanel.review.messages.length === 0 ? 1 : 0);
   const focusCount = props.focusAreas.length;
@@ -1451,7 +1479,7 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { r
     </aside>
   </>;
   const gridTemplateColumns = sideCollapsed || sideFocused ? "minmax(0, 1fr)" : `minmax(0, 1fr) 12px ${props.sideWidth}px`;
-  return <PiTerminalPrContext.Provider value={{ prKey: props.review.pr.key, headSha: props.review.pr.headSha, onDraftReview: (draftReview) => props.setDrafts(draftReview.comments) }}><GitHubDraftContext.Provider value={props.githubDrafts}><div className={`review-page${sideFocused ? " panel-focused" : ""}`}>
+  return <PiTerminalPrContext.Provider value={{ prKey: props.review.pr.key, headSha: props.review.pr.headSha, onDraftReview: (draftReview) => props.setDrafts(draftReview.comments) }}><FocusResolutionContext.Provider value={{ viewedIds: props.piPanel.viewedFocusIds, saving: savingFocusResolution, toggle: toggleFocusResolution }}><GitHubDraftContext.Provider value={props.githubDrafts}><div className={`review-page${sideFocused ? " panel-focused" : ""}`}>
     <div className={`review-layout${sideCollapsed ? " side-collapsed" : ""}${sideFocused ? " side-focused" : ""}`} style={{ gridTemplateColumns }}>
       <div className="review-main">
         <PrHeaderStrip pr={props.review.pr} refreshingActivity={props.refreshingActivity} />
@@ -1494,7 +1522,7 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { r
       {sidePanel}
     </div>
     {draftCount > 0 && (sideCollapsed || sideTab !== "review") && <Button className="floating-submit" onClick={() => openSidePanel("review")}>Review draft ({draftCount}) →</Button>}
-  </div></GitHubDraftContext.Provider></PiTerminalPrContext.Provider>;
+  </div></GitHubDraftContext.Provider></FocusResolutionContext.Provider></PiTerminalPrContext.Provider>;
 }
 
 function PrChecks({ checks }: { checks: CommitChecks }) {
@@ -2113,14 +2141,22 @@ function DiffRowView({ row, target, languagePath, setThreads, drafts, setDrafts,
   return <><div className={`diff-row ${diffViewMode} ${row.kind} ${thread != null && !thread.collapsed ? "selected" : ""} ${selecting ? "range-selecting" : ""} ${inThreadRange ? "in-thread-range" : ""}`} data-path={target?.path} data-line={target?.line ?? undefined} data-side={target?.side} data-hunk={target?.hunk} role={target != null ? "button" : undefined} tabIndex={target != null ? 0 : undefined} aria-label={target != null ? `Review ${targetLabel(target)}` : undefined} onKeyDown={(event) => { if (target != null && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); handleRowClick(target, event.shiftKey); } }} onMouseDown={(event) => { if (target != null && event.button === 0) { if (isDiffCodeTarget(event.target)) return; event.preventDefault(); beginDrag(target); } }} onMouseEnter={() => { if (target != null && dragSelection != null) updateDrag(target); }} onMouseUp={() => { if (target != null) finishDrag(target); }} onClick={(event) => { if (target != null && !hasSelectedDiffCode(event)) handleRowClick(target, event.shiftKey); }}>{diffViewMode === "split" ? splitCells : unifiedCells}</div>{inlineCommentThreads.map((commentThread) => <ExistingReviewThread key={commentThread.map((comment) => comment.id).join(":")} comments={commentThread} prUrl={prUrl} refreshGithubActivity={refreshGithubActivity} collapseSignal={collapseSignal} collapseComments={commentsCollapsed} />)}{rowFocusAreas.map((area) => <FocusAreaInline key={area.id} prUrl={prUrl} area={area} active={area.id === activeFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} />)}{inlineDrafts.map((draft) => <div className="inline-thread draft" id={`draft-${draft.id}`} key={draft.id}><DraftView draft={draft} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} /></div>)}{thread != null && <ThreadBox thread={thread} prUrl={prUrl} setThread={(updatedThread) => setThreads((current) => { const next = { ...current }; delete next[thread.key]; next[updatedThread.key] = updatedThread; return next; })} removeThread={() => setThreads((current) => { const next = { ...current }; delete next[thread.key]; return next; })} addDraft={(body) => setDrafts([...drafts, { id: newId(), path: thread.target.path, line: thread.target.line, startLine: thread.target.startLine, side: thread.target.side, body }])} />}</>;
 }
 
+/** Both focus surfaces share persisted resolution state and disable writes while saving. */
+function FocusResolutionButton({ area }: { area: FocusArea }) {
+  const resolution = useContext(FocusResolutionContext);
+  if (resolution == null) return null;
+  const resolved = resolution.viewedIds[area.id] === true;
+  return <Button variant="muted" className="small-muted-button focus-area-resolve" aria-label={`${resolved ? "Reopen" : "Resolve"} focus area: ${area.title}`} title={resolved ? "Reopen this local finding" : "Mark as handled or dismissed; exclude from copied feedback"} disabled={resolution.saving} onClick={() => void resolution.toggle(area)}>{resolved ? "Reopen" : "Resolve"}</Button>;
+}
+
 function FocusAreaInline({ prUrl, area, active, collapsedFocusAreaIds, setCollapsedFocusAreaIds }: { prUrl: string; area: FocusArea; active: boolean; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"] }) {
   const collapsed = collapsedFocusAreaIds[area.id] ?? false;
-  if (collapsed) return <button type="button" id={`focus-area-${area.id}`} className="inline-thread review-thread focus-area-inline focus-area-minimized focus-area-collapsed minimized" onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: false }))}><div className="thread-head"><div className="thread-title"><ChevronRightIcon size={16} /><div><strong>Focus area</strong><span>{area.title}</span></div></div></div></button>;
+  if (collapsed) return <div id={`focus-area-${area.id}`} className="inline-thread review-thread focus-area-inline focus-area-minimized focus-area-collapsed minimized"><div className="thread-head"><Button variant="muted" className="thread-title" aria-label={`Expand focus area: ${area.title}`} onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: false }))}><ChevronRightIcon size={16} /><strong>Focus area</strong></Button><FocusResolutionButton area={area} /></div></div>;
   const location = focusAreaLocation(area);
   return <div id={`focus-area-${area.id}`} className={`inline-thread review-thread focus-area-inline terminal-open${active ? " active" : ""}`}>
     <div className="thread-head">
       <div className="thread-title"><strong>{area.title}</strong><span>{location}</span></div>
-      <Button variant="icon" aria-label="Collapse focus area" onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: true }))}><ChevronDownIcon size={16} /></Button>
+      <div className="actions"><FocusResolutionButton area={area} /><Button variant="icon" aria-label="Collapse focus area" onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: true }))}><ChevronDownIcon size={16} /></Button></div>
     </div>
     {area.body.trim().length > 0 && <div className="focus-area-terminal-context"><MarkdownText text={area.body} fileLinks={{ prUrl }} /></div>}
     <InlinePiTerminal session={terminalSessionId("focus", area.id)} target={{ path: area.path, line: area.endLine, ...(area.startLine === area.endLine ? {} : { startLine: area.startLine }), side: "RIGHT" }} context={`You are discussing the focus area at ${location} in this pull request. Keep investigation and edits grounded in this location.
@@ -2344,8 +2380,9 @@ function GeneralReviewEntry({ message, prUrl }: { message: AiReviewMessage; prUr
   </details>;
 }
 
-function AiReviewPanel({ prKey, prUrl, focusPanel, review, aiReviewHistory, aiReviewId, showAiReviewRecord, runReview, copyFeedbackPrompt, focusReview, focusScanHistory, focusScanId, showFocusScanRecord, runFocusReview, focusAreas, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds, viewedFocusIds, setViewedFocusIds, saveFocusScan, openFiles, setOpenFiles }: PiPanelProps & { prKey: string; prUrl: string; focusPanel: () => void; focusAreas: FocusArea[]; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"]; openFiles: Record<string, boolean>; setOpenFiles: (open: Record<string, boolean>) => void }) {
+function AiReviewPanel({ prKey, prUrl, focusPanel, review, aiReviewHistory, aiReviewId, showAiReviewRecord, runReview, copyFeedbackPrompt, focusReview, focusScanHistory, focusScanId, showFocusScanRecord, runFocusReview, focusAreas, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds, viewedFocusIds, saveFocusScan, openFiles, setOpenFiles }: PiPanelProps & { prKey: string; prUrl: string; focusPanel: () => void; focusAreas: FocusArea[]; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"]; openFiles: Record<string, boolean>; setOpenFiles: (open: Record<string, boolean>) => void }) {
   const terminalReview = useContext(PiTerminalPrContext);
+  const focusResolution = useContext(FocusResolutionContext);
   const feedbackCopy = useCopyAction(copyFeedbackPrompt);
   const [terminalFocused, setTerminalFocused] = useState(false);
   const focusAreaCount = focusAreas.length;
@@ -2368,14 +2405,6 @@ function AiReviewPanel({ prKey, prUrl, focusPanel, review, aiReviewHistory, aiRe
       const lineRow = document.querySelector(`.diff-row[data-path="${CSS.escape(area.path)}"][data-line="${area.startLine}"]`);
       (focusCard ?? lineRow)?.scrollIntoView({ behavior: "smooth", block: "center" });
     }, 50);
-  }
-  function toggleFocusViewed(area: FocusArea): void {
-    const next = !viewedFocusIds[area.id];
-    const nextViewedIds = { ...viewedFocusIds, [area.id]: next };
-    const nextCollapsedIds = next ? { ...collapsedFocusAreaIds, [area.id]: true } : collapsedFocusAreaIds;
-    setViewedFocusIds(nextViewedIds);
-    if (next) setCollapsedFocusAreaIds(nextCollapsedIds);
-    void saveFocusScan(focusReview.text, nextViewedIds, nextCollapsedIds);
   }
   const terminal = <section className="pi-terminal-session" aria-label="Pi terminal session">
     <div className="pi-terminal-session-head">
@@ -2409,12 +2438,13 @@ function AiReviewPanel({ prKey, prUrl, focusPanel, review, aiReviewHistory, aiRe
       const viewed = viewedFocusIds[area.id] ?? false;
       return <div key={area.id} className={`focus-area-link-row${viewed ? " viewed" : ""}`}>
         <label className="focus-area-check" title="Mark as handled or dismissed — checked focus areas are left out of the copied feedback prompt" onClick={(event) => event.stopPropagation()}>
-          <Checkbox checked={viewed} onChange={() => toggleFocusViewed(area)} />
+          <Checkbox checked={viewed} aria-label={`Resolve focus area: ${area.title}`} disabled={focusResolution == null || focusResolution.saving} onChange={() => void focusResolution?.toggle(area)} />
         </label>
         <button type="button" onClick={() => jumpToFocusArea(area)}>
           <strong>{index + 1}. {area.title}</strong>
           <span>{focusAreaLocation(area)}</span>
         </button>
+        <FocusResolutionButton area={area} />
       </div>;
     })}
   </div>;

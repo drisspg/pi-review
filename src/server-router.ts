@@ -75,6 +75,7 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
     "/api/ai-review/save": (payload) => deps.savedAnalysisApi.saveAiReview(payload),
     "/api/ask": (payload) => deps.piApi.ask(payload),
     "/api/comment/edit": (payload) => deps.commentApi.edit(payload),
+    "/api/comment/resolve": (payload) => deps.commentApi.resolve(payload),
     "/api/comment/reply": (payload) => deps.commentApi.reply(payload),
     "/api/draft-review/discard": (payload) => deps.draftReviewApi.discard(payload),
     "/api/draft-review/get": (payload) => deps.draftReviewApi.get(payload),

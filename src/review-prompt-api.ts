@@ -229,7 +229,7 @@ One or two sentence chapter overview.
 - path:line — Next review stop
   One or two sentence explanation.
 
-Scale the walkthrough to the actual PR. A tiny local change may need one chapter and one stop; a cross-cutting change may need many chapters and stops. Do not pad to a minimum, impose a fixed maximum, or omit a meaningful part of the call path merely to fit a count. Each stop must cite a real changed file and reviewable changed line from the supplied patch.
+Scale the walkthrough to the actual PR. A tiny local change may need one chapter and one stop; a cross-cutting change may need many chapters and stops. Do not pad to a minimum, impose a fixed maximum, or omit a meaningful part of the call path merely to fit a count. Each stop must cite an exact changed-file path and real HEAD line numbers. Stops are full-file navigation references, not publishable comment anchors: surrounding unchanged code outside the supplied patch and ranges spanning hunks are allowed. Inspect the HEAD file before citing lines not shown in the patch; do not guess line numbers. Deleted files have no HEAD navigation target; explain their removal from a surviving changed-file stop.
 
 Every stop must earn its place: a stop exists to explain one idea the reviewer could get wrong, not to enumerate edits. Mechanical or repetitive plumbing — re-exports, import wiring, __all__ or registry entries, renames, and the same promotion repeated across files — is a single stop anchored at the most representative location, with the other locations named inline in that stop's explanation. Never emit one stop per hunk, per file, or per line of an import list; if two adjacent stops would be reviewed with the same thought, merge them. Stops should collectively cover the chapter's important control flow, data flow, or contract while staying few enough that each one carries real explanatory weight.
 
@@ -294,7 +294,7 @@ ${previousFocusAreas}
 
 Re-check previous findings against this revision and retain concerns that remain valid. Being previously reported or viewed does not mean a defect is resolved. Use the closest current reviewable location; omit concerns that are now addressed.
 
-Return markdown with a "Focus areas" list. Start each item with a clickable-style location in this exact format: \`path:startLine-endLine — short title\` or \`path:line — short title\`. Then state the evidence, realistic impact, and the specific unresolved reviewer question. Avoid generic praise and blocking language unless there is strong evidence. If no candidate survives investigation, return exactly: \`No focus areas found.\`
+Return markdown with a "Focus areas" list. Start each item with a clickable-style location in this exact format: \`path:startLine-endLine — short title\` or \`path:line — short title\`. Use exact changed-file paths and real HEAD line numbers, including surrounding unchanged code outside the patch when needed; these are full-file navigation references, not publishable comment anchors. Inspect the HEAD file before citing lines not shown in the patch; do not guess line numbers or anchor at deleted files. Then state the evidence, realistic impact, and the specific unresolved reviewer question. Avoid generic praise and blocking language unless there is strong evidence. If no candidate survives investigation, return exactly: \`No focus areas found.\`
 
 PR title: ${prTitle}
 

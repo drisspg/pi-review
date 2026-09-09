@@ -894,6 +894,47 @@ test("keeps failed GitHub comment edits and replies retryable", async ({ page })
   await expect(replyThread.locator(".thread-reply").getByRole("button", { name: "Retry" })).toBeVisible();
 });
 
+test("resolves and reopens GitHub threads with visible failure recovery", async ({ page }) => {
+  const row = (await openFileWithAddedRows(page, 1)).first();
+  const path = await row.getAttribute("data-path");
+  const line = Number(await row.getAttribute("data-line"));
+  let resolved = false;
+  let reject = true;
+  const requests: boolean[] = [];
+  await page.route("**/api/comment/resolve", async (route) => {
+    const input = route.request().postDataJSON();
+    expect(input.prUrl).toBe(prUrl);
+    expect(input.threadId).toBe("mock-resolvable-thread");
+    requests.push(input.resolved);
+    if (reject) return route.fulfill({ status: 403, json: { error: "Permission denied" } });
+    resolved = input.resolved;
+    await route.fulfill({ json: { result: { id: input.threadId, isResolved: resolved } } });
+  });
+  await page.route("**/api/pr/activity", async (route) => {
+    const response = await route.fetch();
+    const data = await response.json();
+    await route.fulfill({ json: { ...data, comments: [{ id: 987654321, path, line, side: "RIGHT", body: "Thread resolution fixture", html_url: prUrl, thread_id: "mock-resolvable-thread", thread_resolved: resolved, user: { login: "reviewer" } }], issueComments: [], reviewSummaries: [] } });
+  });
+  await openTools(page);
+  await page.getByRole("menuitem", { name: "Refresh", exact: true }).click();
+  await openSideTab(page, "Comments");
+  const thread = page.locator(".side .github-thread").filter({ hasText: "Unresolved" });
+  await thread.getByRole("button", { name: "Resolve", exact: true }).click();
+  await expect(thread.getByRole("alert")).toContainText("Permission denied");
+  await expect(thread).not.toHaveClass(/minimized/);
+  reject = false;
+  await thread.getByRole("button", { name: "Resolve", exact: true }).click();
+  const settled = page.locator(".side .github-thread");
+  await expect(settled).toHaveClass(/minimized/);
+  await expect(settled.getByRole("alert")).toHaveCount(0);
+  await settled.getByRole("button", { name: "Reopen", exact: true }).click();
+  await expect(settled).not.toHaveClass(/minimized/);
+  await expect(settled.locator(".thread-status")).toHaveText("Unresolved");
+  const inline = page.locator(".inline-thread.existing.github-thread");
+  await expect(inline.getByRole("button", { name: "Resolve", exact: true })).toBeVisible();
+  expect(requests).toEqual([true, true, false]);
+});
+
 test("collapses and focuses existing comment threads", async ({ page }) => {
   await openSideTab(page, "Comments");
   const thread = page.locator(".side .github-thread").first();
@@ -1091,6 +1132,34 @@ test("selects diff code text without opening a thread", async ({ page }) => {
   await expect(page.locator(".local-thread")).toHaveCount(0);
 });
 
+test("resolves local focus findings only after persistence and reopens them after reload", async ({ page }) => {
+  await mockNativeTerminal(page);
+  const row = (await openFileWithAddedRows(page, 1)).first();
+  const path = await row.getAttribute("data-path");
+  const line = await row.getAttribute("data-line");
+  await mockAnalysis(page, "focus-review", `## Focus areas\n- ${path}:${line} — Resolution fixture\nCheck this contract.`);
+  await openSideTab(page, "Pi");
+  await page.getByRole("button", { name: /^(Focus scan|Refresh focus scan)$/ }).click();
+  const focus = page.locator(".focus-area-inline");
+  const resolve = focus.getByRole("button", { name: "Resolve focus area: Resolution fixture" });
+  await expect(resolve).toBeVisible();
+  await page.route("**/api/focus-scan/progress", (route) => route.fulfill({ status: 500, json: { error: "Save rejected" } }));
+  await resolve.click();
+  await expect(page.getByRole("alert").filter({ hasText: "Save rejected" })).toBeVisible();
+  await expect(resolve).toBeEnabled();
+  await expect(focus).not.toHaveClass(/minimized/);
+  await page.unroute("**/api/focus-scan/progress");
+  await resolve.click();
+  await expect(focus).toHaveClass(/minimized/);
+  await expect(focus.getByRole("button", { name: "Reopen focus area: Resolution fixture" })).toBeVisible();
+  await page.reload();
+  await mockNativeTerminal(page);
+  await expect(focus).toHaveClass(/minimized/);
+  await focus.getByRole("button", { name: "Reopen focus area: Resolution fixture" }).click();
+  await expect(focus).not.toHaveClass(/minimized/);
+  await expect(focus.getByRole("button", { name: "Resolve focus area: Resolution fixture" })).toBeVisible();
+});
+
 test("runs a separate focus areas review and opens native focus terminals", async ({ page }) => {
   await mockNativeTerminal(page);
   await openFirstFile(page);
@@ -1111,7 +1180,7 @@ test("runs a separate focus areas review and opens native focus terminals", asyn
   await focusArea.getByRole("button", { name: "Collapse" }).click();
   const collapsedFocusArea = page.locator(".focus-area-collapsed");
   await expect(collapsedFocusArea).toBeVisible();
-  await collapsedFocusArea.focus();
+  await collapsedFocusArea.getByRole("button", { name: /^Expand focus area:/ }).focus();
   await page.keyboard.press("Enter");
   await expect(focusArea.locator(".pi-native-terminal.compact")).toBeVisible();
   await expect(focusArea.getByRole("textbox", { name: "Terminal input" })).toBeFocused();
