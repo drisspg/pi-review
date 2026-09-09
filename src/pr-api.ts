@@ -9,6 +9,7 @@ export type PrApiDeps = {
   disposePiSession: (prKey: string) => Promise<void>;
   fetchCommitChecks: (ref: PullRequestRef, sha: string) => Promise<CommitChecks>;
   fetchPullRequestReviewData: (ref: PullRequestRef) => Promise<PullRequestReviewData>;
+  recoverMissingPatches: (data: PullRequestReviewData, cwd: string) => Promise<PullRequestReviewData>;
   getDraftReview: (prKey: string) => Promise<DraftReview | null>;
   listAiReviews: (prKey: string) => Promise<AiReviewRecord[]>;
   listFileReviews: (prKey: string) => Promise<FileReviewState[]>;
@@ -87,13 +88,14 @@ export function createPrApi(deps: PrApiDeps): PrApi {
   function refresh(input: string, prewarm: boolean): Promise<PullRequestReviewResponse> {
     const ref = deps.parsePullRequestRef(input);
     return transition(ref, async () => {
-      const data = await deps.fetchPullRequestReviewData(ref);
+      const snapshot = await deps.fetchPullRequestReviewData(ref);
       const key = prKey(ref);
-      if (registeredHeads.get(key) !== data.pr.headSha) {
+      if (registeredHeads.get(key) !== snapshot.pr.headSha) {
         registeredHeads.delete(key);
         await deps.disposePiSession(key);
       }
-      const worktreeDir = await deps.preparePrWorktree(ref, data.raw.base.repo.clone_url, data.pr.headSha);
+      const worktreeDir = await deps.preparePrWorktree(ref, snapshot.raw.base.repo.clone_url, snapshot.pr.headSha);
+      const data = await deps.recoverMissingPatches(snapshot, worktreeDir);
       const pr = await deps.upsertPullRequest(data.pr);
       await deps.registerPiSessionContext(pr.key, worktreeDir, { headSha: pr.headSha, files: data.files });
       registeredHeads.set(key, pr.headSha);

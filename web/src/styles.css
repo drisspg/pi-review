@@ -2683,8 +2683,6 @@ body:has(.review-page) {
 .thread-github-link,
 .reviewer-chips button,
 .github-draft-location,
-.focus-area-links button,
-.focus-area-check,
 .pi-history-back,
 .github-draft-review-head,
 .draft-card-location.clickable,
@@ -5208,103 +5206,6 @@ button.fold:hover {
 
 .focus-review-note.clean span {
   color: var(--muted);
-}
-
-.focus-area-links {
-  display: grid;
-  gap: 6px;
-  margin-top: 8px;
-  padding: 8px 10px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius);
-  background: var(--panel2);
-}
-
-.focus-area-links-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 0.82rem;
-  color: var(--text);
-}
-
-.focus-area-links button {
-  display: grid;
-  gap: 2px;
-  padding: 7px 9px;
-  border-color: var(--border);
-  background: var(--panel);
-  text-align: left;
-  flex: 1;
-  min-width: 0;
-}
-
-.focus-area-link-row {
-  display: flex;
-  align-items: stretch;
-  gap: 0;
-}
-
-.focus-area-link-row.viewed {
-  opacity: 0.45;
-}
-
-.focus-area-link-row.viewed button {
-  border-color: var(--border);
-  background: var(--panel2);
-}
-
-.focus-area-link-row.viewed strong {
-  text-decoration: line-through;
-  color: var(--muted);
-}
-
-.focus-area-check {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 8px;
-  border: 1px solid var(--border);
-  border-right: none;
-  border-radius: var(--radius-md) 0 0 var(--radius-md);
-  background: var(--panel);
-  cursor: pointer;
-}
-
-.focus-area-link-row.viewed .focus-area-check {
-  border-color: var(--border);
-  background: var(--panel2);
-}
-
-.focus-area-check input {
-  margin: 0;
-  cursor: pointer;
-  accent-color: var(--accent);
-}
-
-.focus-area-link-row button {
-  border-radius: 0 var(--radius-md) var(--radius-md) 0;
-}
-
-.focus-area-links button:hover {
-  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
-  background: var(--panel2);
-}
-
-.focus-area-links strong {
-  overflow: hidden;
-  color: var(--text);
-  font-size: 0.8rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.focus-area-links span {
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 0.76rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .focus-area-inline,

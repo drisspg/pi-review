@@ -1,10 +1,10 @@
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
+import { fileFingerprint } from "./file-fingerprint.js";
 import { markGeneratedPullFiles, parseGitattributes, type GitattributesRule } from "./gitattributes.js";
 import { logger } from "./logger.js";
 import { prKey } from "./pr.js";
@@ -146,10 +146,6 @@ function toStoredPullRequest(ref: PullRequestRef, pr: PullRequest, files: PullFi
     lastReviewEvent: viewerReview == null ? null : reviewEventFromState(viewerReview.state),
     reviewDecision,
   };
-}
-
-function fileFingerprint(file: PullFile): string {
-  return createHash("sha1").update(`${file.status}\n${file.previous_filename ?? ""}\n${file.patch ?? ""}`).digest("hex");
 }
 
 function subjectKindFromRest(type: string | undefined): InboxSubjectKind {

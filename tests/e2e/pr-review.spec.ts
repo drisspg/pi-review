@@ -1187,7 +1187,7 @@ test("runs a separate focus areas review and opens native focus terminals", asyn
   await expect(focusArea.getByRole("button", { name: "Use chat" })).toHaveCount(0);
   await expect(focusArea.getByPlaceholder("Write a draft comment or ask Pi about this focus area")).toHaveCount(0);
 
-  await expect(page.locator(".ai-review")).toContainText("0/1 focus area reviewed");
+  await expect(page.locator(".ai-review .focus-area-links")).toHaveCount(0);
   await expect(row).toHaveClass(/focus-highlight-active/);
 
   let guideRequests = 0;
@@ -1280,12 +1280,8 @@ test("marking a file viewed collapses it without jumping to the active focus are
 
   await openSideTab(page, "Pi");
   await page.getByRole("button", { name: /Focus scan|Refresh focus scan/ }).click();
-  const focusLink = page.locator(".focus-area-link-row button").first();
-  await expect(focusLink).toContainText("check this line");
-  await focusLink.click();
+  await expect(page.locator(".focus-area-inline")).toContainText("check this line");
   await expect(focusRow).toHaveClass(/focus-highlight-active/);
-  // jumpToFocusArea scrolls on a 50ms timer; let it fire before the scroll spy below starts counting.
-  await page.waitForTimeout(150);
 
   const files = page.locator(".file");
   let otherFileIndex = -1;
@@ -1339,7 +1335,8 @@ test("keeps a viewed unchanged file collapsed when the review reopens", async ({
   await viewedCleared;
 });
 
-test("minimizes focus area links after all are reviewed", async ({ page }) => {
+test("keeps focus findings and resolution controls inline, not duplicated in the Pi panel", async ({ page }) => {
+  await mockNativeTerminal(page);
   const rows = await openFileWithAddedRows(page, 2);
   const firstPath = await rows.nth(0).getAttribute("data-path");
   const firstLine = await rows.nth(0).getAttribute("data-line");
@@ -1351,18 +1348,19 @@ test("minimizes focus area links after all are reviewed", async ({ page }) => {
 
   await openSideTab(page, "Pi");
   await page.getByRole("button", { name: "Focus scan" }).click();
-  await expect(page.locator(".focus-area-link-row")).toHaveCount(2);
+  await expect(page.locator(".focus-area-inline")).toHaveCount(2);
+  await expect(page.locator(".ai-review .focus-area-links")).toHaveCount(0);
+  await expect(page.locator(".ai-review .focus-area-resolve")).toHaveCount(0);
   const firstProgress = page.waitForResponse((response) => response.url().endsWith("/api/focus-scan/progress"));
-  await page.locator(".focus-area-check input").nth(0).click();
+  await page.locator(".focus-area-inline").getByRole("button", { name: "Resolve focus area: check first." }).click();
   expect((await firstProgress).ok()).toBe(true);
   const secondProgress = page.waitForResponse((response) => response.url().endsWith("/api/focus-scan/progress"));
-  await page.locator(".focus-area-check input").nth(1).click();
+  await page.locator(".focus-area-inline").getByRole("button", { name: "Resolve focus area: check second." }).click();
   expect((await secondProgress).ok()).toBe(true);
 
-  await expect(page.locator(".focus-area-links")).toContainText("2/2 focus areas reviewed");
-  await expect(page.locator(".focus-area-link-row")).toHaveCount(0);
-  await page.getByRole("button", { name: "Expand all" }).click();
-  await expect(page.locator(".focus-area-link-row")).toHaveCount(2);
+  await expect(page.locator(".focus-area-inline.minimized")).toHaveCount(2);
+  await expect(page.locator(".focus-area-inline").getByRole("button", { name: /^Reopen focus area:/ })).toHaveCount(2);
+  await expect(page.locator(".ai-review").getByRole("button", { name: "Collapse all", exact: true })).toHaveCount(0);
 });
 
 test("keeps a clean focus scan compact when the Pi panel is focused", async ({ page }) => {

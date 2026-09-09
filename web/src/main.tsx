@@ -1472,7 +1472,7 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { r
       </nav>
       <div className="side-tab-panels">
         <TabPanel value="review" className="side-tab-panel review-tab-panel">{sideTab === "review" && <ReviewSummary pr={props.review.pr} files={props.review.files} drafts={props.drafts} setDrafts={props.setDrafts} event={props.reviewEvent} setEvent={props.setReviewEvent} body={props.reviewBody} setBody={props.setReviewBody} draftSaveStatus={props.draftSaveStatus} draftSaveError={props.draftSaveError} retryDraftSave={props.retryDraftSave} editingDraftId={props.editingDraftId} setEditingDraftId={props.setEditingDraftId} archiveReview={props.archiveReview} discardReview={props.discardReview} submitReview={props.submitReview} submitting={props.submitting} invalidDraftIds={props.invalidDraftIds} copyFeedbackPrompt={props.piPanel.copyFeedbackPrompt} onJumpToTarget={jumpToComment} />}</TabPanel>
-        <TabPanel value="pi" className="side-tab-panel pi-tab-panel">{sideTab === "pi" && <InlineSnippetsProvider value={{ headSha: props.review.pr.headSha, snippets: true }}><AiReviewPanel key={props.review.pr.url} prKey={props.review.pr.key} prUrl={props.review.pr.url} focusPanel={() => setSideFocused(true)} {...props.piPanel} focusAreas={props.focusAreas} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={props.collapsedFocusAreaIds} setCollapsedFocusAreaIds={props.setCollapsedFocusAreaIds} openFiles={props.openFiles} setOpenFiles={props.setOpenFiles} /></InlineSnippetsProvider>}</TabPanel>
+        <TabPanel value="pi" className="side-tab-panel pi-tab-panel">{sideTab === "pi" && <InlineSnippetsProvider value={{ headSha: props.review.pr.headSha, snippets: true }}><AiReviewPanel key={props.review.pr.url} prKey={props.review.pr.key} prUrl={props.review.pr.url} focusPanel={() => setSideFocused(true)} {...props.piPanel} focusAreas={props.focusAreas} /></InlineSnippetsProvider>}</TabPanel>
         <TabPanel value="comments" className="side-tab-panel comments-tab-panel">{sideTab === "comments" && <ExistingComments prUrl={props.review.pr.url} comments={props.review.comments} issueComments={props.review.issueComments} reviewSummaries={props.review.reviewSummaries} refreshGithubActivity={props.refreshGithubActivity} collapseSignal={props.commentCollapseSignal} commentsCollapsed={props.commentsCollapsed} toggleAllComments={props.toggleAllComments} onJumpToComment={jumpToComment} />}</TabPanel>
       </div>
       </Tabs>
@@ -2141,7 +2141,7 @@ function DiffRowView({ row, target, languagePath, setThreads, drafts, setDrafts,
   return <><div className={`diff-row ${diffViewMode} ${row.kind} ${thread != null && !thread.collapsed ? "selected" : ""} ${selecting ? "range-selecting" : ""} ${inThreadRange ? "in-thread-range" : ""}`} data-path={target?.path} data-line={target?.line ?? undefined} data-side={target?.side} data-hunk={target?.hunk} role={target != null ? "button" : undefined} tabIndex={target != null ? 0 : undefined} aria-label={target != null ? `Review ${targetLabel(target)}` : undefined} onKeyDown={(event) => { if (target != null && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); handleRowClick(target, event.shiftKey); } }} onMouseDown={(event) => { if (target != null && event.button === 0) { if (isDiffCodeTarget(event.target)) return; event.preventDefault(); beginDrag(target); } }} onMouseEnter={() => { if (target != null && dragSelection != null) updateDrag(target); }} onMouseUp={() => { if (target != null) finishDrag(target); }} onClick={(event) => { if (target != null && !hasSelectedDiffCode(event)) handleRowClick(target, event.shiftKey); }}>{diffViewMode === "split" ? splitCells : unifiedCells}</div>{inlineCommentThreads.map((commentThread) => <ExistingReviewThread key={commentThread.map((comment) => comment.id).join(":")} comments={commentThread} prUrl={prUrl} refreshGithubActivity={refreshGithubActivity} collapseSignal={collapseSignal} collapseComments={commentsCollapsed} />)}{rowFocusAreas.map((area) => <FocusAreaInline key={area.id} prUrl={prUrl} area={area} active={area.id === activeFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} />)}{inlineDrafts.map((draft) => <div className="inline-thread draft" id={`draft-${draft.id}`} key={draft.id}><DraftView draft={draft} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} /></div>)}{thread != null && <ThreadBox thread={thread} prUrl={prUrl} setThread={(updatedThread) => setThreads((current) => { const next = { ...current }; delete next[thread.key]; next[updatedThread.key] = updatedThread; return next; })} removeThread={() => setThreads((current) => { const next = { ...current }; delete next[thread.key]; return next; })} addDraft={(body) => setDrafts([...drafts, { id: newId(), path: thread.target.path, line: thread.target.line, startLine: thread.target.startLine, side: thread.target.side, body }])} />}</>;
 }
 
-/** Both focus surfaces share persisted resolution state and disable writes while saving. */
+/** Inline findings use persisted resolution state and disable writes while saving. */
 function FocusResolutionButton({ area }: { area: FocusArea }) {
   const resolution = useContext(FocusResolutionContext);
   if (resolution == null) return null;
@@ -2380,32 +2380,12 @@ function GeneralReviewEntry({ message, prUrl }: { message: AiReviewMessage; prUr
   </details>;
 }
 
-function AiReviewPanel({ prKey, prUrl, focusPanel, review, aiReviewHistory, aiReviewId, showAiReviewRecord, runReview, copyFeedbackPrompt, focusReview, focusScanHistory, focusScanId, showFocusScanRecord, runFocusReview, focusAreas, setActiveFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds, viewedFocusIds, saveFocusScan, openFiles, setOpenFiles }: PiPanelProps & { prKey: string; prUrl: string; focusPanel: () => void; focusAreas: FocusArea[]; setActiveFocusAreaId: (id: string | null) => void; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"]; openFiles: Record<string, boolean>; setOpenFiles: (open: Record<string, boolean>) => void }) {
+function AiReviewPanel({ prKey, prUrl, focusPanel, review, aiReviewHistory, aiReviewId, showAiReviewRecord, runReview, copyFeedbackPrompt, focusReview, focusScanHistory, focusScanId, showFocusScanRecord, runFocusReview, focusAreas }: PiPanelProps & { prKey: string; prUrl: string; focusPanel: () => void; focusAreas: FocusArea[] }) {
   const terminalReview = useContext(PiTerminalPrContext);
-  const focusResolution = useContext(FocusResolutionContext);
   const feedbackCopy = useCopyAction(copyFeedbackPrompt);
   const [terminalFocused, setTerminalFocused] = useState(false);
-  const focusAreaCount = focusAreas.length;
-  const allFocusCollapsed = focusAreaCount > 0 && focusAreas.every((area) => collapsedFocusAreaIds[area.id]);
   const messages = review.messages.length > 0 ? review.messages : review.text.trim().length > 0 ? [generalReviewMessage(review.text)] : [];
   const reviewMessages = generalReviewMessages(messages);
-  function toggleFocusAreas(): void {
-    const nextCollapsedIds = Object.fromEntries(focusAreas.map((area) => [area.id, !allFocusCollapsed]));
-    setCollapsedFocusAreaIds(nextCollapsedIds);
-    void saveFocusScan(focusReview.text, viewedFocusIds, nextCollapsedIds);
-  }
-  function jumpToFocusArea(area: FocusArea): void {
-    setActiveFocusAreaId(area.id);
-    const nextCollapsedIds = { ...collapsedFocusAreaIds, [area.id]: false };
-    setCollapsedFocusAreaIds(nextCollapsedIds);
-    void saveFocusScan(focusReview.text, viewedFocusIds, nextCollapsedIds);
-    setOpenFiles({ ...openFiles, [area.path]: true });
-    window.setTimeout(() => {
-      const focusCard = document.getElementById(`focus-area-${area.id}`);
-      const lineRow = document.querySelector(`.diff-row[data-path="${CSS.escape(area.path)}"][data-line="${area.startLine}"]`);
-      (focusCard ?? lineRow)?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 50);
-  }
   const terminal = <section className="pi-terminal-session" aria-label="Pi terminal session">
     <div className="pi-terminal-session-head">
       <strong>Native Pi terminal</strong>
@@ -2424,30 +2404,8 @@ function AiReviewPanel({ prKey, prUrl, focusPanel, review, aiReviewHistory, aiRe
   const viewingOlderAiReview = latestAiReviewId != null && aiReviewId != null && aiReviewId !== latestAiReviewId;
   const viewingOlderFocusScan = latestFocusScanId != null && focusScanId != null && focusScanId !== latestFocusScanId;
   const viewingHistory = viewingOlderAiReview || viewingOlderFocusScan;
-  const viewedCount = focusAreas.filter((area) => viewedFocusIds[area.id]).length;
-  const allFocusReviewed = focusAreaCount > 0 && viewedCount === focusAreaCount;
-  const focusLinksMinimized = allFocusReviewed && allFocusCollapsed;
   const focusHistoryOptions = focusScanHistory.map((record, index) => <option key={record.id} value={record.id}>{index === 0 ? "Latest · " : ""}{historyTimestamp(record)} · {focusScanSummary(record)}</option>);
   const aiHistoryOptions = aiReviewHistory.map((record, index) => <option key={record.id} value={record.id}>{index === 0 ? "Latest · " : ""}{historyTimestamp(record)} · Findings</option>);
-  const focusAreaLinks = focusAreaCount > 0 && <div className={`focus-area-links${focusLinksMinimized ? " minimized" : ""}`} aria-label="Focus areas">
-    <div className="focus-area-links-head">
-      <strong>{viewedCount}/{focusAreaCount} focus area{focusAreaCount === 1 ? "" : "s"} reviewed</strong>
-      <Button variant="muted" className="small-muted-button" onClick={toggleFocusAreas}>{allFocusCollapsed ? "Expand all" : "Collapse all"}</Button>
-    </div>
-    {!focusLinksMinimized && focusAreas.map((area, index) => {
-      const viewed = viewedFocusIds[area.id] ?? false;
-      return <div key={area.id} className={`focus-area-link-row${viewed ? " viewed" : ""}`}>
-        <label className="focus-area-check" title="Mark as handled or dismissed — checked focus areas are left out of the copied feedback prompt" onClick={(event) => event.stopPropagation()}>
-          <Checkbox checked={viewed} aria-label={`Resolve focus area: ${area.title}`} disabled={focusResolution == null || focusResolution.saving} onChange={() => void focusResolution?.toggle(area)} />
-        </label>
-        <button type="button" onClick={() => jumpToFocusArea(area)}>
-          <strong>{index + 1}. {area.title}</strong>
-          <span>{focusAreaLocation(area)}</span>
-        </button>
-        <FocusResolutionButton area={area} />
-      </div>;
-    })}
-  </div>;
   return <section className={`panel ai-review${viewingHistory ? " viewing-history" : ""}${terminalFocused ? " terminal-focused" : ""}`}>
     <div className="section-head pi-panel-head"><h2>Pi session{viewingHistory && <span className="pi-history-flag" role="status">Viewing earlier run</span>}</h2><Button type="button" variant="muted" className="small-muted-button pi-copy-feedback" onClick={feedbackCopy.trigger} disabled={feedbackCopy.copying}>{feedbackCopy.copying ? "Copying…" : feedbackCopy.copied ? "Copied feedback prompt" : "Copy feedback prompt"}</Button></div>
     {feedbackCopy.error != null && <Flash variant="danger" className="copy-feedback-error" role="alert">Copy failed: {feedbackCopy.error}</Flash>}
@@ -2466,7 +2424,6 @@ function AiReviewPanel({ prKey, prUrl, focusPanel, review, aiReviewHistory, aiRe
     <div className="pi-review-findings">
       {!focusReview.running && !focusReview.error && focusReviewHasNoFindings(focusReview.text) && <Flash variant="success" className="focus-review-note clean" role="status"><strong>✓ Focus scan clean.</strong><span>No focus areas reported for this pass.</span>{focusReview.text.trim().toLowerCase() !== "no focus areas found." && <details><summary>Scan notes</summary><MarkdownText text={focusReview.text} fileLinks={{ prUrl }} /></details>}</Flash>}
       {!focusReview.running && (focusReview.error || (focusReview.text.trim().length > 0 && !focusReviewHasNoFindings(focusReview.text) && focusAreas.length === 0)) && <Flash variant="warning" role="alert"><strong>Focus scan could not be validated.</strong><p>{focusReview.error ?? focusReview.text}</p>{focusReview.rawAnswer && <details><summary>Raw response</summary><pre>{focusReview.rawAnswer}</pre></details>}</Flash>}
-      {focusAreaLinks}
       {reviewMessages.length > 0 && <div className="ai-chat-messages ai-review-response">{reviewMessages.map((message, index) => <GeneralReviewEntry key={index} message={message} prUrl={prUrl} />)}</div>}
     </div>
     {terminal}

@@ -69,6 +69,9 @@ function fakeDeps() {
       async disposePiSession(prKey: string) {
         calls.push(`dispose:${prKey}`);
       },
+      async recoverMissingPatches(data: PullRequestReviewData, _cwd: string) {
+        return data;
+      },
       async fetchPullRequestReviewData(requestRef: PullRequestRef) {
         calls.push(`fetch:${requestRef.number}`);
         return reviewData();
@@ -121,6 +124,28 @@ function fakeDeps() {
     },
   };
 }
+
+test("PR open and refresh publish recovered patches to both agents and the browser without mutating snapshots", async () => {
+  for (const method of ["open", "activity"] as const) {
+    const { deps, storedFileReviews } = fakeDeps();
+    const snapshot = reviewData();
+    snapshot.files[0].patch = undefined;
+    storedFileReviews.push({ ...snapshot.fileReviews[0], fingerprint: "recovered-fp", viewed: true });
+    deps.fetchPullRequestReviewData = async () => snapshot;
+    deps.recoverMissingPatches = async (data, cwd) => {
+      assert.equal(cwd, "/tmp/worktree");
+      return { ...data, files: [{ ...data.files[0], patch: "@@ -1 +1 @@\n-old\n+new" }], fileReviews: [{ ...data.fileReviews[0], fingerprint: "recovered-fp" }] };
+    };
+    let agentFiles: PullRequestReviewData["files"] = [];
+    deps.registerPiSessionContext = async (_key, _cwd, context) => { agentFiles = context.files; };
+    const response = await createPrApi(deps)[method]("url");
+    assert.match(response.files[0].patch ?? "", /\+new/);
+    assert.equal(agentFiles, response.files);
+    assert.equal(response.fileReviews[0].viewed, true);
+    assert.equal(snapshot.files[0].patch, undefined);
+    assert.equal(snapshot.fileReviews[0].fingerprint, "fp-a");
+  }
+});
 
 test("PR API parse delegates to injected parser", () => {
   const { deps, calls } = fakeDeps();

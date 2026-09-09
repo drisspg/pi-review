@@ -16,6 +16,7 @@ import { createGitHubDraftReviewApi, defaultGitHubDraftReviewApiDeps } from "./g
 import { gpuWorkspaceCreateResponse, gpuWorkspaceDeleteResponse, gpuWorkspaceExecResponse, gpuWorkspaceStatusResponse } from "./gpu-workspace-api.js";
 import { createInboxApi, type InboxSnapshot } from "./inbox-api.js";
 import { createGitInterdiff } from "./interdiff-git.js";
+import { createMissingPatchRecovery } from "./missing-patches.js";
 import { addIssueComment, addPendingPullRequestReviewThread, compareCommits, createPendingPullRequestReview, editIssueComment, editReviewComment, editReviewSummary, fetchCommitChecks, fetchFileText, fetchLatestActivity, fetchNotifications, fetchPendingPullRequestReview, fetchPullRequestReviewData, fetchSubjectSnapshots, fetchViewerLogin, fetchViewerPullRequests, markNotificationDone, replyToReviewComment, setReviewThreadResolved, submitPullRequestReview, unsubscribeNotification } from "./github.js";
 import { logger } from "./logger.js";
 import { parsePullRequestRef, prKey } from "./pr.js";
@@ -125,6 +126,10 @@ const prApi = createPrApi(defaultPrApiDeps({
     await Promise.all([disposePiSession(prKey), piTerminalManager.disposePr(prKey)]);
   },
   fetchPullRequestReviewData: cachedFetchPullRequestReviewData,
+  recoverMissingPatches: createMissingPatchRecovery({
+    git: async (args, cwd) => (await execFileAsync("git", args, { cwd, maxBuffer: 50 * 1024 * 1024, timeout: 30_000 })).stdout,
+    warn: (message, details) => logger.warn("diff", message, details),
+  }),
   getDraftReview,
   listAiReviews,
   listFileReviews,
