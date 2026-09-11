@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { PiAgentProcess } from "../../src/pi-agent-process.js";
 
 import { askPi, disposePiSession, piActivity, piFinalAssistantAnswer, piSessionCwd, registerPiSessionContext } from "../../src/pi-session.js";
 
@@ -39,7 +39,7 @@ test("disposal invalidates queued work before it can create a fallback session",
 });
 
 test("PR work requires registration, failed creation is evicted, global memory distillation remains explicit", async (t) => {
-  const runtime = t.mock.method(ModelRuntime, "create", async () => { throw new Error("catalog unavailable"); });
+  const runtime = t.mock.method(PiAgentProcess, "create", async () => { throw new Error("catalog unavailable"); });
   try {
     await assert.rejects(askPi(key, "unregistered"), /Open this pull request/);
     assert.equal(runtime.mock.callCount(), 0);

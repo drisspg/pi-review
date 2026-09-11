@@ -1,11 +1,11 @@
-import { createAgentSession, type AgentSession, type AgentSessionEvent, ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
+import type { AgentSessionEvent, RpcSessionState } from "@earendil-works/pi-coding-agent";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 
 import { createGpuWorkspaceTool } from "./gpu-workspace-tool.js";
 import { logger } from "./logger.js";
-import { DEFAULT_PI_MODEL_ID, DEFAULT_PI_MODEL_PROVIDER } from "./pi-defaults.js";
+import { PiAgentProcess } from "./pi-agent-process.js";
 import { createReviewDraftTool, type ReviewDraftToolContext } from "./review-draft-tool.js";
 import type { PiPromptEvent } from "./types.js";
 
@@ -21,7 +21,7 @@ type MessageLike = {
   stopReason?: string;
 };
 
-type ThinkingLevel = AgentSession["thinkingLevel"];
+type ThinkingLevel = RpcSessionState["thinkingLevel"];
 
 const DEFAULT_PI_THINKING_LEVEL: ThinkingLevel = "high";
 const PI_THINKING_LEVEL_BY_PURPOSE: Record<string, ThinkingLevel> = {
@@ -55,7 +55,7 @@ const PI_TOOLS_BY_PURPOSE: Record<string, string[]> = {
 
 const generationByPr = new Map<string, number>();
 const disposalsByPr = new Map<string, Promise<void>>();
-const sessions = new Map<string, Promise<AgentSession>>();
+const sessions = new Map<string, Promise<PiAgentProcess>>();
 const cwdByPr = new Map<string, string>();
 const reviewContextByPr = new Map<string, ReviewDraftToolContext>();
 const lastPromptByPr = new Map<string, { chars: number; preview: string; startedAt: string }>();
@@ -93,12 +93,12 @@ function sessionKeyForPr(prKey: string, purpose = "chat"): string {
   return `${sessionPrefixForPr(prKey)}${safe(purpose)}`;
 }
 
-function sessionEntriesForPr(prKey: string): Array<[string, Promise<AgentSession>]> {
+function sessionEntriesForPr(prKey: string): Array<[string, Promise<PiAgentProcess>]> {
   const prefix = sessionPrefixForPr(prKey);
   return [...sessions.entries()].filter(([key]) => key.startsWith(prefix));
 }
 
-async function settledSession(sessionPromise: Promise<AgentSession> | undefined): Promise<AgentSession | null> {
+async function settledSession(sessionPromise: Promise<PiAgentProcess> | undefined): Promise<PiAgentProcess | null> {
   if (sessionPromise == null) return null;
   return Promise.race([sessionPromise, new Promise<null>((resolveCreating) => setTimeout(() => resolveCreating(null), 0))]);
 }
@@ -143,18 +143,7 @@ export async function registerPiSessionContext(prKey: string, cwd: string, conte
   reviewContextByPr.set(prKey, context);
 }
 
-let sharedModelRuntime: Promise<ModelRuntime> | null = null;
-
-/** Share model catalogs and credentials across review sessions. */
-function getModelRuntime(): Promise<ModelRuntime> {
-  sharedModelRuntime ??= ModelRuntime.create().catch((error) => {
-    sharedModelRuntime = null;
-    throw error;
-  });
-  return sharedModelRuntime;
-}
-
-async function createSession(prKey: string, purpose = "chat"): Promise<AgentSession> {
+async function createSession(prKey: string, purpose = "chat"): Promise<PiAgentProcess> {
   // Profile distillation is deliberately global and has no PR checkout.
   const cwd = cwdByPr.get(prKey) ?? (prKey === "review-memory" && purpose === "review-memory-distill" ? process.cwd() : null);
   if (cwd == null) throw new Error("Open this pull request before starting Pi work.");
@@ -162,34 +151,34 @@ async function createSession(prKey: string, purpose = "chat"): Promise<AgentSess
   await mkdir(sessionDir, { recursive: true });
   const startedAt = performance.now();
   logger.info("pi", "create session", { prKey, purpose, cwd, sessionDir });
-  const modelRuntime = await getModelRuntime();
-  const model = modelRuntime.getModel(DEFAULT_PI_MODEL_PROVIDER, DEFAULT_PI_MODEL_ID);
-  if (model == null) throw new Error(`Default Pi Review model not found: ${DEFAULT_PI_MODEL_PROVIDER}/${DEFAULT_PI_MODEL_ID}`);
   const thinkingLevel = PI_THINKING_LEVEL_BY_PURPOSE[purpose] ?? DEFAULT_PI_THINKING_LEVEL;
   const scopedTools = PI_TOOLS_BY_PURPOSE[purpose];
   const reviewContext = reviewContextByPr.get(prKey);
   const draftTool = reviewContext == null || !DRAFT_TOOL_PURPOSES.has(purpose) ? null : createReviewDraftTool(prKey, reviewContext);
   const customTools = draftTool == null ? [] : [draftTool];
-  const { session } = await createAgentSession({
+  const session = await PiAgentProcess.create({
     cwd,
-    model,
-    modelRuntime,
-    sessionManager: SessionManager.create(cwd, sessionDir),
+    sessionDir,
     thinkingLevel,
     ...(scopedTools == null
       ? { customTools: [createGpuWorkspaceTool(prKey), ...customTools] }
       : { tools: [...scopedTools, ...(draftTool == null ? [] : ["draft_review_comment"])], customTools }),
   });
-  logger.info("pi", "create session complete", { prKey, purpose, model: `${DEFAULT_PI_MODEL_PROVIDER}/${DEFAULT_PI_MODEL_ID}`, thinkingLevel, ms: Math.round(performance.now() - startedAt) });
+  logger.info("pi", "create session complete", { prKey, purpose, model: modelLabel(session.model), thinkingLevel, ms: Math.round(performance.now() - startedAt) });
   return session;
 }
 
-function getSession(prKey: string, purpose = "chat"): Promise<AgentSession> {
+function getSession(prKey: string, purpose = "chat"): Promise<PiAgentProcess> {
   if (disposalsByPr.has(prKey)) return Promise.reject(new Error("Pi session is being disposed."));
   if (!generationByPr.has(prKey)) generationByPr.set(prKey, 0);
   const sessionKey = sessionKeyForPr(prKey, purpose);
   const existing = sessions.get(sessionKey);
-  if (existing != null) return existing;
+  if (existing != null) return existing.then(async (session) => {
+    if (!session.closed) return session;
+    await session.dispose();
+    if (sessions.get(sessionKey) === existing) sessions.delete(sessionKey);
+    return getSession(prKey, purpose);
+  });
   const created = createSession(prKey, purpose).catch((error) => {
     if (sessions.get(sessionKey) === created) sessions.delete(sessionKey);
     throw error;
@@ -205,10 +194,10 @@ export function prewarmPiSession(prKey: string, purposes = ["chat"]): void {
 }
 
 function isThinkingLevel(value: string): value is ThinkingLevel {
-  return ["off", "minimal", "low", "medium", "high", "xhigh"].includes(value);
+  return ["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(value);
 }
 
-function modelLabel(model: AgentSession["model"]): string | null {
+function modelLabel(model: RpcSessionState["model"]): string | null {
   if (model == null) return null;
   if (model.provider != null && model.id != null) return `${model.provider}/${model.id}`;
   return model.id ?? ([model.provider, model.name].filter(Boolean).join("/") || null);
@@ -285,8 +274,8 @@ export async function piDiagnostics(prKey: string): Promise<Record<string, unkno
     sessionName: session.sessionName ?? null,
     model: modelLabel(session.model),
     thinkingLevel: session.thinkingLevel ?? null,
-    availableModels: (await session.modelRuntime.getAvailable()).map((model) => ({ provider: model.provider, id: model.id, name: model.name })),
-    availableThinkingLevels: session.getAvailableThinkingLevels(),
+    availableModels: (await session.getAvailableModels()).map((model) => ({ provider: model.provider, id: model.id, name: model.name })),
+    availableThinkingLevels: await session.getAvailableThinkingLevels(),
     activeTools: session.getActiveToolNames(),
     tools: session.getAllTools().map(({ name, sourceInfo }) => ({ name, source: sourceInfo })),
     lastPrompt: lastPromptByPr.get(sessionKeyForPr(prKey)) ?? null,
@@ -295,14 +284,12 @@ export async function piDiagnostics(prKey: string): Promise<Record<string, unkno
 }
 
 export async function setPiModel(prKey: string, provider: string, modelId: string, thinkingLevel?: string): Promise<Record<string, unknown>> {
-  const model = (await getModelRuntime()).getModel(provider, modelId);
-  if (model == null) throw new Error(`Unknown model ${provider}/${modelId}`);
   if (thinkingLevel != null && thinkingLevel.length > 0 && !isThinkingLevel(thinkingLevel)) throw new Error(`Unknown thinking level ${thinkingLevel}`);
   const prSessions = await Promise.all(sessionEntriesForPr(prKey).map(([, sessionPromise]) => sessionPromise));
   if (prSessions.length === 0) prSessions.push(await getSession(prKey));
   for (const session of prSessions) {
-    await session.setModel(model);
-    if (thinkingLevel != null && thinkingLevel.length > 0) session.setThinkingLevel(thinkingLevel as ThinkingLevel);
+    await session.setModel(provider, modelId);
+    if (thinkingLevel != null && thinkingLevel.length > 0) await session.setThinkingLevel(thinkingLevel);
   }
   return piDiagnostics(prKey);
 }
@@ -324,7 +311,7 @@ export function disposePiSession(prKey: string): Promise<void> {
       try {
         await result.value.abort();
       } finally {
-        result.value.dispose();
+        await result.value.dispose();
       }
     }));
   })();

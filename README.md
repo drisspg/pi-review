@@ -44,7 +44,7 @@ flowchart LR
   Server --> GH[gh api + git]
   Server --> State[~/.pi/agent/state/pi-pr-review]
   Server --> Worktree[Cached PR worktree]
-  Server --> Pi[Pi SDK sessions]
+  Server --> Pi[Pi CLI sessions: terminals + headless RPC]
   Pi --> Worktree
   Server --> Notes[~/agent_notes review profile]
 ```
@@ -56,7 +56,7 @@ The app is intentionally local-first. GitHub access goes through your authentica
 - Node.js/npm
 - `gh` authenticated for GitHub API access
 - `git`
-- Pi SDK auth/config already set up for Ask Pi
+- Pi CLI installed, with authentication and a default model already configured
 
 Check GitHub auth:
 
@@ -81,6 +81,45 @@ git clone https://github.com/drisspg/pi-review && cd pi-review && npm start
 ```
 
 `npm start` automatically runs `npm install` when dependencies are missing or stale, runs `npm run build` when the built server/web assets are missing or stale, then starts the production server.
+
+## Pi launcher and model
+
+Pi Review uses your installed Pi CLI for **both inline terminals and background reviews**. It uses
+`PI_REVIEW_PI_COMMAND` when explicitly set, then `piCommand` in the app checkout's gitignored
+`.pi-review.local.json`, then `PI_BIN`, then the installed `pi` on PATH. Project-local npm binaries
+are excluded from launcher lookup. For a machine-local wrapper, create `.pi-review.local.json`:
+
+```json
+{"piCommand": "~/dotfiles/scripts/pi-work"}
+```
+
+Both `npm start` and `npm run dev` pick this up automatically. Alternatively, export the wrapper
+path once in your shell configuration to share it with Pi Review and other applications:
+
+```sh
+export PI_BIN="$HOME/dotfiles/scripts/pi-work"
+```
+
+Avoid sourcing an interactive shell per agent just to resolve an alias: prompt plugins can start
+detached helper processes. With a configured launcher, Pi Review needs no separate login or
+per-thread setup.
+
+The provider/model in your global Pi settings (`~/.pi/agent/settings.json`, or
+`PI_CODING_AGENT_DIR`) applies to new review agents, including terminals resumed from older
+sessions. Pi Review no longer hardcodes a personal Codex provider. Background reviews refuse a
+fallback to a different configured model. Existing running agents keep their model until stopped
+or explicitly changed; restarting Pi Review picks up the new launcher for all agents.
+
+To override the shared launcher for Pi Review only, set `PI_REVIEW_PI_COMMAND=/absolute/path/to/pi-wrapper`
+before `npm start`. This is an executable path, not a shell command with arguments. Authentication
+and transport stay inside that launcher; Pi Review does not copy credentials or reimplement the
+work gateway. Server-owned draft/GPU tools are exposed only to their agent over an ephemeral,
+token-protected loopback connection.
+
+After updating Pi, run `npm run pi:smoke` to exercise a real background response, an in-memory draft
+tool, a real terminal response, reconnection, and process cleanup. It uses your configured model
+(and therefore incurs model usage), creates no GitHub comments, and removes its temporary sessions.
+Run it from your normal terminal; a nested agent sandbox may not allow another sandbox in a new cwd.
 
 ## Development
 
@@ -122,7 +161,8 @@ Important subdirectories:
 state.json                 # recent PRs, viewed files, review memory
 repos/                     # cached base repos
 worktrees/                 # per-PR worktrees
-pi-sessions/               # persistent Pi SDK sessions per PR
+pi-sessions/               # background Pi sessions per PR
+terminal-sessions/         # resumable native Pi terminal threads
 ```
 
 Submitted review comments are captured as raw preference memory in `state.json` and mirrored to:

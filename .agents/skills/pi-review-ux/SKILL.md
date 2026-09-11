@@ -88,6 +88,13 @@ Per-test cost drops from ~7s to ~2.5s; full `pr-review` suite drops from ~1m49s 
 
 The full `pr-review` e2e suite passes on `HEAD` (25/25). The earlier fixture-drift/stale-selector failures were repaired by making the tests source rows via `openFileWithAddedRows`, assert `>=` file counts, target `.local-comment-timeline` for line-thread messages, and rely on hash-restore after reload. If a pr-review test fails, treat it as a real regression and verify on a clean `HEAD` before assuming it is pre-existing.
 
+## Pi runtime integration checks
+
+- Mocked browser tests do not verify launcher authentication. Run `npm run pi:smoke` for a real background reply, server-owned draft tool, terminal reply/reconnect, and process cleanup.
+- Test local launcher configuration with `PI_BIN` and `PI_BINARY_OVERRIDE` unset; otherwise an agent shell can hide a missing app configuration.
+- Use an executable launcher path, not an interactive shell per terminal: prompt plugins can leave detached helpers behind. Check for surviving owned processes after teardown, not just the PTY's exit event.
+- In terminal probes, wait for the model footer/editor before sending input; a PTY `ready` message only means the process was spawned.
+
 ## UX review checklist
 
 - Drive the changed flow in the browser instead of only reading code.

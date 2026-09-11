@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import { access, chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -11,6 +12,7 @@ class FakeProcess {
   writes: string[] = [];
   resizes: Array<[number, number]> = [];
   killed = false;
+  killSignals: Array<string | undefined> = [];
   pauses = 0;
   resumes = 0;
   dataListener: (data: string) => void = () => undefined;
@@ -20,7 +22,7 @@ class FakeProcess {
   resize(cols: number, rows: number) { this.resizes.push([cols, rows]); }
   pause() { this.pauses += 1; }
   resume() { this.resumes += 1; }
-  kill() { this.killed = true; this.exitListener({ exitCode: 0 }); }
+  kill(signal?: string) { this.killSignals.push(signal); this.killed = true; this.exitListener({ exitCode: 0 }); }
   onData(listener: (data: string) => void) { this.dataListener = listener; return { dispose() {} }; }
   onExit(listener: (event: { exitCode: number; signal?: number }) => void) { this.exitListener = listener; return { dispose() {} }; }
 }
@@ -75,7 +77,8 @@ test("resolves Pi outside npm-injected project binaries", async () => {
   }
 });
 
-test("attaches a peer to one persistent Pi PTY", async () => {
+test("attaches a peer to one persistent Pi PTY", async (t) => {
+  t.mock.method(SettingsManager, "create", () => SettingsManager.inMemory({ defaultProvider: "openai", defaultModel: "gpt-6-astra" }));
   const process = new FakeProcess();
   const spawns: Array<{ command: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv }> = [];
   const manager = createPiTerminalManager({
@@ -95,7 +98,7 @@ test("attaches a peer to one persistent Pi PTY", async () => {
   assert.equal(spawns.length, 1);
   assert.equal(spawns[0].command, "/usr/local/bin/pi");
   assert.equal(spawns[0].cwd, "/tmp/pr-worktree");
-  assert.deepEqual(spawns[0].args.slice(0, -1), ["--session-dir", "/tmp/pi-review-terminal-test/github.com-org-repo-1/main", "--continue", "--name", "Pi Review · main", "--provider", "openai-codex", "--model", "gpt-6-astra", "--extension", "/tmp/pi-review-extension.ts", "--append-system-prompt"]);
+  assert.deepEqual(spawns[0].args.slice(0, -1), ["--session-dir", "/tmp/pi-review-terminal-test/github.com-org-repo-1/main", "--continue", "--name", "Pi Review · main", "--provider", "openai", "--model", "gpt-6-astra", "--extension", "/tmp/pi-review-extension.ts", "--append-system-prompt"]);
   assert.match(spawns[0].args.at(-1) ?? "", /gh pr view <number-or-url>.*gh pr diff <number-or-url>/);
   assert.match(spawns[0].args.at(-1) ?? "", /Review line 7$/);
   assert.equal(spawns[0].env.PI_REVIEW_API_URL, "http://127.0.0.1:43133");
@@ -122,6 +125,7 @@ test("attaches a peer to one persistent Pi PTY", async () => {
 
   await manager.disposePr("github.com/org/repo#1");
   assert.equal(process.killed, true);
+  assert.deepEqual(process.killSignals, ["SIGTERM"]);
   assert.deepEqual(first.closed, [1001, "Pull request closed"]);
 });
 

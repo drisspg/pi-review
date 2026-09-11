@@ -6,5 +6,6 @@ test-results/
 playwright-report/
 .DS_Store
 .env
+.pi-review.local.json
 .claude/
 agent_space/

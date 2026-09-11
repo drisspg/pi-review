@@ -1,14 +1,14 @@
 /** Own interactive Pi processes behind a bounded browser-terminal protocol. */
 
-import { accessSync, constants } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { homedir } from "node:os";
-import { delimiter, resolve } from "node:path";
+import { resolve } from "node:path";
 
 import type { IPty } from "node-pty";
 
 import { ghstackWorkspaceInstructions } from "./ghstack-guidance.js";
-import { DEFAULT_PI_MODEL_ID, DEFAULT_PI_MODEL_PROVIDER } from "./pi-defaults.js";
+import { piLaunch, piModelArgs } from "./pi-launch.js";
+export { resolvePiTerminalCommand } from "./pi-launch.js";
 import type { DraftReview } from "./types.js";
 
 const DEFAULT_COLS = 100;
@@ -101,24 +101,6 @@ function boundedDimension(value: unknown, fallback: number, max: number): number
   return Math.max(2, Math.min(max, Math.round(value)));
 }
 
-/** Resolve the user-installed Pi CLI without selecting an npm-injected project binary. */
-export function resolvePiTerminalCommand(pathValue = process.env.PATH): string {
-  const names = process.platform === "win32" ? ["pi.cmd", "pi.exe", "pi"] : ["pi"];
-  for (const directory of pathValue?.split(delimiter) ?? []) {
-    if (directory.length === 0 || /(^|[\\/])node_modules[\\/]\.bin$/.test(directory)) continue;
-    for (const name of names) {
-      const candidate = resolve(directory, name);
-      try {
-        accessSync(candidate, constants.X_OK);
-        return candidate;
-      } catch {
-        // Continue through PATH until the first executable user installation.
-      }
-    }
-  }
-  return "pi";
-}
-
 /** Parse and validate a browser terminal connection URL. */
 export function parsePiTerminalRequest(url: string, host = "127.0.0.1"): PiTerminalRequest | null {
   const parsed = new URL(url, `http://${host}`);
@@ -173,7 +155,6 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
   const sessions = new Map<string, Promise<TerminalSession>>();
   const generations = new Map<string, number>();
   const disposals = new Map<string, Promise<void>>();
-  const piCommand = deps.piCommand ?? resolvePiTerminalCommand();
   const sessionRoot = deps.sessionRoot ?? resolve(homedir(), ".pi", "agent", "state", "pi-pr-review", "terminal-sessions");
   const idleTimeoutMs = deps.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
   const maxSessions = deps.maxSessions ?? DEFAULT_MAX_SESSIONS;
@@ -196,7 +177,8 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
     if (session.idleTimer != null) clearTimeout(session.idleTimer);
     for (const peer of session.peers) peer.close(1001, reason);
     session.peers.clear();
-    session.process.kill();
+    // Auth launchers may ignore SIGHUP; SIGTERM lets them forward shutdown to Pi.
+    session.process.kill("SIGTERM");
   }
 
   function scheduleIdleStop(key: string, session: TerminalSession): void {
@@ -233,13 +215,23 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
     if (request.target == null) delete env.PI_REVIEW_TARGET;
     delete env.PI_SESSION_FILE;
     delete env.PI_SESSION_ID;
-    const args = ["--session-dir", sessionDir, "--continue", "--name", `Pi Review · ${request.session}`, "--provider", DEFAULT_PI_MODEL_PROVIDER, "--model", DEFAULT_PI_MODEL_ID];
+    const args = ["--session-dir", sessionDir, "--continue", "--name", `Pi Review · ${request.session}`, ...piModelArgs(cwd)];
     if (deps.extensionPath != null) args.push("--extension", deps.extensionPath);
     args.push("--append-system-prompt", [ghstackWorkspaceInstructions(request.prKey), request.context].filter(Boolean).join("\n\n"));
-    const options = { cwd, cols: DEFAULT_COLS, rows: DEFAULT_ROWS, env, name: "xterm-256color" };
+    const launch = piLaunch(args, { ...env, ...(deps.piCommand == null ? {} : { PI_REVIEW_PI_COMMAND: deps.piCommand }) });
+    const options = { cwd, cols: DEFAULT_COLS, rows: DEFAULT_ROWS, env: launch.env, name: "xterm-256color" };
     const spawn = deps.spawn ?? (await import("node-pty")).spawn;
     if ((generations.get(request.prKey) ?? 0) !== generation || deps.cwdForPr(request.prKey) !== cwd) throw new Error("Pull request terminal invalidated.");
-    const processHandle = spawn(piCommand, args, options);
+    const processHandle = spawn(launch.command, launch.args, options);
+    if (deps.spawn == null && process.platform !== "win32") {
+      // node-pty creates a new process group. Signal that group, not only the
+      // auth launcher, or the actual Pi child can outlive it.
+      processHandle.kill = (signal = "SIGTERM") => {
+        try { process.kill(-processHandle.pid, signal as NodeJS.Signals); } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+        }
+      };
+    }
     let resolveExit!: () => void;
     const exited = new Promise<void>((resolve) => { resolveExit = resolve; });
     const terminalSession: TerminalSession = { exited, headSha: request.headSha, stopped: false, process: processHandle, peers: new Set(), buffer: "", idleTimer: null, lastActivityAt: Date.now(), paused: false, unackedChars: new Map() };
@@ -254,6 +246,7 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
     });
     processHandle.onExit(({ exitCode, signal }) => {
       terminalSession.stopped = true;
+      if (deps.spawn == null && process.platform !== "win32") processHandle.kill("SIGKILL");
       resolveExit();
       for (const peer of terminalSession.peers) peer.send({ type: "exit", exitCode, signal: signal ?? 0 });
       terminalSession.peers.clear();
@@ -264,7 +257,7 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
       }).catch(() => undefined);
       deps.logger?.info("pi-terminal", "process exited", { prKey: request.prKey, session: request.session, exitCode, signal });
     });
-    deps.logger?.info("pi-terminal", "process started", { prKey: request.prKey, session: request.session, cwd, command: piCommand, pid: processHandle.pid });
+    deps.logger?.info("pi-terminal", "process started", { prKey: request.prKey, session: request.session, cwd, command: launch.command, pid: processHandle.pid });
     return terminalSession;
   }
 
@@ -359,9 +352,9 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
         if (session.idleTimer != null) clearTimeout(session.idleTimer);
         for (const peer of session.peers) peer.close(1001, reason);
         session.peers.clear();
-        session.process.kill();
+        session.process.kill("SIGTERM");
       }
-      // Sending SIGHUP is not teardown: checkout replacement must wait for process exit.
+      // Sending a signal is not teardown: checkout replacement must wait for process exit.
       let timer: NodeJS.Timeout | undefined;
       try {
         await Promise.race([session.exited, new Promise<never>((_, reject) => {
