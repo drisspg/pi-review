@@ -116,6 +116,11 @@ and transport stay inside that launcher; Pi Review does not copy credentials or 
 work gateway. Server-owned draft/GPU tools are exposed only to their agent over an ephemeral,
 token-protected loopback connection.
 
+The `suggest_change` agent tool accepts exact replacement `code` and creates a private inline
+comment using GitHub's `suggestion` block. In a line thread it uses the selected new-file line or
+range; otherwise supply `path`, `line`, and optionally `startLine`. Publish the draft normally,
+and the PR author can use GitHub's **Apply suggestion** action. The tool does not edit the checkout.
+
 After updating Pi, run `npm run pi:smoke` to exercise a real background response, an in-memory draft
 tool, a real terminal response, reconnection, and process cleanup. It uses your configured model
 (and therefore incurs model usage), creates no GitHub comments, and removes its temporary sessions.

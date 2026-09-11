@@ -7,6 +7,7 @@ import { createGpuWorkspaceTool } from "./gpu-workspace-tool.js";
 import { logger } from "./logger.js";
 import { PiAgentProcess } from "./pi-agent-process.js";
 import { createReviewDraftTool, type ReviewDraftToolContext } from "./review-draft-tool.js";
+import { createReviewSuggestionTool } from "./review-suggestion-tool.js";
 import type { PiPromptEvent } from "./types.js";
 
 type TextPart = {
@@ -155,14 +156,14 @@ async function createSession(prKey: string, purpose = "chat"): Promise<PiAgentPr
   const scopedTools = PI_TOOLS_BY_PURPOSE[purpose];
   const reviewContext = reviewContextByPr.get(prKey);
   const draftTool = reviewContext == null || !DRAFT_TOOL_PURPOSES.has(purpose) ? null : createReviewDraftTool(prKey, reviewContext);
-  const customTools = draftTool == null ? [] : [draftTool];
+  const customTools = draftTool == null ? [] : [draftTool, createReviewSuggestionTool(draftTool)];
   const session = await PiAgentProcess.create({
     cwd,
     sessionDir,
     thinkingLevel,
     ...(scopedTools == null
       ? { customTools: [createGpuWorkspaceTool(prKey), ...customTools] }
-      : { tools: [...scopedTools, ...(draftTool == null ? [] : ["draft_review_comment"])], customTools }),
+      : { tools: [...scopedTools, ...customTools.map((tool) => tool.name)], customTools }),
   });
   logger.info("pi", "create session complete", { prKey, purpose, model: modelLabel(session.model), thinkingLevel, ms: Math.round(performance.now() - startedAt) });
   return session;

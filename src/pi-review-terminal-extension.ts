@@ -1,5 +1,6 @@
 import { StringEnum, Type } from "@earendil-works/pi-ai";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { createReviewSuggestionTool } from "./review-suggestion-tool.js";
 
 type ReviewTarget = {
   path: string;
@@ -29,7 +30,7 @@ function defaultTarget(): ReviewTarget | null {
 /** Add Pi Review comment semantics and tools to embedded terminal sessions. */
 export default function piReviewTerminalExtension(pi: ExtensionAPI) {
   const target = defaultTarget();
-  pi.registerTool({
+  const commentTool = defineTool({
     name: "draft_review_comment",
     label: "Draft Review Comment",
     description: target == null
@@ -37,7 +38,7 @@ export default function piReviewTerminalExtension(pi: ExtensionAPI) {
       : `Create a private editable Pi Review comment anchored at ${target.path}:${target.startLine == null || target.startLine === target.line ? target.line : `${target.startLine}-${target.line}`}. Use this instead of editing source files, both for comment requests and for proposed fixes or diffs on this thread.`,
     promptSnippet: "Create editable PR review comments without modifying source files",
     promptGuidelines: [
-      "Never modify repository files in a Pi Review session; deliver comment requests and proposed fixes or diffs as draft_review_comment drafts instead of editing repository files, with proposed code in the body (a ```suggestion block when it replaces the anchored lines).",
+      "Never modify repository files in a Pi Review session. Use draft_review_comment for feedback instead of editing repository files; use suggest_change for exact replacement code the PR author can apply.",
       "For an inline Pi Review thread, draft_review_comment already targets the anchored line or range, so normally provide only the comment body.",
     ],
     parameters: Type.Object({
@@ -63,7 +64,7 @@ export default function piReviewTerminalExtension(pi: ExtensionAPI) {
           headSha,
           path,
           line,
-          startLine: params.startLine ?? target?.startLine,
+          startLine: params.startLine ?? (params.line == null && (params.path == null || params.path === target?.path) ? target?.startLine : undefined),
           side: params.side ?? target?.side ?? "RIGHT",
           body: params.body,
         }),
@@ -79,6 +80,9 @@ export default function piReviewTerminalExtension(pi: ExtensionAPI) {
       };
     },
   });
+
+  pi.registerTool(commentTool);
+  pi.registerTool(createReviewSuggestionTool(commentTool, target ?? undefined));
 
   pi.registerTool({
     name: "read_archived_feedback",
@@ -115,7 +119,7 @@ export default function piReviewTerminalExtension(pi: ExtensionAPI) {
   });
 
   pi.on("before_agent_start", (event) => ({
-    systemPrompt: `${event.systemPrompt}\n\nPi Review comment semantics: the checkout is a read-only review workspace — never modify repository files (the edit and write tools are blocked in this session). Requests to add, leave, post, write, or put a comment on the PR or current line mean creating an editable review draft with draft_review_comment, and proposed fixes, refactors, or diffs are also delivered as draft_review_comment drafts with the proposed code in the body (a \`\`\`suggestion block when it replaces the anchored lines, otherwise a fenced diff).`,
+    systemPrompt: `${event.systemPrompt}\n\nPi Review comment semantics: the checkout is a read-only review workspace — never modify repository files (the edit and write tools are blocked in this session). Requests to add, leave, post, write, or put a comment on the PR or current line mean creating an editable review draft with draft_review_comment. For exact replacement code that the author can accept with Apply suggestion, use suggest_change; use draft_review_comment for explanatory feedback or non-applicable fenced diffs.`,
   }));
 
   pi.on("tool_call", (event) => {

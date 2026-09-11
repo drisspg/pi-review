@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import test from "node:test";
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 import piReviewTerminalExtension from "../../src/pi-review-terminal-extension.js";
 
@@ -91,6 +91,29 @@ test("terminal extension reads archived feedback only on demand, without inline 
   assert.equal(requests.length, requestCount);
 });
 
+test("suggest_change reuses the inline comment endpoint with a GitHub suggestion body", async (t) => {
+  const keys = ["PI_REVIEW_API_URL", "PI_REVIEW_PR_KEY", "PI_REVIEW_HEAD_SHA", "PI_REVIEW_TARGET"];
+  const previous = { ...process.env };
+  t.after(() => { for (const key of keys) { if (previous[key] == null) delete process.env[key]; else process.env[key] = previous[key]; } });
+  Object.assign(process.env, { PI_REVIEW_API_URL: "http://pi-review.test", PI_REVIEW_PR_KEY: "pr", PI_REVIEW_HEAD_SHA: "head", PI_REVIEW_TARGET: JSON.stringify({ path: "a.ts", startLine: 10, line: 11, side: "RIGHT" }) });
+  const tools = new Map<string, ToolDefinition>();
+  piReviewTerminalExtension({ registerTool(tool) { tools.set(tool.name, tool); }, on() {} } as ExtensionAPI);
+  const tool = tools.get("suggest_change");
+  assert.ok(tool);
+  assert.equal(tools.has("draft_review"), false);
+  const requests: unknown[] = [];
+  const signal = new AbortController().signal;
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    requests.push({ url, body: JSON.parse(String(init?.body)) });
+    assert.equal(init?.signal, signal);
+    return new Response(JSON.stringify({ created: true, comment: { path: "a.ts", startLine: 10, line: 11 } }));
+  });
+  await tool.execute("call", { code: "  replacement();" }, signal, undefined, undefined as never);
+  assert.deepEqual(requests, [{ url: "http://pi-review.test/api/pi/draft-comment", body: { prKey: "pr", headSha: "head", path: "a.ts", startLine: 10, line: 11, side: "RIGHT", body: "```suggestion\n  replacement();\n```" } }]);
+  await tool.execute("other-line", { code: "replacement", line: 12 }, signal, undefined, undefined as never);
+  assert.deepEqual(requests[1], { url: "http://pi-review.test/api/pi/draft-comment", body: { prKey: "pr", headSha: "head", path: "a.ts", line: 12, side: "RIGHT", body: "```suggestion\nreplacement\n```" } });
+});
+
 test("terminal extension routes inline comment requests to Pi Review", async () => {
   let tool: { promptGuidelines?: string[]; execute: (...args: unknown[]) => Promise<{ content: Array<{ text: string }> }> } | null = null;
   let promptHandler: ((event: { systemPrompt: string }) => { systemPrompt: string }) | null = null;
@@ -127,7 +150,7 @@ test("terminal extension routes inline comment requests to Pi Review", async () 
     assert.match(tool.promptGuidelines?.join("\n") ?? "", /instead of editing repository files/);
     const systemPrompt = promptHandler?.({ systemPrompt: "base" }).systemPrompt ?? "";
     assert.match(systemPrompt, /never modify repository files/);
-    assert.match(systemPrompt, /proposed fixes, refactors, or diffs are also delivered as draft_review_comment drafts/);
+    assert.match(systemPrompt, /Apply suggestion, use suggest_change/);
 
     // Review checkouts are read-only: file-editing tools are hard-blocked, inspection tools pass through.
     assert.ok(toolCallHandler != null);
