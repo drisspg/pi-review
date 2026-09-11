@@ -45,6 +45,7 @@ export type StateStore = {
   currentReviewMemoryDistillationSource: () => Promise<string>;
   currentReviewProfile: () => Promise<ReviewMemoryProfile | null>;
   listReviewMemoryRecords: (limit?: number) => Promise<ReviewMemoryRecord[]>;
+  listArchivedReviews: (prKey: string) => Promise<ReviewMemoryRecord[]>;
   reviewMemoryStats: () => Promise<{ recordCount: number; inlineCommentCount: number; prCount: number; latestCreatedAt: string | null; profileUpdatedAt: string | null; profileSourceRecordCount: number | null }>;
   saveReviewProfile: (text: string) => Promise<ReviewMemoryProfile>;
   listRecentPullRequests: () => Promise<StoredPullRequest[]>;
@@ -208,6 +209,11 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
 
   async function listReviewMemoryRecords(limit = 50): Promise<ReviewMemoryRecord[]> {
     return (await readState()).reviewMemory.slice(0, limit);
+  }
+
+  /** Find this PR's archives before pagination so activity on other PRs cannot hide them. */
+  async function listArchivedReviews(prKey: string): Promise<ReviewMemoryRecord[]> {
+    return (await readState()).reviewMemory.filter((record) => record.prKey === prKey && record.disposition === "archived");
   }
 
   async function reviewMemoryStats(): Promise<{ recordCount: number; inlineCommentCount: number; prCount: number; latestCreatedAt: string | null; profileUpdatedAt: string | null; profileSourceRecordCount: number | null }> {
@@ -456,7 +462,7 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
     });
   }
 
-  return { readState, currentReviewMemoryDistillationSource, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewProfile, listRecentPullRequests, upsertPullRequest, markPullRequestReviewed, listFileReviews, setFileViewed, getDraftReview, saveDraftReview, appendDraftReviewComment, clearDraftReview, updateFocusScanProgress, updateGuideReviewProgress, listFocusScans, saveFocusScan, listAiReviews, saveAiReview, listGuideReviews, saveGuideReview, listOverviews, saveOverview, saveReviewMemory, currentReviewMemoryPrompt, removePullRequest };
+  return { readState, currentReviewMemoryDistillationSource, currentReviewProfile, listReviewMemoryRecords, listArchivedReviews, reviewMemoryStats, saveReviewProfile, listRecentPullRequests, upsertPullRequest, markPullRequestReviewed, listFileReviews, setFileViewed, getDraftReview, saveDraftReview, appendDraftReviewComment, clearDraftReview, updateFocusScanProgress, updateGuideReviewProgress, listFocusScans, saveFocusScan, listAiReviews, saveAiReview, listGuideReviews, saveGuideReview, listOverviews, saveOverview, saveReviewMemory, currentReviewMemoryPrompt, removePullRequest };
 }
 
 export const {
@@ -473,6 +479,7 @@ export const {
   listOverviews,
   listRecentPullRequests,
   listReviewMemoryRecords,
+  listArchivedReviews,
   markPullRequestReviewed,
   removePullRequest,
   reviewMemoryStats,

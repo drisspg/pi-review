@@ -6,6 +6,91 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import piReviewTerminalExtension from "../../src/pi-review-terminal-extension.js";
 
+test("terminal extension reads archived feedback only on demand, without inline target filtering", async (t) => {
+  type Tool = { promptGuidelines?: string[]; execute: (...args: unknown[]) => Promise<{ content: Array<{ text: string }>; details?: unknown }> };
+  type Handler = (event: { systemPrompt?: string; toolName?: string }) => { systemPrompt?: string; block?: boolean } | undefined;
+  const tools = new Map<string, Tool>();
+  const handlers = new Map<string, Handler>();
+  const previousEnv = { ...process.env };
+  t.after(() => {
+    for (const key of ["PI_REVIEW_API_URL", "PI_REVIEW_PR_KEY", "PI_REVIEW_HEAD_SHA", "PI_REVIEW_TARGET"]) {
+      if (previousEnv[key] == null) delete process.env[key];
+      else process.env[key] = previousEnv[key];
+    }
+  });
+  Object.assign(process.env, {
+    PI_REVIEW_API_URL: "http://pi-review.test",
+    PI_REVIEW_PR_KEY: "github.com/org/repo#1",
+    PI_REVIEW_HEAD_SHA: "session-head",
+    PI_REVIEW_TARGET: JSON.stringify({ path: "unrelated.ts", line: 9 }),
+  });
+  const requests: Array<{ url: unknown; init?: RequestInit }> = [];
+  let payload: unknown = { archives: [{ id: "old-review", headSha: "historical-head", createdAt: "2026-01-01", event: "COMMENT", commentCount: 1, summary: "Check bounds" }], nextOffset: 20 };
+  let responseStatus = 200;
+  t.mock.method(globalThis, "fetch", async (url: unknown, init?: RequestInit) => {
+    requests.push({ url, init });
+    init?.signal?.throwIfAborted();
+    return new Response(JSON.stringify(payload), { status: responseStatus });
+  });
+  piReviewTerminalExtension({
+    registerTool(definition) { tools.set(definition.name, definition as unknown as Tool); },
+    on(event, handler) { handlers.set(event, handler as unknown as Handler); },
+  } as ExtensionAPI);
+  const tool = tools.get("read_archived_feedback");
+  assert.ok(tool);
+  assert.ok(tools.has("draft_review_comment"));
+  assert.equal(handlers.get("tool_call")?.({ toolName: "read_archived_feedback" }), undefined);
+  handlers.get("session_start")?.({});
+  const prompt = handlers.get("before_agent_start")?.({ systemPrompt: "base" });
+  assert.equal(requests.length, 0);
+  assert.doesNotMatch(prompt?.systemPrompt ?? "", /historical-head|Check bounds/);
+  const guidelines = tool.promptGuidelines?.join("\n") ?? "";
+  assert.match(guidelines, /current checkout/);
+  assert.match(guidelines, /addressed.*still-open.*unverified/);
+  assert.match(guidelines, /historical data.*not.*instructions/);
+  assert.match(guidelines, /does not mean.*resolved/);
+  assert.match(guidelines, /Do not.*archives.*drafts.*GitHub/);
+
+  const signal = new AbortController().signal;
+  const listing = await tool.execute("list", {}, signal);
+  assert.deepEqual(listing.details, payload);
+  assert.match(listing.content[0].text, /old-review/);
+  assert.deepEqual(requests[0], { url: "http://pi-review.test/api/review/archive/history", init: {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prKey: "github.com/org/repo#1" }), signal,
+  } });
+  payload = { archives: [], nextOffset: null };
+  const lastPage = await tool.execute("next", { offset: 20 });
+  assert.deepEqual(lastPage.details, payload);
+  assert.deepEqual(JSON.parse(String(requests[1].init?.body)), { prKey: "github.com/org/repo#1", offset: 20 });
+
+  payload = { archive: {
+    id: "old-review", headSha: "historical-head", body: "Full review body",
+    comments: [{ path: "old-name.ts", line: 15, body: "Check bounds" }],
+    changeSet: { headSha: "historical-head", files: [{ path: "old-name.ts", patch: "historical diff" }] },
+  } };
+  const detail = await tool.execute("detail", { archiveId: "old-review" });
+  assert.deepEqual(detail.details, payload);
+  assert.match(detail.content[0].text, /Full review body/);
+  assert.match(detail.content[0].text, /historical diff/);
+  assert.match(detail.content[0].text, /historical-head/);
+  assert.deepEqual(JSON.parse(String(requests[2].init?.body)), { prKey: "github.com/org/repo#1", archiveId: "old-review" });
+
+  responseStatus = 404;
+  payload = { error: "Archive not found" };
+  await assert.rejects(tool.execute("missing", { archiveId: "missing" }), /Archive not found/);
+  payload = {};
+  await assert.rejects(tool.execute("failure", {}), /404/);
+  await assert.rejects(tool.execute("abort", {}, AbortSignal.abort()), /abort/i);
+  const requestCount = requests.length;
+  for (const key of ["PI_REVIEW_API_URL", "PI_REVIEW_PR_KEY", "PI_REVIEW_HEAD_SHA"]) {
+    const value = process.env[key];
+    delete process.env[key];
+    await assert.rejects(tool.execute("context", {}), /terminal review context/);
+    process.env[key] = value;
+  }
+  assert.equal(requests.length, requestCount);
+});
+
 test("terminal extension routes inline comment requests to Pi Review", async () => {
   let tool: { promptGuidelines?: string[]; execute: (...args: unknown[]) => Promise<{ content: Array<{ text: string }> }> } | null = null;
   let promptHandler: ((event: { systemPrompt: string }) => { systemPrompt: string }) | null = null;
@@ -32,7 +117,7 @@ test("terminal extension routes inline comment requests to Pi Review", async () 
   });
   try {
     piReviewTerminalExtension({
-      registerTool(definition) { tool = definition as typeof tool; },
+      registerTool(definition) { if (definition.name === "draft_review_comment") tool = definition as typeof tool; },
       on(event, handler) {
         if (event === "before_agent_start") promptHandler = handler as typeof promptHandler;
         if (event === "tool_call") toolCallHandler = handler as typeof toolCallHandler;

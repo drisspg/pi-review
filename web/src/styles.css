@@ -1078,6 +1078,25 @@ body:has(.review-page) {
   min-width: 0;
 }
 
+.pr-header-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.pr-header-refresh {
+  flex: none;
+  color: var(--muted);
+}
+
+.pr-header-refresh[aria-busy="true"] svg {
+  animation: spinner-rotate 1s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pr-header-refresh[aria-busy="true"] svg { animation: none; }
+}
+
 .pr-header-title {
   margin: 0;
   font-size: clamp(1.1rem, 1.6vw, 1.35rem);

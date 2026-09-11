@@ -1,6 +1,6 @@
 import React, { createContext, ReactNode, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
-import { ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, GitPullRequestIcon, KebabHorizontalIcon, ScreenFullIcon, ScreenNormalIcon, XIcon } from "@primer/octicons-react";
+import { CheckIcon, CopyIcon, ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, GitPullRequestIcon, KebabHorizontalIcon, ScreenFullIcon, ScreenNormalIcon, SyncIcon, XIcon } from "@primer/octicons-react";
 import { BaseStyles, Checkbox, Flash, Radio, Select, Textarea, TextInput, ThemeProvider } from "@primer/react";
 import { api, errorMessage, isStaleBuild, logUsage, subscribeStaleBuild } from "./api";
 import { ActionMenu, ActionMenuItem } from "./components/ActionMenu";
@@ -1096,7 +1096,6 @@ function App() {
   const reviewBarMenu = review == null ? null : <ActionMenu trigger={<Button variant="icon" className="bar-tools-button" aria-label="Tools"><KebabHorizontalIcon size={16} /></Button>}>
     <ActionMenuItem onSelect={goHome}>New review</ActionMenuItem>
     <ActionMenuItem onSelect={() => window.open(review.pr.url, "_blank", "noreferrer")}>Open on GitHub</ActionMenuItem>
-    <ActionMenuItem onSelect={() => void refreshGithubActivity()}>{refreshingActivity ? "Refreshing…" : "Refresh"}</ActionMenuItem>
     <ActionMenuItem onSelect={() => setGpuWorkspaceOpen(true)}>GPU workspace</ActionMenuItem>
     <ActionMenuItem title="Pi session settings" onSelect={() => { setSettingsOpen(true); void loadDiagnostics(); }}>Session settings</ActionMenuItem>
     <ActionMenuItem title="Pi session diagnostics" onSelect={() => void loadDiagnostics()}>Session diagnostics</ActionMenuItem>
@@ -1482,7 +1481,7 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { r
   return <PiTerminalPrContext.Provider value={{ prKey: props.review.pr.key, headSha: props.review.pr.headSha, onDraftReview: (draftReview) => props.setDrafts(draftReview.comments) }}><FocusResolutionContext.Provider value={{ viewedIds: props.piPanel.viewedFocusIds, saving: savingFocusResolution, toggle: toggleFocusResolution }}><GitHubDraftContext.Provider value={props.githubDrafts}><div className={`review-page${sideFocused ? " panel-focused" : ""}`}>
     <div className={`review-layout${sideCollapsed ? " side-collapsed" : ""}${sideFocused ? " side-focused" : ""}`} style={{ gridTemplateColumns }}>
       <div className="review-main">
-        <PrHeaderStrip pr={props.review.pr} refreshingActivity={props.refreshingActivity} />
+        <PrHeaderStrip pr={props.review.pr} refreshingActivity={props.refreshingActivity} refresh={props.refreshGithubActivity} />
         <div className="review-bar files-toolbar">
           <a className="review-home" aria-label="Home" title="Home (all reviews and inbox)" href={homeHash} onClick={(event) => { if (!isPlainLeftClick(event)) return; event.preventDefault(); props.goHome(); }}>π</a>
           <nav className="review-mode-tabs" aria-label="Review view">
@@ -1541,7 +1540,7 @@ function PrChecks({ checks }: { checks: CommitChecks }) {
   </span>;
 }
 
-function PrHeaderStrip({ pr, refreshingActivity }: { pr: StoredPullRequest; refreshingActivity: boolean }) {
+function PrHeaderStrip({ pr, refreshingActivity, refresh }: { pr: StoredPullRequest; refreshingActivity: boolean; refresh: () => Promise<void> }) {
   const status = reviewStatus(pr);
   const number = pr.key.match(/#(\d+)$/)?.[1];
   const repository = pr.key.replace(/^github\.com\//, "").replace(/#\d+$/, "");
@@ -1556,7 +1555,10 @@ function PrHeaderStrip({ pr, refreshingActivity }: { pr: StoredPullRequest; refr
   }, [pr.url, pr.headSha, refreshingActivity]);
   return <section className="pr-header-strip">
     <div className="pr-header-main">
-      <h1 className="pr-header-title">{pr.title}{number != null && <span className="pr-header-number"> #{number}</span>}</h1>
+      <div className="pr-header-title-row">
+        <h1 className="pr-header-title">{pr.title}{number != null && <span className="pr-header-number"> #{number}</span>}</h1>
+        <Button variant="icon" className="pr-header-refresh" aria-label="Refresh pull request" title={refreshingActivity ? "Refreshing pull request…" : "Refresh pull request"} aria-busy={refreshingActivity} disabled={refreshingActivity} onClick={() => void refresh()}><SyncIcon size={16} /></Button>
+      </div>
       <div className="pr-header-meta">
         <span className={`review-status ${status.tone}`}>{status.label}</span>
         <span>{repository}</span>
@@ -2099,6 +2101,7 @@ function hasSelectedDiffCode(event: React.MouseEvent<HTMLElement>): boolean {
 
 function DraftView({ draft, index, invalid = false, drafts, setDrafts, editingDraftId, setEditingDraftId, onJump }: { draft: DraftComment; index?: number; invalid?: boolean; drafts: DraftComment[]; setDrafts: (drafts: DraftComment[]) => void; editingDraftId: string | null; setEditingDraftId: (id: string | null) => void; onJump?: () => void }) {
   const editing = editingDraftId === draft.id;
+  const copy = useCopyAction(() => writeClipboard(draft.body));
   const [removing, setRemoving] = useState(false);
   function removeDraft(): void {
     if (removing) return;
@@ -2113,10 +2116,12 @@ function DraftView({ draft, index, invalid = false, drafts, setDrafts, editingDr
         {invalid && <span className="draft-card-warning">needs re-anchor</span>}
       </div>
       <div className="draft-card-actions">
+        <Button variant="icon" aria-label={copy.copied ? "Copied draft comment" : "Copy draft comment"} title={copy.copied ? "Copied!" : "Copy draft comment"} disabled={copy.copying} onClick={copy.trigger}>{copy.copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}</Button>
         <Button variant="icon" aria-label={editing ? "Done editing" : "Edit draft"} onClick={() => setEditingDraftId(editing ? null : draft.id)}>{editing ? <ChevronDownIcon size={14} /> : <ChevronRightIcon size={14} />}</Button>
         <Button variant="icon" className="close-thread-button" aria-label="Remove draft" onClick={removeDraft} disabled={removing}><XIcon size={14} /></Button>
       </div>
     </div>
+    {copy.error != null && <Flash variant="danger" role="alert">Copy failed: {copy.error}</Flash>}
     <div className="draft-card-body">{editing ? <MarkdownEditor autoFocus value={draft.body} onChange={(body) => setDrafts(drafts.map((item) => item.id === draft.id ? { ...item, body } : item))} ariaLabel="Edit draft comment" /> : <MarkdownText text={draft.body} />}</div>
   </div>;
 }

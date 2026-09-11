@@ -183,6 +183,7 @@ function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
       },
     },
     reviewArchiveApi: {
+      async history() { return { archives: [], nextOffset: null }; },
       async archive() {
         return { memory: { body: "", changeSet: { files: [] }, comments: [], createdAt: "now", disposition: "archived", event: "COMMENT", headSha: "head", id: "archive", prKey: "pr" } };
       },
@@ -350,10 +351,23 @@ test("server route deletes persisted Pi terminal sessions", async () => {
   assert.deepEqual(jsonBody(response), { ok: true });
 });
 
+test("server route retrieves archived feedback without using the archive mutation", async () => {
+  const payloads: Record<string, unknown>[] = [];
+  const deps = baseDeps();
+  deps.reviewArchiveApi.history = async (payload) => { payloads.push(payload); return { archives: [], nextOffset: null }; };
+  deps.reviewArchiveApi.archive = async () => { throw new Error("must not archive"); };
+  const payload = { prKey: "pr", offset: 20 };
+  const response = await routeRequest(createServerRoute(deps), "POST", "/api/review/archive/history", payload);
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(jsonBody(response), { archives: [], nextOffset: null });
+  assert.deepEqual(payloads, [payload]);
+});
+
 test("server route archives local reviews", async () => {
   const payloads: Record<string, unknown>[] = [];
   const route = createServerRoute(baseDeps({
     reviewArchiveApi: {
+      async history() { return { archives: [], nextOffset: null }; },
       async archive(payload) {
         payloads.push(payload);
         return { memory: { body: "local", comments: [], createdAt: "now", disposition: "archived", event: "COMMENT", headSha: "head", id: "archive", prKey: "pr" } };

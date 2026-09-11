@@ -81,6 +81,20 @@ function pr(overrides: Partial<StoredPullRequest> = {}): StoredPullRequest {
   };
 }
 
+test("PR archives remain discoverable after draft clearing, HEAD updates, cleanup and restart", async () => {
+  const archive: AppState["reviewMemory"][number] = { id: "original-feedback", prKey: "target", headSha: "old-head", event: "COMMENT", body: "Fix the empty case", comments: [{ path: "old.ts", line: 7, side: "RIGHT", body: "Handle zero rows" }], disposition: "archived", createdAt: "then" };
+  const others = Array.from({ length: 250 }, (_, i) => ({ ...archive, id: `other-${i}`, prKey: "other" }));
+  const { runtime, writes } = fakeRuntime({ ...emptyState(), reviewMemory: [...others, { ...archive, id: "published", disposition: "published" }, archive] });
+  const store = createStateStore(runtime, paths);
+  await store.clearDraftReview("target");
+  await store.upsertPullRequest({ ...pr(), key: "target", headSha: "new-head" });
+  await store.removePullRequest("target");
+  const beforeRead = writes.length;
+  const restarted = createStateStore(runtime, paths);
+  assert.deepEqual(await restarted.listArchivedReviews("target"), [archive]);
+  assert.equal(writes.length, beforeRead, "archive lookup is read-only");
+});
+
 test("state store returns normalized empty state when no state file exists", async () => {
   const { runtime } = fakeRuntime();
 

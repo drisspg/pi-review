@@ -171,9 +171,8 @@ test("analysis remains usable after refreshing to a new HEAD", async ({ page }) 
     const record = { id: "refreshed", prKey: input.prKey, headSha: input.headSha, answer: "Review of the refreshed revision.", createdAt: "now", updatedAt: "now" };
     await route.fulfill({ json: { run: { id: "refreshed", prKey: input.prKey, headSha: input.headSha, kind: "main-review", status: "complete", startedAt: "now", result: { kind: "main-review", record } } } });
   });
-  await openTools(page);
   const refreshed = page.waitForResponse((response) => response.url().endsWith("/api/pr/activity"));
-  await page.getByRole("menuitem", { name: "Refresh", exact: true }).click();
+  await page.getByRole("button", { name: "Refresh pull request", exact: true }).click();
   await refreshed;
   await openSideTab(page, "Pi");
   await page.getByRole("button", { name: /Full review|Refresh findings/ }).click();
@@ -192,8 +191,7 @@ test("a late refresh does not reopen the PR after navigation", async ({ page }) 
     await gate;
     await route.fulfill({ response });
   });
-  await openTools(page);
-  await page.getByRole("menuitem", { name: "Refresh", exact: true }).click();
+  await page.getByRole("button", { name: "Refresh pull request", exact: true }).click();
   await started;
   await goHome(page);
   const finished = page.waitForResponse((response) => response.url().endsWith("/api/pr/activity"));
@@ -308,17 +306,28 @@ test("opens a PR and renders GitHub-style file diffs", async ({ page }) => {
   await expect(page.locator(".diff-row.added").first()).toBeVisible();
 });
 
-test("refresh updates pull request activity and landed status", async ({ page }) => {
+test("title refresh spins while refetching and updates pull request activity", async ({ page }) => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
   await page.route("**/api/pr/activity", async (route) => {
     const response = await route.fetch();
     const review = await response.json() as { pr: Record<string, unknown> } & Record<string, unknown>;
+    await gate;
     await route.fulfill({ response, json: { ...review, pr: { ...review.pr, state: "closed", merged: true } } });
   });
 
-  await openTools(page);
-  await page.getByRole("menuitem", { name: "Refresh" }).click();
-
+  const refresh = page.locator(".pr-header-title-row").getByRole("button", { name: "Refresh pull request", exact: true });
+  await refresh.focus();
+  await page.keyboard.press("Enter");
+  await expect(refresh).toBeDisabled();
+  await expect(refresh).toHaveAttribute("aria-busy", "true");
+  await expect(refresh.locator("svg")).toHaveCSS("animation-name", "spinner-rotate");
+  release();
+  await expect(refresh).toBeEnabled();
+  await expect(refresh).toHaveAttribute("aria-busy", "false");
   await expect(page.locator(".pr-header-strip .review-status")).toHaveText("Merged");
+  await openTools(page);
+  await expect(page.getByRole("menuitem", { name: "Refresh", exact: true })).toHaveCount(0);
 });
 
 test("opens PR description references on GitHub in new tabs", async ({ page, context }) => {
@@ -603,6 +612,28 @@ test("shows private GitHub draft pull failures in the Review panel", async ({ pa
   await page.getByRole("button", { name: "Pull GitHub private drafts" }).click();
 
   await expect(page.locator(".github-draft-review").getByRole("alert")).toContainText("GitHub draft failed: GitHub unavailable");
+});
+
+test("copies individual inline drafts, including edits, and reports clipboard failures", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const row = (await openFileWithAddedRows(page, 1)).first();
+  const path = await row.getAttribute("data-path");
+  const line = Number(await row.getAttribute("data-line"));
+  if (path == null || !Number.isInteger(line)) throw new Error("Missing draft target");
+  const body = "Keep **this Markdown**.\n\nOnly this comment.";
+  await loadDraftReviewFromTerminal(page, [{ id: "single-copy", path, line, side: "RIGHT", body }]);
+  const draft = page.locator(".inline-thread.draft .draft-card");
+  await draft.getByRole("button", { name: "Copy draft comment", exact: true }).click();
+  await expect(draft.getByRole("button", { name: "Copied draft comment", exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(body);
+  await draft.getByRole("button", { name: "Edit draft", exact: true }).click();
+  await draft.getByRole("textbox", { name: "Edit draft comment" }).fill("Updated `comment`.");
+  await draft.getByRole("button", { name: "Copy draft comment", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("Updated `comment`.");
+  await page.evaluate(() => { Object.defineProperty(navigator.clipboard, "writeText", { configurable: true, value: async () => { throw new Error("Clipboard denied"); } }); document.execCommand = () => false; });
+  await draft.getByRole("button", { name: "Copy draft comment", exact: true }).click();
+  await expect(draft.getByRole("alert")).toContainText("Clipboard access failed");
+  await expect(draft.getByRole("textbox", { name: "Edit draft comment" })).toHaveValue("Updated `comment`.");
 });
 
 test("copies all draft comments with diff context", async ({ page, context }) => {
@@ -915,8 +946,7 @@ test("resolves and reopens GitHub threads with visible failure recovery", async 
     const data = await response.json();
     await route.fulfill({ json: { ...data, comments: [{ id: 987654321, path, line, side: "RIGHT", body: "Thread resolution fixture", html_url: prUrl, thread_id: "mock-resolvable-thread", thread_resolved: resolved, user: { login: "reviewer" } }], issueComments: [], reviewSummaries: [] } });
   });
-  await openTools(page);
-  await page.getByRole("menuitem", { name: "Refresh", exact: true }).click();
+  await page.getByRole("button", { name: "Refresh pull request", exact: true }).click();
   await openSideTab(page, "Comments");
   const thread = page.locator(".side .github-thread").filter({ hasText: "Unresolved" });
   await thread.getByRole("button", { name: "Resolve", exact: true }).click();

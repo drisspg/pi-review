@@ -95,6 +95,7 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
     "/api/pi/terminal/delete": (payload) => deps.piTerminalApi.remove(payload),
     "/api/pr/checks": (payload) => deps.prApi.checks(payload),
     "/api/pr/interdiff": (payload) => deps.prApi.interdiff(payload),
+    "/api/review/archive/history": (payload) => deps.reviewArchiveApi.history(payload),
     "/api/review/archive": (payload) => deps.reviewArchiveApi.archive(payload),
     "/api/usage": async (payload) => deps.usageApi.recordClientEvents(payload),
   };

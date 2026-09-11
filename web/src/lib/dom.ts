@@ -16,9 +16,12 @@ function writeClipboardFallback(text: string): void {
   textarea.style.position = "fixed";
   textarea.style.opacity = "0";
   document.body.append(textarea);
-  textarea.select();
-  document.execCommand("copy");
-  textarea.remove();
+  try {
+    textarea.select();
+    if (!document.execCommand("copy")) throw new Error("Clipboard access failed. Copy the comment text manually.");
+  } finally {
+    textarea.remove();
+  }
 }
 
 /** Copy text via the clipboard API, falling back to execCommand when the API is missing or denied. */
