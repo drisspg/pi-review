@@ -47,8 +47,10 @@ test("PR work requires registration, failed creation is evicted, global memory d
     await assert.rejects(askPi(key, "first attempt"), /catalog unavailable/);
     await assert.rejects(askPi(key, "retry creation"), /catalog unavailable/);
     assert.equal(runtime.mock.callCount(), 2);
+    assert.deepEqual(runtime.mock.calls[0].arguments[0].workspace, { prKey: key, root: "/tmp/pi-review-lifecycle", headSha: "new", scope: "chat", changedFiles: [] });
     await assert.rejects(askPi("review-memory", "distill", "review-memory-distill"), /catalog unavailable/);
     assert.equal(runtime.mock.callCount(), 3);
+    assert.equal(runtime.mock.calls[2].arguments[0].workspace, undefined);
     await assert.rejects(askPi("review-memory", "chat"), /Open this pull request/);
   } finally {
     await disposePiSession(key);

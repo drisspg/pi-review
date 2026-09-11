@@ -1,7 +1,9 @@
 /** Register server-owned tools inside launcher-authenticated background Pi sessions. */
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { installReviewWorkspaceGuidance } from "./pi-review-workspace.js";
 
 export default async function piReviewAgentExtension(pi: ExtensionAPI) {
+  installReviewWorkspaceGuidance(pi);
   const url = process.env.PI_REVIEW_TOOL_URL;
   const token = process.env.PI_REVIEW_TOOL_TOKEN;
   if (!url || !token) throw new Error("Pi Review did not provide the session tool bridge");

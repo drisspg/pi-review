@@ -1,6 +1,7 @@
 import { StringEnum, Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createReviewSuggestionTool } from "./review-suggestion-tool.js";
+import { installReviewWorkspaceGuidance } from "./pi-review-workspace.js";
 
 type ReviewTarget = {
   path: string;
@@ -29,6 +30,7 @@ function defaultTarget(): ReviewTarget | null {
 
 /** Add Pi Review comment semantics and tools to embedded terminal sessions. */
 export default function piReviewTerminalExtension(pi: ExtensionAPI) {
+  installReviewWorkspaceGuidance(pi);
   const target = defaultTarget();
   const commentTool = defineTool({
     name: "draft_review_comment",

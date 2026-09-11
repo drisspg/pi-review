@@ -2164,7 +2164,7 @@ function FocusAreaInline({ prUrl, area, active, collapsedFocusAreaIds, setCollap
       <div className="actions"><FocusResolutionButton area={area} /><Button variant="icon" aria-label="Collapse focus area" onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: true }))}><ChevronDownIcon size={16} /></Button></div>
     </div>
     {area.body.trim().length > 0 && <div className="focus-area-terminal-context"><MarkdownText text={area.body} fileLinks={{ prUrl }} /></div>}
-    <InlinePiTerminal session={terminalSessionId("focus", area.id)} target={{ path: area.path, line: area.endLine, ...(area.startLine === area.endLine ? {} : { startLine: area.startLine }), side: "RIGHT" }} context={`You are discussing the focus area at ${location} in this pull request. Keep investigation and edits grounded in this location.
+    <InlinePiTerminal session={terminalSessionId("focus", area.id)} target={{ path: area.path, line: area.endLine, ...(area.startLine === area.endLine ? {} : { startLine: area.startLine }), side: "RIGHT" }} context={`You are discussing the focus area at ${location} in this pull request. Keep read-only investigation grounded in this location.
 
 Focus finding:
 ${area.body}`} />
@@ -2206,7 +2206,7 @@ function ThreadBox({ thread, prUrl, setThread, removeThread, addDraft }: { threa
   }
   if (thread.collapsed) return <><div className={`inline-thread collapsed terminal-marker${terminalOpen ? " terminal-active" : ""}`}><button type="button" className="terminal-marker-open" onClick={() => setThread({ ...thread, collapsed: false })}><ChevronRightIcon size={14} /><span className="collapsed-pill-label">{terminalOpen ? "Pi terminal" : "Comment"} · {targetLabel(thread.target)}</span></button><Button variant="icon" className="terminal-marker-delete" aria-label={terminalOpen ? "Delete terminal" : "Discard comment"} title={terminalOpen ? "Stop and permanently remove terminal" : "Discard this empty comment"} onClick={() => void deleteThread()} disabled={deleting}><XIcon size={14} /></Button></div>{deleteError != null && <Flash variant="danger" className="terminal-delete-error" role="alert">Could not delete terminal: {deleteError}</Flash>}</>;
   const location = targetLabel(thread.target);
-  const terminalContext = `You are discussing ${location} in this pull request. Keep investigation and edits grounded in this line thread.
+  const terminalContext = `You are discussing ${location} in this pull request. Keep read-only investigation grounded in this line thread.
 
 Diff hunk:
 ${thread.target.hunk.slice(0, 4_000)}`;

@@ -161,6 +161,7 @@ async function createSession(prKey: string, purpose = "chat"): Promise<PiAgentPr
     cwd,
     sessionDir,
     thinkingLevel,
+    ...(reviewContext == null ? {} : { workspace: { prKey, root: cwd, headSha: reviewContext.headSha, scope: purpose, changedFiles: reviewContext.files.map((file) => file.filename) } }),
     ...(scopedTools == null
       ? { customTools: [createGpuWorkspaceTool(prKey), ...customTools] }
       : { tools: [...scopedTools, ...customTools.map((tool) => tool.name)], customTools }),

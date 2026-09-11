@@ -107,7 +107,7 @@ test("review prompt API builds chat prompts with typed purposes", async () => {
   assert.match(focus.prompt, /Do not check out, rebase, push, or modify ghstack's synthetic branches/);
   assert.equal(chat.purpose, "chat");
   assert.match(chat.prompt, /Previous dialogue:\nUser: hi/);
-  assert.match(chat.prompt, /git log --format=full/);
+  assert.match(chat.prompt, /git log -n 20 --format=full/);
   assert.match(chat.prompt, /Do not create drafts for ordinary questions/);
 });
 

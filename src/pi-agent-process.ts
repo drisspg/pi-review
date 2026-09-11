@@ -5,12 +5,13 @@ import { fileURLToPath } from "node:url";
 
 import { piLaunch, piModelArgs } from "./pi-launch.js";
 import { createPiToolBridge } from "./pi-tool-bridge.js";
+import { REVIEW_WORKSPACE_ENV, reviewWorkspaceEnvironment, type PiReviewWorkspace } from "./pi-review-workspace.js";
 
 const COMMAND_TIMEOUT_MS = 30_000;
 const MAX_RECORD_CHARS = 16_000_000;
 type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout };
 type Model = NonNullable<RpcSessionState["model"]>;
-type Options = { cwd: string; sessionDir: string; thinkingLevel: string; tools?: string[]; customTools: ToolDefinition[] };
+type Options = { cwd: string; sessionDir: string; thinkingLevel: string; tools?: string[]; customTools: ToolDefinition[]; workspace?: PiReviewWorkspace };
 
 type RpcData = {
   get_state: RpcSessionState;
@@ -67,6 +68,8 @@ export class PiAgentProcess {
     if (options.tools?.length === 0) args.push("--no-tools");
     else if (options.tools) args.push("--tools", options.tools.join(","));
     const launch = piLaunch(args);
+    delete launch.env[REVIEW_WORKSPACE_ENV];
+    if (options.workspace) Object.assign(launch.env, reviewWorkspaceEnvironment(options.workspace));
     const bridge = await createPiToolBridge(options.customTools);
     let session: PiAgentProcess;
     try {

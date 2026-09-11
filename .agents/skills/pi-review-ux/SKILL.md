@@ -94,6 +94,8 @@ The full `pr-review` e2e suite passes on `HEAD` (25/25). The earlier fixture-dri
 - Test local launcher configuration with `PI_BIN` and `PI_BINARY_OVERRIDE` unset; otherwise an agent shell can hide a missing app configuration.
 - Use an executable launcher path, not an interactive shell per terminal: prompt plugins can leave detached helpers behind. Check for surviving owned processes after teardown, not just the PTY's exit event.
 - In terminal probes, wait for the model footer/editor before sending input; a PTY `ready` message only means the process was spawned.
+- Diagnose agent tool calls separately from extension-owned subprocesses. Repeated `git status` can be a footer poller, not an LLM action; UI timers must require `ctx.mode === "tui"` (`hasUI` is also true in RPC).
+- Keep review workspace/environment guidance in `src/pi-review-workspace.ts` and test both parent prompts and delegated task injection. Missing packages should end bounded local discovery, not trigger a whole-disk search.
 
 ## UX review checklist
 

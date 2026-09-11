@@ -116,6 +116,12 @@ and transport stay inside that launcher; Pi Review does not copy credentials or 
 work gateway. Server-owned draft/GPU tools are exposed only to their agent over an ephemeral,
 token-protected loopback connection.
 
+Review agents receive a bounded workspace brief: PR/snapshot, checkout root, task scope, host,
+and environment hints. It makes static review the default, prohibits whole-disk package searches,
+and tells agents to report missing dependencies instead of expanding discovery. The same brief is
+added to delegated subagent tasks. This is guidance, not a sandbox, and does not cancel already
+running work; restart review sessions to pick up new launch context.
+
 The `suggest_change` agent tool accepts exact replacement `code` and creates a private inline
 comment using GitHub's `suggestion` block. In a line thread it uses the selected new-file line or
 range; otherwise supply `path`, `line`, and optionally `startLine`. Publish the draft normally,

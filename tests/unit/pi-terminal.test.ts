@@ -105,6 +105,7 @@ test("attaches a peer to one persistent Pi PTY", async (t) => {
   assert.equal(spawns[0].env.PI_REVIEW_PR_KEY, "github.com/org/repo#1");
   assert.equal(spawns[0].env.PI_REVIEW_HEAD_SHA, "abcdef1234567");
   assert.equal(spawns[0].env.PI_REVIEW_TARGET, JSON.stringify({ path: "src/a.ts", line: 9, side: "RIGHT" }));
+  assert.deepEqual(JSON.parse(spawns[0].env.PI_REVIEW_WORKSPACE_CONTEXT!), { prKey: "github.com/org/repo#1", root: "/tmp/pr-worktree", headSha: "abcdef1234567", scope: "main", target: { path: "src/a.ts", line: 9, side: "RIGHT" } });
 
   process.dataListener("native output");
   assert.deepEqual(first.messages.at(-1), { type: "output", data: "native output" });

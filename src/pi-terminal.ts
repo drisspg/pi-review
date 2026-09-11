@@ -8,6 +8,7 @@ import type { IPty } from "node-pty";
 
 import { ghstackWorkspaceInstructions } from "./ghstack-guidance.js";
 import { piLaunch, piModelArgs } from "./pi-launch.js";
+import { reviewWorkspaceEnvironment } from "./pi-review-workspace.js";
 export { resolvePiTerminalCommand } from "./pi-launch.js";
 import type { DraftReview } from "./types.js";
 
@@ -204,6 +205,7 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
     await mkdir(sessionDir, { recursive: true });
     const env: NodeJS.ProcessEnv = {
       ...process.env,
+      ...reviewWorkspaceEnvironment({ prKey: request.prKey, root: cwd, headSha: request.headSha, scope: request.session, target: request.target }),
       TERM: "xterm-256color",
       COLORTERM: "truecolor",
       ...(deps.apiUrl == null ? {} : { PI_REVIEW_API_URL: deps.apiUrl }),
