@@ -1057,6 +1057,38 @@ test("opens the native Pi terminal by default and focuses it on demand", async (
   await expect.poll(async () => (await terminalMessages()).some((message) => message.includes('"type":"resize"'))).toBe(true);
 });
 
+test("renders terminal Powerline symbols with the bundled font after a delayed load", async ({ page }) => {
+  await mockNativeTerminal(page);
+  let releaseFont!: () => void;
+  const fontGate = new Promise<void>((resolve) => { releaseFont = resolve; });
+  await page.route("**/SymbolsNerdFontMono-Regular*.woff2", async (route) => {
+    await fontGate;
+    await route.continue();
+  });
+  try {
+    await openSideTab(page, "Pi");
+    await expect(page.locator(".xterm-rows")).toContainText("Native Pi ready");
+    await emitNativeTerminalMessage(page, { type: "output", data: " MAX MODE   main\r\n" });
+    const row = page.locator(".xterm-rows > div").filter({ hasText: "MAX MODE" });
+    await expect(row).toBeVisible();
+    await row.evaluate((element) => { element.id = "terminal-symbol-probe"; });
+
+    // Ask Chromium which font actually painted the glyphs, not just the CSS stack.
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("DOM.enable");
+    await cdp.send("CSS.enable");
+    const { root } = await cdp.send("DOM.getDocument");
+    const { nodeId } = await cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector: "#terminal-symbol-probe" });
+    const paintedFonts = async () => (await cdp.send("CSS.getPlatformFontsForNode", { nodeId })).fonts;
+    expect((await paintedFonts()).some((font) => font.isCustomFont)).toBe(false);
+    releaseFont();
+    await expect.poll(async () => (await paintedFonts()).some((font) => font.isCustomFont && font.familyName === "Symbols Nerd Font Mono" && font.glyphCount >= 3)).toBe(true);
+    await expect(page.getByRole("textbox", { name: "Terminal input" })).toBeVisible();
+  } finally {
+    releaseFont();
+  }
+});
+
 test("opens a line comment by default and starts Pi on demand", async ({ page }) => {
   await mockNativeTerminal(page);
   const rows = await openFileWithAddedRows(page, 1);

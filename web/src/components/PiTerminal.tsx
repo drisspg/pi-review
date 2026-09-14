@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
+import "./PiTerminal.css";
 
 import type { DraftReview } from "../types";
 
@@ -68,9 +69,10 @@ export function PiTerminal({ prKey, headSha, session = "main", context, target, 
   useEffect(() => {
     if (containerRef.current == null) return;
     const container: HTMLDivElement = containerRef.current;
+    const fontFamily = getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim();
     const terminal = new Terminal({
       cursorBlink: true,
-      fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim(),
+      fontFamily,
       fontSize: 13,
       lineHeight: 1.15,
       scrollback: 10_000,
@@ -102,6 +104,14 @@ export function PiTerminal({ prKey, headSha, session = "main", context, target, 
       fitAddon.fit();
       if (ready) send({ type: "resize", cols: terminal.cols, rows: terminal.rows });
     }
+
+    // Switch fonts only after loading so xterm invalidates any cached missing glyphs.
+    let disposed = false;
+    void document.fonts.load('13px "Pi Review Symbols"', "").then(() => {
+      if (disposed) return;
+      terminal.options.fontFamily = `"Pi Review Symbols", ${fontFamily}`;
+      fit();
+    }).catch((error) => console.warn("Could not load Pi terminal symbols font", error));
 
     const resizeObserver = new ResizeObserver(fit);
     resizeObserver.observe(container);
@@ -146,6 +156,7 @@ export function PiTerminal({ prKey, headSha, session = "main", context, target, 
 
     window.requestAnimationFrame(fit);
     return () => {
+      disposed = true;
       inputDisposable.dispose();
       themeObserver.disconnect();
       resizeObserver.disconnect();

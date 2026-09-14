@@ -1,0 +1,7 @@
+/* Symbols only: preserve the app's monospace metrics for ordinary terminal text. */
+@font-face {
+  font-family: "Pi Review Symbols";
+  src: url("../assets/fonts/SymbolsNerdFontMono-Regular.woff2") format("woff2");
+  font-display: swap;
+  unicode-range: U+E000-F8FF, U+F0000-FFFFD;
+}
