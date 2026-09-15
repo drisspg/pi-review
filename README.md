@@ -170,11 +170,120 @@ Important subdirectories:
 
 ```text
 state.json                 # recent PRs, viewed files, review memory
-repos/                     # cached base repos
-worktrees/                 # per-PR worktrees
 pi-sessions/               # background Pi sessions per PR
 terminal-sessions/         # resumable native Pi terminal threads
 ```
+
+`PI_REVIEW_STATE_PATH` still selects the state JSON file. It does not relocate existing
+production state. With a non-default state path, new Pi/terminal records live in `<state-path>.data/`
+and checkouts default to `<state-path>.cache/`, isolating test/dev instances from production.
+Neither session records nor drafts belong in the checkout cache.
+
+### Checkout storage and offline eviction
+
+Full clones (`repos/`, including their checked-out source trees) and linked PR worktrees
+(`worktrees/`) now live in a separate checkout root:
+
+| Platform | Default |
+| --- | --- |
+| macOS | `~/Library/Caches/pi-review/` |
+| Linux/other Unix | `$XDG_CACHE_HOME/pi-review/`, or `~/.cache/pi-review/` |
+| Windows | `%LOCALAPPDATA%/pi-review/Cache/` |
+
+`PI_REVIEW_CACHE_DIR=/absolute/path` overrides the checkout root, including for custom state
+files. Give concurrent instances different state files **and** cache roots. A server owns its
+cache for its entire lifetime; a second server or maintenance command cannot share it. Use only
+local storage. A conventional cache location is **not** a promise of exclusion by backup or
+security software: those policies are organization-specific. This app does not change them.
+Checkouts may contain user work; never blindly delete the cache directory.
+
+Inventory is read-only, does not fetch, and includes both clones and worktrees:
+
+```sh
+npm run cache -- inventory
+```
+
+Eviction is deliberately offline in this first version. Stop the owning server yourself and
+close external terminals, editors, and jobs using its checkouts. Then select **one exact ID**
+from the inventory, for example:
+
+```sh
+npm run cache -- evict --offline worktrees/github.com/owner/repo/pr-123
+```
+
+`--offline` is your confirmation that external users are closed, not a force flag. The command
+acquires the cache lock and reruns safety checks. It refuses active processes, failed process/Git
+inspection, missing/locked/broken Git linkage or indexes, tracked/staged/untracked/ignored files,
+index flags that hide changes, populated submodules, and commits (including detached HEAD
+reflogs) not covered by fetched origin/PR refs. Clones additionally require no linked worktrees,
+no uncovered local refs/reflogs or unreachable objects, no tags/notes/stashes/replace refs
+(their remote publication is not verified), and no detected custom Git configuration, hooks,
+excludes, or extra administrative data. Refusals need manual preservation/investigation;
+there is no force-delete fallback. Git operations and process probes have time limits.
+
+The process scan uses `lsof` and `ps` on Unix; if unavailable or incomplete, eviction refuses.
+Warnings (including Linux FUSE/GVFS permission warnings) block eviction; resolve the inspection
+limitation rather than suppressing warnings. It is supplementary, not proof that an arbitrary
+external editor/job cannot start writing later.
+Do not run non-cooperating Git tools or old servers against the cache during maintenance.
+A leftover `.checkout-owner/owner.json` after a crash blocks reuse: verify its host/PID and all
+checkout users, then remove **only that stale lock directory** manually. Locks are never stolen
+based on a PID or an age heuristic.
+
+Eviction never calls the review-state deletion API: drafts, annotations, saved reviews/history,
+and Pi session files remain. Restart the server and reopen the PR to recreate its checkout and
+register its current cwd. Old paths in session transcripts are historical, not authoritative.
+The UI's **Remove saved PR and cleanup worktree** remains a different, destructive review-state
+operation. It now refuses while its checkout exists; evict offline first if you actually intend
+to remove the saved PR as well. Do not use bulk saved-PR removal to reclaim checkout storage.
+
+Refresh also no longer force-replaces an existing checkout. If a PR HEAD changes (or a checkout
+is interrupted), open/refresh refuses **without stopping its sessions or changing review state**.
+Inspect and safely evict offline, then reopen. This intentionally trades automatic revision
+replacement for safety; there is no background pruning timer or retention policy.
+
+### Transitioning an existing installation
+
+Old versions stored both clones and worktrees beside durable state. The new default refuses to
+prepare checkouts while that legacy inventory remains, rather than silently creating a second
+complete set. Nothing is automatically moved or deleted.
+
+1. Inventory while the old application is still running (active users appear as blockers):
+   `npm run cache -- inventory --legacy`.
+2. Review the inventory and preserve dirty/ignored data or unpublished commits **outside the
+   cache**. Commits absent from current fetched refs may be old upstream history, not necessarily
+   unpublished work; the tool cannot prove that and refuses. Initialized submodules and custom
+   Git metadata also need manual handling.
+3. When ready, stop **all Pi Review servers** and close their agents/terminals/editors yourself.
+   Old servers do not implement the ownership lock, and new servers still use durable legacy
+   session data, so legacy maintenance conservatively checks for any server process.
+4. Rerun the inventory. Evict eligible worktree IDs one at a time using
+   `npm run cache -- evict --legacy --offline <worktree-id>`.
+5. Inventory again; evict eligible **clone** IDs with the same command. Clones are full working
+   copies too. Protected clones remain for manual preservation; never remove the legacy root,
+   its state JSON, `pi-sessions/`, `terminal-sessions/`, or `artifacts/`.
+6. Once legacy checkout entries are gone, start normally and reopen saved PRs. Git recreates valid
+   linked worktrees in the new root; no plain filesystem renames of linked worktrees are used.
+
+Interrupted clones/checkouts and missing directories with stale Git registrations are protected,
+not auto-repaired. For a missing worktree, inspect its clone with
+`git -C <clone> worktree list --porcelain` and
+`git -C <clone> worktree prune --dry-run --verbose --expire=now`. Preserve detached commits,
+reflogs, and any other user data outside the cache before manually pruning a confirmed stale
+registration (`git -C <clone> worktree prune --verbose --expire=now`). For a missing index or
+non-Git directory, preserve the directory and associated clone metadata outside the cache and
+investigate manually; neither a failed clone nor a failed inspection grants deletion permission.
+Tags, extra tool metadata (for example Sapling state), and unreachable objects from old PR
+force-pushes can keep otherwise clean clones protected. Automatic clone reclamation is intentionally
+limited, and a 60-second inspection timeout also requires manual investigation. Object-database
+inspection is skipped when cheaper checks already establish a protection reason.
+
+If some legacy entries need more time, explicitly set
+`PI_REVIEW_CACHE_DIR="$HOME/.pi/agent/state/pi-pr-review"` when starting the updated server to
+continue using them (after stopping old instances), or explicitly choose a new cache root while
+retaining a reviewed legacy inventory for manual handling. An override is a deliberate transition
+choice, not automatic migration. No backup/battery improvement is claimed until actual storage
+has been reclaimed and a matched measurement has been made.
 
 Submitted review comments are captured as raw preference memory in `state.json` and mirrored to:
 

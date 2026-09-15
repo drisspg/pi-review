@@ -34,7 +34,10 @@ src/                    Node server (TypeScript, ESM, run via tsx)
                         AI/guide/focus-scan records, reviewer memory) at PI_REVIEW_STATE_PATH
   github.ts             gh api / GraphQL calls (PR data, pending reviews, comments,
                         notifications + batched PR/issue snapshots + viewer open PRs)
-  worktrees.ts          Per-PR git worktree reuse
+  worktrees.ts          Per-PR git worktree reuse (never force-replaces existing checkouts)
+  checkout-cache.ts     Read-only inventory + explicit offline checkout eviction; lifetime cache
+                        ownership excludes servers/maintenance from sharing a root
+  storage-paths.ts      Separate checkout cache and durable state/session paths
   pi-session.ts         Pi agent sessions (ask, prewarm, activity, diagnostics, model select)
   pi-terminal*.ts       Native Pi terminals (node-pty + WebSocket), persisted across reloads
   types.ts              Shared backend types
@@ -87,7 +90,9 @@ vscode-extension/       Generated artifacts only (dist/), no source here
 | `npm run usage:report` | Summarize the local usage JSONL (feature counts, latency, errors) |
 
 Env vars: `PI_PR_REVIEW_PORT` (API), `PI_REVIEW_WEB_PORT` (Vite), `PI_REVIEW_STATE_PATH` (state
-JSON), `PI_REVIEW_USAGE_LOG_PATH` (usage JSONL; defaults to `<state>.usage.jsonl` next to the
+JSON; custom state also isolates session records and defaults checkouts to `<state>.cache`),
+`PI_REVIEW_CACHE_DIR` (checkout root override; production default on macOS is
+`~/Library/Caches/pi-review`), `PI_REVIEW_USAGE_LOG_PATH` (usage JSONL; defaults to `<state>.usage.jsonl` next to the
 state file so test/dev instances never pollute the real log), `PI_REVIEW_TEST_PORT` (Playwright
 port override), `PI_REVIEW_FAST_TESTS=1` (fast e2e mode),
 `PI_REVIEW_DISABLE_AUTO_REVIEWS=1` (suppress the on-open guide/review/focus warmup — REQUIRED for
@@ -100,6 +105,16 @@ a dev server you did not launch. For separate feature work, use an isolated work
 ports and state, for example:
 `PI_PR_REVIEW_PORT=43135 PI_REVIEW_WEB_PORT=5175 PI_REVIEW_STATE_PATH=/tmp/pi-review-$USER-43135.json npm run dev`.
 Stop only that process tree; never broad `pkill`/`killall`.
+
+Checkout eviction is offline-only: `npm run cache -- inventory [--legacy]`, then after operator
+confirmation and closing checkout users, `npm run cache -- evict [--legacy] --offline <id>`.
+Never remove saved PRs to reclaim cache space, bypass safety checks, steal a live ownership lock,
+or move linked worktrees with a plain rename. Git cleanliness alone is not deletion evidence:
+inspect detached HEAD reflogs, ignored files, Git linkage and administrative state too.
+Keep Playwright cache roots outside `test-results/` (which it wipes) and use graceful SIGTERM
+shutdown so test runs release lifetime ownership locks. Changed-HEAD refresh intentionally refuses
+until safe offline eviction. See README for migration and protected-entry handling. Production legacy
+cleanup needs a read-only inventory and user confirmation; tests must use temporary Git repos.
 
 ## Backend-first feature workflow
 

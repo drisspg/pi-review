@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
 import { PiAgentProcess } from "../../src/pi-agent-process.js";
 
 import { askPi, disposePiSession, piActivity, piFinalAssistantAnswer, piSessionCwd, registerPiSessionContext } from "../../src/pi-session.js";
@@ -39,6 +42,9 @@ test("disposal invalidates queued work before it can create a fallback session",
 });
 
 test("PR work requires registration, failed creation is evicted, global memory distillation remains explicit", async (t) => {
+  const root = await mkdtemp(resolve(tmpdir(), "pi-review-session-lifecycle-"));
+  const previousStatePath = process.env.PI_REVIEW_STATE_PATH;
+  process.env.PI_REVIEW_STATE_PATH = resolve(root, "state.json");
   const runtime = t.mock.method(PiAgentProcess, "create", async () => { throw new Error("catalog unavailable"); });
   try {
     await assert.rejects(askPi(key, "unregistered"), /Open this pull request/);
@@ -47,6 +53,7 @@ test("PR work requires registration, failed creation is evicted, global memory d
     await assert.rejects(askPi(key, "first attempt"), /catalog unavailable/);
     await assert.rejects(askPi(key, "retry creation"), /catalog unavailable/);
     assert.equal(runtime.mock.callCount(), 2);
+    assert.ok(runtime.mock.calls[0].arguments[0].sessionDir.startsWith(`${root}/state.json.data/`));
     assert.deepEqual(runtime.mock.calls[0].arguments[0].workspace, { prKey: key, root: "/tmp/pi-review-lifecycle", headSha: "new", scope: "chat", changedFiles: [] });
     await assert.rejects(askPi("review-memory", "distill", "review-memory-distill"), /catalog unavailable/);
     assert.equal(runtime.mock.callCount(), 3);
@@ -55,5 +62,8 @@ test("PR work requires registration, failed creation is evicted, global memory d
   } finally {
     await disposePiSession(key);
     await disposePiSession("review-memory");
+    if (previousStatePath == null) delete process.env.PI_REVIEW_STATE_PATH;
+    else process.env.PI_REVIEW_STATE_PATH = previousStatePath;
+    await rm(root, { recursive: true, force: true });
   }
 });

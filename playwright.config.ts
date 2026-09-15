@@ -1,11 +1,14 @@
 import { defineConfig } from "@playwright/test";
 import { resolve } from "node:path";
+import { tmpdir } from "node:os";
 
 const port = Number.parseInt(process.env.PI_REVIEW_TEST_PORT ?? process.env.PI_PR_REVIEW_PORT ?? "43134", 10);
 const fast = process.env.PI_REVIEW_FAST_TESTS === "1";
 const statePath = resolve("test-results", `e2e-state-${port}.json`);
 // PR data caching: every test re-opens the same pinned PR, so fetch it from GitHub once instead of ~60 times.
-const stateEnv = `PI_REVIEW_STATE_PATH=${JSON.stringify(statePath)} PI_REVIEW_DISABLE_AUTO_REVIEWS=1 PI_REVIEW_PR_CACHE_MS=600000`;
+// Playwright wipes test-results, including while reusing a live server: keep its owner lock outside it.
+const cachePath = resolve(tmpdir(), `pi-review-e2e-cache-${port}`);
+const stateEnv = `PI_REVIEW_STATE_PATH=${JSON.stringify(statePath)} PI_REVIEW_CACHE_DIR=${JSON.stringify(cachePath)} PI_REVIEW_DISABLE_AUTO_REVIEWS=1 PI_REVIEW_PR_CACHE_MS=600000`;
 const command = fast
   ? `rm -f ${JSON.stringify(statePath)} && ${stateEnv} PI_PR_REVIEW_PORT=${port} npx tsx src/server.ts`
   : `rm -f ${JSON.stringify(statePath)} && ${stateEnv} PI_PR_REVIEW_PORT=${port} npm start`;
@@ -28,6 +31,8 @@ export default defineConfig({
     command,
     url: `http://127.0.0.1:${port}/api/health`,
     reuseExistingServer: fast,
+    // Default Playwright SIGKILL leaves the lifetime cache lock behind.
+    gracefulShutdown: { signal: "SIGTERM", timeout: 10_000 },
     timeout: 30_000,
   },
 });

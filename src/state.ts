@@ -7,9 +7,9 @@ import { isDeepStrictEqual } from "node:util";
 
 import type { AiReviewRecord, AppState, DraftReview, FileReviewState, FocusScanRecord, GuideReviewRecord, ReviewMemoryProfile, ReviewMemoryRecord, StoredPullRequest } from "./types.js";
 
-const STATE_PATH = process.env.PI_REVIEW_STATE_PATH == null
-  ? resolve(homedir(), ".pi", "agent", "state", "pi-pr-review", "state.json")
-  : resolve(process.env.PI_REVIEW_STATE_PATH);
+import { reviewStatePath } from "./storage-paths.js";
+
+const STATE_PATH = reviewStatePath();
 const REVIEW_MEMORY_NOTES_PATH = resolve(homedir(), "agent_notes", "findings", "pi_review_preferences.md");
 const REVIEW_PROFILE_PATH = resolve(homedir(), "agent_notes", "findings", "pi_review_profile.md");
 

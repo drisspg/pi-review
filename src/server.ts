@@ -10,6 +10,8 @@ import { promisify } from "node:util";
 import { createAskStreamApi } from "./ask-stream-api.js";
 import { createBlameApi } from "./blame-api.js";
 import { createCommentApi, defaultCommentApiDeps } from "./comment-api.js";
+import { ownServerCheckoutCache } from "./checkout-cache.js";
+import { checkoutCacheRoot } from "./storage-paths.js";
 import { createDraftReviewApi } from "./draft-review-api.js";
 import { createFileApi, defaultFileApiDeps } from "./file-api.js";
 import { createGitHubDraftReviewApi, defaultGitHubDraftReviewApiDeps } from "./github-draft-review-api.js";
@@ -40,6 +42,9 @@ import { createUsageApi, defaultUsageApiDeps, defaultUsageLogPath } from "./usag
 import { appendDraftReviewComment, clearDraftReview, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, getDraftReview, listAiReviews, listFileReviews, listFocusScans, listGuideReviews, listOverviews, listRecentPullRequests, listReviewMemoryRecords, listArchivedReviews, markPullRequestReviewed, removePullRequest, reviewMemoryStats, saveAiReview, saveDraftReview, saveFocusScan, saveGuideReview, saveOverview, saveReviewMemory, saveReviewProfile, setFileViewed, updateFocusScanProgress, updateGuideReviewProgress, upsertPullRequest } from "./state.js";
 import { cleanupPrWorktree, preparePrWorktree, repoDirForRef, worktreeDirForRef } from "./worktrees.js";
 
+// Lifetime ownership covers HTTP/file operations, preparation, agents and WebSocket terminals.
+// Offline maintenance and a second server must never share this cache concurrently.
+const releaseCheckoutCache = await ownServerCheckoutCache(checkoutCacheRoot());
 const DEFAULT_PORT = 43133;
 const WEB_ROOT = resolve(process.cwd(), "dist-web");
 const execFileAsync = promisify(execFile);
@@ -230,6 +235,7 @@ async function shutdown(signal: string): Promise<void> {
     piTerminalManager.dispose(),
     disposePiSessions(),
   ]);
+  releaseCheckoutCache();
   process.exit(0);
 }
 

@@ -154,11 +154,11 @@ test("PR API parse delegates to injected parser", () => {
   assert.deepEqual(calls, ["parse:https://github.com/pytorch/pytorch/pull/1"]);
 });
 
-test("PR API cleanup disposes session before worktree cleanup and state removal", async () => {
+test("PR API cleanup checks checkout removal before disposing sessions or removing state", async () => {
   const { deps, calls } = fakeDeps();
 
   assert.deepEqual(await createPrApi(deps).cleanup("url"), { ok: true, prKey: "github.com/pytorch/pytorch#1", worktreeDir: "/tmp/worktree" });
-  assert.deepEqual(calls, ["parse:url", "dispose:github.com/pytorch/pytorch#1", "cleanup:1", "remove:github.com/pytorch/pytorch#1"]);
+  assert.deepEqual(calls, ["parse:url", "cleanup:1", "dispose:github.com/pytorch/pytorch#1", "remove:github.com/pytorch/pytorch#1"]);
 });
 
 test("PR API activity refreshes the worktree, Pi context, and review response", async () => {
@@ -176,8 +176,8 @@ test("PR API activity refreshes the worktree, Pi context, and review response", 
   assert.deepEqual(calls, [
     "parse:url",
     "fetch:1",
-    "dispose:github.com/pytorch/pytorch#1",
     "prepare:1:git@github.com:pytorch/pytorch.git:head",
+    "dispose:github.com/pytorch/pytorch#1",
     "upsert:github.com/pytorch/pytorch#1",
     "context:github.com/pytorch/pytorch#1:/tmp/worktree:head:a.ts",
     "draft:github.com/pytorch/pytorch#1",
@@ -199,8 +199,8 @@ test("PR API open prepares worktree, registers Pi cwd, prewarms sessions, and hy
   assert.deepEqual(calls, [
     "parse:url",
     "fetch:1",
-    "dispose:github.com/pytorch/pytorch#1",
     "prepare:1:git@github.com:pytorch/pytorch.git:head",
+    "dispose:github.com/pytorch/pytorch#1",
     "upsert:github.com/pytorch/pytorch#1",
     "context:github.com/pytorch/pytorch#1:/tmp/worktree:head:a.ts",
     "prewarm:github.com/pytorch/pytorch#1:main-review,focus-review",
@@ -309,7 +309,7 @@ test("PR API interdiff and checks reject malformed payloads", async () => {
   await assert.rejects(prApi.checks({ prUrl: "url" }), /sha/);
 });
 
-test("PR transitions serialize refresh and cleanup, disposing only before revision replacement", async () => {
+test("PR transitions serialize refresh and cleanup, disposing only after successful preparation", async () => {
   const { deps, calls } = fakeDeps();
   let headSha = "first";
   deps.fetchPullRequestReviewData = async () => {
@@ -330,9 +330,20 @@ test("PR transitions serialize refresh and cleanup, disposing only before revisi
   const cleaning = api.cleanup("url");
   await new Promise((resolve) => setImmediate(resolve));
   assert.ok(calls.includes("dispose:start"));
-  assert.equal(calls.some((call) => call.startsWith("prepare:") || call.startsWith("cleanup:")), false);
+  assert.equal(calls.some((call) => call.startsWith("prepare:")), true);
+  assert.equal(calls.some((call) => call.startsWith("cleanup:")), false);
   release();
   await Promise.all([refreshing, cleaning]);
-  assert.ok(calls.indexOf("dispose:end") < calls.findIndex((call) => call.startsWith("prepare:")));
+  assert.ok(calls.findIndex((call) => call.startsWith("prepare:")) < calls.indexOf("dispose:start"));
   assert.ok(calls.findIndex((call) => call.startsWith("context:")) < calls.indexOf("cleanup:1"));
 });
+
+for (const operation of ["open", "cleanup"] as const) {
+  test(`PR ${operation} refusal preserves sessions and saved state`, async () => {
+    const { deps, calls } = fakeDeps();
+    if (operation === "open") deps.preparePrWorktree = async () => { throw new Error("offline maintenance required"); };
+    else deps.cleanupPrWorktree = async () => { throw new Error("offline maintenance required"); };
+    await assert.rejects(createPrApi(deps)[operation]("url"), /offline maintenance/);
+    assert.equal(calls.some((call) => /^(dispose|remove|upsert|context):/.test(call)), false);
+  });
+}

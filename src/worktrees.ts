@@ -1,21 +1,16 @@
-import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, rm } from "node:fs/promises";
-import { homedir } from "node:os";
+import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
-import { promisify } from "node:util";
 
+import { assertLegacyTransition, cacheGit } from "./checkout-cache.js";
 import { logger } from "./logger.js";
+import { checkoutCacheRoot } from "./storage-paths.js";
 import type { PullRequestRef } from "./types.js";
-
-const execFileAsync = promisify(execFile);
-const STATE_ROOT = resolve(homedir(), ".pi", "agent", "state", "pi-pr-review");
 
 type WorktreeRuntime = {
   exists: (path: string) => boolean;
   git: (args: string[], cwd?: string) => Promise<string>;
   mkdir: (path: string) => Promise<void>;
-  rm: (path: string) => Promise<void>;
 };
 
 export type WorktreeService = {
@@ -27,126 +22,72 @@ export type WorktreeService = {
 
 const defaultRuntime: WorktreeRuntime = {
   exists: existsSync,
-  async git(args, cwd) {
-    const { stdout } = await execFileAsync("git", args, { cwd, maxBuffer: 50 * 1024 * 1024 });
-    return stdout.trim();
-  },
-  async mkdir(path) {
-    await mkdir(path, { recursive: true });
-  },
-  async rm(path) {
-    await rm(path, { recursive: true, force: true });
-  },
+  git: (args, cwd) => cacheGit(args, cwd ?? process.cwd()),
+  async mkdir(path) { await mkdir(path, { recursive: true }); },
 };
 
 function safe(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "unknown";
 }
 
-export function createWorktreeService(runtime: WorktreeRuntime = defaultRuntime, stateRoot = STATE_ROOT): WorktreeService {
-  const preparations = new Map<string, Promise<string>>();
-
+/** The server owns this cache for its entire lifetime; maintenance cannot run alongside it. */
+export function createWorktreeService(runtime: WorktreeRuntime = defaultRuntime, cacheRoot = checkoutCacheRoot()): WorktreeService {
+  const preparations = new Map<string, Promise<unknown>>();
   function worktreeDirForRef(ref: PullRequestRef): string {
-    return resolve(stateRoot, "worktrees", safe(ref.host), safe(ref.owner), safe(ref.repo), `pr-${ref.number}`);
+    return resolve(cacheRoot, "worktrees", safe(ref.host), safe(ref.owner), safe(ref.repo), `pr-${ref.number}`);
   }
-
   function repoDirForRef(ref: PullRequestRef): string {
-    return resolve(stateRoot, "repos", safe(ref.host), safe(ref.owner), safe(ref.repo));
+    return resolve(cacheRoot, "repos", safe(ref.host), safe(ref.owner), safe(ref.repo));
   }
-
-  async function gitAllowFailure(args: string[], cwd?: string): Promise<void> {
-    try {
-      await runtime.git(args, cwd);
-    } catch (error) {
-      logger.debug("worktree", "ignored git failure", { args, error: error instanceof Error ? error.message : String(error) });
-    }
+  // Different PRs share a clone and its refs/worktree registry, so serialize by repository.
+  function transition<T>(ref: PullRequestRef, operation: () => Promise<T>): Promise<T> {
+    const key = repoDirForRef(ref);
+    const pending = (preparations.get(key) ?? Promise.resolve()).catch(() => undefined).then(operation);
+    preparations.set(key, pending);
+    void pending.finally(() => { if (preparations.get(key) === pending) preparations.delete(key); }).catch(() => undefined);
+    return pending;
   }
-
-  async function currentWorktreeHead(worktreeDir: string): Promise<string | null> {
-    if (!runtime.exists(worktreeDir)) return null;
-    try {
-      const head = await runtime.git(["rev-parse", "HEAD"], worktreeDir);
-      const indexPath = await runtime.git(["rev-parse", "--git-path", "index"], worktreeDir);
-      if (!runtime.exists(indexPath)) {
-        logger.warn("worktree", "existing worktree is missing its Git index", { worktreeDir, indexPath });
-        return null;
-      }
-      return head;
-    } catch (error) {
-      logger.debug("worktree", "failed to read existing worktree head", { worktreeDir, error: error instanceof Error ? error.message : String(error) });
-      return null;
-    }
+  function maintenanceRequired(path: string): Error {
+    return new Error(`Checkout retained at ${path}. Inspect and evict it with npm run cache during offline maintenance before replacing/removing it. No user files or review state were deleted.`);
   }
-
-  /** Prepare one PR worktree after earlier operations for the same path settle. */
-  async function preparePrWorktreeOnce(ref: PullRequestRef, cloneUrl: string, headSha: string): Promise<string> {
-    const startedAt = performance.now();
-    const repoDir = repoDirForRef(ref);
-    const worktreeDir = worktreeDirForRef(ref);
-    const remoteRef = `refs/pi-pr-review/pr-${ref.number}`;
-    logger.info("worktree", "prepare start", { repoDir, worktreeDir });
-    await runtime.mkdir(resolve(repoDir, ".."));
-    await runtime.mkdir(resolve(worktreeDir, ".."));
-    if (!runtime.exists(resolve(repoDir, ".git"))) {
-      await runtime.git(["clone", cloneUrl, repoDir]);
-    }
-    if (await currentWorktreeHead(worktreeDir) === headSha) {
-      logger.info("worktree", "prepare skipped; existing worktree is current", { worktreeDir, ms: Math.round(performance.now() - startedAt) });
-      return worktreeDir;
-    }
-    await gitAllowFailure(["worktree", "unlock", worktreeDir], repoDir);
-    await gitAllowFailure(["worktree", "remove", "--force", worktreeDir], repoDir);
-    await runtime.rm(worktreeDir);
-    await runtime.git(["worktree", "prune"], repoDir);
-    await runtime.git(["fetch", "--force", "origin", `pull/${ref.number}/head:${remoteRef}`], repoDir);
-    await runtime.git(["worktree", "add", "--detach", "--force", worktreeDir, headSha], repoDir);
-    logger.info("worktree", "prepare complete", { worktreeDir, ms: Math.round(performance.now() - startedAt) });
-    return worktreeDir;
-  }
-
   async function preparePrWorktree(ref: PullRequestRef, cloneUrl: string, headSha: string): Promise<string> {
-    const worktreeDir = worktreeDirForRef(ref);
-    const previous = preparations.get(worktreeDir);
-    const preparation = (previous == null ? Promise.resolve() : previous.then(() => undefined, () => undefined))
-      .then(() => preparePrWorktreeOnce(ref, cloneUrl, headSha));
-    preparations.set(worktreeDir, preparation);
-    try {
-      return await preparation;
-    } finally {
-      if (preparations.get(worktreeDir) === preparation) preparations.delete(worktreeDir);
-    }
+    return transition(ref, async () => {
+      const repoDir = repoDirForRef(ref);
+      const worktreeDir = worktreeDirForRef(ref);
+      if (runtime.exists(worktreeDir)) {
+        // Errors (including an interrupted checkout) are not permission to force-delete.
+        const head = await runtime.git(["rev-parse", "HEAD"], worktreeDir);
+        const index = resolve(worktreeDir, await runtime.git(["rev-parse", "--git-path", "index"], worktreeDir));
+        if (head !== headSha || !runtime.exists(index)) throw maintenanceRequired(worktreeDir);
+        return worktreeDir;
+      }
+      await runtime.mkdir(resolve(repoDir, ".."));
+      await runtime.mkdir(resolve(worktreeDir, ".."));
+      if (!runtime.exists(repoDir)) await runtime.git(["clone", cloneUrl, repoDir]);
+      else if (!runtime.exists(resolve(repoDir, ".git"))) throw maintenanceRequired(repoDir);
+      const remoteRef = `refs/pi-pr-review/pr-${ref.number}`;
+      await runtime.git(["fetch", "--force", "origin", `pull/${ref.number}/head:${remoteRef}`], repoDir);
+      // No --force/prune/unlock: stale registrations and ambiguous states need inspection.
+      await runtime.git(["worktree", "add", "--detach", worktreeDir, headSha], repoDir);
+      logger.info("worktree", "prepare complete", { worktreeDir });
+      return worktreeDir;
+    });
   }
-
   async function cleanupPrWorktree(ref: PullRequestRef): Promise<string> {
-    const repoDir = repoDirForRef(ref);
-    const worktreeDir = worktreeDirForRef(ref);
-    if (runtime.exists(resolve(repoDir, ".git"))) {
-      await gitAllowFailure(["worktree", "unlock", worktreeDir], repoDir);
-      await gitAllowFailure(["worktree", "remove", "--force", worktreeDir], repoDir);
-      await gitAllowFailure(["worktree", "prune"], repoDir);
-    }
-    await runtime.rm(worktreeDir);
-    logger.info("worktree", "cleanup complete", { worktreeDir });
-    return worktreeDir;
+    return transition(ref, async () => {
+      const worktreeDir = worktreeDirForRef(ref);
+      if (runtime.exists(worktreeDir)) throw maintenanceRequired(worktreeDir);
+      return worktreeDir;
+    });
   }
-
   return { worktreeDirForRef, repoDirForRef, preparePrWorktree, cleanupPrWorktree };
 }
 
 const defaultService = createWorktreeService();
-
-export function worktreeDirForRef(ref: PullRequestRef): string {
-  return defaultService.worktreeDirForRef(ref);
-}
-
-export function repoDirForRef(ref: PullRequestRef): string {
-  return defaultService.repoDirForRef(ref);
-}
-
+export const worktreeDirForRef = defaultService.worktreeDirForRef;
+export const repoDirForRef = defaultService.repoDirForRef;
 export async function preparePrWorktree(ref: PullRequestRef, cloneUrl: string, headSha: string): Promise<string> {
+  await assertLegacyTransition();
   return defaultService.preparePrWorktree(ref, cloneUrl, headSha);
 }
-
-export async function cleanupPrWorktree(ref: PullRequestRef): Promise<string> {
-  return defaultService.cleanupPrWorktree(ref);
-}
+export const cleanupPrWorktree = defaultService.cleanupPrWorktree;

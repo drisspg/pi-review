@@ -156,6 +156,20 @@ test("reopens a cleaned PR through the server instead of the client cache", asyn
   await expect(page.locator(".review-layout")).toBeVisible();
 });
 
+test("checkout cleanup refusal keeps the saved PR and draft visible", async ({ page }) => {
+  if (openedPr == null) throw new Error("Missing opened PR");
+  const { key, headSha } = openedPr;
+  page.on("dialog", (dialog) => dialog.accept());
+  await goHome(page);
+  const saved = await page.request.post("/api/draft-review/save", { data: { prKey: key, headSha, event: "COMMENT", body: "Preserve this review", comments: [] } });
+  expect(saved.ok()).toBe(true);
+  await page.locator(".pr-card").filter({ hasText: key }).getByTitle("Remove saved PR and cleanup worktree").click();
+  await expect(page.getByRole("alert").filter({ hasText: "Checkout retained" })).toContainText("offline maintenance");
+  await expect(page.locator(".pr-card").filter({ hasText: key })).toBeVisible();
+  const draft = await page.request.post("/api/draft-review/get", { data: { prKey: key } });
+  expect((await draft.json()).draftReview.body).toBe("Preserve this review");
+});
+
 test("analysis remains usable after refreshing to a new HEAD", async ({ page }) => {
   await mockNativeTerminal(page);
   const headSha = "ffffffffffffffffffffffffffffffffffffffff";

@@ -1,10 +1,10 @@
 import type { AgentSessionEvent, RpcSessionState } from "@earendil-works/pi-coding-agent";
 import { mkdir } from "node:fs/promises";
-import { homedir } from "node:os";
 import { resolve } from "node:path";
 
 import { createGpuWorkspaceTool } from "./gpu-workspace-tool.js";
 import { logger } from "./logger.js";
+import { reviewSessionRoot } from "./storage-paths.js";
 import { PiAgentProcess } from "./pi-agent-process.js";
 import { createReviewDraftTool, type ReviewDraftToolContext } from "./review-draft-tool.js";
 import { createReviewSuggestionTool } from "./review-suggestion-tool.js";
@@ -109,7 +109,7 @@ function deleteEntriesWithPrefix<T>(map: Map<string, T>, prefix: string): void {
 }
 
 function sessionDirForPr(prKey: string, purpose = "chat"): string {
-  return resolve(homedir(), ".pi", "agent", "state", "pi-pr-review", "pi-sessions", sessionKeyForPr(prKey, purpose));
+  return resolve(reviewSessionRoot(), "pi-sessions", sessionKeyForPr(prKey, purpose));
 }
 
 /** Only registered checkouts may host PR work; persisted directories may be stale. */

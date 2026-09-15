@@ -1,12 +1,12 @@
 /** Own interactive Pi processes behind a bounded browser-terminal protocol. */
 
 import { mkdir, rm } from "node:fs/promises";
-import { homedir } from "node:os";
 import { resolve } from "node:path";
 
 import type { IPty } from "node-pty";
 
 import { ghstackWorkspaceInstructions } from "./ghstack-guidance.js";
+import { reviewSessionRoot } from "./storage-paths.js";
 import { piLaunch, piModelArgs } from "./pi-launch.js";
 import { reviewWorkspaceEnvironment } from "./pi-review-workspace.js";
 export { resolvePiTerminalCommand } from "./pi-launch.js";
@@ -156,7 +156,7 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
   const sessions = new Map<string, Promise<TerminalSession>>();
   const generations = new Map<string, number>();
   const disposals = new Map<string, Promise<void>>();
-  const sessionRoot = deps.sessionRoot ?? resolve(homedir(), ".pi", "agent", "state", "pi-pr-review", "terminal-sessions");
+  const sessionRoot = deps.sessionRoot ?? resolve(reviewSessionRoot(), "terminal-sessions");
   const idleTimeoutMs = deps.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
   const maxSessions = deps.maxSessions ?? DEFAULT_MAX_SESSIONS;
 

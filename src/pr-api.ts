@@ -76,25 +76,25 @@ export function createPrApi(deps: PrApiDeps): PrApi {
     const ref = deps.parsePullRequestRef(input);
     const key = prKey(ref);
     return transition(ref, async () => {
+      const worktreeDir = await deps.cleanupPrWorktree(ref);
       registeredHeads.delete(key);
       await deps.disposePiSession(key);
-      const worktreeDir = await deps.cleanupPrWorktree(ref);
       await deps.removePullRequest(key);
       return { ok: true, prKey: key, worktreeDir };
     });
   }
 
-  /** Dispose old-revision consumers before worktree preparation can replace their cwd. */
+  /** Preparation never replaces an existing checkout; refusal must leave its consumers alive. */
   function refresh(input: string, prewarm: boolean): Promise<PullRequestReviewResponse> {
     const ref = deps.parsePullRequestRef(input);
     return transition(ref, async () => {
       const snapshot = await deps.fetchPullRequestReviewData(ref);
       const key = prKey(ref);
+      const worktreeDir = await deps.preparePrWorktree(ref, snapshot.raw.base.repo.clone_url, snapshot.pr.headSha);
       if (registeredHeads.get(key) !== snapshot.pr.headSha) {
         registeredHeads.delete(key);
         await deps.disposePiSession(key);
       }
-      const worktreeDir = await deps.preparePrWorktree(ref, snapshot.raw.base.repo.clone_url, snapshot.pr.headSha);
       const data = await deps.recoverMissingPatches(snapshot, worktreeDir);
       const pr = await deps.upsertPullRequest(data.pr);
       await deps.registerPiSessionContext(pr.key, worktreeDir, { headSha: pr.headSha, files: data.files });
