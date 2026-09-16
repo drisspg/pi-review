@@ -1,12 +1,14 @@
-/** Memoize an async function by key for a bounded time; ttlMs <= 0 disables caching entirely. */
-export function withTtlCache<A extends unknown[], R>(fn: (...args: A) => Promise<R>, key: (...args: A) => string, ttlMs: number): (...args: A) => Promise<R> {
-  if (ttlMs <= 0) return fn;
+type CachedFunction<A extends unknown[], R> = ((...args: A) => Promise<R>) & { refresh: (...args: A) => Promise<R> };
+
+/** Memoize an async function by key; refresh bypasses and replaces the cached result. */
+export function withTtlCache<A extends unknown[], R>(fn: (...args: A) => Promise<R>, key: (...args: A) => string, ttlMs: number): CachedFunction<A, R> {
   const entries = new Map<string, { at: number; value: Promise<R> }>();
-  return (...args) => {
+  function load(args: A, refresh: boolean): Promise<R> {
+    if (ttlMs <= 0) return fn(...args);
     const cacheKey = key(...args);
     const hit = entries.get(cacheKey);
     const now = Date.now();
-    if (hit != null && now - hit.at < ttlMs) return hit.value;
+    if (!refresh && hit != null && now - hit.at < ttlMs) return hit.value;
     const value = fn(...args).catch((error: unknown) => {
       // Never cache failures: the next caller should retry.
       if (entries.get(cacheKey)?.value === value) entries.delete(cacheKey);
@@ -14,5 +16,6 @@ export function withTtlCache<A extends unknown[], R>(fn: (...args: A) => Promise
     });
     entries.set(cacheKey, { at: now, value });
     return value;
-  };
+  }
+  return Object.assign((...args: A) => load(args, false), { refresh: (...args: A) => load(args, true) });
 }

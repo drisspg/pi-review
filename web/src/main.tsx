@@ -129,7 +129,7 @@ type DiffProps = {
   updateDrag: (target: Target) => void;
   finishDrag: (target: Target) => void;
   handleRowClick: (target: Target, extend: boolean) => void;
-  refreshGithubActivity: () => Promise<void>;
+  refreshGithubActivity: (resetCheckout?: boolean) => Promise<void>;
   commentCollapseSignal: number;
   commentsCollapsed: boolean;
   toggleAllComments: () => void;
@@ -681,13 +681,13 @@ function App() {
     };
   }, [review?.pr.key, review?.pr.headSha, reviewEvent, reviewBody, drafts, draftSaveRetry]);
 
-  async function refreshGithubActivity() {
+  async function refreshGithubActivity(resetCheckout = false) {
     if (review == null || refreshingActivity) return;
     setRefreshingActivity(true);
     setError(null);
     const requestId = openRequestIdRef.current;
     try {
-      const data = await api<OpenResponse>("/api/pr/activity", { method: "POST", body: JSON.stringify({ input: review.pr.url }) });
+      const data = await api<OpenResponse>(resetCheckout ? "/api/pr/refresh" : "/api/pr/activity", { method: "POST", body: JSON.stringify({ input: review.pr.url }) });
       if (requestId !== openRequestIdRef.current || activeReviewKeyRef.current !== data.pr.key) return;
       cacheReview(data);
       activeReviewHeadRef.current = data.pr.headSha;
@@ -1481,7 +1481,7 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { r
   return <PiTerminalPrContext.Provider value={{ prKey: props.review.pr.key, headSha: props.review.pr.headSha, onDraftReview: (draftReview) => props.setDrafts(draftReview.comments) }}><FocusResolutionContext.Provider value={{ viewedIds: props.piPanel.viewedFocusIds, saving: savingFocusResolution, toggle: toggleFocusResolution }}><GitHubDraftContext.Provider value={props.githubDrafts}><div className={`review-page${sideFocused ? " panel-focused" : ""}`}>
     <div className={`review-layout${sideCollapsed ? " side-collapsed" : ""}${sideFocused ? " side-focused" : ""}`} style={{ gridTemplateColumns }}>
       <div className="review-main">
-        <PrHeaderStrip pr={props.review.pr} refreshingActivity={props.refreshingActivity} refresh={props.refreshGithubActivity} />
+        <PrHeaderStrip pr={props.review.pr} refreshingActivity={props.refreshingActivity} refresh={() => props.refreshGithubActivity(true)} />
         <div className="review-bar files-toolbar">
           <a className="review-home" aria-label="Home" title="Home (all reviews and inbox)" href={homeHash} onClick={(event) => { if (!isPlainLeftClick(event)) return; event.preventDefault(); props.goHome(); }}>π</a>
           <nav className="review-mode-tabs" aria-label="Review view">

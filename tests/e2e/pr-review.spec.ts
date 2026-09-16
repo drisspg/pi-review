@@ -173,7 +173,7 @@ test("checkout cleanup refusal keeps the saved PR and draft visible", async ({ p
 test("analysis remains usable after refreshing to a new HEAD", async ({ page }) => {
   await mockNativeTerminal(page);
   const headSha = "ffffffffffffffffffffffffffffffffffffffff";
-  await page.route("**/api/pr/activity", async (route) => {
+  await page.route("**/api/pr/refresh", async (route) => {
     const response = await route.fetch();
     const data = await response.json();
     await route.fulfill({ json: { ...data, pr: { ...data.pr, headSha } } });
@@ -185,7 +185,7 @@ test("analysis remains usable after refreshing to a new HEAD", async ({ page }) 
     const record = { id: "refreshed", prKey: input.prKey, headSha: input.headSha, answer: "Review of the refreshed revision.", createdAt: "now", updatedAt: "now" };
     await route.fulfill({ json: { run: { id: "refreshed", prKey: input.prKey, headSha: input.headSha, kind: "main-review", status: "complete", startedAt: "now", result: { kind: "main-review", record } } } });
   });
-  const refreshed = page.waitForResponse((response) => response.url().endsWith("/api/pr/activity"));
+  const refreshed = page.waitForResponse((response) => response.url().endsWith("/api/pr/refresh"));
   await page.getByRole("button", { name: "Refresh pull request", exact: true }).click();
   await refreshed;
   await openSideTab(page, "Pi");
@@ -199,7 +199,7 @@ test("a late refresh does not reopen the PR after navigation", async ({ page }) 
   let received!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
   const started = new Promise<void>((resolve) => { received = resolve; });
-  await page.route("**/api/pr/activity", async (route) => {
+  await page.route("**/api/pr/refresh", async (route) => {
     const response = await route.fetch();
     received();
     await gate;
@@ -208,7 +208,7 @@ test("a late refresh does not reopen the PR after navigation", async ({ page }) 
   await page.getByRole("button", { name: "Refresh pull request", exact: true }).click();
   await started;
   await goHome(page);
-  const finished = page.waitForResponse((response) => response.url().endsWith("/api/pr/activity"));
+  const finished = page.waitForResponse((response) => response.url().endsWith("/api/pr/refresh"));
   release();
   await finished;
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
@@ -323,7 +323,7 @@ test("opens a PR and renders GitHub-style file diffs", async ({ page }) => {
 test("title refresh spins while refetching and updates pull request activity", async ({ page }) => {
   let release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
-  await page.route("**/api/pr/activity", async (route) => {
+  await page.route("**/api/pr/refresh", async (route) => {
     const response = await route.fetch();
     const review = await response.json() as { pr: Record<string, unknown> } & Record<string, unknown>;
     await gate;
@@ -945,6 +945,7 @@ test("resolves and reopens GitHub threads with visible failure recovery", async 
   const line = Number(await row.getAttribute("data-line"));
   let resolved = false;
   let reject = true;
+  let resets = 0;
   const requests: boolean[] = [];
   await page.route("**/api/comment/resolve", async (route) => {
     const input = route.request().postDataJSON();
@@ -955,7 +956,8 @@ test("resolves and reopens GitHub threads with visible failure recovery", async 
     resolved = input.resolved;
     await route.fulfill({ json: { result: { id: input.threadId, isResolved: resolved } } });
   });
-  await page.route("**/api/pr/activity", async (route) => {
+  await page.route("**/api/pr/{activity,refresh}", async (route) => {
+    if (route.request().url().endsWith("/api/pr/refresh")) resets++;
     const response = await route.fetch();
     const data = await response.json();
     await route.fulfill({ json: { ...data, comments: [{ id: 987654321, path, line, side: "RIGHT", body: "Thread resolution fixture", html_url: prUrl, thread_id: "mock-resolvable-thread", thread_resolved: resolved, user: { login: "reviewer" } }], issueComments: [], reviewSummaries: [] } });
@@ -977,6 +979,7 @@ test("resolves and reopens GitHub threads with visible failure recovery", async 
   const inline = page.locator(".inline-thread.existing.github-thread");
   await expect(inline.getByRole("button", { name: "Resolve", exact: true })).toBeVisible();
   expect(requests).toEqual([true, true, false]);
+  expect(resets).toBe(1); // Only the explicit Refresh button resets the checkout.
 });
 
 test("collapses and focuses existing comment threads", async ({ page }) => {

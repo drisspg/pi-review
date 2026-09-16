@@ -76,6 +76,10 @@ function fakeDeps() {
         calls.push(`fetch:${requestRef.number}`);
         return reviewData();
       },
+      async fetchFreshPullRequestReviewData(requestRef: PullRequestRef) {
+        calls.push(`fetch-fresh:${requestRef.number}`);
+        return reviewData();
+      },
       async getDraftReview(prKey: string) {
         calls.push(`draft:${prKey}`);
         return draftReview;
@@ -104,8 +108,8 @@ function fakeDeps() {
         calls.push(`parse:${input}`);
         return ref;
       },
-      async preparePrWorktree(requestRef: PullRequestRef, cloneUrl: string, headSha: string) {
-        calls.push(`prepare:${requestRef.number}:${cloneUrl}:${headSha}`);
+      async preparePrWorktree(requestRef: PullRequestRef, cloneUrl: string, headSha: string, mode?: "reuse" | "reset") {
+        calls.push(`prepare:${requestRef.number}:${cloneUrl}:${headSha}:${mode}`);
         return "/tmp/worktree";
       },
       prewarmPiSession(prKey: string, purposes: string[]) {
@@ -126,12 +130,12 @@ function fakeDeps() {
 }
 
 test("PR open and refresh publish recovered patches to both agents and the browser without mutating snapshots", async () => {
-  for (const method of ["open", "activity"] as const) {
+  for (const method of ["open", "activity", "refresh"] as const) {
     const { deps, storedFileReviews } = fakeDeps();
     const snapshot = reviewData();
     snapshot.files[0].patch = undefined;
     storedFileReviews.push({ ...snapshot.fileReviews[0], fingerprint: "recovered-fp", viewed: true });
-    deps.fetchPullRequestReviewData = async () => snapshot;
+    deps.fetchPullRequestReviewData = deps.fetchFreshPullRequestReviewData = async () => snapshot;
     deps.recoverMissingPatches = async (data, cwd) => {
       assert.equal(cwd, "/tmp/worktree");
       return { ...data, files: [{ ...data.files[0], patch: "@@ -1 +1 @@\n-old\n+new" }], fileReviews: [{ ...data.fileReviews[0], fingerprint: "recovered-fp" }] };
@@ -161,10 +165,10 @@ test("PR API cleanup checks checkout removal before disposing sessions or removi
   assert.deepEqual(calls, ["parse:url", "cleanup:1", "dispose:github.com/pytorch/pytorch#1", "remove:github.com/pytorch/pytorch#1"]);
 });
 
-test("PR API activity refreshes the worktree, Pi context, and review response", async () => {
+test("PR API explicit refresh resets the worktree, Pi context, and review response", async () => {
   const { deps, calls } = fakeDeps();
 
-  const response = await createPrApi(deps).activity("url");
+  const response = await createPrApi(deps).refresh("url");
 
   assert.equal(response.worktreeDir, "/tmp/worktree");
   assert.equal(response.pr.title, "Stored PR");
@@ -175,9 +179,9 @@ test("PR API activity refreshes the worktree, Pi context, and review response", 
   assert.equal(response.overview?.id, "overview");
   assert.deepEqual(calls, [
     "parse:url",
-    "fetch:1",
-    "prepare:1:git@github.com:pytorch/pytorch.git:head",
+    "fetch-fresh:1",
     "dispose:github.com/pytorch/pytorch#1",
+    "prepare:1:git@github.com:pytorch/pytorch.git:head:reset",
     "upsert:github.com/pytorch/pytorch#1",
     "context:github.com/pytorch/pytorch#1:/tmp/worktree:head:a.ts",
     "draft:github.com/pytorch/pytorch#1",
@@ -199,7 +203,7 @@ test("PR API open prepares worktree, registers Pi cwd, prewarms sessions, and hy
   assert.deepEqual(calls, [
     "parse:url",
     "fetch:1",
-    "prepare:1:git@github.com:pytorch/pytorch.git:head",
+    "prepare:1:git@github.com:pytorch/pytorch.git:head:reuse",
     "dispose:github.com/pytorch/pytorch#1",
     "upsert:github.com/pytorch/pytorch#1",
     "context:github.com/pytorch/pytorch#1:/tmp/worktree:head:a.ts",
@@ -309,34 +313,71 @@ test("PR API interdiff and checks reject malformed payloads", async () => {
   await assert.rejects(prApi.checks({ prUrl: "url" }), /sha/);
 });
 
-test("PR transitions serialize refresh and cleanup, disposing only after successful preparation", async () => {
+test("PR transitions serialize refresh and cleanup, waiting for disposal before resetting even at the same HEAD", async () => {
   const { deps, calls } = fakeDeps();
   let headSha = "first";
-  deps.fetchPullRequestReviewData = async () => {
+  deps.fetchPullRequestReviewData = deps.fetchFreshPullRequestReviewData = async () => {
     calls.push(`fetch:${headSha}`);
     return reviewData(storedPr({ headSha }));
   };
   const api = createPrApi(deps);
   await api.open("url");
   calls.length = 0;
-  await api.activity("url");
-  assert.equal(calls.some((call) => call.startsWith("dispose:")), false);
+  await api.refresh("url");
+  assert.equal(calls.some((call) => call.startsWith("dispose:")), true);
+  assert.ok(calls.includes("prepare:1:git@github.com:pytorch/pytorch.git:first:reset"));
   headSha = "second";
   calls.length = 0;
   let release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
   deps.disposePiSession = async () => { calls.push("dispose:start"); await gate; calls.push("dispose:end"); };
-  const refreshing = api.activity("url");
+  const refreshing = api.refresh("url");
   const cleaning = api.cleanup("url");
   await new Promise((resolve) => setImmediate(resolve));
   assert.ok(calls.includes("dispose:start"));
-  assert.equal(calls.some((call) => call.startsWith("prepare:")), true);
+  assert.equal(calls.some((call) => call.startsWith("prepare:")), false);
   assert.equal(calls.some((call) => call.startsWith("cleanup:")), false);
   release();
   await Promise.all([refreshing, cleaning]);
-  assert.ok(calls.findIndex((call) => call.startsWith("prepare:")) < calls.indexOf("dispose:start"));
+  assert.ok(calls.findIndex((call) => call.startsWith("prepare:")) > calls.indexOf("dispose:end"));
   assert.ok(calls.findIndex((call) => call.startsWith("context:")) < calls.indexOf("cleanup:1"));
 });
+
+test("implicit activity updates reuse the checkout and keep same-HEAD sessions alive", async () => {
+  const { deps, calls } = fakeDeps();
+  const api = createPrApi(deps);
+  await api.open("url");
+  calls.length = 0;
+  await api.activity("url");
+  assert.ok(calls.includes("prepare:1:git@github.com:pytorch/pytorch.git:head:reuse"));
+  assert.equal(calls.some((call) => call.startsWith("dispose:") || call.startsWith("fetch-fresh:")), false);
+  deps.preparePrWorktree = async () => { throw new Error("Use Refresh"); };
+  calls.length = 0;
+  await assert.rejects(api.activity("url"), /Use Refresh/);
+  assert.equal(calls.some((call) => /^(dispose|remove|upsert|context):/.test(call)), false);
+});
+
+test("refresh uses the fresh snapshot rather than cached open data", async () => {
+  const { deps, calls } = fakeDeps();
+  deps.fetchFreshPullRequestReviewData = async () => reviewData(storedPr({ headSha: "latest" }));
+  const response = await createPrApi(deps).refresh("url");
+  assert.equal(response.pr.headSha, "latest");
+  assert.ok(calls.includes("prepare:1:git@github.com:pytorch/pytorch.git:latest:reset"));
+  assert.equal(calls.includes("fetch:1"), false);
+});
+
+for (const failure of ["snapshot", "disposal", "reset"] as const) {
+  test(`refresh does not publish new state after ${failure} fails`, async () => {
+    const { deps, calls } = fakeDeps();
+    const fail = async (): Promise<never> => { throw new Error("failed refresh"); };
+    if (failure === "snapshot") deps.fetchFreshPullRequestReviewData = fail;
+    if (failure === "disposal") deps.disposePiSession = fail;
+    if (failure === "reset") deps.preparePrWorktree = fail;
+    await assert.rejects(createPrApi(deps).refresh("url"), /failed refresh/);
+    assert.equal(calls.some((call) => /^(prepare|remove|upsert|context):/.test(call)), false);
+    if (failure === "snapshot") assert.equal(calls.some((call) => call.startsWith("dispose:")), false);
+  });
+}
 
 for (const operation of ["open", "cleanup"] as const) {
   test(`PR ${operation} refusal preserves sessions and saved state`, async () => {

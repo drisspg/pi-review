@@ -9,6 +9,7 @@ export type PrApiDeps = {
   disposePiSession: (prKey: string) => Promise<void>;
   fetchCommitChecks: (ref: PullRequestRef, sha: string) => Promise<CommitChecks>;
   fetchPullRequestReviewData: (ref: PullRequestRef) => Promise<PullRequestReviewData>;
+  fetchFreshPullRequestReviewData: (ref: PullRequestRef) => Promise<PullRequestReviewData>;
   recoverMissingPatches: (data: PullRequestReviewData, cwd: string) => Promise<PullRequestReviewData>;
   getDraftReview: (prKey: string) => Promise<DraftReview | null>;
   listAiReviews: (prKey: string) => Promise<AiReviewRecord[]>;
@@ -17,7 +18,7 @@ export type PrApiDeps = {
   listGuideReviews: (prKey: string) => Promise<GuideReviewRecord[]>;
   listOverviews: (prKey: string) => Promise<GuideReviewRecord[]>;
   parsePullRequestRef: (input: string) => PullRequestRef;
-  preparePrWorktree: (ref: PullRequestRef, cloneUrl: string, headSha: string) => Promise<string>;
+  preparePrWorktree: (ref: PullRequestRef, cloneUrl: string, headSha: string, mode?: "reuse" | "reset") => Promise<string>;
   prewarmPiSession: (prKey: string, purposes: string[]) => void;
   registerPiSessionContext: (prKey: string, cwd: string, context: { headSha: string; files: PullRequestReviewData["files"] }) => Promise<void>;
   removePullRequest: (prKey: string) => Promise<void>;
@@ -28,6 +29,7 @@ export type PrApi = {
   parse: (input: string) => { ref: PullRequestRef };
   cleanup: (input: string) => Promise<{ ok: true; prKey: string; worktreeDir: string }>;
   activity: (input: string) => Promise<PullRequestReviewResponse>;
+  refresh: (input: string) => Promise<PullRequestReviewResponse>;
   open: (input: string) => Promise<PullRequestReviewResponse>;
   interdiff: (payload: Record<string, unknown>) => Promise<{ files: PullFile[]; totalCommits: number; sinceSha: string; headSha: string; source: "github" | "local-git"; rewritten: boolean }>;
   checks: (payload: Record<string, unknown>) => Promise<{ checks: CommitChecks }>;
@@ -84,14 +86,18 @@ export function createPrApi(deps: PrApiDeps): PrApi {
     });
   }
 
-  /** Preparation never replaces an existing checkout; refusal must leave its consumers alive. */
-  function refresh(input: string, prewarm: boolean): Promise<PullRequestReviewResponse> {
+  /** Only explicit Refresh resets local files; opening a PR remains non-destructive. */
+  function load(input: string, mode: "open" | "activity" | "refresh"): Promise<PullRequestReviewResponse> {
     const ref = deps.parsePullRequestRef(input);
     return transition(ref, async () => {
-      const snapshot = await deps.fetchPullRequestReviewData(ref);
+      const snapshot = await (mode === "refresh" ? deps.fetchFreshPullRequestReviewData(ref) : deps.fetchPullRequestReviewData(ref));
       const key = prKey(ref);
-      const worktreeDir = await deps.preparePrWorktree(ref, snapshot.raw.base.repo.clone_url, snapshot.pr.headSha);
-      if (registeredHeads.get(key) !== snapshot.pr.headSha) {
+      if (mode === "refresh") {
+        registeredHeads.delete(key);
+        await deps.disposePiSession(key);
+      }
+      const worktreeDir = await deps.preparePrWorktree(ref, snapshot.raw.base.repo.clone_url, snapshot.pr.headSha, mode === "refresh" ? "reset" : "reuse");
+      if (mode !== "refresh" && registeredHeads.get(key) !== snapshot.pr.headSha) {
         registeredHeads.delete(key);
         await deps.disposePiSession(key);
       }
@@ -99,17 +105,21 @@ export function createPrApi(deps: PrApiDeps): PrApi {
       const pr = await deps.upsertPullRequest(data.pr);
       await deps.registerPiSessionContext(pr.key, worktreeDir, { headSha: pr.headSha, files: data.files });
       registeredHeads.set(key, pr.headSha);
-      if (prewarm) deps.prewarmPiSession(pr.key, ["main-review", "focus-review"]);
+      if (mode === "open") deps.prewarmPiSession(pr.key, ["main-review", "focus-review"]);
       return hydrateReviewResponse(data, pr, { worktreeDir });
     });
   }
 
   function activity(input: string): Promise<PullRequestReviewResponse> {
-    return refresh(input, false);
+    return load(input, "activity");
+  }
+
+  function refresh(input: string): Promise<PullRequestReviewResponse> {
+    return load(input, "refresh");
   }
 
   function open(input: string): Promise<PullRequestReviewResponse> {
-    return refresh(input, true);
+    return load(input, "open");
   }
 
   /** The current PR file list (with GitHub patches) the client already holds, for the rewritten-history signature compare. */
@@ -163,5 +173,5 @@ export function createPrApi(deps: PrApiDeps): PrApi {
     return { checks: await deps.fetchCommitChecks(ref, shaFromPayload(payload, "sha")) };
   }
 
-  return { parse, cleanup, activity, open, interdiff, checks };
+  return { parse, cleanup, activity, refresh, open, interdiff, checks };
 }

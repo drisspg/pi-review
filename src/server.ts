@@ -131,6 +131,7 @@ const prApi = createPrApi(defaultPrApiDeps({
     await Promise.all([disposePiSession(prKey), piTerminalManager.disposePr(prKey)]);
   },
   fetchPullRequestReviewData: cachedFetchPullRequestReviewData,
+  fetchFreshPullRequestReviewData: cachedFetchPullRequestReviewData.refresh,
   recoverMissingPatches: createMissingPatchRecovery({
     git: async (args, cwd) => (await execFileAsync("git", args, { cwd, maxBuffer: 50 * 1024 * 1024, timeout: 30_000 })).stdout,
     warn: (message, details) => logger.warn("diff", message, details),

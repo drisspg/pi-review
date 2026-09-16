@@ -31,6 +31,25 @@ test("withTtlCache does not cache failures", async () => {
   assert.equal(calls, 2);
 });
 
+test("refresh bypasses and replaces the cache, even while an older request is in flight", async () => {
+  let calls = 0;
+  let rejectOld!: (error: Error) => void;
+  const cached = withTtlCache(async () => {
+    calls++;
+    if (calls === 1) return new Promise<string>((_resolve, reject) => { rejectOld = reject; });
+    if (calls === 3) throw new Error("refresh failed");
+    return `head-${calls}`;
+  }, () => "pr", 60_000);
+  const old = cached();
+  const oldFailure = assert.rejects(old, /stale request failed/);
+  assert.equal(await cached.refresh(), "head-2");
+  rejectOld(new Error("stale request failed"));
+  await oldFailure;
+  assert.equal(await cached(), "head-2");
+  await assert.rejects(cached.refresh(), /refresh failed/);
+  assert.equal(await cached(), "head-4");
+});
+
 test("withTtlCache with ttl 0 is a pass-through", async () => {
   let calls = 0;
   const cached = withTtlCache(async () => {

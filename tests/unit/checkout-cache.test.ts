@@ -43,6 +43,7 @@ async function fixture(t: TestContext) {
 
   const service = createWorktreeService({
     exists: existsSync,
+    realpath,
     git: (args, cwd) => cacheGit(args[0] === "clone" ? ["clone", "--template=", ...args.slice(1)] : args, cwd ?? directory),
     async mkdir(path) { await mkdir(path, { recursive: true }); },
   }, root);
@@ -243,6 +244,7 @@ test("symlinked worktrees are not followed or removed", async (t) => {
   await rename(f.worktree, target);
   await symlink(target, f.worktree, "dir");
   await assertRefused(f, f.worktreeId, /Symlinked checkout paths require manual handling/);
+  await assert.rejects(f.service.preparePrWorktree(ref, f.origin, f.head, "reset"), /offline maintenance/);
   assert.equal(await realpath(f.worktree), target);
   assert.equal(await readFile(resolve(target, "README.md"), "utf8"), "PR content\n");
 });
@@ -252,6 +254,7 @@ test("worktrees linked to the wrong clone are preserved", async (t) => {
   await f.cache.evict(f.worktreeId, true);
   await cacheGit(["worktree", "add", "--detach", f.worktree, f.head], f.origin);
   await assertRefused(f, f.worktreeId, /Git linkage points outside its expected cache clone/);
+  await assert.rejects(f.service.preparePrWorktree(ref, f.origin, f.head, "reset"), /offline maintenance/);
   assert.ok((await cacheGit(["worktree", "list", "--porcelain"], f.origin)).includes(`worktree ${f.worktree}`));
   assert.equal(await readFile(resolve(f.worktree, "README.md"), "utf8"), "PR content\n");
 });
@@ -281,14 +284,14 @@ test("clean commits do not justify deleting custom worktree metadata or local ta
   await assertRefused(f, f.repoId, /tags\/notes\/stashes\/replace refs/);
 });
 
-test("changed PR HEAD never replaces a dirty real checkout; safe eviction permits the new revision", async (t) => {
+test("opening a changed PR HEAD preserves a dirty checkout; safe eviction permits the new revision", async (t) => {
   const f = await fixture(t);
   await writeFile(resolve(f.origin, "README.md"), "updated upstream\n");
   await cacheGit(["add", "README.md"], f.origin);
   const nextHead = await commit(f.origin, "Update PR");
   await cacheGit(["update-ref", "refs/pull/1/head", nextHead], f.origin);
   await writeFile(resolve(f.worktree, "README.md"), "local changes\n");
-  await assert.rejects(f.service.preparePrWorktree(ref, f.origin, nextHead), /offline maintenance/);
+  await assert.rejects(f.service.preparePrWorktree(ref, f.origin, nextHead), /Use Refresh/);
   assert.equal(await readFile(resolve(f.worktree, "README.md"), "utf8"), "local changes\n");
   assert.equal(await cacheGit(["rev-parse", "HEAD"], f.worktree), f.head);
   await writeFile(resolve(f.worktree, "README.md"), "PR content\n");
@@ -297,6 +300,74 @@ test("changed PR HEAD never replaces a dirty real checkout; safe eviction permit
   assert.equal(await cacheGit(["rev-parse", "HEAD"], f.worktree), nextHead);
   await assertSentinels(f);
 });
+
+test("refresh preserves untracked nested Git repositories", async (t) => {
+  const f = await fixture(t);
+  const nested = resolve(f.worktree, "nested");
+  await initRepository(nested);
+  await f.service.preparePrWorktree(ref, f.origin, f.head, "reset");
+  assert.equal(await readFile(resolve(nested, "README.md"), "utf8"), "base content\n");
+  assert.equal(await cacheGit(["status", "--porcelain"], f.worktree), "?? nested/");
+});
+
+test("refresh accepts a canonical alias of the cache root", async (t) => {
+  const f = await fixture(t);
+  const alias = resolve(f.directory, "cache-alias");
+  await symlink(f.root, alias, "dir");
+  const service = createWorktreeService({ exists: existsSync, realpath, git: (args, cwd) => cacheGit(args, cwd!), mkdir: async (path) => { await mkdir(path, { recursive: true }); } }, alias);
+  await writeFile(resolve(f.worktree, "README.md"), "local edit\n");
+  await service.preparePrWorktree(ref, f.origin, f.head, "reset");
+  assert.equal(await readFile(resolve(f.worktree, "README.md"), "utf8"), "PR content\n");
+  await assertSentinels(f);
+});
+
+for (const changedHead of [false, true]) {
+  test(`explicit refresh resets a dirty checkout (changed HEAD: ${changedHead}) without deleting review state`, async (t) => {
+    const f = await fixture(t);
+    let head = f.head;
+    if (changedHead) {
+      await writeFile(resolve(f.origin, "README.md"), "updated upstream\n");
+      await cacheGit(["add", "README.md"], f.origin);
+      head = await commit(f.origin, "Update PR");
+      await cacheGit(["update-ref", "refs/pull/1/head", head], f.origin);
+    }
+    await cacheGit(["checkout", "-b", "local-work"], f.worktree);
+    await writeFile(resolve(f.worktree, "README.md"), "local commit\n");
+    await cacheGit(["add", "README.md"], f.worktree);
+    const localHead = await commit(f.worktree, "Local work");
+    await writeFile(resolve(f.worktree, "README.md"), "staged edit\n");
+    await cacheGit(["add", "README.md"], f.worktree);
+    await writeFile(resolve(f.worktree, "README.md"), "unstaged edit\n");
+    await mkdir(resolve(f.worktree, "scratch"));
+    await writeFile(resolve(f.worktree, "scratch", "notes.txt"), "untracked\n");
+    await writeFile(resolve(f.worktree, "ignored.log"), "keep ignored files\n");
+
+    assert.equal(await f.service.preparePrWorktree(ref, f.origin, head, "reset"), f.worktree);
+    assert.equal(await cacheGit(["rev-parse", "HEAD"], f.worktree), head);
+    assert.equal(await cacheGit(["status", "--porcelain"], f.worktree), "");
+    assert.equal(await cacheGit(["rev-parse", "local-work"], f.repo), localHead);
+    await assert.rejects(cacheGit(["symbolic-ref", "-q", "HEAD"], f.worktree));
+    assert.equal(await readFile(resolve(f.worktree, "README.md"), "utf8"), changedHead ? "updated upstream\n" : "PR content\n");
+    assert.equal(existsSync(resolve(f.worktree, "scratch")), false);
+    assert.equal(await readFile(resolve(f.worktree, "ignored.log"), "utf8"), "keep ignored files\n");
+    await assertSentinels(f);
+  });
+}
+
+for (const problem of ["fetch failure", "remote moved", "locked worktree", "missing index", "rebase in progress"] as const) {
+  test(`explicit refresh leaves files intact on ${problem}`, async (t) => {
+    const f = await fixture(t);
+    await writeFile(resolve(f.worktree, "README.md"), "keep local edit\n");
+    if (problem === "fetch failure") await cacheGit(["remote", "set-url", "origin", resolve(f.directory, "missing")], f.repo);
+    if (problem === "locked worktree") await cacheGit(["worktree", "lock", f.worktree], f.repo);
+    if (problem === "missing index") await rm(await cacheGit(["rev-parse", "--git-path", "index"], f.worktree));
+    if (problem === "rebase in progress") await mkdir(await cacheGit(["rev-parse", "--git-path", "rebase-merge"], f.worktree));
+    await assert.rejects(f.service.preparePrWorktree(ref, f.origin, problem === "remote moved" ? "0000000000000000000000000000000000000000" : f.head, "reset"));
+    assert.equal(await readFile(resolve(f.worktree, "README.md"), "utf8"), "keep local edit\n");
+    assert.equal(await cacheGit(["rev-parse", "HEAD"], f.worktree), f.head);
+    await assertSentinels(f);
+  });
+}
 
 test("initialized submodules require manual preservation even when Git status is clean", async (t) => {
   const f = await fixture(t);
@@ -315,5 +386,6 @@ test("initialized submodules require manual preservation even when Git status is
   }
   assert.equal(await cacheGit(["status", "--porcelain"], f.worktree), "");
   await assertRefused(f, f.worktreeId, /populated or ambiguous submodules require manual handling/);
+  await assert.rejects(f.service.preparePrWorktree(ref, f.origin, head, "reset"), /offline maintenance/);
   assert.equal(await readFile(resolve(f.worktree, "dependency", "README.md"), "utf8"), "base content\n");
 });

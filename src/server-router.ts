@@ -173,10 +173,10 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
       return;
     }
 
-    if (req.method === "POST" && url.pathname === "/api/pr/activity") {
+    if (req.method === "POST" && (url.pathname === "/api/pr/activity" || url.pathname === "/api/pr/refresh")) {
       const input = await inputFromRequest(req);
       deps.logger.info("api", "refresh PR activity requested", { input });
-      const response = await deps.prApi.activity(input);
+      const response = await (url.pathname === "/api/pr/refresh" ? deps.prApi.refresh(input) : deps.prApi.activity(input));
       deps.logger.info("api", "refresh PR activity complete", { key: response.pr.key, existingCommentCount: response.pr.existingCommentCount });
       sendJson(res, 200, response);
       return;

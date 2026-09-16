@@ -163,6 +163,9 @@ function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
       },
     },
     prApi: {
+      async refresh() {
+        return { pr: { existingCommentCount: 0, filesChanged: 0, key: "pr" }, draftReview: null, focusScan: null, focusScans: [], aiReview: null, aiReviews: [] };
+      },
       async activity() {
         return { pr: { existingCommentCount: 0, filesChanged: 0, key: "pr" }, draftReview: null, focusScan: null, focusScans: [], aiReview: null, aiReviews: [] };
       },
@@ -251,6 +254,19 @@ function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
     ...overrides,
   } as ServerRouteDeps;
 }
+
+test("only the explicit PR refresh route dispatches reset behavior", async () => {
+  const deps = baseDeps();
+  const calls: string[] = [];
+  const response = await deps.prApi.activity("url");
+  deps.prApi.activity = async (input) => { calls.push(`activity:${input}`); return response; };
+  deps.prApi.refresh = async (input) => { calls.push(`refresh:${input}`); return response; };
+  const route = createServerRoute(deps);
+  for (const endpoint of ["activity", "refresh"]) {
+    assert.equal((await routeRequest(route, "POST", `/api/pr/${endpoint}`, { input: "url" })).statusCode, 200);
+  }
+  assert.deepEqual(calls, ["activity:url", "refresh:url"]);
+});
 
 test("server route handles health and OPTIONS without feature deps", async () => {
   const route = createServerRoute(baseDeps());

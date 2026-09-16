@@ -237,10 +237,21 @@ The UI's **Remove saved PR and cleanup worktree** remains a different, destructi
 operation. It now refuses while its checkout exists; evict offline first if you actually intend
 to remove the saved PR as well. Do not use bulk saved-PR removal to reclaim checkout storage.
 
-Refresh also no longer force-replaces an existing checkout. If a PR HEAD changes (or a checkout
-is interrupted), open/refresh refuses **without stopping its sessions or changing review state**.
-Inspect and safely evict offline, then reopen. This intentionally trades automatic revision
-replacement for safety; there is no background pruning timer or retention policy.
+**Refresh resets the PR checkout to the latest remote PR commit**, even when the commit is
+unchanged. It fetches fresh GitHub data, stops Pi Review's agents/terminals for that PR and waits
+for teardown, fetches the PR ref, then force-checks out the matching commit in detached mode and
+runs `git clean -fd`. Local tracked/staged edits and ordinary non-ignored untracked files are discarded;
+ignored files (such as environments/build caches), nested Git repositories, local branch refs,
+saved reviews/drafts, and session history remain. Close external editors/jobs using the checkout before Refresh. A remote
+HEAD race or failed fetch aborts before resetting files; retry Refresh for a moved HEAD.
+Sessions may already be stopped if checkout validation or fetching fails.
+
+Opening a PR and automatic activity updates after comment/review actions remain non-destructive:
+a different local HEAD asks you to use Refresh. Only the explicit Refresh button calls the reset
+endpoint (`/api/pr/refresh`); `/api/pr/activity` never resets. Missing indexes, foreign/broken Git
+linkage, locked worktrees, initialized submodules, and in-progress rebases/sequencers still require
+manual handling. Refresh never deletes/recreates the checkout directory or evicts the
+cache. There is no background pruning timer or retention policy.
 
 ### Transitioning an existing installation
 

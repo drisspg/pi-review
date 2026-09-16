@@ -112,8 +112,12 @@ Never remove saved PRs to reclaim cache space, bypass safety checks, steal a liv
 or move linked worktrees with a plain rename. Git cleanliness alone is not deletion evidence:
 inspect detached HEAD reflogs, ignored files, Git linkage and administrative state too.
 Keep Playwright cache roots outside `test-results/` (which it wipes) and use graceful SIGTERM
-shutdown so test runs release lifetime ownership locks. Changed-HEAD refresh intentionally refuses
-until safe offline eviction. See README for migration and protected-entry handling. Production legacy
+shutdown so test runs release lifetime ownership locks. Explicit Refresh fetches uncached PR data,
+awaits Pi session/terminal teardown, then resets the linked checkout to the matching remote PR HEAD
+and cleans ordinary non-ignored untracked files. Only `/api/pr/refresh` resets; opening and
+`/api/pr/activity` (also used after comment/review actions) remain non-destructive. Never wire those
+implicit activity callbacks to reset mode. Refresh preserves ignored environments, nested repos,
+branch refs, and durable review state; eviction remains offline-only. See README for protected-entry handling. Production legacy
 cleanup needs a read-only inventory and user confirmation; tests must use temporary Git repos.
 
 ## Backend-first feature workflow

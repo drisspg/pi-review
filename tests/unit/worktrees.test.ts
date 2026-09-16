@@ -14,6 +14,7 @@ function fixture() {
   const calls: string[][] = [];
   const runtime = {
     exists: (path: string) => paths.has(path),
+    realpath: async (path: string) => path,
     async git(args: string[], _cwd?: string) {
       calls.push(args);
       if (args[0] === "clone") { paths.add(repo); paths.add(`${repo}/.git`); }
