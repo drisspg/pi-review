@@ -1769,8 +1769,21 @@ body:has(.review-page) {
   top: 0;
 }
 
-.guide-live-diff .diff-row.guide-step-highlight {
-  box-shadow: inset 3px 0 var(--accent);
+/* Paint on the cells so added/deleted backgrounds cannot cover the guide cue.
+   The overlay preserves diff colors; the continuous gutter marks the reading range. */
+.guide-live-diff .diff-row.guide-step-highlight > .code-cell,
+.guide-live-diff .diff-row.guide-step-highlight > .split-code-cell {
+  background-image: linear-gradient(var(--selected-bg), var(--selected-bg));
+}
+
+.guide-live-diff .diff-row.guide-step-highlight > .num {
+  background: color-mix(in srgb, var(--accent) 24%, var(--panel));
+  color: var(--text);
+  font-weight: 600;
+}
+
+.guide-live-diff .diff-row.guide-step-highlight > .num:first-child {
+  box-shadow: inset 4px 0 var(--accent);
 }
 
 /* Inline threads inherit a wide gutter offset sized for the full diff page;

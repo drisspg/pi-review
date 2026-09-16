@@ -1285,7 +1285,13 @@ test("runs a separate focus areas review and opens native focus terminals", asyn
   await expect(guide.getByRole("heading", { name: "Core implementation" })).toBeVisible();
   await expect(guide).toContainText(`${path}:${line}`);
   await expect(guide.locator(".guide-live-diff .file")).toBeVisible();
-  await expect(guide.locator(".guide-live-diff .diff-row.guide-step-highlight").first()).toBeVisible();
+  const highlightedRow = guide.locator(".guide-live-diff .diff-row.guide-step-highlight.added").first();
+  await expect(highlightedRow).toBeVisible();
+  // The guide cue must paint on the cells: added/deleted cell backgrounds hide a row-only rail.
+  await expect(highlightedRow.locator(".code-cell")).not.toHaveCSS("background-image", "none");
+  await expect(highlightedRow.locator(".num").first()).not.toHaveCSS("box-shadow", "none");
+  await expect(highlightedRow.locator(".num").first()).toHaveCSS("font-weight", "600");
+  await expect(guide.locator(".diff-row.context:not(.guide-step-highlight) .code-cell").first()).toHaveCSS("background-image", "none");
   const liveDiffSize = await guide.locator(".guide-live-diff").evaluate((diff) => ({ clientHeight: diff.clientHeight, scrollHeight: diff.scrollHeight }));
   expect(liveDiffSize.clientHeight).toBeLessThanOrEqual(800);
   expect(liveDiffSize.scrollHeight).toBeGreaterThan(liveDiffSize.clientHeight);
