@@ -2181,6 +2181,21 @@ ${area.body}`} />
 function ThreadBox({ thread, prUrl, setThread, removeThread, addDraft }: { thread: Thread; prUrl: string; setThread: (thread: Thread) => void; removeThread: () => void; addDraft: (body: string) => void }) {
   const review = useContext(PiTerminalPrContext);
   const terminalOpen = thread.terminalOpen === true;
+  const slotRef = useRef<HTMLDivElement | null>(null);
+  const [expandedHeight, setExpandedHeight] = useState<number | null>(null);
+  const expanded = expandedHeight != null && !thread.collapsed;
+  useEffect(() => {
+    if (thread.collapsed) setExpandedHeight(null);
+  }, [thread.collapsed]);
+  useEffect(() => {
+    if (!expanded) return;
+    function restore(event: KeyboardEvent): void {
+      // Escape remains available to Pi and the comment editor while they have focus.
+      if (event.key === "Escape" && !(event.target instanceof Element && event.target.closest(".xterm, textarea, [contenteditable]"))) setExpandedHeight(null);
+    }
+    window.addEventListener("keydown", restore);
+    return () => window.removeEventListener("keydown", restore);
+  }, [expanded]);
   const [composing, setComposing] = useState(!terminalOpen);
   const [draft, setDraft] = useState("");
   const [deleting, setDeleting] = useState(false);
@@ -2224,11 +2239,12 @@ ${thread.target.hunk.slice(0, 4_000)}`;
     setDraft("");
     setComposing(false);
   }
-  return <div className={`inline-thread review-thread local-thread${terminalOpen ? " terminal-open" : " comment-open"}`}>
+  return <div className="line-review-slot" ref={slotRef} style={expanded ? { height: expandedHeight } : undefined}><div className={`inline-thread review-thread local-thread${terminalOpen ? " terminal-open" : " comment-open"}${expanded ? " line-review-expanded" : ""}`}>
     <div className="thread-head">
       <div className="thread-title"><strong>{terminalOpen ? "Line review" : "Add review comment"}</strong><span>{location}</span></div>
       <div className="actions">
         {terminalOpen ? <Button variant="muted" className="small-muted-button" onClick={() => setComposing((current) => !current)} aria-expanded={composing}>{composing ? "Hide comment" : "Add comment"}</Button> : <Button variant="muted" className="small-muted-button" onClick={() => { setThread({ ...thread, terminalOpen: true }); setComposing(false); }}>Open Pi terminal</Button>}
+        {terminalOpen && <Button variant="icon" aria-label={expanded ? "Restore line review" : "Expand line review"} aria-pressed={expanded} title={expanded ? "Restore line review" : "Expand line review · drag the bottom-right corner to resize"} onClick={() => setExpandedHeight(expanded ? null : slotRef.current?.getBoundingClientRect().height ?? 0)}>{expanded ? <ScreenNormalIcon size={16} /> : <ScreenFullIcon size={16} />}</Button>}
         <Button variant="icon" aria-label="Collapse thread" onClick={() => setThread({ ...thread, collapsed: true })}><ChevronDownIcon size={16} /></Button>
         <Button variant="icon" className="close-thread-button" aria-label={terminalOpen ? "Delete terminal" : "Discard comment"} onClick={() => void deleteThread()} disabled={deleting}><XIcon size={16} /></Button>
       </div>
@@ -2240,7 +2256,7 @@ ${thread.target.hunk.slice(0, 4_000)}`;
     </div>}
     {deleteError != null && <Flash variant="danger" className="terminal-delete-error" role="alert">Could not delete terminal: {deleteError}</Flash>}
     {terminalOpen && <InlinePiTerminal session={terminalSessionId("inline", thread.key)} target={thread.target.line == null ? undefined : { path: thread.target.path, line: thread.target.line, ...(thread.target.startLine == null ? {} : { startLine: thread.target.startLine }), side: thread.target.side }} context={terminalContext} />}
-  </div>;
+  </div></div>;
 }
 
 function reviewStatus(pr: StoredPullRequest): { label: string; tone: string } {

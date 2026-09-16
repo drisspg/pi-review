@@ -1182,6 +1182,53 @@ test("opens a line comment by default and starts Pi on demand", async ({ page })
   await expect(page.locator(".review-summary .draft-card", { hasText: body })).toBeVisible();
 });
 
+test("resizes and expands a line terminal without reconnecting its session", async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  const messages = await mockNativeTerminal(page);
+  await (await openFileWithAddedRows(page, 1)).first().click();
+  const thread = page.locator(".local-thread");
+  await thread.getByRole("button", { name: "Open Pi terminal" }).click();
+  await expect(thread.locator(".xterm-rows")).toContainText("Native Pi ready");
+  await thread.scrollIntoViewIfNeeded();
+  await page.evaluate(() => Object.assign(window, {
+    __originalLineTerminal: document.querySelector(".local-thread .pi-native-terminal"),
+    __originalLineSocket: (window as unknown as { __terminalSocket: unknown }).__terminalSocket,
+  }));
+  async function resize(dx: number, dy: number) {
+    const box = await thread.boundingBox();
+    if (box == null) throw new Error("Missing line terminal");
+    await page.mouse.move(box.x + box.width - 3, box.y + box.height - 3);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width - 3 + dx, box.y + box.height - 3 + dy, { steps: 5 });
+    await page.mouse.up();
+    await expect.poll(async () => Math.round((await thread.boundingBox())!.width)).toBe(Math.round(box.width + dx));
+    await expect.poll(async () => Math.round((await thread.boundingBox())!.height)).toBe(Math.round(box.height + dy));
+  }
+  await resize(-200, -120);
+  await resize(100, 80);
+  const resized = await thread.boundingBox();
+  const resizeCount = (await messages()).filter((message) => JSON.parse(message).type === "resize").length;
+  await thread.getByRole("button", { name: "Expand line review" }).click();
+  await expect(thread).toHaveClass(/line-review-expanded/);
+  await expect.poll(async () => Math.round((await thread.boundingBox())!.width)).toBe(1568);
+  await expect.poll(async () => Math.round((await thread.boundingBox())!.height)).toBe(968);
+  await expect.poll(async () => (await messages()).filter((message) => JSON.parse(message).type === "resize").length).toBeGreaterThan(resizeCount);
+  await expect(thread.getByRole("button", { name: "Restore line review" })).toBeVisible();
+  await thread.getByRole("textbox", { name: "Terminal input" }).focus();
+  await page.keyboard.press("Escape");
+  await expect(thread).toHaveClass(/line-review-expanded/); // Pi retains its own Escape handling.
+  await thread.getByRole("button", { name: "Restore line review" }).focus();
+  await page.keyboard.press("Escape");
+  await expect(thread).not.toHaveClass(/line-review-expanded/);
+  await expect.poll(async () => Math.round((await thread.boundingBox())!.width)).toBe(Math.round(resized!.width));
+  await expect.poll(async () => Math.round((await thread.boundingBox())!.height)).toBe(Math.round(resized!.height));
+  expect(await page.evaluate(() => {
+    const saved = window as unknown as { __originalLineTerminal: unknown; __originalLineSocket: unknown; __terminalSocket: unknown };
+    return document.querySelector(".local-thread .pi-native-terminal") === saved.__originalLineTerminal && saved.__terminalSocket === saved.__originalLineSocket;
+  })).toBe(true);
+  await expect(thread.locator(".xterm-rows")).toContainText("Native Pi ready");
+});
+
 test("deletes a minimized line terminal", async ({ page }) => {
   await mockNativeTerminal(page);
   const rows = await openFileWithAddedRows(page, 1);

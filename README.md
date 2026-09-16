@@ -29,6 +29,7 @@ Ask Pi can work at multiple levels: an inline question on a selected line/range,
 - Mark files viewed and keep recent PR review status locally.
 - Fetch existing GitHub comments and activity.
 - Ask Pi about selected lines, focus areas, or the full PR.
+- Resize inline Line review terminals by dragging the bottom-right corner, or use the header's expand/restore button to fill the viewport without reconnecting the session.
 - Reuse PR worktrees and Pi sessions across reloads/server restarts.
 - Store submitted review examples and distill them into a reviewer profile.
 - Re-review with "Since last review": diff only what changed since the head you last reviewed.
