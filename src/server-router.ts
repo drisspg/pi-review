@@ -19,6 +19,7 @@ import type { ReviewPromptApi } from "./review-prompt-api.js";
 import type { ReviewSubmitRouteApi } from "./review-submit-route-api.js";
 import type { SavedAnalysisApi } from "./saved-analysis-api.js";
 import type { ShellApi } from "./shell-api.js";
+import { CheckoutResetRequiredError } from "./worktrees.js";
 
 export type ServerLogger = {
   error: (scope: string, message: string, data?: Record<string, unknown>) => void;
@@ -311,9 +312,9 @@ export function createRequestListener(route: ServerRoute, logger: ServerLogger, 
     });
     route(req, res).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
-      const status = error instanceof MalformedJsonError ? 400 : 500;
+      const status = error instanceof CheckoutResetRequiredError ? 409 : error instanceof MalformedJsonError ? 400 : 500;
       logger.error("http", "request failed", { method, url, error: message });
-      sendJson(res, status, { error: message });
+      sendJson(res, status, { error: message, ...(error instanceof CheckoutResetRequiredError ? { code: error.code } : {}) });
     });
   };
 }

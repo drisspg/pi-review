@@ -2,7 +2,7 @@ import React, { createContext, ReactNode, useContext, useEffect, useMemo, useRef
 import { createRoot } from "react-dom/client";
 import { CheckIcon, CopyIcon, ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, GitPullRequestIcon, KebabHorizontalIcon, ScreenFullIcon, ScreenNormalIcon, SyncIcon, XIcon } from "@primer/octicons-react";
 import { BaseStyles, Checkbox, Flash, Radio, Select, Textarea, TextInput, ThemeProvider } from "@primer/react";
-import { api, errorMessage, isStaleBuild, logUsage, subscribeStaleBuild } from "./api";
+import { api, ApiError, errorMessage, isStaleBuild, logUsage, subscribeStaleBuild } from "./api";
 import { ActionMenu, ActionMenuItem } from "./components/ActionMenu";
 import { Button } from "./components/Button";
 import { CodeText, InlineSnippetsProvider, MarkdownText } from "./components/Markdown";
@@ -35,6 +35,7 @@ type DiffViewMode = "unified" | "split";
 
 type OpenPrOptions = {
   syncLocation?: boolean;
+  resetCheckout?: boolean;
 };
 
 const PiTerminal = React.lazy(async () => ({ default: (await import("./components/PiTerminal")).PiTerminal }));
@@ -432,6 +433,7 @@ function App() {
   const [submitting, setSubmitting] = useState(false);
   const [sideWidth, setSideWidth] = useState(420);
   const [error, setError] = useState<string | null>(null);
+  const [checkoutResetInput, setCheckoutResetInput] = useState<string | null>(null);
   const [diagnostics, setDiagnostics] = useState<Record<string, unknown> | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
@@ -614,7 +616,8 @@ function App() {
     const requestId = ++openRequestIdRef.current;
     if (options.syncLocation !== false) navigateHash(reviewHash(nextInput));
     setError(null);
-    const cached = reviewCacheRef.current.get(nextInput);
+    setCheckoutResetInput(null);
+    const cached = options.resetCheckout ? undefined : reviewCacheRef.current.get(nextInput);
     if (cached != null) {
       showReview(cached);
       setBusy(false);
@@ -625,7 +628,7 @@ function App() {
     pendingOpenRef.current = { input: nextInput, requestId };
     setBusy(true);
     try {
-      const data = await api<OpenResponse>("/api/pr/open", { method: "POST", body: JSON.stringify({ input: nextInput }), signal: controller.signal });
+      const data = await api<OpenResponse>(options.resetCheckout ? "/api/pr/refresh" : "/api/pr/open", { method: "POST", body: JSON.stringify({ input: nextInput }), signal: controller.signal });
       cacheReview(data);
       if (requestId !== openRequestIdRef.current) return;
       showReview(data);
@@ -633,7 +636,10 @@ function App() {
       void runAutomaticPiReviews(data);
       await Promise.all([refreshHistory(), refreshLogs()]);
     } catch (err) {
-      if (requestId === openRequestIdRef.current && !(err instanceof DOMException && err.name === "AbortError")) setError(errorMessage(err));
+      if (requestId === openRequestIdRef.current && !(err instanceof DOMException && err.name === "AbortError")) {
+        setError(errorMessage(err));
+        if (err instanceof ApiError && err.code === "CHECKOUT_RESET_REQUIRED") setCheckoutResetInput(nextInput);
+      }
     } finally {
       if (pendingOpenRef.current?.requestId === requestId) pendingOpenRef.current = null;
       if (openAbortRef.current === controller) openAbortRef.current = null;
@@ -1073,6 +1079,7 @@ function App() {
     activeReviewKeyRef.current = null;
     setReview(null);
     setError(null);
+    setCheckoutResetInput(null);
     setDiagnostics(null);
     void refreshHistory();
   }
@@ -1118,7 +1125,7 @@ function App() {
       openMemory={() => void showReviewMemory()}
       openLogs={() => { setLogsOpen(true); void refreshLogs(); }}
     />}
-    {error != null && <Flash variant="danger" className="error" role="alert">{error}</Flash>}
+    {error != null && <Flash variant="danger" className="error" role="alert">{error}{checkoutResetInput != null && <div className="checkout-reset-recovery"><span>Reset discards local code edits and ordinary untracked files. Saved reviews and ignored environments are kept.</span><Button disabled={busy} onClick={() => void openPr(checkoutResetInput, { resetCheckout: true })}>Reset checkout and open</Button></div>}</Flash>}
     {busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p><Button variant="muted" onClick={cancelOpen}>Cancel</Button></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPrs={cleanupPrs} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} reviewMode={reviewMode} setReviewMode={setReviewMode} overview={overview} runOverview={runOverview} saveGuideProgress={saveGuideProgress} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, copyFeedbackPrompt: copyReviewFeedbackPrompt, guideReview, runGuideReview, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} reviewEvent={reviewEvent} setReviewEvent={setReviewEvent} reviewBody={reviewBody} setReviewBody={setReviewBody} draftSaveStatus={draftSaveStatus} draftSaveError={draftSaveError} retryDraftSave={() => setDraftSaveRetry((retry) => retry + 1)} archiveReview={archiveReview} discardReview={discardReview} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} githubDrafts={{ review: githubDraftReview, loaded: githubDraftLoaded, loading: githubDraftLoading, moving: githubDraftMoving, error: githubDraftError, pull: pullGithubDraftReview, moveLocalDrafts: moveLocalDraftsToGithub, copyHandoff: copyGithubDraftHandoff }} barMenu={reviewBarMenu} goHome={goHome} />}    {diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}
     {review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} openDiagnostics={() => { setSettingsOpen(false); void loadDiagnostics(); }} close={() => setSettingsOpen(false)} />}
     {memoryOpen && <ReviewMemoryModal memory={reviewMemory} loading={memoryLoading} distilling={memoryDistilling} refresh={() => void loadReviewMemory()} distill={() => void distillReviewMemory()} close={() => setMemoryOpen(false)} />}

@@ -247,8 +247,9 @@ HEAD race or failed fetch aborts before resetting files; retry Refresh for a mov
 Sessions may already be stopped if checkout validation or fetching fails.
 
 Opening a PR and automatic activity updates after comment/review actions remain non-destructive:
-a different local HEAD asks you to use Refresh. Only the explicit Refresh button calls the reset
-endpoint (`/api/pr/refresh`); `/api/pr/activity` never resets. Missing indexes, foreign/broken Git
+a different local HEAD returns a recoverable conflict. If opening is blocked, the error banner
+offers **Reset checkout and open**, with a warning about discarded local edits. Only this recovery
+action and the explicit Refresh button call `/api/pr/refresh`; `/api/pr/activity` never resets. Missing indexes, foreign/broken Git
 linkage, locked worktrees, initialized submodules, and in-progress rebases/sequencers still require
 manual handling. Refresh never deletes/recreates the checkout directory or evicts the
 cache. There is no background pruning timer or retention policy.

@@ -51,7 +51,7 @@ for (const problem of ["changed HEAD", "missing index", "failed git"] as const) 
     paths.add(worktree);
     if (problem !== "missing index") paths.add(`${worktree}/index`);
     if (problem === "failed git") runtime.git = async () => { throw new Error("git failed"); };
-    await assert.rejects(service.preparePrWorktree(ref, "origin", problem === "changed HEAD" ? "new" : "head"));
+    await assert.rejects(service.preparePrWorktree(ref, "origin", problem === "changed HEAD" ? "new" : "head"), problem === "changed HEAD" ? { code: "CHECKOUT_RESET_REQUIRED" } : undefined);
     assert.ok(paths.has(worktree));
     assert.ok(calls.every((args) => args[0] === "rev-parse"));
   });

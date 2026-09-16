@@ -803,6 +803,14 @@ kbd {
   white-space: pre-wrap;
 }
 
+.checkout-reset-recovery {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
 .operation-error {
   margin: 0;
   padding: 6px 8px;

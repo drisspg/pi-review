@@ -1,3 +1,9 @@
+export class ApiError extends Error {
+  constructor(message: string, readonly code?: string) {
+    super(message);
+  }
+}
+
 /** Human-readable message for a caught unknown, usually an api() rejection. */
 export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -41,7 +47,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { ...init, headers: { "content-type": "application/json", ...init?.headers } });
   trackBuild(response);
   const body = await response.json();
-  if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
+  if (!response.ok) throw new ApiError(body.error ?? `HTTP ${response.status}`, typeof body.code === "string" ? body.code : undefined);
   return body as T;
 }
 

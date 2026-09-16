@@ -156,6 +156,45 @@ test("reopens a cleaned PR through the server instead of the client cache", asyn
   await expect(page.locator(".review-layout")).toBeVisible();
 });
 
+test("recovers a blocked PR open from the start page only after an explicit checkout reset", async ({ page }) => {
+  if (openedPr == null) throw new Error("Missing opened PR");
+  const { key, headSha } = openedPr;
+  await goHome(page);
+  await page.reload(); // Drop the client cache: reproduce a fresh tab opening an older checkout.
+  await page.request.post("/api/draft-review/save", { data: { prKey: key, headSha, event: "COMMENT", body: "Preserve recovery draft", comments: [] } });
+  let conflict = false;
+  let resets = 0;
+  await page.route("**/api/pr/open", (route) => route.fulfill({
+    status: conflict ? 409 : 500,
+    json: conflict ? { error: "This checkout is on an older or local revision.", code: "CHECKOUT_RESET_REQUIRED" } : { error: "GitHub unavailable" },
+  }));
+  await page.route("**/api/pr/refresh", async (route) => {
+    resets++;
+    expect(route.request().postDataJSON()).toEqual({ input: prUrl });
+    await route.fulfill({ response: await route.fetch() });
+  });
+  await page.locator("input").first().fill(prUrl);
+  await page.getByRole("button", { name: "Open", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("GitHub unavailable");
+  await expect(page.getByRole("button", { name: "Reset checkout and open" })).toHaveCount(0);
+
+  conflict = true;
+  await page.getByRole("button", { name: "Open", exact: true }).click();
+  const recovery = page.getByRole("button", { name: "Reset checkout and open" });
+  await expect(recovery).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText("Reset discards local code edits");
+  await expect(page.locator(".review-layout")).toHaveCount(0);
+  expect(resets).toBe(0);
+  const refreshed = page.waitForResponse((response) => response.url().endsWith("/api/pr/refresh"));
+  await recovery.click();
+  const response = await refreshed;
+  expect(response.ok()).toBe(true);
+  expect((await response.json()).draftReview.body).toBe("Preserve recovery draft");
+  await expect(page.locator(".review-layout")).toBeVisible();
+  await expect(recovery).toHaveCount(0);
+  expect(resets).toBe(1);
+});
+
 test("checkout cleanup refusal keeps the saved PR and draft visible", async ({ page }) => {
   if (openedPr == null) throw new Error("Missing opened PR");
   const { key, headSha } = openedPr;

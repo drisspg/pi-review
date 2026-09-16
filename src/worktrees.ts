@@ -7,6 +7,14 @@ import { logger } from "./logger.js";
 import { checkoutCacheRoot } from "./storage-paths.js";
 import type { PullRequestRef } from "./types.js";
 
+export class CheckoutResetRequiredError extends Error {
+  readonly code = "CHECKOUT_RESET_REQUIRED";
+
+  constructor(worktreeDir: string) {
+    super(`This checkout is on an older or local revision. Use Refresh to reset it to the remote PR: ${worktreeDir}`);
+  }
+}
+
 type WorktreeRuntime = {
   exists: (path: string) => boolean;
   realpath: (path: string) => Promise<string>;
@@ -63,7 +71,7 @@ export function createWorktreeService(runtime: WorktreeRuntime = defaultRuntime,
         const index = resolve(worktreeDir, await runtime.git(["rev-parse", "--git-path", "index"], worktreeDir));
         if (!runtime.exists(index)) throw maintenanceRequired(worktreeDir);
         if (mode === "reuse") {
-          if (head !== headSha) throw new Error(`This checkout is on an older or local revision. Use Refresh to reset it to the remote PR: ${worktreeDir}`);
+          if (head !== headSha) throw new CheckoutResetRequiredError(worktreeDir);
           return worktreeDir;
         }
         // Canonicalize only the cache root (e.g. macOS /var -> /private/var), not inner symlinks.

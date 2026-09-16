@@ -5,6 +5,7 @@ import { Readable } from "node:stream";
 import test from "node:test";
 
 import { createRequestListener, createServerRoute, type ServerRoute, type ServerRouteDeps } from "../../src/server-router.js";
+import { CheckoutResetRequiredError } from "../../src/worktrees.js";
 
 class FakeResponse extends EventEmitter {
   body = "";
@@ -566,6 +567,18 @@ test("request listener returns JSON 400 for malformed request bodies", async () 
 
   assert.equal(res.statusCode, 400);
   assert.deepEqual(jsonBody(res), { error: "Malformed JSON request body" });
+});
+
+test("request listener identifies a checkout revision conflict as recoverable without resetting it", async () => {
+  const error = new CheckoutResetRequiredError("/tmp/pr");
+  const listener = createRequestListener(async () => { throw error; }, { info() {}, error() {} });
+  const res = new FakeResponse();
+  await new Promise<void>((resolve) => {
+    res.on("finish", resolve);
+    listener(fakeRequest("POST", "/api/pr/open"), res as unknown as ServerResponse);
+  });
+  assert.equal(res.statusCode, 409);
+  assert.deepEqual(jsonBody(res), { error: error.message, code: "CHECKOUT_RESET_REQUIRED" });
 });
 
 test("request listener logs and wraps route failures as JSON 500", async () => {
