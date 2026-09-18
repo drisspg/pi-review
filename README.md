@@ -180,7 +180,7 @@ production state. With a non-default state path, new Pi/terminal records live in
 and checkouts default to `<state-path>.cache/`, isolating test/dev instances from production.
 Neither session records nor drafts belong in the checkout cache.
 
-### Checkout storage and offline eviction
+### Checkout storage and deletion
 
 Full clones (`repos/`, including their checked-out source trees) and linked PR worktrees
 (`worktrees/`) now live in a separate checkout root:
@@ -204,8 +204,19 @@ Inventory is read-only, does not fetch, and includes both clones and worktrees:
 npm run cache -- inventory
 ```
 
-Eviction is deliberately offline in this first version. Stop the owning server yourself and
-close external terminals, editors, and jobs using its checkouts. Then select **one exact ID**
+The saved-PR card's **Delete local checkout** button (also available in bulk selection) stops
+Pi agents/terminals for that PR and deletes only its clean checkout. Saved PR cards, reviews,
+drafts, annotations, and session history remain. The success message confirms that reopening
+will recreate the checkout; the shared clone is retained. Close external editors/jobs first.
+Deletion refuses local changes, ignored files, uncovered commits, extra Git metadata, or failed
+inspection. Pi sessions may already be stopped when a protection check refuses deletion.
+
+The server must own the cache, and deletion is ordered with PR opens/refreshes, preparation,
+blame, and editor-open requests. `/api/pr/checkout/delete` is the checkout-only contract;
+it never calls the review-state removal API. It does not force-delete or reset protected files.
+
+CLI eviction (including full-clone reclamation) remains offline-only. Stop the owning server
+and close external terminals, editors, and jobs using its checkouts. Then select **one exact ID**
 from the inventory, for example:
 
 ```sh
@@ -234,9 +245,9 @@ based on a PID or an age heuristic.
 Eviction never calls the review-state deletion API: drafts, annotations, saved reviews/history,
 and Pi session files remain. Restart the server and reopen the PR to recreate its checkout and
 register its current cwd. Old paths in session transcripts are historical, not authoritative.
-The UI's **Remove saved PR and cleanup worktree** remains a different, destructive review-state
-operation. It now refuses while its checkout exists; evict offline first if you actually intend
-to remove the saved PR as well. Do not use bulk saved-PR removal to reclaim checkout storage.
+The legacy `/api/pr/cleanup` contract remains a different, destructive review-state operation
+and refuses while a checkout exists. The card and bulk checkout-delete buttons no longer call
+it. Do not remove saved PRs to reclaim checkout storage.
 
 **Refresh resets the PR checkout to the latest remote PR commit**, even when the commit is
 unchanged. It fetches fresh GitHub data, stops Pi Review's agents/terminals for that PR and waits

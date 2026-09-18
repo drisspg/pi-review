@@ -2,9 +2,11 @@ import { sep, resolve } from "node:path";
 
 import { parsePullRequestRef } from "./pr.js";
 import type { FileReviewState, PullRequestRef } from "./types.js";
-import { repoDirForRef, worktreeDirForRef } from "./worktrees.js";
+import { repoDirForRef, worktreeDirForRef, withPrWorktree } from "./worktrees.js";
 
 export type FileApiDeps = {
+  exists: (path: string) => boolean;
+  withPrWorktree: <T>(ref: PullRequestRef, operation: () => Promise<T>) => Promise<T>;
   fetchFileText: (ref: PullRequestRef, path: string, sha: string) => Promise<string>;
   /** `git show <sha>:<path>` in the PR's local clone; null when the clone or object is unavailable. */
   readLocalFileText: (ref: PullRequestRef, path: string, sha: string) => Promise<string | null>;
@@ -23,6 +25,8 @@ export type FileApi = {
 
 export const defaultFileApiDeps = (fetchFileText: FileApiDeps["fetchFileText"], setFileViewed: FileApiDeps["setFileViewed"], openUrl: FileApiDeps["openUrl"], git: (args: string[], cwd: string) => Promise<string>, exists: (path: string) => boolean): FileApiDeps => ({
   fetchFileText,
+  exists,
+  withPrWorktree,
   async readLocalFileText(ref, path, sha) {
     const repoDir = repoDirForRef(ref);
     if (!exists(repoDir) || !/^[0-9a-f]{7,40}$/i.test(sha)) return null;
@@ -74,9 +78,15 @@ export function createFileApi(deps: FileApiDeps): FileApi {
 
   async function open(payload: Record<string, unknown>): Promise<{ target: string }> {
     if (typeof payload.prUrl !== "string" || typeof payload.path !== "string") throw new Error("Expected prUrl and path");
-    const target = editorTarget(deps.worktreeDirForRef(deps.parsePullRequestRef(payload.prUrl)), payload.path, typeof payload.line === "number" ? payload.line : undefined);
-    await deps.openUrl(editorUrlForTarget(target));
-    return { target };
+    const ref = deps.parsePullRequestRef(payload.prUrl);
+    const path = payload.path;
+    return deps.withPrWorktree(ref, async () => {
+      const worktreeDir = deps.worktreeDirForRef(ref);
+      if (!deps.exists(worktreeDir)) throw new Error("PR checkout was deleted; reopen the PR before opening files");
+      const target = editorTarget(worktreeDir, path, typeof payload.line === "number" ? payload.line : undefined);
+      await deps.openUrl(editorUrlForTarget(target));
+      return { target };
+    });
   }
 
   return { viewed, text, open };

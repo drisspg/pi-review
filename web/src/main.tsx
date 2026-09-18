@@ -434,6 +434,9 @@ function App() {
   const [sideWidth, setSideWidth] = useState(420);
   const [error, setError] = useState<string | null>(null);
   const [checkoutResetInput, setCheckoutResetInput] = useState<string | null>(null);
+  const [checkoutDeleteStatus, setCheckoutDeleteStatus] = useState<string | null>(null);
+  const [deletingCheckouts, setDeletingCheckouts] = useState(false);
+  const deletingCheckoutsRef = useRef(false);
   const [diagnostics, setDiagnostics] = useState<Record<string, unknown> | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
@@ -609,6 +612,8 @@ function App() {
   }
 
   async function openPr(nextInput: string, options: OpenPrOptions = {}) {
+    if (deletingCheckoutsRef.current) return;
+    setCheckoutDeleteStatus(null);
     if (pendingOpenRef.current?.input === nextInput && pendingOpenRef.current.requestId === openRequestIdRef.current) return;
     openAbortRef.current?.abort();
     const controller = new AbortController();
@@ -1043,35 +1048,42 @@ function App() {
     }
   }
 
-  async function cleanupPrs(targets: StoredPullRequest[]): Promise<string[]> {
-    if (targets.length === 0) return [];
+  async function deleteCheckouts(targets: StoredPullRequest[]): Promise<string[]> {
+    if (targets.length === 0 || deletingCheckoutsRef.current) return [];
     const prompt = targets.length === 1
-      ? `Remove ${targets[0].key} from history and delete its local worktree/session cache?`
-      : `Remove ${targets.length} saved PRs from history and delete their local worktree/session caches?`;
-    if (!confirm(prompt)) return [];
+      ? `Delete local checkout for ${targets[0].key}?`
+      : `Delete local checkouts for ${targets.length} selected PRs?`;
+    if (!confirm(`${prompt}\n\nThis stops Pi work for these PRs. Saved reviews, drafts, and session history are kept. Close external editors and jobs using these checkouts before continuing.`)) return [];
+    deletingCheckoutsRef.current = true;
+    setDeletingCheckouts(true);
     setError(null);
-    const removedKeys: string[] = [];
+    setCheckoutResetInput(null);
+    setCheckoutDeleteStatus(null);
+    const deletedKeys: string[] = [];
     const failures: string[] = [];
-    for (const pr of targets) {
-      try {
-        await api("/api/pr/cleanup", { method: "POST", body: JSON.stringify({ input: pr.url || prUrlFromKey(pr.key) }) });
-        removedKeys.push(pr.key);
-        for (const [cacheKey, cached] of reviewCacheRef.current) {
-          if (cached.pr.key === pr.key) reviewCacheRef.current.delete(cacheKey);
+    try {
+      for (const pr of targets) {
+        try {
+          await api("/api/pr/checkout/delete", { method: "POST", body: JSON.stringify({ input: pr.url || prUrlFromKey(pr.key) }) });
+          deletedKeys.push(pr.key);
+        } catch (error) {
+          failures.push(`${pr.key}: ${errorMessage(error)}`);
+        } finally {
+          // Even a protected checkout may have had its Pi context disposed before refusal.
+          for (const [cacheKey, cached] of reviewCacheRef.current) {
+            if (cached.pr.key === pr.key) reviewCacheRef.current.delete(cacheKey);
+          }
         }
-      } catch (error) {
-        failures.push(`${pr.key}: ${errorMessage(error)}`);
       }
+      if (deletedKeys.length > 0) setCheckoutDeleteStatus(`Deleted ${deletedKeys.length} local checkout${deletedKeys.length === 1 ? "" : "s"}. Saved reviews, drafts, and session history were kept. Reopening a PR recreates its checkout.`);
+      if (failures.length > 0) setError(`Checkout deletion failed for ${failures.join("; ")}`);
+      window.scrollTo(0, 0);
+      await refreshLogs().catch(() => undefined);
+      return deletedKeys;
+    } finally {
+      deletingCheckoutsRef.current = false;
+      setDeletingCheckouts(false);
     }
-    const removedKeySet = new Set(removedKeys);
-    setPrs((current) => current.filter((item) => !removedKeySet.has(item.key)));
-    if (review != null && removedKeySet.has(review.pr.key)) {
-      activeReviewKeyRef.current = null;
-      setReview(null);
-    }
-    if (failures.length > 0) setError(`Cleanup failed for ${failures.join("; ")}`);
-    await refreshLogs().catch(() => undefined);
-    return removedKeys;
   }
 
   function goHome() {
@@ -1079,6 +1091,7 @@ function App() {
     activeReviewKeyRef.current = null;
     setReview(null);
     setError(null);
+    setCheckoutDeleteStatus(null);
     setCheckoutResetInput(null);
     setDiagnostics(null);
     void refreshHistory();
@@ -1125,8 +1138,9 @@ function App() {
       openMemory={() => void showReviewMemory()}
       openLogs={() => { setLogsOpen(true); void refreshLogs(); }}
     />}
+    {checkoutDeleteStatus != null && <Flash variant="success" role="status">{checkoutDeleteStatus}</Flash>}
     {error != null && <Flash variant="danger" className="error" role="alert">{error}{checkoutResetInput != null && <div className="checkout-reset-recovery"><span>Reset discards local code edits and ordinary untracked files. Saved reviews and ignored environments are kept.</span><Button disabled={busy} onClick={() => void openPr(checkoutResetInput, { resetCheckout: true })}>Reset checkout and open</Button></div>}</Flash>}
-    {busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p><Button variant="muted" onClick={cancelOpen}>Cancel</Button></div> : review == null ? <StartPage prs={prs} openPr={openPr} cleanupPrs={cleanupPrs} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} reviewMode={reviewMode} setReviewMode={setReviewMode} overview={overview} runOverview={runOverview} saveGuideProgress={saveGuideProgress} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, copyFeedbackPrompt: copyReviewFeedbackPrompt, guideReview, runGuideReview, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} reviewEvent={reviewEvent} setReviewEvent={setReviewEvent} reviewBody={reviewBody} setReviewBody={setReviewBody} draftSaveStatus={draftSaveStatus} draftSaveError={draftSaveError} retryDraftSave={() => setDraftSaveRetry((retry) => retry + 1)} archiveReview={archiveReview} discardReview={discardReview} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} githubDrafts={{ review: githubDraftReview, loaded: githubDraftLoaded, loading: githubDraftLoading, moving: githubDraftMoving, error: githubDraftError, pull: pullGithubDraftReview, moveLocalDrafts: moveLocalDraftsToGithub, copyHandoff: copyGithubDraftHandoff }} barMenu={reviewBarMenu} goHome={goHome} />}    {diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}
+    {busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p><Button variant="muted" onClick={cancelOpen}>Cancel</Button></div> : review == null ? <StartPage prs={prs} openPr={openPr} deleteCheckouts={deleteCheckouts} deleting={deletingCheckouts} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} reviewMode={reviewMode} setReviewMode={setReviewMode} overview={overview} runOverview={runOverview} saveGuideProgress={saveGuideProgress} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, copyFeedbackPrompt: copyReviewFeedbackPrompt, guideReview, runGuideReview, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} reviewEvent={reviewEvent} setReviewEvent={setReviewEvent} reviewBody={reviewBody} setReviewBody={setReviewBody} draftSaveStatus={draftSaveStatus} draftSaveError={draftSaveError} retryDraftSave={() => setDraftSaveRetry((retry) => retry + 1)} archiveReview={archiveReview} discardReview={discardReview} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} githubDrafts={{ review: githubDraftReview, loaded: githubDraftLoaded, loading: githubDraftLoading, moving: githubDraftMoving, error: githubDraftError, pull: pullGithubDraftReview, moveLocalDrafts: moveLocalDraftsToGithub, copyHandoff: copyGithubDraftHandoff }} barMenu={reviewBarMenu} goHome={goHome} />}    {diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}
     {review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} openDiagnostics={() => { setSettingsOpen(false); void loadDiagnostics(); }} close={() => setSettingsOpen(false)} />}
     {memoryOpen && <ReviewMemoryModal memory={reviewMemory} loading={memoryLoading} distilling={memoryDistilling} refresh={() => void loadReviewMemory()} distill={() => void distillReviewMemory()} close={() => setMemoryOpen(false)} />}
     {review != null && gpuWorkspaceOpen && <GpuWorkspaceModal review={review} close={() => setGpuWorkspaceOpen(false)} refreshLogs={refreshLogs} />}
@@ -1175,11 +1189,10 @@ function AppToolbar({ review, theme, setTheme, busy, goHome, openGpuWorkspace, o
 
 type StartFilter = "all" | "needs-review" | "in-progress" | "done";
 
-function StartPage({ prs, openPr, cleanupPrs, openInput, setOpenInput, busy }: { prs: StoredPullRequest[]; openPr: (input: string) => Promise<void>; cleanupPrs: (prs: StoredPullRequest[]) => Promise<string[]>; openInput: string; setOpenInput: (value: string) => void; busy: boolean }) {
+function StartPage({ prs, openPr, deleteCheckouts, deleting, openInput, setOpenInput, busy }: { prs: StoredPullRequest[]; openPr: (input: string) => Promise<void>; deleteCheckouts: (prs: StoredPullRequest[]) => Promise<string[]>; deleting: boolean; openInput: string; setOpenInput: (value: string) => void; busy: boolean }) {
   const [filter, setFilter] = useState<StartFilter>("all");
   const [selecting, setSelecting] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
-  const [deleting, setDeleting] = useState(false);
   const groups = useMemo(() => groupPrsByStatus(prs), [prs]);
   const counts = { all: prs.length, "needs-review": groups.needsReview.length, "in-progress": groups.inProgress.length, done: groups.done.length } as const;
   const visibleGroups: Array<{ id: StartFilter; title: string; hint: string; prs: StoredPullRequest[] }> = [
@@ -1214,16 +1227,11 @@ function StartPage({ prs, openPr, cleanupPrs, openInput, setOpenInput, busy }: {
   }
   async function deleteSelected(): Promise<void> {
     if (selectedPrs.length === 0 || deleting) return;
-    setDeleting(true);
-    try {
-      const removedKeys = new Set(await cleanupPrs(selectedPrs));
-      if (removedKeys.size === 0) return;
-      const remainingKeys = selectedPrs.filter((pr) => !removedKeys.has(pr.key)).map((pr) => pr.key);
-      setSelectedKeys(new Set(remainingKeys));
-      if (remainingKeys.length === 0) setSelecting(false);
-    } finally {
-      setDeleting(false);
-    }
+    const deletedKeys = new Set(await deleteCheckouts(selectedPrs));
+    if (deletedKeys.size === 0) return;
+    const remainingKeys = selectedPrs.filter((pr) => !deletedKeys.has(pr.key)).map((pr) => pr.key);
+    setSelectedKeys(new Set(remainingKeys));
+    if (remainingKeys.length === 0) setSelecting(false);
   }
   return <div className="start-page">
     <section className="hero">
@@ -1231,7 +1239,7 @@ function StartPage({ prs, openPr, cleanupPrs, openInput, setOpenInput, busy }: {
       <p className="muted">Paste a GitHub PR URL or <code>OWNER/REPO#123</code>. Pi will check it out and assist your review.</p>
       <form className="hero-form" onSubmit={(event) => { event.preventDefault(); void openPr(openInput); }}>
         <TextInput autoFocus block className="hero-url-input" value={openInput} onChange={(event) => setOpenInput(event.target.value)} placeholder="https://github.com/owner/repo/pull/123" />
-        <Button type="submit" disabled={busy || openInput.trim().length === 0}>{busy ? "Fetching…" : "Open"}</Button>
+        <Button type="submit" disabled={busy || deleting || openInput.trim().length === 0}>{busy ? "Fetching…" : "Open"}</Button>
       </form>
     </section>
     <InboxPanel openPr={openPr} />
@@ -1242,16 +1250,16 @@ function StartPage({ prs, openPr, cleanupPrs, openInput, setOpenInput, busy }: {
         </nav>
         <div className="start-bulk-actions">
           {selecting ? <>
-            <label className={`start-select-visible${visiblePrs.length === 0 ? " disabled" : ""}`}><Checkbox checked={allVisibleSelected} onChange={toggleVisible} disabled={visiblePrs.length === 0} /> Select visible</label>
+            <label className={`start-select-visible${visiblePrs.length === 0 ? " disabled" : ""}`}><Checkbox checked={allVisibleSelected} onChange={toggleVisible} disabled={visiblePrs.length === 0 || deleting} /> Select visible</label>
             <span className="muted">{selectedPrs.length} selected</span>
-            <Button variant="muted" className="bulk-delete-button" onClick={() => void deleteSelected()} disabled={selectedPrs.length === 0 || deleting}>{deleting ? "Deleting…" : `Delete selected${selectedPrs.length > 0 ? ` (${selectedPrs.length})` : ""}`}</Button>
+            <Button variant="muted" className="bulk-delete-button" onClick={() => void deleteSelected()} disabled={selectedPrs.length === 0 || deleting}>{deleting ? "Deleting…" : `Delete local checkouts${selectedPrs.length > 0 ? ` (${selectedPrs.length})` : ""}`}</Button>
             <Button variant="muted" onClick={cancelSelection} disabled={deleting}>Cancel</Button>
-          </> : <Button variant="muted" onClick={() => setSelecting(true)}>Select</Button>}
+          </> : <Button variant="muted" onClick={() => setSelecting(true)} disabled={deleting}>Select</Button>}
         </div>
       </div>
       {visibleGroups.length === 0 ? <p className="muted">Nothing in this category.</p> : visibleGroups.map((group) => <section className="start-group" key={group.id}>
         <header className="start-group-head"><h2>{group.title}</h2><span className="muted">{group.hint}</span></header>
-        <div className="pr-grid">{group.prs.map((pr) => <PrCard key={pr.key} pr={pr} openPr={openPr} cleanupPrs={cleanupPrs} selecting={selecting} selected={selectedKeys.has(pr.key)} toggleSelected={toggleSelected} />)}</div>      </section>)}
+        <div className="pr-grid">{group.prs.map((pr) => <PrCard key={pr.key} pr={pr} openPr={openPr} deleteCheckouts={deleteCheckouts} deleting={deleting} selecting={selecting} selected={selectedKeys.has(pr.key)} toggleSelected={toggleSelected} />)}</div>      </section>)}
     </>}
   </div>;
 }
@@ -1277,10 +1285,10 @@ function groupPrsByStatus(prs: StoredPullRequest[]): { needsReview: StoredPullRe
   return { needsReview, inProgress, done };
 }
 
-function PrCard({ pr, openPr, cleanupPrs, selecting, selected, toggleSelected }: { pr: StoredPullRequest; openPr: (input: string) => Promise<void>; cleanupPrs: (prs: StoredPullRequest[]) => Promise<string[]>; selecting: boolean; selected: boolean; toggleSelected: (key: string) => void }) {  const status = reviewStatus(pr);
+function PrCard({ pr, openPr, deleteCheckouts, deleting, selecting, selected, toggleSelected }: { pr: StoredPullRequest; openPr: (input: string) => Promise<void>; deleteCheckouts: (prs: StoredPullRequest[]) => Promise<string[]>; deleting: boolean; selecting: boolean; selected: boolean; toggleSelected: (key: string) => void }) {  const status = reviewStatus(pr);
   return <article className={`pr-card status-${status.tone}${selecting ? " selecting" : ""}${selected ? " selected" : ""}`}>
-    {selecting && <label className="pr-card-select"><Checkbox checked={selected} onChange={() => toggleSelected(pr.key)} aria-label={`Select ${pr.key}`} /></label>}
-    <a className="pr-card-body" href={reviewHash(pr.url)} onClick={(event) => { if (!isPlainLeftClick(event)) return; event.preventDefault(); if (selecting) toggleSelected(pr.key); else void openPr(pr.url); }}>
+    {selecting && <label className="pr-card-select"><Checkbox checked={selected} onChange={() => toggleSelected(pr.key)} aria-label={`Select ${pr.key}`} disabled={deleting} /></label>}
+    <a className="pr-card-body" href={reviewHash(pr.url)} aria-disabled={deleting} onClick={(event) => { if (!isPlainLeftClick(event)) return; event.preventDefault(); if (deleting) return; if (selecting) toggleSelected(pr.key); else void openPr(pr.url); }}>
       <div className="pr-card-head">
         <strong className="pr-card-title">{pr.title}</strong>
         <span className={`review-status ${status.tone}`}>{status.label}</span>
@@ -1293,7 +1301,7 @@ function PrCard({ pr, openPr, cleanupPrs, selecting, selected, toggleSelected }:
         <span>{relativeTime(pr.lastOpenedAt)}</span>
       </div>
     </a>
-    {!selecting && <button className="trash-button" title="Remove saved PR and cleanup worktree" aria-label="Remove saved PR and cleanup worktree" onClick={() => void cleanupPrs([pr])}><XIcon size={16} /></button>}
+    {!selecting && <button className="trash-button" title="Delete local checkout" aria-label="Delete local checkout" onClick={() => void deleteCheckouts([pr])} disabled={deleting}><XIcon size={16} /></button>}
   </article>;
 }
 

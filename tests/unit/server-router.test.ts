@@ -164,6 +164,9 @@ function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
       },
     },
     prApi: {
+      async deleteCheckout() {
+        return { ok: true, prKey: "pr", worktreeDir: "/tmp/pr" };
+      },
       async refresh() {
         return { pr: { existingCommentCount: 0, filesChanged: 0, key: "pr" }, draftReview: null, focusScan: null, focusScans: [], aiReview: null, aiReviews: [] };
       },
@@ -255,6 +258,22 @@ function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
     ...overrides,
   } as ServerRouteDeps;
 }
+
+test("checkout deletion has a distinct route from saved-review removal", async () => {
+  const deps = baseDeps();
+  const calls: string[] = [];
+  deps.prApi.cleanup = async () => { throw new Error("must not remove saved review"); };
+  deps.prApi.deleteCheckout = async (input) => {
+    calls.push(input);
+    return { ok: true, prKey: "pr", worktreeDir: "/tmp/pr" };
+  };
+  const route = createServerRoute(deps);
+  const response = await routeRequest(route, "POST", "/api/pr/checkout/delete", { input: "url" });
+  assert.deepEqual(jsonBody(response), { ok: true, prKey: "pr", worktreeDir: "/tmp/pr" });
+  assert.deepEqual(calls, ["url"]);
+  await assert.rejects(routeRequest(route, "POST", "/api/pr/checkout/delete", {}));
+  assert.deepEqual(calls, ["url"]);
+});
 
 test("only the explicit PR refresh route dispatches reset behavior", async () => {
   const deps = baseDeps();

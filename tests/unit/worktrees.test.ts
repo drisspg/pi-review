@@ -57,6 +57,27 @@ for (const problem of ["changed HEAD", "missing index", "failed git"] as const) 
   });
 }
 
+test("checkout deletion waits for file users and serializes preparation", async () => {
+  const { runtime, paths, calls } = fixture();
+  paths.add(worktree);
+  paths.add(`${worktree}/index`);
+  let release!: () => void;
+  const gate = new Promise<void>((done) => { release = done; });
+  const service = createWorktreeService(runtime, root, async (id) => {
+    calls.push(["delete", id]);
+    paths.delete(worktree);
+  });
+  const reading = service.withPrWorktree(ref, async () => { await gate; assert.ok(paths.has(worktree)); });
+  const deleting = service.deletePrWorktree(ref);
+  const preparing = service.preparePrWorktree(ref, "origin", "head");
+  await new Promise((done) => setImmediate(done));
+  assert.deepEqual(calls, []);
+  release();
+  await Promise.all([reading, deleting, preparing]);
+  assert.deepEqual(calls[0], ["delete", "worktrees/github.com/pytorch/pytorch/pr-185924"]);
+  assert.ok(paths.has(worktree));
+});
+
 test("cleanup requires offline eviction and never deletes an existing checkout", async () => {
   const { paths, service, calls } = fixture();
   paths.add(worktree);

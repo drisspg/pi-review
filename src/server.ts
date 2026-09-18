@@ -40,7 +40,7 @@ import { createShellApi } from "./shell-api.js";
 import { withTtlCache } from "./ttl-cache.js";
 import { createUsageApi, defaultUsageApiDeps, defaultUsageLogPath } from "./usage-api.js";
 import { appendDraftReviewComment, clearDraftReview, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, getDraftReview, listAiReviews, listFileReviews, listFocusScans, listGuideReviews, listOverviews, listRecentPullRequests, listReviewMemoryRecords, listArchivedReviews, markPullRequestReviewed, removePullRequest, reviewMemoryStats, saveAiReview, saveDraftReview, saveFocusScan, saveGuideReview, saveOverview, saveReviewMemory, saveReviewProfile, setFileViewed, updateFocusScanProgress, updateGuideReviewProgress, upsertPullRequest } from "./state.js";
-import { cleanupPrWorktree, preparePrWorktree, repoDirForRef, worktreeDirForRef } from "./worktrees.js";
+import { cleanupPrWorktree, deletePrWorktree, preparePrWorktree, repoDirForRef, worktreeDirForRef, withPrWorktree } from "./worktrees.js";
 
 // Lifetime ownership covers HTTP/file operations, preparation, agents and WebSocket terminals.
 // Offline maintenance and a second server must never share this cache concurrently.
@@ -81,6 +81,7 @@ const blameApi = createBlameApi({
   git: async (args, cwd) => (await execFileAsync("git", args, { cwd, maxBuffer: 10 * 1024 * 1024 })).stdout,
   parsePullRequestRef,
   worktreeDirForRef,
+  withPrWorktree,
 });
 const commentApi = createCommentApi(defaultCommentApiDeps({ addIssueComment, editIssueComment, editReviewComment, editReviewSummary, replyToReviewComment, setReviewThreadResolved }));
 const draftReviewApi = createDraftReviewApi({ clearDraftReview, getDraftReview, now: () => new Date().toISOString(), saveDraftReview });
@@ -119,6 +120,7 @@ const piTerminalApi = createPiTerminalApi({ deleteSession: piTerminalManager.del
 const piTerminalDraftApi = createPiTerminalDraftApi({ appendDraftReviewComment, contextForPr: piSessionReviewContext, notifyDraftReview: piTerminalManager.broadcastDraftReview });
 const prApi = createPrApi(defaultPrApiDeps({
   cleanupPrWorktree,
+  deletePrWorktree,
   compareCommits,
   compareCommitsLocally: createGitInterdiff({
     exists: existsSync,

@@ -50,6 +50,10 @@ function fakeDeps() {
     calls,
     storedFileReviews,
     deps: {
+      async deletePrWorktree(requestRef: PullRequestRef) {
+        calls.push(`delete-checkout:${requestRef.number}`);
+        return "/tmp/worktree";
+      },
       async cleanupPrWorktree(requestRef: PullRequestRef) {
         calls.push(`cleanup:${requestRef.number}`);
         return "/tmp/worktree";
@@ -150,6 +154,40 @@ test("PR open and refresh publish recovered patches to both agents and the brows
     assert.equal(snapshot.fileReviews[0].fingerprint, "fp-a");
   }
 });
+
+test("checkout deletion waits for Pi teardown, preserves all review state, and serializes reopening", async () => {
+  const { deps, calls } = fakeDeps();
+  let release!: () => void;
+  const gate = new Promise<void>((done) => { release = done; });
+  deps.disposePiSession = async () => { calls.push("dispose:start"); await gate; calls.push("dispose:end"); };
+  const api = createPrApi(deps);
+  const deleting = api.deleteCheckout("url");
+  const reopening = api.open("url");
+  await new Promise((done) => setImmediate(done));
+  assert.ok(calls.includes("dispose:start"));
+  assert.equal(calls.some((call) => call.startsWith("delete-checkout:") || call.startsWith("fetch:")), false);
+  release();
+  assert.deepEqual(await deleting, { ok: true, prKey: "github.com/pytorch/pytorch#1", worktreeDir: "/tmp/worktree" });
+  const response = await reopening;
+  assert.ok(calls.indexOf("dispose:end") < calls.indexOf("delete-checkout:1"));
+  assert.ok(calls.indexOf("delete-checkout:1") < calls.indexOf("fetch:1"));
+  assert.equal(calls.some((call) => call.startsWith("remove:") || call.startsWith("cleanup:")), false);
+  assert.equal(response.draftReview?.body, "draft body");
+  assert.equal(response.aiReview?.id, "ai");
+  assert.equal(response.guideReview?.id, "guide");
+});
+
+for (const failure of ["disposal", "protected checkout"] as const) {
+  test(`checkout deletion preserves history when ${failure} fails`, async () => {
+    const { deps, calls } = fakeDeps();
+    const fail = async (): Promise<never> => { throw new Error(failure); };
+    if (failure === "disposal") deps.disposePiSession = fail;
+    else deps.deletePrWorktree = fail;
+    await assert.rejects(createPrApi(deps).deleteCheckout("url"), new RegExp(failure));
+    assert.equal(calls.some((call) => call.startsWith("remove:") || call.startsWith("upsert:")), false);
+    if (failure === "disposal") assert.equal(calls.some((call) => call.startsWith("delete-checkout:")), false);
+  });
+}
 
 test("PR API parse delegates to injected parser", () => {
   const { deps, calls } = fakeDeps();

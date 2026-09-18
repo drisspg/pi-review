@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdir, realpath } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 
-import { assertLegacyTransition, cacheGit } from "./checkout-cache.js";
+import { assertLegacyTransition, cacheGit, createCheckoutCache } from "./checkout-cache.js";
 import { logger } from "./logger.js";
 import { checkoutCacheRoot } from "./storage-paths.js";
 import type { PullRequestRef } from "./types.js";
@@ -27,6 +27,8 @@ export type WorktreeService = {
   repoDirForRef: (ref: PullRequestRef) => string;
   preparePrWorktree: (ref: PullRequestRef, cloneUrl: string, headSha: string, mode?: "reuse" | "reset") => Promise<string>;
   cleanupPrWorktree: (ref: PullRequestRef) => Promise<string>;
+  deletePrWorktree: (ref: PullRequestRef) => Promise<string>;
+  withPrWorktree: <T>(ref: PullRequestRef, operation: () => Promise<T>) => Promise<T>;
 };
 
 const defaultRuntime: WorktreeRuntime = {
@@ -41,7 +43,7 @@ function safe(value: string): string {
 }
 
 /** The server owns this cache for its entire lifetime; maintenance cannot run alongside it. */
-export function createWorktreeService(runtime: WorktreeRuntime = defaultRuntime, cacheRoot = checkoutCacheRoot()): WorktreeService {
+export function createWorktreeService(runtime: WorktreeRuntime = defaultRuntime, cacheRoot = checkoutCacheRoot(), deleteCheckout = createCheckoutCache(cacheRoot).deleteWorktree): WorktreeService {
   const preparations = new Map<string, Promise<unknown>>();
   function worktreeDirForRef(ref: PullRequestRef): string {
     return resolve(cacheRoot, "worktrees", safe(ref.host), safe(ref.owner), safe(ref.repo), `pr-${ref.number}`);
@@ -117,7 +119,14 @@ export function createWorktreeService(runtime: WorktreeRuntime = defaultRuntime,
       return worktreeDir;
     });
   }
-  return { worktreeDirForRef, repoDirForRef, preparePrWorktree, cleanupPrWorktree };
+  async function deletePrWorktree(ref: PullRequestRef): Promise<string> {
+    return transition(ref, async () => {
+      const worktreeDir = worktreeDirForRef(ref);
+      await deleteCheckout(relative(cacheRoot, worktreeDir).split("\\").join("/"));
+      return worktreeDir;
+    });
+  }
+  return { worktreeDirForRef, repoDirForRef, preparePrWorktree, cleanupPrWorktree, deletePrWorktree, withPrWorktree: transition };
 }
 
 const defaultService = createWorktreeService();
@@ -128,3 +137,5 @@ export async function preparePrWorktree(ref: PullRequestRef, cloneUrl: string, h
   return defaultService.preparePrWorktree(ref, cloneUrl, headSha, mode);
 }
 export const cleanupPrWorktree = defaultService.cleanupPrWorktree;
+export const deletePrWorktree = defaultService.deletePrWorktree;
+export const withPrWorktree = defaultService.withPrWorktree;

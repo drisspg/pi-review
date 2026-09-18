@@ -1,4 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
+import { existsSync } from "node:fs";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { resolve, sep } from "node:path";
 import type { AnalysisKind, AnalysisResult, AnalysisRun } from "../../src/analysis-types";
 import { parseFocusAreas } from "../../src/focus";
 import { parseGuideChapters } from "../../src/guide";
@@ -7,6 +11,13 @@ test.describe.configure({ mode: "serial" });
 
 const prUrl = process.env.PI_REVIEW_TEST_PR ?? "https://github.com/Dao-AILab/flash-attention/pull/2542";
 let openedPr: { key: string; headSha: string } | null = null;
+let openedWorktreeDir: string | undefined;
+
+function testCheckoutDir(page: Page): string {
+  const cacheRoot = resolve(tmpdir(), `pi-review-e2e-cache-${new URL(page.url()).port}`);
+  if (!openedWorktreeDir?.startsWith(`${cacheRoot}${sep}`)) throw new Error("Checkout deletion tests require the isolated Playwright cache");
+  return openedWorktreeDir;
+}
 
 async function openFirstFile(page: Page) {
   const firstFile = page.locator(".file").first();
@@ -135,7 +146,9 @@ test.beforeEach(async ({ page }) => {
   const responsePromise = page.waitForResponse((response) => response.url().endsWith("/api/pr/open") && response.request().method() === "POST");
   await page.getByRole("button", { name: "Open", exact: true }).click();
   const response = await responsePromise;
-  openedPr = (await response.json() as { pr: { key: string; headSha: string } }).pr;
+  const data = await response.json() as { pr: { key: string; headSha: string }; worktreeDir?: string };
+  openedPr = data.pr;
+  openedWorktreeDir = data.worktreeDir;
   await expect(page.locator(".review-layout")).toBeVisible({ timeout: 60_000 });
 });
 
@@ -144,16 +157,41 @@ test.afterEach(async ({ request }) => {
   await request.post("/api/draft-review/save", { data: { prKey: openedPr.key, headSha: openedPr.headSha, event: "COMMENT", body: "", comments: [] } });
 });
 
-test("reopens a cleaned PR through the server instead of the client cache", async ({ page }) => {
+test("deletes a local checkout, preserves the saved PR and draft, and recreates it on reopen", async ({ page }) => {
+  if (openedPr == null) throw new Error("Missing opened PR");
+  const { key, headSha } = openedPr;
+  const worktreeDir = testCheckoutDir(page);
+  expect(existsSync(worktreeDir)).toBe(true);
   page.on("dialog", (dialog) => dialog.accept());
-  await page.route("**/api/pr/cleanup", (route) => route.fulfill({ json: { ok: true } }));
   await goHome(page);
-  await page.locator(".pr-card").first().getByTitle("Remove saved PR and cleanup worktree").click();
-  await page.locator("input").first().fill(prUrl);
+  const saved = await page.request.post("/api/draft-review/save", { data: { prKey: key, headSha, event: "COMMENT", body: "Preserve checkout deletion draft", comments: [] } });
+  expect(saved.ok()).toBe(true);
+  const card = page.locator(".pr-card").filter({ hasText: key });
+  const deleted = page.waitForResponse((response) => response.url().endsWith("/api/pr/checkout/delete"));
+  await card.getByRole("button", { name: "Delete local checkout", exact: true }).click();
+  const deletion = await deleted;
+  expect(deletion.ok(), await deletion.text()).toBe(true);
+  expect(await deletion.json()).toEqual({ ok: true, prKey: key, worktreeDir });
+  expect(existsSync(worktreeDir)).toBe(false);
+  await expect(page.getByRole("status")).toContainText("Saved reviews, drafts, and session history were kept");
+  await expect(page.getByRole("status")).toBeInViewport();
+  await expect(card).toBeVisible();
+  const history = await page.request.get("/api/prs");
+  expect((await history.json()).prs.some((pr: { key: string }) => pr.key === key)).toBe(true);
+  const draft = await page.request.post("/api/draft-review/get", { data: { prKey: key } });
+  expect((await draft.json()).draftReview.body).toBe("Preserve checkout deletion draft");
+
   const reopened = page.waitForResponse((response) => response.url().endsWith("/api/pr/open"));
-  await page.getByRole("button", { name: "Open", exact: true }).click();
-  expect((await reopened).ok()).toBe(true);
+  await card.locator(".pr-card-body").click();
+  const response = await reopened;
+  expect(response.ok()).toBe(true);
+  const review = await response.json();
+  expect(review.worktreeDir).toBe(worktreeDir);
+  expect(review.draftReview.body).toBe("Preserve checkout deletion draft");
+  expect(existsSync(worktreeDir)).toBe(true);
   await expect(page.locator(".review-layout")).toBeVisible();
+  await openReviewForm(page);
+  await expect(page.getByPlaceholder("Overall review body")).toHaveValue("Preserve checkout deletion draft");
 });
 
 test("recovers a blocked PR open from the start page only after an explicit checkout reset", async ({ page }) => {
@@ -195,18 +233,33 @@ test("recovers a blocked PR open from the start page only after an explicit chec
   expect(resets).toBe(1);
 });
 
-test("checkout cleanup refusal keeps the saved PR and draft visible", async ({ page }) => {
+test("protected checkout deletion refusal keeps local files, the saved PR, and draft", async ({ page }) => {
   if (openedPr == null) throw new Error("Missing opened PR");
   const { key, headSha } = openedPr;
-  page.on("dialog", (dialog) => dialog.accept());
-  await goHome(page);
-  const saved = await page.request.post("/api/draft-review/save", { data: { prKey: key, headSha, event: "COMMENT", body: "Preserve this review", comments: [] } });
-  expect(saved.ok()).toBe(true);
-  await page.locator(".pr-card").filter({ hasText: key }).getByTitle("Remove saved PR and cleanup worktree").click();
-  await expect(page.getByRole("alert").filter({ hasText: "Checkout retained" })).toContainText("offline maintenance");
-  await expect(page.locator(".pr-card").filter({ hasText: key })).toBeVisible();
-  const draft = await page.request.post("/api/draft-review/get", { data: { prKey: key } });
-  expect((await draft.json()).draftReview.body).toBe("Preserve this review");
+  const markerDir = await mkdtemp(resolve(testCheckoutDir(page), ".pi-review-e2e-protected-"));
+  const marker = resolve(markerDir, "local-work.txt");
+  try {
+    await writeFile(marker, "Preserve local work");
+    page.on("dialog", (dialog) => dialog.accept());
+    await goHome(page);
+    const saved = await page.request.post("/api/draft-review/save", { data: { prKey: key, headSha, event: "COMMENT", body: "Preserve this review", comments: [] } });
+    expect(saved.ok()).toBe(true);
+    await page.locator(".pr-card").filter({ hasText: key }).getByRole("button", { name: "Delete local checkout", exact: true }).click();
+    await expect(page.getByRole("alert")).toContainText("files need preservation");
+    await expect(page.getByRole("alert")).toBeInViewport();
+    await expect(page.locator(".pr-card").filter({ hasText: key })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "Deleted" })).toHaveCount(0);
+    expect(await readFile(marker, "utf8")).toBe("Preserve local work");
+    const draft = await page.request.post("/api/draft-review/get", { data: { prKey: key } });
+    expect((await draft.json()).draftReview.body).toBe("Preserve this review");
+    const reopened = page.waitForResponse((response) => response.url().endsWith("/api/pr/open"));
+    await page.locator(".pr-card").filter({ hasText: key }).locator(".pr-card-body").click();
+    expect((await reopened).ok()).toBe(true);
+    await expect(page.locator(".review-layout")).toBeVisible();
+    expect(await readFile(marker, "utf8")).toBe("Preserve local work");
+  } finally {
+    await rm(markerDir, { recursive: true, force: true });
+  }
 });
 
 test("analysis remains usable after refreshing to a new HEAD", async ({ page }) => {
@@ -255,59 +308,102 @@ test("a late refresh does not reopen the PR after navigation", async ({ page }) 
   await expect(page.locator(".review-layout")).toHaveCount(0);
 });
 
-test("removes a previous PR from local history", async ({ page }) => {
-  page.on("dialog", (dialog) => dialog.accept());
-  await page.route("**/api/pr/cleanup", async (route) => {
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true }) });
+test("confirms checkout-only deletion and prevents duplicate requests while pending", async ({ page }) => {
+  const dialogs: string[] = [];
+  let requests = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  page.on("dialog", async (dialog) => {
+    dialogs.push(dialog.message());
+    if (dialogs.length === 1) await dialog.dismiss();
+    else await dialog.accept();
+  });
+  await page.route("**/api/pr/checkout/delete", async (route) => {
+    requests++;
+    expect(route.request().postDataJSON()).toEqual({ input: prUrl });
+    await gate;
+    await route.fulfill({ json: { ok: true, prKey: openedPr?.key } });
   });
 
   await goHome(page);
-  const firstRow = page.locator(".pr-card").first();
-  const key = await firstRow.locator(".pr-card-key").textContent();
-  await firstRow.getByTitle("Remove saved PR and cleanup worktree").click();
-  if (key != null) await expect(page.locator(".pr-card", { hasText: key })).toHaveCount(0);
+  const card = page.locator(".pr-card").filter({ hasText: openedPr!.key });
+  const button = card.getByRole("button", { name: "Delete local checkout", exact: true });
+  await button.click();
+  expect(requests).toBe(0);
+  await expect(button).toBeEnabled();
+  await button.click();
+  try {
+    await expect(button).toBeDisabled();
+    await button.evaluate((element: HTMLButtonElement) => element.click());
+    await expect.poll(() => requests).toBe(1);
+  } finally {
+    release();
+  }
+  await expect(page.getByRole("status")).toContainText("Deleted 1 local checkout");
+  await expect(button).toBeEnabled();
+  await expect(card).toBeVisible();
+  expect(dialogs).toHaveLength(2);
+  expect(dialogs[1]).toContain(`Delete local checkout for ${openedPr!.key}?`);
+  expect(dialogs[1]).toContain("This stops Pi work");
+  expect(dialogs[1]).toContain("Saved reviews, drafts, and session history are kept");
+  expect(dialogs[1]).toContain("Close external editors and jobs");
+  expect(requests).toBe(1);
 });
 
-test("selects and removes multiple previous PRs", async ({ page }) => {
-  const savedPrs = [
-    { key: "github.com/example/repo#1", title: "First saved PR", url: "https://github.com/example/repo/pull/1", headSha: "111111111111", lastOpenedAt: "2026-07-23T03:00:00.000Z", filesChanged: 1, existingCommentCount: 0 },
-    { key: "github.com/example/repo#2", title: "Second saved PR", url: "https://github.com/example/repo/pull/2", headSha: "222222222222", lastOpenedAt: "2026-07-23T02:00:00.000Z", filesChanged: 2, existingCommentCount: 1 },
-    { key: "github.com/example/repo#3", title: "Keep this PR", url: "https://github.com/example/repo/pull/3", headSha: "333333333333", lastOpenedAt: "2026-07-23T01:00:00.000Z", filesChanged: 3, existingCommentCount: 2 },
-  ];
-  const cleanupInputs: string[] = [];
-  const dialogs: string[] = [];
-  let activeCleanups = 0;
-  let maxActiveCleanups = 0;
-  page.on("dialog", async (dialog) => {
-    dialogs.push(dialog.message());
-    await dialog.accept();
-  });
-  await page.route("**/api/prs", async (route) => {
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ prs: savedPrs }) });
-  });
-  await page.route("**/api/pr/cleanup", async (route) => {
-    cleanupInputs.push((route.request().postDataJSON() as { input: string }).input);
-    activeCleanups += 1;
-    maxActiveCleanups = Math.max(maxActiveCleanups, activeCleanups);
-    await new Promise((resolve) => setTimeout(resolve, 25));
-    activeCleanups -= 1;
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true }) });
-  });
+for (const partialFailure of [false, true]) {
+  test(partialFailure ? "bulk checkout deletion reports partial failures and keeps failed selections" : "selects and deletes multiple local checkouts without removing saved PRs", async ({ page }) => {
+    const savedPrs = [
+      { key: "github.com/example/repo#1", title: "First saved PR", url: "https://github.com/example/repo/pull/1", headSha: "111111111111", lastOpenedAt: "2026-07-23T03:00:00.000Z", filesChanged: 1, existingCommentCount: 0 },
+      { key: "github.com/example/repo#2", title: "Second saved PR", url: "https://github.com/example/repo/pull/2", headSha: "222222222222", lastOpenedAt: "2026-07-23T02:00:00.000Z", filesChanged: 2, existingCommentCount: 1 },
+      { key: "github.com/example/repo#3", title: "Keep this PR", url: "https://github.com/example/repo/pull/3", headSha: "333333333333", lastOpenedAt: "2026-07-23T01:00:00.000Z", filesChanged: 3, existingCommentCount: 2 },
+    ];
+    const deletionInputs: string[] = [];
+    const dialogs: string[] = [];
+    let activeDeletions = 0;
+    let maxActiveDeletions = 0;
+    page.on("dialog", async (dialog) => {
+      dialogs.push(dialog.message());
+      await dialog.accept();
+    });
+    await page.route("**/api/prs", async (route) => {
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ prs: savedPrs }) });
+    });
+    await page.route("**/api/pr/checkout/delete", async (route) => {
+      const input = (route.request().postDataJSON() as { input: string }).input;
+      deletionInputs.push(input);
+      activeDeletions += 1;
+      maxActiveDeletions = Math.max(maxActiveDeletions, activeDeletions);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      activeDeletions -= 1;
+      await route.fulfill(partialFailure && input === savedPrs[1].url
+        ? { status: 409, json: { error: "Checkout protected: local files need preservation" } }
+        : { json: { ok: true } });
+    });
 
-  await page.goto("/");
-  await expect(page.locator(".pr-card")).toHaveCount(3);
-  await page.getByRole("button", { name: "Select", exact: true }).click();
-  await page.getByLabel("Select github.com/example/repo#1").check();
-  await page.getByLabel("Select github.com/example/repo#2").check();
-  await page.getByRole("button", { name: "Delete selected (2)" }).click();
+    await page.goto("/");
+    await expect(page.locator(".pr-card")).toHaveCount(3);
+    await page.getByRole("button", { name: "Select", exact: true }).click();
+    await page.getByLabel("Select github.com/example/repo#1").check();
+    await page.getByLabel("Select github.com/example/repo#2").check();
+    await page.getByRole("button", { name: "Delete local checkouts (2)" }).click();
 
-  await expect(page.locator(".pr-card")).toHaveCount(1);
-  await expect(page.locator(".pr-card")).toContainText("Keep this PR");
-  await expect(page.getByRole("button", { name: "Select", exact: true })).toBeVisible();
-  expect(cleanupInputs).toEqual(savedPrs.slice(0, 2).map((pr) => pr.url));
-  expect(maxActiveCleanups).toBe(1);
-  expect(dialogs).toEqual(["Remove 2 saved PRs from history and delete their local worktree/session caches?"]);
-});
+    await expect(page.getByRole("status")).toContainText(`Deleted ${partialFailure ? 1 : 2} local checkout`);
+    await expect(page.locator(".pr-card")).toHaveCount(3);
+    if (partialFailure) {
+      await expect(page.getByRole("alert")).toContainText("github.com/example/repo#2: Checkout protected");
+      await expect(page.getByLabel("Select github.com/example/repo#1")).not.toBeChecked();
+      await expect(page.getByLabel("Select github.com/example/repo#2")).toBeChecked();
+      await expect(page.getByRole("button", { name: "Delete local checkouts (1)" })).toBeEnabled();
+    } else {
+      await expect(page.getByRole("button", { name: "Select", exact: true })).toBeVisible();
+    }
+    expect(deletionInputs).toEqual(savedPrs.slice(0, 2).map((pr) => pr.url));
+    expect(maxActiveDeletions).toBe(1);
+    expect(dialogs).toHaveLength(1);
+    expect(dialogs[0]).toContain("Delete local checkouts for 2 selected PRs?");
+    expect(dialogs[0]).toContain("Saved reviews, drafts, and session history are kept");
+  });
+}
 
 test("reopens a previously loaded PR from the client cache", async ({ page }) => {
   let openRequests = 0;

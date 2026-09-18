@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import { checkoutCacheRoot, legacyStorageRoot, usesDefaultReviewState } from "./storage-paths.js";
 
 const exec = promisify(execFile);
+const owners = new Map<string, string>();
 export const CACHE_LOCK = ".checkout-owner";
 export type CacheEntry = { id: string; path: string; kind: "worktree" | "repo"; reasons: string[] };
 export type CacheRuntime = {
@@ -34,11 +35,13 @@ export function ownCheckoutCache(root: string): () => void {
   const ownerPath = resolve(lock, "owner.json");
   const owner = JSON.stringify({ pid: process.pid, host: hostname(), startedAt: new Date().toISOString(), token: randomUUID() });
   writeFileSync(ownerPath, owner);
+  owners.set(lock, owner);
   let released = false;
   const release = () => {
     if (released) return;
     released = true;
     process.removeListener("exit", release);
+    if (owners.get(lock) === owner) owners.delete(lock);
     try {
       if (readFileSync(ownerPath, "utf8") === owner) rmSync(lock, { recursive: true, force: true });
     } catch (error) {
@@ -132,28 +135,32 @@ async function assertContained(root: string, path: string): Promise<void> {
 async function inspectEntry(root: string, entry: CacheEntry, runtime: CacheRuntime): Promise<void> {
   if (entry.reasons.length) return;
   try {
-    await assertContained(root, entry.path);
-    const git = (args: string[]) => runtime.git(args, entry.path);
-    const canonical = await realpath(entry.path);
+    // Canonicalize the root only; inner symlinks remain visible to containment checks.
+    const canonicalRoot = await realpath(root);
+    const path = resolve(canonicalRoot, relative(root, entry.path));
+    root = canonicalRoot;
+    await assertContained(root, path);
+    const git = (args: string[]) => runtime.git(args, path);
+    const canonical = await realpath(path);
     if (await realpath(await git(["rev-parse", "--show-toplevel"])) !== canonical) throw new Error("Not a checkout root");
-    const common = await realpath(resolve(entry.path, await git(["rev-parse", "--git-common-dir"])));
-    const repoPath = entry.kind === "repo" ? entry.path : resolve(root, "repos", ...entry.id.split("/").slice(1, 4));
+    const common = await realpath(resolve(path, await git(["rev-parse", "--git-common-dir"])));
+    const repoPath = entry.kind === "repo" ? path : resolve(root, "repos", ...entry.id.split("/").slice(1, 4));
     await assertContained(root, resolve(repoPath, ".git"));
     if (common !== await realpath(resolve(repoPath, ".git"))) throw new Error("Git linkage points outside its expected cache clone");
-    const gitDir = resolve(entry.path, await git(["rev-parse", "--absolute-git-dir"]));
+    const gitDir = resolve(path, await git(["rev-parse", "--absolute-git-dir"]));
     await assertContained(root, gitDir);
     if (entry.kind === "worktree") {
       const allowed = new Set(["HEAD", "commondir", "gitdir", "index", "logs", "refs", "ORIG_HEAD", "FETCH_HEAD"]);
       if ((await children(gitDir)).some((name) => !allowed.has(name)) || (await children(resolve(gitDir, "logs"))).some((name) => name !== "HEAD") || (await children(resolve(gitDir, "refs"))).length) entry.reasons.push("worktree-specific Git state needs manual preservation");
     }
-    const index = resolve(entry.path, await git(["rev-parse", "--git-path", "index"]));
+    const index = resolve(path, await git(["rev-parse", "--git-path", "index"]));
     if (!existsSync(index)) throw new Error("Missing Git index");
     if (await git(["status", "--porcelain=v1", "--untracked-files=all", "--ignored"])) entry.reasons.push("tracked, staged, untracked, or ignored files need preservation");
     if ((await git(["ls-files", "-v"])).split("\n").some((line) => line && !line.startsWith("H "))) entry.reasons.push("index has assume-unchanged/skip-worktree or unusual entries");
     for (const line of (await git(["ls-files", "--stage"])).split("\n")) {
       if (!line.startsWith("160000 ")) continue;
       const submodule = line.split("\t")[1];
-      if (!submodule || submodule.startsWith('"') || (await children(resolve(entry.path, submodule))).length) {
+      if (!submodule || submodule.startsWith('"') || (await children(resolve(path, submodule))).length) {
         entry.reasons.push("populated or ambiguous submodules require manual handling");
         break;
       }
@@ -201,7 +208,39 @@ export function createCheckoutCache(root: string, runtime: CacheRuntime = defaul
     return { root, blockers, entries };
   }
 
-  /** Only explicit offline maintenance may delete checkouts; no state store is involved. */
+  /** Server-owned deletion shares the offline safety checks; callers must drain PR consumers. */
+  async function deleteWorktree(id: string): Promise<void> {
+    const lock = resolve(await realpath(root), CACHE_LOCK);
+    function assertOwned(): void {
+      const owner = owners.get(lock);
+      let recorded: string;
+      try { recorded = readFileSync(resolve(lock, "owner.json"), "utf8"); } catch (error) {
+        throw new Error("Checkout deletion requires this process to own the cache", { cause: error });
+      }
+      if (owner == null || recorded !== owner) throw new Error("Checkout deletion requires this process to own the cache");
+    }
+    assertOwned();
+    if (!/^worktrees\/[a-z0-9._-]+\/[a-z0-9._-]+\/[a-z0-9._-]+\/pr-\d+$/.test(id) || id.split("/").includes("..")) throw new Error("Invalid worktree ID");
+    const entry: CacheEntry = { id, path: resolve(root, id), kind: "worktree", reasons: [] };
+    const repo = resolve(root, "repos", ...id.split("/").slice(1, 4));
+    try { await lstat(entry.path); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      if (existsSync(repo)) {
+        const expected = resolve(await realpath(root), id);
+        const registrations = await runtime.git(["worktree", "list", "--porcelain"], repo);
+        if (registrations.split("\n").includes(`worktree ${expected}`)) throw new Error("Missing checkout still has a Git registration; inspect it during offline maintenance before reopening");
+      }
+      return;
+    }
+    await inspectEntry(root, entry, runtime);
+    if (entry.reasons.length) throw new Error(`Checkout protected: ${entry.reasons.join("; ")}. No checkout files or saved reviews were deleted.`);
+    const users = await runtime.users(entry.path);
+    if (users.length) throw new Error(`Close external checkout users before deleting: ${users.join("; ")}`);
+    assertOwned();
+    await runtime.git(["worktree", "remove", entry.path], repo);
+  }
+
+  /** CLI maintenance remains offline-only, including full-clone deletion. */
   async function evict(id: string, offlineConfirmed: boolean): Promise<void> {
     if (!offlineConfirmed) throw new Error("Confirm offline maintenance: stop the owning server and close terminals/editors/jobs using this cache first");
     const release = ownCheckoutCache(root);
@@ -221,7 +260,7 @@ export function createCheckoutCache(root: string, runtime: CacheRuntime = defaul
       }
     } finally { release(); }
   }
-  return { inventory, evict };
+  return { inventory, evict, deleteWorktree };
 }
 
 /** A new default must not silently strand old clones and create a duplicate set. */

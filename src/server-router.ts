@@ -165,6 +165,13 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
       return;
     }
 
+    if (req.method === "POST" && url.pathname === "/api/pr/checkout/delete") {
+      const response = await deps.prApi.deleteCheckout(await inputFromRequest(req));
+      deps.logger.info("api", "checkout deletion complete", { prKey: response.prKey, worktreeDir: response.worktreeDir });
+      sendJson(res, 200, response);
+      return;
+    }
+
     if (req.method === "POST" && url.pathname === "/api/pr/cleanup") {
       const input = await inputFromRequest(req);
       deps.logger.info("api", "cleanup PR requested", { input });

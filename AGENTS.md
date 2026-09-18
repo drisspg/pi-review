@@ -35,8 +35,8 @@ src/                    Node server (TypeScript, ESM, run via tsx)
   github.ts             gh api / GraphQL calls (PR data, pending reviews, comments,
                         notifications + batched PR/issue snapshots + viewer open PRs)
   worktrees.ts          Per-PR git worktree reuse (never force-replaces existing checkouts)
-  checkout-cache.ts     Read-only inventory + explicit offline checkout eviction; lifetime cache
-                        ownership excludes servers/maintenance from sharing a root
+  checkout-cache.ts     Read-only inventory, offline CLI eviction, and server-owned worktree deletion;
+                        lifetime cache ownership excludes servers/maintenance from sharing a root
   storage-paths.ts      Separate checkout cache and durable state/session paths
   pi-session.ts         Pi agent sessions (ask, prewarm, activity, diagnostics, model select)
   pi-terminal*.ts       Native Pi terminals (node-pty + WebSocket), persisted across reloads
@@ -106,8 +106,13 @@ ports and state, for example:
 `PI_PR_REVIEW_PORT=43135 PI_REVIEW_WEB_PORT=5175 PI_REVIEW_STATE_PATH=/tmp/pi-review-$USER-43135.json npm run dev`.
 Stop only that process tree; never broad `pkill`/`killall`.
 
-Checkout eviction is offline-only: `npm run cache -- inventory [--legacy]`, then after operator
+CLI checkout eviction is offline-only: `npm run cache -- inventory [--legacy]`, then after operator
 confirmation and closing checkout users, `npm run cache -- evict [--legacy] --offline <id>`.
+The explicit `/api/pr/checkout/delete` action may delete a clean worktree while its server owns
+the cache: first await PR agent/terminal teardown, serialize with preparation and file users,
+and run the same Git/data safety checks plus an external-user check. Keep the saved PR, drafts,
+reviews, and session history; the shared clone stays cached. UI deletion must not call the
+legacy saved-review removal contract `/api/pr/cleanup`.
 Never remove saved PRs to reclaim cache space, bypass safety checks, steal a live ownership lock,
 or move linked worktrees with a plain rename. Git cleanliness alone is not deletion evidence:
 inspect detached HEAD reflogs, ignored files, Git linkage and administrative state too.
@@ -117,7 +122,7 @@ awaits Pi session/terminal teardown, then resets the linked checkout to the matc
 and cleans ordinary non-ignored untracked files. Only `/api/pr/refresh` resets; opening and
 `/api/pr/activity` (also used after comment/review actions) remain non-destructive. Never wire those
 implicit activity callbacks to reset mode. Refresh preserves ignored environments, nested repos,
-branch refs, and durable review state; eviction remains offline-only. See README for protected-entry handling. Production legacy
+branch refs, and durable review state; full-clone eviction remains offline-only. See README for protected-entry handling. Production legacy
 cleanup needs a read-only inventory and user confirmation; tests must use temporary Git repos.
 
 ## Backend-first feature workflow

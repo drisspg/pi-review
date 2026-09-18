@@ -84,10 +84,80 @@ async function assertRefused(f: Fixture, id: string, reason: RegExp): Promise<vo
   assert.ok(entry, `missing inventory entry ${id}`);
   assert.match(entry.reasons.join("; "), reason);
   await assert.rejects(f.cache.evict(id, true), reason);
+  if (id === f.worktreeId) {
+    const release = ownCheckoutCache(f.root);
+    try { await assert.rejects(f.cache.deleteWorktree(id), reason); } finally { release(); }
+  }
   assert.ok(existsSync(entry.path));
   assert.equal(existsSync(resolve(f.root, CACHE_LOCK)), false);
   await assertSentinels(f);
 }
+
+test("server-owned checkout deletion keeps durable state, supports reopen, and is idempotent", async (t) => {
+  const f = await fixture(t);
+  await assert.rejects(f.cache.deleteWorktree(f.worktreeId), /own the cache/);
+  const release = ownCheckoutCache(f.root);
+  try {
+    await assert.rejects(f.cache.deleteWorktree(f.repoId), /Invalid worktree ID/);
+    await f.cache.deleteWorktree(f.worktreeId);
+    await f.cache.deleteWorktree(f.worktreeId);
+    assert.equal(existsSync(f.worktree), false);
+    assert.ok(existsSync(f.repo));
+    assert.equal((await cacheGit(["worktree", "list", "--porcelain"], f.repo)).includes(`worktree ${f.worktree}`), false);
+    await assertSentinels(f);
+    await f.service.preparePrWorktree(ref, f.origin, f.head);
+    assert.equal(await cacheGit(["rev-parse", "HEAD"], f.worktree), f.head);
+  } finally { release(); }
+});
+
+test("inventory and server deletion accept a canonical alias of the cache root", async (t) => {
+  const f = await fixture(t);
+  const alias = resolve(f.directory, "cache-alias");
+  await symlink(f.root, alias, "dir");
+  const cache = createCheckoutCache(alias, runtime);
+  assert.deepEqual((await cache.inventory()).entries.find((entry) => entry.id === f.worktreeId)?.reasons, []);
+  const release = ownCheckoutCache(f.root);
+  try {
+    await cache.deleteWorktree(f.worktreeId);
+    assert.equal(existsSync(f.worktree), false);
+    await assertSentinels(f);
+  } finally { release(); }
+});
+
+test("server-owned deletion refuses active external users and lost ownership", async (t) => {
+  const f = await fixture(t);
+  const release = ownCheckoutCache(f.root);
+  try {
+    const active = createCheckoutCache(f.root, { ...runtime, users: async (path) => {
+      assert.equal(path, f.worktree);
+      return ["editor still open"];
+    } });
+    await assert.rejects(active.deleteWorktree(f.worktreeId), /editor still open/);
+    const unknown = createCheckoutCache(f.root, { ...runtime, users: async () => { throw new Error("process probe failed"); } });
+    await assert.rejects(unknown.deleteWorktree(f.worktreeId), /process probe failed/);
+    const changed = createCheckoutCache(f.root, { ...runtime, users: async () => {
+      await writeFile(resolve(f.root, CACHE_LOCK, "owner.json"), "replacement owner");
+      return [];
+    } });
+    await assert.rejects(changed.deleteWorktree(f.worktreeId), /own the cache/);
+    await rm(resolve(f.root, CACHE_LOCK, "owner.json"));
+    await assert.rejects(f.cache.deleteWorktree(f.worktreeId), /own the cache/);
+    assert.ok(existsSync(f.worktree));
+    await assertSentinels(f);
+  } finally { release(); }
+});
+
+test("server deletion refuses a missing but still registered checkout", async (t) => {
+  const f = await fixture(t);
+  const moved = resolve(f.directory, "preserved-worktree");
+  await rename(f.worktree, moved);
+  const release = ownCheckoutCache(f.root);
+  try {
+    await assert.rejects(f.cache.deleteWorktree(f.worktreeId), /still has a Git registration/);
+    assert.equal(await readFile(resolve(moved, "README.md"), "utf8"), "PR content\n");
+    await assertSentinels(f);
+  } finally { release(); }
+});
 
 test("clean PR worktrees can be evicted and recreated without touching durable state or sessions", async (t) => {
   const f = await fixture(t);

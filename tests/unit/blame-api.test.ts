@@ -25,6 +25,7 @@ function fakeDeps(overrides: Partial<BlameApiDeps> = {}): BlameApiDeps & { gitCa
   return {
     gitCalls,
     exists: () => true,
+    withPrWorktree: (_ref, operation) => operation(),
     async git(args, cwd) {
       gitCalls.push({ args, cwd });
       return porcelain;
@@ -59,6 +60,20 @@ test("blame runs git blame in the PR worktree and builds the commit URL", async 
   assert.equal(blame.sha, sha);
   assert.equal(blame.prNumber, 1234);
   assert.equal(blame.commitUrl, `https://github.com/pytorch/pytorch/commit/${sha}`);
+});
+
+test("blame keeps its Git operation inside the checkout lease", async () => {
+  let locked = false;
+  const deps = fakeDeps({
+    withPrWorktree: async (requestRef, operation) => {
+      assert.deepEqual(requestRef, ref);
+      locked = true;
+      try { return await operation(); } finally { locked = false; }
+    },
+    git: async () => { assert.ok(locked); return porcelain; },
+  });
+  await createBlameApi(deps).blame({ prUrl: "url", path: "src/a.ts", line: 12 });
+  assert.equal(locked, false);
 });
 
 test("blame rejects malformed payloads and missing worktrees", async () => {

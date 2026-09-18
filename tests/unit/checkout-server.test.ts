@@ -20,7 +20,7 @@ async function unusedPort(): Promise<number> {
   return address.port;
 }
 
-test("real servers isolate checkout roots and exclude cross-process maintenance/sharing", { timeout: 30_000 }, async (t) => {
+test("real servers isolate checkout roots and exclude cross-process maintenance/sharing", { timeout: 60_000 }, async (t) => {
   const directory = await mkdtemp(resolve(tmpdir(), "pi-review-server-cache-"));
   const children: ReturnType<typeof spawn>[] = [];
   t.after(async () => {
@@ -45,9 +45,11 @@ test("real servers isolate checkout roots and exclude cross-process maintenance/
     let output = "";
     child.stdout.on("data", (data) => { output += data; });
     child.stderr.on("data", (data) => { output += data; });
-    for (let i = 0; i < 150; i++) {
+    // Match Playwright's startup budget; the full unit suite competes for cold tsx imports.
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
       if (child.exitCode != null) return { child, cache, state, output, port };
-      if (await fetch(`http://127.0.0.1:${port}/api/health`).then((response) => response.ok).catch(() => false)) return { child, cache, state, output, port };
+      if (await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(1_000) }).then((response) => response.ok).catch(() => false)) return { child, cache, state, output, port };
       await new Promise((done) => setTimeout(done, 50));
     }
     throw new Error(`Server did not start: ${output}`);

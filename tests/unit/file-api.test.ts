@@ -15,6 +15,8 @@ function fakeDeps() {
     viewedReviews,
     textRequests,
     deps: {
+      exists: () => true,
+      withPrWorktree: <T>(_ref: PullRequestRef, operation: () => Promise<T>) => operation(),
       async fetchFileText(requestRef: PullRequestRef, path: string, sha: string) {
         textRequests.push({ ref: requestRef, path, sha });
         return "file text";
@@ -68,6 +70,20 @@ test("file API open resolves a safe worktree editor target", async () => {
     target: "/tmp/worktrees/pytorch/pr-1/torch/a.py:7:1",
   });
   assert.deepEqual(openedUrls, ["vscode://file/tmp/worktrees/pytorch/pr-1/torch/a.py:7:1"]);
+});
+
+test("file opening uses the checkout lease and refuses deleted checkouts", async () => {
+  const { deps, openedUrls } = fakeDeps();
+  let locked = false;
+  deps.withPrWorktree = async <T>(requestRef: PullRequestRef, operation: () => Promise<T>): Promise<T> => {
+    assert.deepEqual(requestRef, ref);
+    locked = true;
+    try { return await operation(); } finally { locked = false; }
+  };
+  deps.exists = () => { assert.ok(locked); return false; };
+  await assert.rejects(createFileApi(deps).open({ prUrl: "https://github.com/pytorch/pytorch/pull/1", path: "a.ts" }), /reopen the PR/);
+  assert.deepEqual(openedUrls, []);
+  assert.equal(locked, false);
 });
 
 test("file API open escapes URL delimiter characters in valid file paths", async () => {

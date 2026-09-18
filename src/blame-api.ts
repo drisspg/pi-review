@@ -14,6 +14,7 @@ export type BlameApiDeps = {
   git: (args: string[], cwd: string) => Promise<string>;
   parsePullRequestRef: (input: string) => PullRequestRef;
   worktreeDirForRef: (ref: PullRequestRef) => string;
+  withPrWorktree: <T>(ref: PullRequestRef, operation: () => Promise<T>) => Promise<T>;
 };
 
 export type BlameApi = {
@@ -45,9 +46,11 @@ export function createBlameApi(deps: BlameApiDeps): BlameApi {
     if (typeof path !== "string" || path.length === 0 || path.startsWith("/") || path.startsWith("-") || path.includes("..")) throw new Error("Expected a repository-relative path");
     if (typeof line !== "number" || !Number.isInteger(line) || line < 1) throw new Error("Expected a positive line number");
     const ref = deps.parsePullRequestRef(prUrl);
-    const worktreeDir = deps.worktreeDirForRef(ref);
-    if (!deps.exists(worktreeDir)) throw new Error("PR worktree is not prepared yet; open the PR first");
-    const output = await deps.git(["blame", "--porcelain", "-L", `${line},${line}`, "HEAD", "--", path], worktreeDir);
+    const output = await deps.withPrWorktree(ref, async () => {
+      const worktreeDir = deps.worktreeDirForRef(ref);
+      if (!deps.exists(worktreeDir)) throw new Error("PR worktree is not prepared yet; open the PR first");
+      return deps.git(["blame", "--porcelain", "-L", `${line},${line}`, "HEAD", "--", path], worktreeDir);
+    });
     const parsed = parseBlamePorcelain(output);
     if (parsed == null) throw new Error(`No blame information for ${path}:${line}`);
     return { blame: { ...parsed, commitUrl: `https://${ref.host}/${ref.owner}/${ref.repo}/commit/${parsed.sha}` } };

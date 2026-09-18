@@ -4,6 +4,7 @@ import type { AiReviewRecord, CommitChecks, DraftReview, FileReviewState, FocusS
 
 export type PrApiDeps = {
   cleanupPrWorktree: (ref: PullRequestRef) => Promise<string>;
+  deletePrWorktree: (ref: PullRequestRef) => Promise<string>;
   compareCommits: (ref: PullRequestRef, baseSha: string, headSha: string) => Promise<{ files: PullFile[]; totalCommits: number }>;
   compareCommitsLocally: (ref: PullRequestRef, sinceSha: string, headSha: string, currentFiles: PullFile[]) => Promise<GitInterdiffResult>;
   disposePiSession: (prKey: string) => Promise<void>;
@@ -28,6 +29,7 @@ export type PrApiDeps = {
 export type PrApi = {
   parse: (input: string) => { ref: PullRequestRef };
   cleanup: (input: string) => Promise<{ ok: true; prKey: string; worktreeDir: string }>;
+  deleteCheckout: (input: string) => Promise<{ ok: true; prKey: string; worktreeDir: string }>;
   activity: (input: string) => Promise<PullRequestReviewResponse>;
   refresh: (input: string) => Promise<PullRequestReviewResponse>;
   open: (input: string) => Promise<PullRequestReviewResponse>;
@@ -82,6 +84,18 @@ export function createPrApi(deps: PrApiDeps): PrApi {
       registeredHeads.delete(key);
       await deps.disposePiSession(key);
       await deps.removePullRequest(key);
+      return { ok: true, prKey: key, worktreeDir };
+    });
+  }
+
+  /** Explicit checkout deletion stops live Pi consumers but never removes durable review state. */
+  async function deleteCheckout(input: string): Promise<{ ok: true; prKey: string; worktreeDir: string }> {
+    const ref = deps.parsePullRequestRef(input);
+    const key = prKey(ref);
+    return transition(ref, async () => {
+      registeredHeads.delete(key);
+      await deps.disposePiSession(key);
+      const worktreeDir = await deps.deletePrWorktree(ref);
       return { ok: true, prKey: key, worktreeDir };
     });
   }
@@ -173,5 +187,5 @@ export function createPrApi(deps: PrApiDeps): PrApi {
     return { checks: await deps.fetchCommitChecks(ref, shaFromPayload(payload, "sha")) };
   }
 
-  return { parse, cleanup, activity, refresh, open, interdiff, checks };
+  return { parse, cleanup, deleteCheckout, activity, refresh, open, interdiff, checks };
 }
