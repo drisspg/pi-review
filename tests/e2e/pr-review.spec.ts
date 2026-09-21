@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, sep } from "node:path";
 import type { AnalysisKind, AnalysisResult, AnalysisRun } from "../../src/analysis-types";
@@ -162,6 +162,12 @@ test("deletes a local checkout, preserves the saved PR and draft, and recreates 
   const { key, headSha } = openedPr;
   const worktreeDir = testCheckoutDir(page);
   expect(existsSync(worktreeDir)).toBe(true);
+  const cacheRoot = await realpath(resolve(tmpdir(), `pi-review-e2e-cache-${new URL(page.url()).port}`));
+  const gitDir = (await readFile(resolve(worktreeDir, ".git"), "utf8")).trim().replace(/^gitdir: /, "");
+  expect((await realpath(gitDir)).startsWith(`${cacheRoot}${sep}repos${sep}`)).toBe(true);
+  const metadataMarker = `metadata-e2e-${Date.now()}`;
+  await mkdir(resolve(gitDir, "sl"), { recursive: true });
+  await writeFile(resolve(gitDir, "sl", metadataMarker), "Preserve Sapling metadata");
   page.on("dialog", (dialog) => dialog.accept());
   await goHome(page);
   const saved = await page.request.post("/api/draft-review/save", { data: { prKey: key, headSha, event: "COMMENT", body: "Preserve checkout deletion draft", comments: [] } });
@@ -173,6 +179,10 @@ test("deletes a local checkout, preserves the saved PR and draft, and recreates 
   expect(deletion.ok(), await deletion.text()).toBe(true);
   expect(await deletion.json()).toEqual({ ok: true, prKey: key, worktreeDir });
   expect(existsSync(worktreeDir)).toBe(false);
+  const recoveryRoot = resolve("test-results", `e2e-state-${new URL(page.url()).port}.json.data`, "checkout-metadata");
+  const copies = (await readdir(recoveryRoot, { recursive: true })).filter((name) => name.endsWith(`${sep}sl${sep}${metadataMarker}`));
+  expect(copies).toHaveLength(1);
+  expect(await readFile(resolve(recoveryRoot, copies[0]), "utf8")).toBe("Preserve Sapling metadata");
   await expect(page.getByRole("status")).toContainText("Saved reviews, drafts, and session history were kept");
   await expect(page.getByRole("status")).toBeInViewport();
   await expect(card).toBeVisible();
@@ -404,6 +414,28 @@ for (const partialFailure of [false, true]) {
     expect(dialogs[0]).toContain("Saved reviews, drafts, and session history are kept");
   });
 }
+
+test("large checkout deletion failures are collapsed into a per-PR list", async ({ page }) => {
+  const prs = Array.from({ length: 16 }, (_, index) => ({
+    key: `github.com/example/repo#${index + 1}`, url: `https://github.com/example/repo/pull/${index + 1}`,
+    title: `Saved review ${index + 1}`, headSha: "111111111111", lastOpenedAt: "2026-07-23T00:00:00.000Z",
+  }));
+  await page.route("**/api/prs", (route) => route.fulfill({ json: { prs } }));
+  await page.route("**/api/pr/checkout/delete", (route) => route.fulfill({ status: 409, json: { error: "Checkout protected: commit history needs preservation" } }));
+  page.on("dialog", (dialog) => dialog.accept());
+  await page.goto("/");
+  await expect(page.locator(".pr-card")).toHaveCount(16);
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await page.getByText("Select visible", { exact: true }).click();
+  await page.getByRole("button", { name: "Delete local checkouts (16)" }).click();
+  const alert = page.getByRole("alert");
+  await expect(alert.locator("summary")).toHaveText("16 checkouts kept — review protection reasons");
+  await expect(alert.locator("details")).toHaveJSProperty("open", false);
+  await expect(alert.locator("li")).toHaveCount(16);
+  await alert.locator("summary").click();
+  await expect(alert.locator("li").first()).toContainText("github.com/example/repo#1: Checkout protected");
+  await expect(page.locator(".pr-card")).toHaveCount(16);
+});
 
 test("reopens a previously loaded PR from the client cache", async ({ page }) => {
   let openRequests = 0;

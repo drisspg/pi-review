@@ -37,6 +37,7 @@ src/                    Node server (TypeScript, ESM, run via tsx)
   worktrees.ts          Per-PR git worktree reuse (never force-replaces existing checkouts)
   checkout-cache.ts     Read-only inventory, offline CLI eviction, and server-owned worktree deletion;
                         lifetime cache ownership excludes servers/maintenance from sharing a root
+  checkout-metadata.ts  Bounded, verified durable copies of Sapling metadata before UI deletion
   storage-paths.ts      Separate checkout cache and durable state/session paths
   pi-session.ts         Pi agent sessions (ask, prewarm, activity, diagnostics, model select)
   pi-terminal*.ts       Native Pi terminals (node-pty + WebSocket), persisted across reloads
@@ -112,7 +113,10 @@ The explicit `/api/pr/checkout/delete` action may delete a clean worktree while 
 the cache: first await PR agent/terminal teardown, serialize with preparation and file users,
 and run the same Git/data safety checks plus an external-user check. Keep the saved PR, drafts,
 reviews, and session history; the shared clone stays cached. UI deletion must not call the
-legacy saved-review removal contract `/api/pr/cleanup`.
+legacy saved-review removal contract `/api/pr/cleanup`. Ordinary worktree `sl/` metadata may be
+preserved in durable `checkout-metadata/` before server-owned deletion; verify source and copied
+manifests, keep recovery outside the deleted checkout, and refuse symlinks/special files or copy
+failures. Do not treat this as permission to discard unknown metadata or unpublished commits.
 Never remove saved PRs to reclaim cache space, bypass safety checks, steal a live ownership lock,
 or move linked worktrees with a plain rename. Git cleanliness alone is not deletion evidence:
 inspect detached HEAD reflogs, ignored files, Git linkage and administrative state too.

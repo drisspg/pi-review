@@ -435,6 +435,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [checkoutResetInput, setCheckoutResetInput] = useState<string | null>(null);
   const [checkoutDeleteStatus, setCheckoutDeleteStatus] = useState<string | null>(null);
+  const [checkoutDeleteFailures, setCheckoutDeleteFailures] = useState<Array<{ prKey: string; message: string }>>([]);
   const [deletingCheckouts, setDeletingCheckouts] = useState(false);
   const deletingCheckoutsRef = useRef(false);
   const [diagnostics, setDiagnostics] = useState<Record<string, unknown> | null>(null);
@@ -614,6 +615,7 @@ function App() {
   async function openPr(nextInput: string, options: OpenPrOptions = {}) {
     if (deletingCheckoutsRef.current) return;
     setCheckoutDeleteStatus(null);
+    setCheckoutDeleteFailures([]);
     if (pendingOpenRef.current?.input === nextInput && pendingOpenRef.current.requestId === openRequestIdRef.current) return;
     openAbortRef.current?.abort();
     const controller = new AbortController();
@@ -1059,15 +1061,16 @@ function App() {
     setError(null);
     setCheckoutResetInput(null);
     setCheckoutDeleteStatus(null);
+    setCheckoutDeleteFailures([]);
     const deletedKeys: string[] = [];
-    const failures: string[] = [];
+    const failures: Array<{ prKey: string; message: string }> = [];
     try {
       for (const pr of targets) {
         try {
           await api("/api/pr/checkout/delete", { method: "POST", body: JSON.stringify({ input: pr.url || prUrlFromKey(pr.key) }) });
           deletedKeys.push(pr.key);
         } catch (error) {
-          failures.push(`${pr.key}: ${errorMessage(error)}`);
+          failures.push({ prKey: pr.key, message: errorMessage(error) });
         } finally {
           // Even a protected checkout may have had its Pi context disposed before refusal.
           for (const [cacheKey, cached] of reviewCacheRef.current) {
@@ -1076,7 +1079,7 @@ function App() {
         }
       }
       if (deletedKeys.length > 0) setCheckoutDeleteStatus(`Deleted ${deletedKeys.length} local checkout${deletedKeys.length === 1 ? "" : "s"}. Saved reviews, drafts, and session history were kept. Reopening a PR recreates its checkout.`);
-      if (failures.length > 0) setError(`Checkout deletion failed for ${failures.join("; ")}`);
+      setCheckoutDeleteFailures(failures);
       window.scrollTo(0, 0);
       await refreshLogs().catch(() => undefined);
       return deletedKeys;
@@ -1092,6 +1095,7 @@ function App() {
     setReview(null);
     setError(null);
     setCheckoutDeleteStatus(null);
+    setCheckoutDeleteFailures([]);
     setCheckoutResetInput(null);
     setDiagnostics(null);
     void refreshHistory();
@@ -1139,6 +1143,10 @@ function App() {
       openLogs={() => { setLogsOpen(true); void refreshLogs(); }}
     />}
     {checkoutDeleteStatus != null && <Flash variant="success" role="status">{checkoutDeleteStatus}</Flash>}
+    {checkoutDeleteFailures.length > 0 && <Flash variant="warning" role="alert"><details open={checkoutDeleteFailures.length <= 3}>
+      <summary>{checkoutDeleteFailures.length} checkout{checkoutDeleteFailures.length === 1 ? "" : "s"} kept — review protection reasons</summary>
+      <ul>{checkoutDeleteFailures.map(({ prKey, message }) => <li key={prKey}><strong>{prKey}</strong>: {message}</li>)}</ul>
+    </details><p>Saved reviews are unchanged. Local files or potentially unique commits still need preservation before these checkouts can be deleted.</p></Flash>}
     {error != null && <Flash variant="danger" className="error" role="alert">{error}{checkoutResetInput != null && <div className="checkout-reset-recovery"><span>Reset discards local code edits and ordinary untracked files. Saved reviews and ignored environments are kept.</span><Button disabled={busy} onClick={() => void openPr(checkoutResetInput, { resetCheckout: true })}>Reset checkout and open</Button></div>}</Flash>}
     {busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p><Button variant="muted" onClick={cancelOpen}>Cancel</Button></div> : review == null ? <StartPage prs={prs} openPr={openPr} deleteCheckouts={deleteCheckouts} deleting={deletingCheckouts} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} reviewMode={reviewMode} setReviewMode={setReviewMode} overview={overview} runOverview={runOverview} saveGuideProgress={saveGuideProgress} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, copyFeedbackPrompt: copyReviewFeedbackPrompt, guideReview, runGuideReview, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} reviewEvent={reviewEvent} setReviewEvent={setReviewEvent} reviewBody={reviewBody} setReviewBody={setReviewBody} draftSaveStatus={draftSaveStatus} draftSaveError={draftSaveError} retryDraftSave={() => setDraftSaveRetry((retry) => retry + 1)} archiveReview={archiveReview} discardReview={discardReview} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} githubDrafts={{ review: githubDraftReview, loaded: githubDraftLoaded, loading: githubDraftLoading, moving: githubDraftMoving, error: githubDraftError, pull: pullGithubDraftReview, moveLocalDrafts: moveLocalDraftsToGithub, copyHandoff: copyGithubDraftHandoff }} barMenu={reviewBarMenu} goHome={goHome} />}    {diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}
     {review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} openDiagnostics={() => { setSettingsOpen(false); void loadDiagnostics(); }} close={() => setSettingsOpen(false)} />}

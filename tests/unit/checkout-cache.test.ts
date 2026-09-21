@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test, { type TestContext } from "node:test";
@@ -61,9 +61,10 @@ async function fixture(t: TestContext) {
   await writeFile(state, '{"drafts":[{"body":"keep my review"}]}\n');
   await writeFile(session, '{"type":"message","text":"keep my session"}\n');
   const sentinels = await Promise.all([state, session].map((path) => readFile(path)));
+  const metadataRoot = resolve(directory, "durable-metadata");
   return {
-    directory, root, origin, head, service, state, session, sentinels,
-    cache: createCheckoutCache(root, runtime),
+    directory, root, origin, head, service, state, session, sentinels, metadataRoot,
+    cache: createCheckoutCache(root, runtime, metadataRoot),
     repo: service.repoDirForRef(ref),
     worktree: service.worktreeDirForRef(ref),
     repoId: "repos/github.com/fixture/project",
@@ -91,6 +92,83 @@ async function assertRefused(f: Fixture, id: string, reason: RegExp): Promise<vo
   assert.ok(existsSync(entry.path));
   assert.equal(existsSync(resolve(f.root, CACHE_LOCK)), false);
   await assertSentinels(f);
+}
+
+for (const legacy of [false, true]) {
+  test(`server deletion preserves Sapling state outside evictable trees (legacy root: ${legacy})`, async (t) => {
+    const f = await fixture(t);
+    const gitDir = await cacheGit(["rev-parse", "--absolute-git-dir"], f.worktree);
+    await mkdir(resolve(gitDir, "sl/store"), { recursive: true });
+    await writeFile(resolve(gitDir, "sl/store/dirstate"), "preserve Sapling state");
+    const metadataRoot = legacy ? resolve(f.root, "checkout-metadata") : f.metadataRoot;
+    const cache = createCheckoutCache(f.root, runtime, metadataRoot);
+    const release = ownCheckoutCache(f.root);
+    try {
+      await cache.deleteWorktree(f.worktreeId);
+      assert.equal(existsSync(f.worktree), false);
+      const parent = resolve(metadataRoot, f.worktreeId);
+      const versions = await readdir(parent);
+      assert.equal(versions.length, 1);
+      assert.equal(await readFile(resolve(parent, versions[0], "sl/store/dirstate"), "utf8"), "preserve Sapling state");
+      await assertSentinels(f);
+    } finally { release(); }
+  });
+}
+
+for (const problem of ["local commit", "recovery directory failure", "symlink", "destination inside checkout", "destination inside Git metadata"] as const) {
+  test(`Sapling preservation does not bypass ${problem} protection`, async (t) => {
+    const f = await fixture(t);
+    const gitDir = await cacheGit(["rev-parse", "--absolute-git-dir"], f.worktree);
+    await mkdir(resolve(gitDir, "sl"));
+    await writeFile(resolve(gitDir, "sl/config-git-user"), "metadata");
+    let cache = f.cache;
+    if (problem === "local commit") {
+      await writeFile(resolve(f.worktree, "README.md"), "local work");
+      await cacheGit(["add", "README.md"], f.worktree);
+      await commit(f.worktree, "Unpublished work");
+    } else if (problem === "recovery directory failure") {
+      await writeFile(f.metadataRoot, "not a directory");
+    } else if (problem === "symlink") {
+      await symlink(resolve(gitDir, "sl/config-git-user"), resolve(gitDir, "sl/link"));
+    } else {
+      // Canonical aliases must not hide either directory removed by git worktree remove.
+      const alias = resolve(f.directory, "metadata-alias");
+      await symlink(problem === "destination inside checkout" ? f.worktree : gitDir, alias, "dir");
+      cache = createCheckoutCache(f.root, runtime, resolve(alias, "recovery"));
+    }
+    const beforeWorktree = await readdir(f.worktree);
+    const beforeGitDir = await readdir(gitDir);
+    const release = ownCheckoutCache(f.root);
+    try {
+      await assert.rejects(cache.deleteWorktree(f.worktreeId), problem === "local commit" ? /local commits/ : problem === "symlink" ? /symlink/ : problem.startsWith("destination inside") ? /outside the checkout/ : /ENOTDIR/);
+      assert.deepEqual(await readdir(f.worktree), beforeWorktree);
+      assert.deepEqual(await readdir(gitDir), beforeGitDir);
+      assert.ok(existsSync(f.worktree));
+      assert.equal(await readFile(resolve(gitDir, "sl/config-git-user"), "utf8"), "metadata");
+      await assertSentinels(f);
+    } finally { release(); }
+  });
+}
+
+for (const afterCopy of [false, true]) {
+  test(`Sapling metadata users block deletion (arrive after copy: ${afterCopy})`, async (t) => {
+    const f = await fixture(t);
+    const gitDir = await cacheGit(["rev-parse", "--absolute-git-dir"], f.worktree);
+    await mkdir(resolve(gitDir, "sl"));
+    await writeFile(resolve(gitDir, "sl/dirstate"), "metadata");
+    let metadataProbes = 0;
+    const cache = createCheckoutCache(f.root, { ...runtime, users: async (path) => {
+      if (path === gitDir && (++metadataProbes > 1 || !afterCopy)) return ["Sapling process still open"];
+      return [];
+    } }, f.metadataRoot);
+    const release = ownCheckoutCache(f.root);
+    try {
+      await assert.rejects(cache.deleteWorktree(f.worktreeId), /Sapling process still open/);
+      assert.ok(existsSync(f.worktree));
+      assert.equal(await readFile(resolve(gitDir, "sl/dirstate"), "utf8"), "metadata");
+      assert.equal(existsSync(f.metadataRoot), afterCopy);
+    } finally { release(); }
+  });
 }
 
 test("server-owned checkout deletion keeps durable state, supports reopen, and is idempotent", async (t) => {
@@ -129,8 +207,7 @@ test("server-owned deletion refuses active external users and lost ownership", a
   const release = ownCheckoutCache(f.root);
   try {
     const active = createCheckoutCache(f.root, { ...runtime, users: async (path) => {
-      assert.equal(path, f.worktree);
-      return ["editor still open"];
+      return path === f.worktree ? ["editor still open"] : [];
     } });
     await assert.rejects(active.deleteWorktree(f.worktreeId), /editor still open/);
     const unknown = createCheckoutCache(f.root, { ...runtime, users: async () => { throw new Error("process probe failed"); } });

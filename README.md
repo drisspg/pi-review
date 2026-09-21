@@ -208,8 +208,19 @@ The saved-PR card's **Delete local checkout** button (also available in bulk sel
 Pi agents/terminals for that PR and deletes only its clean checkout. Saved PR cards, reviews,
 drafts, annotations, and session history remain. The success message confirms that reopening
 will recreate the checkout; the shared clone is retained. Close external editors/jobs first.
-Deletion refuses local changes, ignored files, uncovered commits, extra Git metadata, or failed
-inspection. Pi sessions may already be stopped when a protection check refuses deletion.
+Deletion refuses local changes, ignored files, uncovered commits, unknown Git metadata, or failed
+inspection. Pi sessions may already be stopped when a protection check refuses deletion. Bulk
+results list each retained PR separately; long failure lists start collapsed.
+
+Ordinary Sapling `sl/` worktree metadata is automatically preserved **before** server-owned
+checkout deletion. Verified copies and SHA-256 manifests live in
+`~/.pi/agent/state/pi-pr-review/checkout-metadata/<worktree-id>/<copy-id>/` (or
+`<custom-state-path>.data/checkout-metadata/`), outside the removed checkout. This is metadata
+preservation, not an archive of the source tree or unpublished Git history. Copies are private,
+limited to 64 MiB / 10,000 entries, and must contain only regular files/directories. A failed copy,
+changed source, unsafe recovery location, symlink, or special file refuses deletion. Other Git
+metadata and potentially unique commits remain protected. CLI inventory/eviction still reports
+Sapling metadata for manual handling; automatic preservation belongs to the server-owned flow.
 
 The server must own the cache, and deletion is ordered with PR opens/refreshes, preparation,
 blame, and editor-open requests. `/api/pr/checkout/delete` is the checkout-only contract;

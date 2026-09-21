@@ -6,7 +6,8 @@ import { homedir, hostname } from "node:os";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 
-import { checkoutCacheRoot, legacyStorageRoot, usesDefaultReviewState } from "./storage-paths.js";
+import { checkoutCacheRoot, legacyStorageRoot, reviewSessionRoot, usesDefaultReviewState } from "./storage-paths.js";
+import { preserveSaplingMetadata, resolveMetadataRecoveryPath } from "./checkout-metadata.js";
 
 const exec = promisify(execFile);
 const owners = new Map<string, string>();
@@ -132,8 +133,10 @@ async function assertContained(root: string, path: string): Promise<void> {
   }
 }
 
-async function inspectEntry(root: string, entry: CacheEntry, runtime: CacheRuntime): Promise<void> {
+/** Inspection is read-only; recognized Sapling state must be preserved by the deleting caller. */
+async function inspectEntry(root: string, entry: CacheEntry, runtime: CacheRuntime, preserveSapling = false): Promise<{ gitDir: string; saplingMetadata?: string } | undefined> {
   if (entry.reasons.length) return;
+  let saplingMetadata: string | undefined;
   try {
     // Canonicalize the root only; inner symlinks remain visible to containment checks.
     const canonicalRoot = await realpath(root);
@@ -151,7 +154,12 @@ async function inspectEntry(root: string, entry: CacheEntry, runtime: CacheRunti
     await assertContained(root, gitDir);
     if (entry.kind === "worktree") {
       const allowed = new Set(["HEAD", "commondir", "gitdir", "index", "logs", "refs", "ORIG_HEAD", "FETCH_HEAD"]);
-      if ((await children(gitDir)).some((name) => !allowed.has(name)) || (await children(resolve(gitDir, "logs"))).some((name) => name !== "HEAD") || (await children(resolve(gitDir, "refs"))).length) entry.reasons.push("worktree-specific Git state needs manual preservation");
+      const names = await children(gitDir);
+      if (preserveSapling && names.includes("sl")) {
+        allowed.add("sl");
+        saplingMetadata = resolve(gitDir, "sl");
+      }
+      if (names.some((name) => !allowed.has(name)) || (await children(resolve(gitDir, "logs"))).some((name) => name !== "HEAD") || (await children(resolve(gitDir, "refs"))).length) entry.reasons.push("worktree-specific Git state needs manual preservation");
     }
     const index = resolve(path, await git(["rev-parse", "--git-path", "index"]));
     if (!existsSync(index)) throw new Error("Missing Git index");
@@ -188,12 +196,13 @@ async function inspectEntry(root: string, entry: CacheEntry, runtime: CacheRunti
       // Walking a large object database is expensive; only do it for an otherwise eligible clone.
       if (!entry.reasons.length && (await git(["fsck", "--full", "--unreachable", "--no-reflogs"])).trim()) entry.reasons.push("unreachable Git objects need manual preservation");
     }
+    return { gitDir, saplingMetadata };
   } catch (error) {
     entry.reasons.push(`inspection failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
-export function createCheckoutCache(root: string, runtime: CacheRuntime = defaultRuntime) {
+export function createCheckoutCache(root: string, runtime: CacheRuntime = defaultRuntime, metadataRoot = resolve(reviewSessionRoot(), "checkout-metadata")) {
   root = resolve(root);
   async function inventory(): Promise<{ root: string; blockers: string[]; entries: CacheEntry[] }> {
     if (!existsSync(root)) return { root, blockers: [], entries: [] };
@@ -232,10 +241,21 @@ export function createCheckoutCache(root: string, runtime: CacheRuntime = defaul
       }
       return;
     }
-    await inspectEntry(root, entry, runtime);
+    const inspection = await inspectEntry(root, entry, runtime, true);
     if (entry.reasons.length) throw new Error(`Checkout protected: ${entry.reasons.join("; ")}. No checkout files or saved reviews were deleted.`);
-    const users = await runtime.users(entry.path);
-    if (users.length) throw new Error(`Close external checkout users before deleting: ${users.join("; ")}`);
+    if (inspection == null) throw new Error("Failed to inspect checkout Git metadata");
+    const { gitDir, saplingMetadata } = inspection;
+    async function checkUsers(): Promise<void> {
+      const users = (await Promise.all([runtime.users(entry.path), runtime.users(gitDir)])).flat();
+      if (users.length) throw new Error(`Close external checkout users before deleting: ${users.join("; ")}`);
+    }
+    await checkUsers();
+    if (saplingMetadata != null) {
+      // A legacy root may also hold durable state; only repos/ and worktrees/ are evictable.
+      const destination = await resolveMetadataRecoveryPath(resolve(metadataRoot, id), [resolve(root, "repos"), resolve(root, "worktrees")]);
+      await preserveSaplingMetadata(saplingMetadata, destination);
+      await checkUsers();
+    }
     assertOwned();
     await runtime.git(["worktree", "remove", entry.path], repo);
   }
