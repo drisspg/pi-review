@@ -105,6 +105,9 @@ export type StoredPullRequest = {
   reviewDecision: PullRequestReviewDecision;
 };
 
+/** Runtime checkout availability is overlaid for the history list, never persisted. */
+export type PullRequestListItem = StoredPullRequest & { checkoutPresent: boolean };
+
 export type FileReviewState = {
   prKey: string;
   path: string;

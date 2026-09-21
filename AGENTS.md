@@ -39,6 +39,8 @@ src/                    Node server (TypeScript, ESM, run via tsx)
                         lifetime cache ownership excludes servers/maintenance from sharing a root
   checkout-metadata.ts  Bounded, verified durable copies of Sapling metadata before UI deletion
   storage-paths.ts      Separate checkout cache and durable state/session paths
+  shell-api.ts          Saved-PR list overlays runtime checkoutPresent; home defaults to Local
+                        checkouts, with absent checkouts kept under Saved only. Never persist this flag.
   pi-session.ts         Pi agent sessions (ask, prewarm, activity, diagnostics, model select)
   pi-terminal*.ts       Native Pi terminals (node-pty + WebSocket), persisted across reloads
   types.ts              Shared backend types

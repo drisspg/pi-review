@@ -33,6 +33,7 @@ const log: LogEntry = {
 
 test("shell API returns health status", () => {
   const api = createShellApi({
+    hasCheckout: () => false,
     async listRecentPullRequests() {
       return [];
     },
@@ -46,6 +47,7 @@ test("shell API returns health status", () => {
 
 test("shell API lists recent PRs through injected state", async () => {
   const api = createShellApi({
+    hasCheckout: (ref) => { assert.deepEqual(ref, pr.ref); return true; },
     async listRecentPullRequests() {
       return [pr];
     },
@@ -54,11 +56,26 @@ test("shell API lists recent PRs through injected state", async () => {
     },
   });
 
-  assert.deepEqual(await api.prs(), { prs: [pr] });
+  assert.deepEqual(await api.prs(), { prs: [{ ...pr, checkoutPresent: true }] });
+  assert.equal(Object.hasOwn(pr, "checkoutPresent"), false);
+});
+
+test("shell API overlays current checkout presence on every history request", async () => {
+  let present = true;
+  const api = createShellApi({
+    hasCheckout: (ref) => present && ref.number === 1,
+    listRecentPullRequests: async () => [pr, { ...pr, key: "github.com/o/r#2", ref: { ...pr.ref, number: 2 } }],
+    logEntries: () => [],
+  });
+  assert.deepEqual((await api.prs()).prs.map((pr) => pr.checkoutPresent), [true, false]);
+  present = false;
+  assert.deepEqual((await api.prs()).prs.map((pr) => pr.checkoutPresent), [false, false]);
+  assert.equal(Object.hasOwn(pr, "checkoutPresent"), false);
 });
 
 test("shell API returns log entries through injected logger", () => {
   const api = createShellApi({
+    hasCheckout: () => false,
     async listRecentPullRequests() {
       return [];
     },

@@ -24,7 +24,7 @@ import { parseOverviewSections } from "./lib/overview";
 import { languageForPath } from "./lib/highlight";
 import { newId, prUrlFromKey, relativeTime, shortSha } from "./lib/pr";
 import { isLightTheme, themes } from "./lib/theme";
-import type { AiReview, AiReviewMessage, AiReviewRecord, BlameInfo, CommitChecks, DiffRow, DraftComment, DraftReview, DragSelection, FileReviewState, FlowDag, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, GitHubDraftComment, GitHubPendingReview, GpuWorkspace, GpuWorkspaceContract, GpuWorkspaceExecResult, GuideReviewRecord, InterdiffResponse, LogEntry, OpenResponse, PiAgentActivity, PullFile, PullIssueComment, PullRequestReviewSummary, PullReviewComment, ReviewMemoryRecord, ReviewMemoryResponse, StoredPullRequest, Target, ThemeName, Thread } from "./types";
+import type { AiReview, AiReviewMessage, AiReviewRecord, BlameInfo, CommitChecks, DiffRow, DraftComment, DraftReview, DragSelection, FileReviewState, FlowDag, FocusArea, FocusAreaReviewState, FocusReview, FocusScanRecord, GitHubDraftComment, GitHubPendingReview, GpuWorkspace, GpuWorkspaceContract, GpuWorkspaceExecResult, GuideReviewRecord, InterdiffResponse, LogEntry, OpenResponse, PiAgentActivity, PullFile, PullIssueComment, PullRequestListItem, PullRequestReviewSummary, PullReviewComment, ReviewMemoryRecord, ReviewMemoryResponse, StoredPullRequest, Target, ThemeName, Thread } from "./types";
 import "@primer/primitives/dist/css/primitives.css";
 import "@primer/primitives/dist/css/functional/themes/dark.css";
 import "@primer/primitives/dist/css/functional/themes/dark-dimmed.css";
@@ -382,7 +382,8 @@ function highlightFocusAreas(areas: FocusArea[], activeId: string | null, collap
 
 function App() {
   const [input, setInput] = useState("");
-  const [prs, setPrs] = useState<StoredPullRequest[]>([]);
+  const [prs, setPrs] = useState<PullRequestListItem[]>([]);
+  const historyRequestIdRef = useRef(0);
   const [review, setReview] = useState<OpenResponse | null>(null);
   const [reviewMode, setReviewMode] = useState<"guide" | "diff">("diff");
   const [overview, setOverview] = useState<FlowDag>({ running: false, text: "", error: null });
@@ -450,7 +451,14 @@ function App() {
   const [logsOpen, setLogsOpen] = useState(false);
   const [gpuWorkspaceOpen, setGpuWorkspaceOpen] = useState(false);
 
-  async function refreshHistory() { setPrs((await api<{ prs: StoredPullRequest[] }>("/api/prs")).prs); }
+  async function refreshHistory() {
+    const requestId = ++historyRequestIdRef.current;
+    const { prs } = await api<{ prs: PullRequestListItem[] }>("/api/prs");
+    if (requestId !== historyRequestIdRef.current) return;
+    for (const pr of prs) if (pr.checkoutPresent === false) forgetCachedCheckout(pr.key);
+    // During a rolling upgrade, an older server's missing flag is not proof of deletion.
+    setPrs(prs.map((pr) => ({ ...pr, checkoutPresent: pr.checkoutPresent !== false })));
+  }
   async function refreshLogs() { setLogs((await api<{ logs: LogEntry[] }>("/api/logs")).logs.slice(-40).reverse()); }
   function updateAiReview(update: (current: AiReview) => AiReview): void {
     aiReviewRef.current = update(aiReviewRef.current);
@@ -539,6 +547,12 @@ function App() {
       window.removeEventListener("mouseup", finishWindowDrag);
     };
   });
+
+  function forgetCachedCheckout(prKey: string) {
+    for (const [cacheKey, cached] of reviewCacheRef.current) {
+      if (cached.pr.key === prKey) reviewCacheRef.current.delete(cacheKey);
+    }
+  }
 
   function cacheReview(data: OpenResponse) {
     reviewCacheRef.current.set(data.pr.url, data);
@@ -1069,16 +1083,16 @@ function App() {
         try {
           await api("/api/pr/checkout/delete", { method: "POST", body: JSON.stringify({ input: pr.url || prUrlFromKey(pr.key) }) });
           deletedKeys.push(pr.key);
+          historyRequestIdRef.current++;
+          setPrs((current) => current.map((item) => item.key === pr.key ? { ...item, checkoutPresent: false } : item));
         } catch (error) {
           failures.push({ prKey: pr.key, message: errorMessage(error) });
         } finally {
           // Even a protected checkout may have had its Pi context disposed before refusal.
-          for (const [cacheKey, cached] of reviewCacheRef.current) {
-            if (cached.pr.key === pr.key) reviewCacheRef.current.delete(cacheKey);
-          }
+          forgetCachedCheckout(pr.key);
         }
       }
-      if (deletedKeys.length > 0) setCheckoutDeleteStatus(`Deleted ${deletedKeys.length} local checkout${deletedKeys.length === 1 ? "" : "s"}. Saved reviews, drafts, and session history were kept. Reopening a PR recreates its checkout.`);
+      if (deletedKeys.length > 0) setCheckoutDeleteStatus(`Deleted ${deletedKeys.length} local checkout${deletedKeys.length === 1 ? "" : "s"}. Saved reviews, drafts, and session history were kept. Find them under Saved only; reopening a PR recreates its checkout.`);
       setCheckoutDeleteFailures(failures);
       window.scrollTo(0, 0);
       await refreshLogs().catch(() => undefined);
@@ -1197,19 +1211,22 @@ function AppToolbar({ review, theme, setTheme, busy, goHome, openGpuWorkspace, o
 
 type StartFilter = "all" | "needs-review" | "in-progress" | "done";
 
-function StartPage({ prs, openPr, deleteCheckouts, deleting, openInput, setOpenInput, busy }: { prs: StoredPullRequest[]; openPr: (input: string) => Promise<void>; deleteCheckouts: (prs: StoredPullRequest[]) => Promise<string[]>; deleting: boolean; openInput: string; setOpenInput: (value: string) => void; busy: boolean }) {
+function StartPage({ prs, openPr, deleteCheckouts, deleting, openInput, setOpenInput, busy }: { prs: PullRequestListItem[]; openPr: (input: string) => Promise<void>; deleteCheckouts: (prs: StoredPullRequest[]) => Promise<string[]>; deleting: boolean; openInput: string; setOpenInput: (value: string) => void; busy: boolean }) {
+  const [scope, setScope] = useState<"local" | "saved">("local");
   const [filter, setFilter] = useState<StartFilter>("all");
   const [selecting, setSelecting] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
-  const groups = useMemo(() => groupPrsByStatus(prs), [prs]);
-  const counts = { all: prs.length, "needs-review": groups.needsReview.length, "in-progress": groups.inProgress.length, done: groups.done.length } as const;
-  const visibleGroups: Array<{ id: StartFilter; title: string; hint: string; prs: StoredPullRequest[] }> = [
+  const localCount = prs.filter((pr) => pr.checkoutPresent).length;
+  const scopedPrs = useMemo(() => prs.filter((pr) => scope === "local" ? pr.checkoutPresent : !pr.checkoutPresent), [prs, scope]);
+  const groups = useMemo(() => groupPrsByStatus(scopedPrs), [scopedPrs]);
+  const counts = { all: scopedPrs.length, "needs-review": groups.needsReview.length, "in-progress": groups.inProgress.length, done: groups.done.length } as const;
+  const visibleGroups: Array<{ id: StartFilter; title: string; hint: string; prs: PullRequestListItem[] }> = [
     { id: "needs-review" as const, title: "Needs review", hint: "Not yet reviewed or new commits since your last pass.", prs: groups.needsReview },
     { id: "in-progress" as const, title: "In progress", hint: "You commented but did not approve or request changes.", prs: groups.inProgress },
     { id: "done" as const, title: "Done", hint: "Approved or changes requested at the current head.", prs: groups.done },
   ].filter((group) => filter === "all" || group.id === filter).filter((group) => group.prs.length > 0);
   const visiblePrs = visibleGroups.flatMap((group) => group.prs);
-  const selectedPrs = prs.filter((pr) => selectedKeys.has(pr.key));
+  const selectedPrs = visiblePrs.filter((pr) => pr.checkoutPresent && selectedKeys.has(pr.key));
   const allVisibleSelected = visiblePrs.length > 0 && visiblePrs.every((pr) => selectedKeys.has(pr.key));
   function toggleSelected(key: string): void {
     setSelectedKeys((current) => {
@@ -1252,20 +1269,26 @@ function StartPage({ prs, openPr, deleteCheckouts, deleting, openInput, setOpenI
     </section>
     <InboxPanel openPr={openPr} />
     {prs.length === 0 ? <section className="panel start-empty"><GitPullRequestIcon size={24} /><p className="muted">No previous reviews yet. Paste a PR above to get started.</p></section> : <>
+      <nav className="start-filters" aria-label="Checkout availability">
+        {(["local", "saved"] as const).map((id) => <button key={id} type="button" className={`start-filter${scope === id ? " active" : ""}`} aria-pressed={scope === id} disabled={deleting} onClick={() => { setScope(id); setFilter("all"); cancelSelection(); }}>
+          {id === "local" ? "Local checkouts" : "Saved only"}<span className="start-filter-count">{id === "local" ? localCount : prs.length - localCount}</span>
+        </button>)}
+      </nav>
+      <p className="muted">{scope === "local" ? "PR checkouts on this machine. Deleting a checkout keeps its saved review." : "Saved reviews without local checkouts. Opening one recreates its checkout."}</p>
       <div className="start-list-toolbar">
         <nav className="start-filters" aria-label="Filter previous reviews">
           {(["all", "needs-review", "in-progress", "done"] as const).map((id) => <button key={id} type="button" className={`start-filter${filter === id ? " active" : ""}`} onClick={() => setFilter(id)}>{filterLabel(id)}<span className="start-filter-count">{counts[id]}</span></button>)}
         </nav>
-        <div className="start-bulk-actions">
+        {scope === "local" && <div className="start-bulk-actions">
           {selecting ? <>
             <label className={`start-select-visible${visiblePrs.length === 0 ? " disabled" : ""}`}><Checkbox checked={allVisibleSelected} onChange={toggleVisible} disabled={visiblePrs.length === 0 || deleting} /> Select visible</label>
             <span className="muted">{selectedPrs.length} selected</span>
             <Button variant="muted" className="bulk-delete-button" onClick={() => void deleteSelected()} disabled={selectedPrs.length === 0 || deleting}>{deleting ? "Deleting…" : `Delete local checkouts${selectedPrs.length > 0 ? ` (${selectedPrs.length})` : ""}`}</Button>
             <Button variant="muted" onClick={cancelSelection} disabled={deleting}>Cancel</Button>
-          </> : <Button variant="muted" onClick={() => setSelecting(true)} disabled={deleting}>Select</Button>}
-        </div>
+          </> : <Button variant="muted" onClick={() => setSelecting(true)} disabled={deleting || localCount === 0}>Select</Button>}
+        </div>}
       </div>
-      {visibleGroups.length === 0 ? <p className="muted">Nothing in this category.</p> : visibleGroups.map((group) => <section className="start-group" key={group.id}>
+      {visibleGroups.length === 0 ? <p className="muted">{scopedPrs.length > 0 ? "Nothing in this category." : scope === "local" ? "No local checkouts. Your saved reviews are under Saved only." : "No saved-only reviews. Deleting a checkout keeps its review here."}</p> : visibleGroups.map((group) => <section className="start-group" key={group.id}>
         <header className="start-group-head"><h2>{group.title}</h2><span className="muted">{group.hint}</span></header>
         <div className="pr-grid">{group.prs.map((pr) => <PrCard key={pr.key} pr={pr} openPr={openPr} deleteCheckouts={deleteCheckouts} deleting={deleting} selecting={selecting} selected={selectedKeys.has(pr.key)} toggleSelected={toggleSelected} />)}</div>      </section>)}
     </>}
@@ -1279,11 +1302,11 @@ function filterLabel(id: StartFilter): string {
   return "Done";
 }
 
-function groupPrsByStatus(prs: StoredPullRequest[]): { needsReview: StoredPullRequest[]; inProgress: StoredPullRequest[]; done: StoredPullRequest[] } {
+function groupPrsByStatus(prs: PullRequestListItem[]): { needsReview: PullRequestListItem[]; inProgress: PullRequestListItem[]; done: PullRequestListItem[] } {
   const sorted = [...prs].sort((a, b) => (b.lastOpenedAt ?? "").localeCompare(a.lastOpenedAt ?? ""));
-  const needsReview: StoredPullRequest[] = [];
-  const inProgress: StoredPullRequest[] = [];
-  const done: StoredPullRequest[] = [];
+  const needsReview: PullRequestListItem[] = [];
+  const inProgress: PullRequestListItem[] = [];
+  const done: PullRequestListItem[] = [];
   for (const pr of sorted) {
     const status = reviewStatus(pr);
     if (status.tone === "success" || status.tone === "danger" || status.tone === "merged") done.push(pr);
@@ -1293,7 +1316,7 @@ function groupPrsByStatus(prs: StoredPullRequest[]): { needsReview: StoredPullRe
   return { needsReview, inProgress, done };
 }
 
-function PrCard({ pr, openPr, deleteCheckouts, deleting, selecting, selected, toggleSelected }: { pr: StoredPullRequest; openPr: (input: string) => Promise<void>; deleteCheckouts: (prs: StoredPullRequest[]) => Promise<string[]>; deleting: boolean; selecting: boolean; selected: boolean; toggleSelected: (key: string) => void }) {  const status = reviewStatus(pr);
+function PrCard({ pr, openPr, deleteCheckouts, deleting, selecting, selected, toggleSelected }: { pr: PullRequestListItem; openPr: (input: string) => Promise<void>; deleteCheckouts: (prs: StoredPullRequest[]) => Promise<string[]>; deleting: boolean; selecting: boolean; selected: boolean; toggleSelected: (key: string) => void }) {  const status = reviewStatus(pr);
   return <article className={`pr-card status-${status.tone}${selecting ? " selecting" : ""}${selected ? " selected" : ""}`}>
     {selecting && <label className="pr-card-select"><Checkbox checked={selected} onChange={() => toggleSelected(pr.key)} aria-label={`Select ${pr.key}`} disabled={deleting} /></label>}
     <a className="pr-card-body" href={reviewHash(pr.url)} aria-disabled={deleting} onClick={(event) => { if (!isPlainLeftClick(event)) return; event.preventDefault(); if (deleting) return; if (selecting) toggleSelected(pr.key); else void openPr(pr.url); }}>
@@ -1307,9 +1330,10 @@ function PrCard({ pr, openPr, deleteCheckouts, deleting, selecting, selected, to
         <span>{pr.existingCommentCount ?? 0} comments</span>
         <span>head {shortSha(pr.headSha)}</span>
         <span>{relativeTime(pr.lastOpenedAt)}</span>
+        <span>{pr.checkoutPresent ? "Local checkout" : "No local checkout"}</span>
       </div>
     </a>
-    {!selecting && <button className="trash-button" title="Delete local checkout" aria-label="Delete local checkout" onClick={() => void deleteCheckouts([pr])} disabled={deleting}><XIcon size={16} /></button>}
+    {!selecting && pr.checkoutPresent && <button className="trash-button" title="Delete local checkout" aria-label="Delete local checkout" onClick={() => void deleteCheckouts([pr])} disabled={deleting}><XIcon size={16} /></button>}
   </article>;
 }
 

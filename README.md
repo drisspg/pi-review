@@ -204,6 +204,12 @@ Inventory is read-only, does not fetch, and includes both clones and worktrees:
 npm run cache -- inventory
 ```
 
+The home page defaults to **Local checkouts**. Reviews whose checkout is absent are hidden
+under **Saved only**, with a **No local checkout** label and no checkout-delete controls.
+Deleting a checkout moves its card there immediately; reopening the review recreates the
+checkout and returns it to the default view. Availability is checked from the configured cache
+on each `/api/prs` request, not persisted as review state or inferred from review status.
+
 The saved-PR card's **Delete local checkout** button (also available in bulk selection) stops
 Pi agents/terminals for that PR and deletes only its clean checkout. Saved PR cards, reviews,
 drafts, annotations, and session history remain. The success message confirms that reopening

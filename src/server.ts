@@ -154,7 +154,7 @@ const reviewArchiveApi = createReviewArchiveApi(defaultReviewArchiveApiDeps({ cl
 const reviewMemoryApi = createReviewMemoryApi({ askPi, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewMemory, saveReviewProfile });
 const reviewSubmitRouteApi = createReviewSubmitRouteApi(defaultReviewSubmitRouteApiDeps({ clearDraftReview, fetchPullRequestReviewData: cachedFetchPullRequestReviewData, markPullRequestReviewed, saveReviewMemory, submitPullRequestReview }));
 const savedAnalysisApi = createSavedAnalysisApi({ saveAiReview, saveFocusScan, saveGuideReview, saveOverview, updateFocusScanProgress, updateGuideReviewProgress });
-const shellApi = createShellApi({ listRecentPullRequests, logEntries: logger.entries });
+const shellApi = createShellApi({ listRecentPullRequests, logEntries: logger.entries, hasCheckout: (ref) => existsSync(worktreeDirForRef(ref)) });
 const usageApi = createUsageApi(defaultUsageApiDeps(logger));
 
 // Identifies the currently served web build so open tabs can notice in-place

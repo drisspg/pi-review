@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -35,7 +35,7 @@ test("real servers isolate checkout roots and exclude cross-process maintenance/
   async function start(name: string, cacheName = name) {
     const port = await unusedPort();
     const state = resolve(directory, `${name}.json`);
-    await writeFile(state, '{"prs":[],"draftReviews":[{"prKey":"keep","body":"draft history"}]}');
+    await writeFile(state, JSON.stringify({ prs: [{ key: "github.com/example/repo#1", ref: { host: "github.com", owner: "example", repo: "repo", number: 1 }, url: "https://github.com/example/repo/pull/1", lastOpenedAt: "2026-09-21T00:00:00Z" }], draftReviews: [{ prKey: "keep", body: "draft history" }] }));
     const cache = resolve(directory, `${cacheName}-cache`);
     const child = spawn(process.execPath, ["--import", "tsx", "src/server.ts"], {
       env: { ...process.env, PI_PR_REVIEW_PORT: String(port), PI_REVIEW_STATE_PATH: state, PI_REVIEW_CACHE_DIR: cache, PI_REVIEW_DISABLE_AUTO_REVIEWS: "1" },
@@ -59,6 +59,14 @@ test("real servers isolate checkout roots and exclude cross-process maintenance/
   const config = await fetch(`http://127.0.0.1:${first.port}/api/config`).then((response) => response.json());
   assert.equal(config.autoReviews, false);
   const stateBefore = await readFile(first.state);
+  const history = () => fetch(`http://127.0.0.1:${first.port}/api/prs`).then((response) => response.json());
+  assert.equal((await history()).prs[0].checkoutPresent, false);
+  const checkout = resolve(first.cache, "worktrees/github.com/example/repo/pr-1");
+  await mkdir(checkout, { recursive: true });
+  assert.equal((await history()).prs[0].checkoutPresent, true);
+  await rm(checkout, { recursive: true });
+  assert.equal((await history()).prs[0].checkoutPresent, false);
+  assert.deepEqual(await readFile(first.state), stateBefore);
   await assert.rejects(createCheckoutCache(first.cache).evict("worktrees/github.com/example/repo/pr-1", true), /owned/);
   const shared = await start("shared", "first");
   assert.equal(shared.child.exitCode, 1, shared.output);

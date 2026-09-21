@@ -41,6 +41,10 @@ async function goHome(page: Page) {
   await page.getByRole("menuitem", { name: "New review" }).click();
 }
 
+async function showSavedOnly(page: Page) {
+  await page.getByRole("navigation", { name: "Checkout availability" }).getByRole("button", { name: /^Saved only/ }).click();
+}
+
 async function openTools(page: Page) {
   await page.getByRole("button", { name: /Tools/ }).click();
 }
@@ -185,11 +189,18 @@ test("deletes a local checkout, preserves the saved PR and draft, and recreates 
   expect(await readFile(resolve(recoveryRoot, copies[0]), "utf8")).toBe("Preserve Sapling metadata");
   await expect(page.getByRole("status")).toContainText("Saved reviews, drafts, and session history were kept");
   await expect(page.getByRole("status")).toBeInViewport();
-  await expect(card).toBeVisible();
+  await expect(card).toHaveCount(0);
   const history = await page.request.get("/api/prs");
-  expect((await history.json()).prs.some((pr: { key: string }) => pr.key === key)).toBe(true);
+  expect((await history.json()).prs.some((pr: { key: string; checkoutPresent: boolean }) => pr.key === key && !pr.checkoutPresent)).toBe(true);
   const draft = await page.request.post("/api/draft-review/get", { data: { prKey: key } });
   expect((await draft.json()).draftReview.body).toBe("Preserve checkout deletion draft");
+  await page.reload();
+  await expect(page.getByText("No local checkouts. Your saved reviews are under Saved only.")).toBeVisible();
+  await expect(card).toHaveCount(0);
+  await showSavedOnly(page);
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("No local checkout");
+  await expect(card.getByRole("button", { name: "Delete local checkout", exact: true })).toHaveCount(0);
 
   const reopened = page.waitForResponse((response) => response.url().endsWith("/api/pr/open"));
   await card.locator(".pr-card-body").click();
@@ -202,6 +213,9 @@ test("deletes a local checkout, preserves the saved PR and draft, and recreates 
   await expect(page.locator(".review-layout")).toBeVisible();
   await openReviewForm(page);
   await expect(page.getByPlaceholder("Overall review body")).toHaveValue("Preserve checkout deletion draft");
+  await goHome(page);
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("Local checkout");
 });
 
 test("recovers a blocked PR open from the start page only after an explicit checkout reset", async ({ page }) => {
@@ -350,8 +364,10 @@ test("confirms checkout-only deletion and prevents duplicate requests while pend
     release();
   }
   await expect(page.getByRole("status")).toContainText("Deleted 1 local checkout");
-  await expect(button).toBeEnabled();
+  await expect(card).toHaveCount(0);
+  await showSavedOnly(page);
   await expect(card).toBeVisible();
+  await expect(button).toHaveCount(0);
   expect(dialogs).toHaveLength(2);
   expect(dialogs[1]).toContain(`Delete local checkout for ${openedPr!.key}?`);
   expect(dialogs[1]).toContain("This stops Pi work");
@@ -363,9 +379,9 @@ test("confirms checkout-only deletion and prevents duplicate requests while pend
 for (const partialFailure of [false, true]) {
   test(partialFailure ? "bulk checkout deletion reports partial failures and keeps failed selections" : "selects and deletes multiple local checkouts without removing saved PRs", async ({ page }) => {
     const savedPrs = [
-      { key: "github.com/example/repo#1", title: "First saved PR", url: "https://github.com/example/repo/pull/1", headSha: "111111111111", lastOpenedAt: "2026-07-23T03:00:00.000Z", filesChanged: 1, existingCommentCount: 0 },
-      { key: "github.com/example/repo#2", title: "Second saved PR", url: "https://github.com/example/repo/pull/2", headSha: "222222222222", lastOpenedAt: "2026-07-23T02:00:00.000Z", filesChanged: 2, existingCommentCount: 1 },
-      { key: "github.com/example/repo#3", title: "Keep this PR", url: "https://github.com/example/repo/pull/3", headSha: "333333333333", lastOpenedAt: "2026-07-23T01:00:00.000Z", filesChanged: 3, existingCommentCount: 2 },
+      { key: "github.com/example/repo#1", title: "First saved PR", url: "https://github.com/example/repo/pull/1", headSha: "111111111111", lastOpenedAt: "2026-07-23T03:00:00.000Z", filesChanged: 1, existingCommentCount: 0, checkoutPresent: true },
+      { key: "github.com/example/repo#2", title: "Second saved PR", url: "https://github.com/example/repo/pull/2", headSha: "222222222222", lastOpenedAt: "2026-07-23T02:00:00.000Z", filesChanged: 2, existingCommentCount: 1, checkoutPresent: true },
+      { key: "github.com/example/repo#3", title: "Keep this PR", url: "https://github.com/example/repo/pull/3", headSha: "333333333333", lastOpenedAt: "2026-07-23T01:00:00.000Z", filesChanged: 3, existingCommentCount: 2, checkoutPresent: true },
     ];
     const deletionInputs: string[] = [];
     const dialogs: string[] = [];
@@ -398,10 +414,10 @@ for (const partialFailure of [false, true]) {
     await page.getByRole("button", { name: "Delete local checkouts (2)" }).click();
 
     await expect(page.getByRole("status")).toContainText(`Deleted ${partialFailure ? 1 : 2} local checkout`);
-    await expect(page.locator(".pr-card")).toHaveCount(3);
+    await expect(page.locator(".pr-card")).toHaveCount(partialFailure ? 2 : 1);
     if (partialFailure) {
       await expect(page.getByRole("alert")).toContainText("github.com/example/repo#2: Checkout protected");
-      await expect(page.getByLabel("Select github.com/example/repo#1")).not.toBeChecked();
+      await expect(page.getByLabel("Select github.com/example/repo#1")).toHaveCount(0);
       await expect(page.getByLabel("Select github.com/example/repo#2")).toBeChecked();
       await expect(page.getByRole("button", { name: "Delete local checkouts (1)" })).toBeEnabled();
     } else {
@@ -412,13 +428,76 @@ for (const partialFailure of [false, true]) {
     expect(dialogs).toHaveLength(1);
     expect(dialogs[0]).toContain("Delete local checkouts for 2 selected PRs?");
     expect(dialogs[0]).toContain("Saved reviews, drafts, and session history are kept");
+    await showSavedOnly(page);
+    await expect(page.locator(".pr-card")).toHaveCount(partialFailure ? 1 : 2);
+    await expect(page.getByRole("button", { name: "Select", exact: true })).toHaveCount(0);
   });
 }
+
+test("saved-only reviews are hidden by default and cannot be selected for checkout deletion", async ({ page }) => {
+  const prs = [
+    { key: "github.com/example/repo#1", url: "https://github.com/example/repo/pull/1", title: "Active checkout", headSha: "111111111111", lastOpenedAt: "2026-09-21T00:00:00Z", checkoutPresent: true },
+    { key: "github.com/example/repo#2", url: "https://github.com/example/repo/pull/2", title: "Preserved review", headSha: "222222222222", lastOpenedAt: "2026-09-20T00:00:00Z", checkoutPresent: false },
+  ];
+  await page.route("**/api/prs", (route) => route.fulfill({ json: { prs } }));
+  await page.goto("/");
+  await expect(page.locator(".pr-card")).toHaveCount(1);
+  await expect(page.locator(".pr-card")).toContainText("Active checkout");
+  const availability = page.getByRole("navigation", { name: "Checkout availability" });
+  await expect(availability.getByRole("button", { name: /^Local checkouts/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(availability.getByRole("button", { name: /^Saved only/ }).locator(".start-filter-count")).toHaveText("1");
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await page.getByLabel("Select github.com/example/repo#1").check();
+  await showSavedOnly(page);
+  await expect(page.locator(".pr-card")).toHaveCount(1);
+  await expect(page.locator(".pr-card")).toContainText("Preserved review");
+  await expect(page.locator(".pr-card")).toContainText("No local checkout");
+  await expect(page.getByRole("button", { name: "Delete local checkout", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Select", exact: true })).toHaveCount(0);
+  await page.reload();
+  await expect(page.locator(".pr-card")).toContainText("Active checkout");
+  await expect(availability.getByRole("button", { name: /^Local checkouts/ })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("a stale history response cannot restore a deleted checkout to the default view", async ({ page }) => {
+  const prs = [{ key: "github.com/example/repo#1", url: "https://github.com/example/repo/pull/1", title: "Checkout to delete", headSha: "111111111111", lastOpenedAt: "2026-09-21T00:00:00Z", checkoutPresent: true }];
+  let delay = false;
+  let release!: () => void;
+  let received!: () => void;
+  const gate = new Promise<void>((done) => { release = done; });
+  const started = new Promise<void>((done) => { received = done; });
+  await page.route("**/api/prs", async (route) => {
+    const snapshot = JSON.stringify({ prs });
+    if (delay) { received(); await gate; }
+    await route.fulfill({ contentType: "application/json", body: snapshot });
+  });
+  await page.route("**/api/pr/checkout/delete", (route) => {
+    prs[0].checkoutPresent = false;
+    return route.fulfill({ json: { ok: true } });
+  });
+  page.on("dialog", (dialog) => dialog.accept());
+  await page.goto("/");
+  await expect(page.locator(".pr-card")).toHaveCount(1);
+  delay = true;
+  await page.evaluate(() => window.dispatchEvent(new HashChangeEvent("hashchange")));
+  await started;
+  try {
+    await page.getByRole("button", { name: "Delete local checkout", exact: true }).click();
+    await expect(page.locator(".pr-card")).toHaveCount(0);
+    const finished = page.waitForResponse((response) => response.url().endsWith("/api/prs"));
+    release();
+    await finished;
+    await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
+    await expect(page.locator(".pr-card")).toHaveCount(0);
+    await showSavedOnly(page);
+    await expect(page.locator(".pr-card")).toHaveCount(1);
+  } finally { release(); }
+});
 
 test("large checkout deletion failures are collapsed into a per-PR list", async ({ page }) => {
   const prs = Array.from({ length: 16 }, (_, index) => ({
     key: `github.com/example/repo#${index + 1}`, url: `https://github.com/example/repo/pull/${index + 1}`,
-    title: `Saved review ${index + 1}`, headSha: "111111111111", lastOpenedAt: "2026-07-23T00:00:00.000Z",
+    title: `Saved review ${index + 1}`, headSha: "111111111111", lastOpenedAt: "2026-07-23T00:00:00.000Z", checkoutPresent: true,
   }));
   await page.route("**/api/prs", (route) => route.fulfill({ json: { prs } }));
   await page.route("**/api/pr/checkout/delete", (route) => route.fulfill({ status: 409, json: { error: "Checkout protected: commit history needs preservation" } }));
