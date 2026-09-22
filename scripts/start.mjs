@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 
@@ -9,6 +9,36 @@ function run(command, args) {
   const result = spawnSync(command, args, { stdio: "inherit" });
   if (result.error) throw result.error;
   if (result.status !== 0) process.exit(result.status ?? 1);
+}
+
+/** Forward launcher-only signals and stay alive until the server finishes asynchronous teardown. */
+function runServer(command, args) {
+  const child = spawn(command, args, { stdio: "inherit" });
+  let stopping = false;
+  function forward(signal) {
+    if (stopping) return;
+    stopping = true;
+    child.kill(signal);
+  }
+  const onInterrupt = () => forward("SIGINT");
+  const onTerminate = () => forward("SIGTERM");
+  const onHangup = () => forward("SIGHUP");
+  process.on("SIGINT", onInterrupt);
+  process.on("SIGTERM", onTerminate);
+  process.on("SIGHUP", onHangup);
+  function detach() {
+    process.off("SIGINT", onInterrupt);
+    process.off("SIGTERM", onTerminate);
+    process.off("SIGHUP", onHangup);
+  }
+  return new Promise((resolve, reject) => {
+    child.once("error", (error) => { detach(); reject(error); });
+    child.once("close", (code) => {
+      detach();
+      process.exitCode = code ?? 1;
+      resolve();
+    });
+  });
 }
 
 function filesUnder(path) {
@@ -53,4 +83,4 @@ if (oldestBuildOutput === 0 || newestBuildInput > oldestBuildOutput) {
 }
 
 console.log("\n[pi-review] Starting http://127.0.0.1:43133\n");
-run(process.execPath, [join("dist-server", "server.js")]);
+await runServer(process.execPath, [join("dist-server", "server.js")]);

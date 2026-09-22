@@ -77,6 +77,9 @@ export function attachPiTerminalWebSocketServer(server: HttpServer, manager: PiT
   return () => {
     clearInterval(heartbeat);
     server.off("upgrade", onUpgrade);
+    // server.closeAllConnections() excludes upgraded sockets. Do not wait for a dead browser
+    // to acknowledge a close frame before server.close() can finish and release cache ownership.
+    for (const client of webSocketServer.clients) client.terminate();
     webSocketServer.close();
   };
 }

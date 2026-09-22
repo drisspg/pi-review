@@ -42,6 +42,12 @@ import { createUsageApi, defaultUsageApiDeps, defaultUsageLogPath } from "./usag
 import { appendDraftReviewComment, clearDraftReview, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, getDraftReview, listAiReviews, listFileReviews, listFocusScans, listGuideReviews, listOverviews, listRecentPullRequests, listReviewMemoryRecords, listArchivedReviews, markPullRequestReviewed, removePullRequest, reviewMemoryStats, saveAiReview, saveDraftReview, saveFocusScan, saveGuideReview, saveOverview, saveReviewMemory, saveReviewProfile, setFileViewed, updateFocusScanProgress, updateGuideReviewProgress, upsertPullRequest } from "./state.js";
 import { cleanupPrWorktree, deletePrWorktree, preparePrWorktree, repoDirForRef, worktreeDirForRef, withPrWorktree } from "./worktrees.js";
 
+// Install persistent handlers before the asynchronous ownership check. Signals during startup
+// are deferred until lifecycle resources exist; repeated signals must not force Node's default exit.
+let pendingShutdown: string | undefined;
+let requestShutdown = (signal: string): void => { pendingShutdown ??= signal; };
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.on(signal, () => requestShutdown(signal));
+
 // Lifetime ownership covers HTTP/file operations, preparation, agents and WebSocket terminals.
 // Offline maintenance and a second server must never share this cache concurrently.
 const releaseCheckoutCache = await ownServerCheckoutCache(checkoutCacheRoot());
@@ -242,10 +248,12 @@ async function shutdown(signal: string): Promise<void> {
   process.exit(0);
 }
 
-process.once("SIGINT", () => void shutdown("SIGINT"));
-process.once("SIGTERM", () => void shutdown("SIGTERM"));
-
-server.listen(port, "127.0.0.1", () => {
-  logger.info("server", "listening", { url: `http://127.0.0.1:${port}`, webRoot: WEB_ROOT });
-  usageApi.record("server", "server:start");
-});
+requestShutdown = (signal) => { void shutdown(signal); };
+if (pendingShutdown != null) {
+  await shutdown(pendingShutdown);
+} else {
+  server.listen(port, "127.0.0.1", () => {
+    logger.info("server", "listening", { url: `http://127.0.0.1:${port}`, webRoot: WEB_ROOT });
+    usageApi.record("server", "server:start");
+  });
+}

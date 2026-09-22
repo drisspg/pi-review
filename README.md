@@ -83,6 +83,11 @@ git clone https://github.com/drisspg/pi-review && cd pi-review && npm start
 
 `npm start` automatically runs `npm install` when dependencies are missing or stale, runs `npm run build` when the built server/web assets are missing or stale, then starts the production server.
 
+Stop it with Ctrl-C. The launcher forwards stop signals and waits for server cleanup; repeated
+interrupts do not abandon an in-progress shutdown. Browser terminal sockets are closed without
+waiting for disconnected clients, and cache ownership is released after Pi process teardown.
+A force-kill or machine crash can still leave a stale lock requiring the verification described below.
+
 ## Pi launcher and model
 
 Pi Review uses your installed Pi CLI for **both inline terminals and background reviews**. It uses
