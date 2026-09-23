@@ -478,7 +478,7 @@ function reviewFeedbackPrompt(payload: Record<string, unknown>): ReviewPromptRes
     prompt: `# Task: assess my review notes
 
 Role: I am the reviewer. The requester-authored private drafts below are MY review instructions and questions, not incoming threads from other reviewers. A question such as "why is this False?" asks you to investigate the code, not to prepare a reply to me on GitHub.
-Mode: Triage only. Inspect the current checkout and return an assessment/action plan; do not change code, drafts, or GitHub in this pass. A separate request to implement changes is a different task.
+Mode: Triage only. Inspect the current checkout and produce a proposed implementation checklist for my sign-off; do not change code, drafts, or GitHub in this pass. A separate request to implement approved changes is a different task.
 
 ## Source rules
 - Requester-authored drafts express my review intent, but their technical claims still need verification. Never classify my drafts as needing replies or communication follow-ups.
@@ -487,7 +487,11 @@ Mode: Triage only. Inspect the current checkout and return an assessment/action 
 - Bot/status-only comments do not create action items by themselves. Resolved threads do not imply current code correctness; verify relevant code when necessary.
 
 ## Response contract
-For every requester-authored note and each additional actionable finding, retain its source ID (R0 for the overall note; D1, G1, A1, F1, AI-GLOBAL, or the explicit item ID), give a disposition (change recommended / intentional behavior / already addressed / unverified), cite code or test evidence, and name the concrete code/test follow-up. Deduplicate overlapping points while retaining all contributing IDs. Answer questions in my notes directly; do not turn explanations of intentional behavior into unnecessary edits.
+Lead with "Proposed changes for sign-off": a short, unchecked Markdown checklist, not a triage essay. Each item should be a self-contained instruction that I can approve and hand directly to a coding agent: source ID(s), the relevant file/location, the exact requested change, and a concrete acceptance/test criterion when needed. Keep each item to one or two sentences; include a brief rationale only when it affects the decision. Do not add boilerplate disposition/evidence/action labels to every item.
+
+Retain source IDs (R0 for the overall note; D1, G1, A1, F1, AI-GLOBAL, or explicit item IDs). Deduplicate overlapping points while retaining all contributing IDs. Keep the scope faithful to my notes; clearly label independently verified AI-derived additions as "AI-verified", rather than presenting them as my own requests.
+
+Account for every requester-authored note. Put intentional behavior, already-addressed or invalid notes in a short "No change needed" section with IDs and the reason. Put unverified claims or consequential choices in "Questions before approval", not in the ready checklist. Answer questions in my notes directly; do not turn explanations of intentional behavior into unnecessary edits. Never pre-check an item or claim that I approved it. Omit empty sections and redundant summaries.
 
 Never draft, suggest, or return reply text for review threads. Do not add "needs reply" or communication follow-up tasks to this assessment; communication triage requires a separate explicit request. Omit empty sections and do not invent work for status comments.
 

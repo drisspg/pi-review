@@ -136,8 +136,11 @@ and the PR author can use GitHub's **Apply suggestion** action. The tool does no
 **Copy feedback prompt** produces a triage-only handoff from your perspective as the reviewer.
 Your private drafts are labeled as requester-authored instructions/questions, separate from GitHub
 discussion and unverified AI suggestions. Draft references (`D1`, `D2`, …; `R0` for the overall
-note) survive the handoff. The requested response gives per-item dispositions, evidence, and
-code/test follow-ups—not thread replies or “needs reply” tasks. **Copy agent handoff** under
+note) survive the handoff. The response leads with a short **Proposed changes for sign-off**
+checklist: concrete, self-contained instructions you can approve and forward to a coding agent.
+Verified AI additions are labeled; intentional behavior and unresolved questions stay in separate
+short sections. It does not presume approval, write thread replies, or add “needs reply” tasks.
+**Copy agent handoff** under
 GitHub private drafts is different: it asks a coding agent to implement valid notes while keeping
 the GitHub drafts unchanged. **Copy draft context** exports context and ownership metadata without
 choosing a new task. None of these copy actions publishes anything.

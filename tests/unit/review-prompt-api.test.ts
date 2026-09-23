@@ -130,6 +130,13 @@ test("review prompt API builds copyable review feedback bundles", async () => {
   assert.equal(result.purpose, "review-feedback");
   assert.match(result.prompt, /Role: I am the reviewer/);
   assert.match(result.prompt, /Mode: Triage only/);
+  assert.match(result.prompt, /proposed implementation checklist for my sign-off/);
+  assert.match(result.prompt, /short, unchecked Markdown checklist, not a triage essay/);
+  assert.match(result.prompt, /self-contained instruction that I can approve and hand directly to a coding agent/);
+  assert.match(result.prompt, /"No change needed"/);
+  assert.match(result.prompt, /"Questions before approval", not in the ready checklist/);
+  assert.match(result.prompt, /Never pre-check an item or claim that I approved it/);
+  assert.match(result.prompt, /AI-derived additions as "AI-verified"/);
   // My own review notes are not incoming threads or communication tasks.
   assert.match(result.prompt, /Never draft, suggest, or return reply text/);
   assert.doesNotMatch(result.prompt, /suggest reply text/);
