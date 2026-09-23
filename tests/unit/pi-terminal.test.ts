@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
-import { access, chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 
 import { createPiTerminalManager, parsePiTerminalClientMessage, parsePiTerminalRequest, resolvePiTerminalCommand, type PiTerminalPeer, type PiTerminalServerMessage } from "../../src/pi-terminal.js";
 
@@ -38,6 +38,187 @@ class FakePeer implements PiTerminalPeer {
   onMessage(listener: (message: string) => void) { this.messageListener = listener; }
   onClose(listener: () => void) { this.closeListener = listener; }
 }
+
+async function failingSignalFixture(t: TestContext, options: { idleTimeoutMs?: number; maxSessions?: number; processExitTimeoutMs?: number } = {}) {
+  t.mock.method(SettingsManager, "create", () => SettingsManager.inMemory({ defaultProvider: "openai", defaultModel: "gpt-6-astra" }));
+  const root = await mkdtemp(join(tmpdir(), "pi-review-signal-failure-"));
+  const fake = new FakeProcess();
+  const processes = new Map<number, FakeProcess>();
+  const control = { gone: false, denyTerm: false, denyKill: false, denyProbe: false, linger: false };
+  const signals: Array<{ pgid: number; signal: NodeJS.Signals | 0 }> = [];
+  const errors: Array<{ message: string; data?: Record<string, unknown> }> = [];
+  let spawns = 0;
+  const manager = createPiTerminalManager({
+    cwdForPr: () => "/tmp/pr-worktree", piCommand: "/usr/local/bin/pi", sessionRoot: root,
+    processExitTimeoutMs: 30, ...options,
+    logger: { info() {}, error(_scope, message, data) { errors.push({ message, data }); } },
+    spawn: () => {
+      const process = spawns === 0 ? fake : new FakeProcess();
+      process.pid = 42 + spawns++;
+      processes.set(process.pid, process);
+      control.gone = false;
+      return process;
+    },
+    signalProcessGroup(pgid, signal) {
+      signals.push({ pgid, signal });
+      if (signal === 0) {
+        if (control.gone) throw Object.assign(new Error("group gone"), { code: "ESRCH" });
+        if (control.denyProbe) throw Object.assign(new Error("probe EPERM"), { code: "EPERM" });
+        return;
+      }
+      if ((signal === "SIGTERM" && control.denyTerm) || (signal === "SIGKILL" && control.denyKill)) throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+      if (signal === "SIGTERM") {
+        if (!control.linger) control.gone = true;
+        processes.get(pgid)!.exitListener({ exitCode: 0, signal: 15 });
+      }
+      if (signal === "SIGKILL" && !control.linger) control.gone = true;
+    },
+  });
+  t.after(async () => {
+    control.denyTerm = control.denyKill = control.denyProbe = control.linger = false;
+    control.gone = true;
+    for (const process of processes.values()) process.exitListener({ exitCode: 0 });
+    await new Promise((done) => setImmediate(done));
+    await manager.dispose();
+    await rm(root, { recursive: true, force: true });
+  });
+  const request = { prKey: "github.com/org/repo#1", session: "main" };
+  const peer = new FakePeer();
+  await manager.attach(peer, request);
+  return { root, fake, control, signals, errors, manager, request, peer, spawns: () => spawns };
+}
+
+test("exit-callback probe EPERM is contained and blocks replacement until group absence is verified", async (t) => {
+  const f = await failingSignalFixture(t);
+  f.control.denyKill = f.control.denyProbe = true;
+  assert.doesNotThrow(() => f.fake.exitListener({ exitCode: 0, signal: 15 }));
+  assert.equal(f.peer.messages.some((message) => message.type === "error"), false, "do not alarm on a possibly transient exit probe");
+  await assert.rejects(f.manager.disposePr(f.request.prKey), /EPERM/);
+  assert.equal(f.errors[0].data?.pid, 42);
+  assert.equal(f.errors[0].data?.pgid, 42);
+  assert.equal(f.errors[0].data?.signal, "0");
+  await new Promise((done) => setImmediate(done));
+  await assert.rejects(f.manager.disposePr(f.request.prKey), /EPERM/);
+  const blocked = new FakePeer();
+  await f.manager.attach(blocked, f.request);
+  assert.equal(blocked.messages.some((message) => message.type === "ready"), false);
+  assert.equal(f.spawns(), 1);
+  assert.doesNotThrow(() => f.fake.exitListener({ exitCode: 0 }));
+  assert.equal(f.signals.filter(({ signal }) => signal !== 0).length, 0, "never signal an exited leader's possibly reused PGID");
+  f.control.gone = true;
+  await new Promise((done) => setImmediate(done));
+  await f.manager.disposePr(f.request.prKey);
+});
+
+test("exit callbacks only probe gone groups and never issue SIGKILL or a spurious error", async (t) => {
+  const f = await failingSignalFixture(t);
+  f.control.denyKill = true;
+  f.control.gone = true;
+  assert.doesNotThrow(() => f.fake.exitListener({ exitCode: 0 }));
+  await f.manager.disposePr(f.request.prKey);
+  assert.ok(f.signals.length > 0 && f.signals.every(({ signal }) => signal === 0));
+  assert.deepEqual(f.errors, []);
+  assert.equal(f.peer.messages.some((message) => message.type === "error"), false);
+});
+
+test("leader exit alone does not permit replacement while the group still exists", async (t) => {
+  const f = await failingSignalFixture(t);
+  f.control.linger = true;
+  await assert.rejects(f.manager.disposePr(f.request.prKey), /has not exited/);
+  await new Promise((done) => setImmediate(done));
+  f.control.gone = true;
+  await f.manager.disposePr(f.request.prKey);
+  assert.equal(f.signals.filter(({ signal }) => signal === "SIGTERM").length, 1);
+  assert.equal(f.signals.filter(({ signal }) => signal === "SIGKILL").length, 0);
+});
+
+for (const origin of ["peer", "idle timer"] as const) {
+  test(`SIGTERM EPERM from ${origin} is contained and preserves session history`, async (t) => {
+    const f = await failingSignalFixture(t, { idleTimeoutMs: 5 });
+    const history = join(f.root, "github.com-org-repo-1", "main", "history.jsonl");
+    await writeFile(history, "keep history");
+    f.control.denyTerm = true;
+    if (origin === "peer") {
+      assert.doesNotThrow(() => f.peer.messageListener(JSON.stringify({ type: "stop" })));
+      assert.ok(f.peer.messages.some((message) => message.type === "error" && /EPERM/.test(message.message)));
+      assert.equal(f.peer.closed?.[0], 1011);
+    } else { f.peer.closeListener(); await new Promise((done) => setTimeout(done, 20)); }
+    await assert.rejects(f.manager.disposePr(f.request.prKey), /EPERM/);
+    await assert.rejects(f.manager.deleteSession(f.request.prKey, f.request.session), /EPERM/);
+    assert.equal(await readFile(history, "utf8"), "keep history");
+    assert.ok(f.errors.some(({ data }) => data?.signal === "SIGTERM"));
+  });
+}
+
+test("a denied SIGTERM can be retried while the leader has not exited", async (t) => {
+  const f = await failingSignalFixture(t);
+  f.control.denyTerm = true;
+  await assert.rejects(f.manager.disposePr(f.request.prKey), /EPERM/);
+  f.control.denyTerm = false;
+  await f.manager.disposePr(f.request.prKey);
+  assert.equal(f.signals.filter(({ signal }) => signal === "SIGTERM").length, 2);
+  assert.equal(f.control.gone, true);
+});
+
+test("a named terminal cannot reconnect while its deletion is waiting for group exit", async (t) => {
+  const f = await failingSignalFixture(t, { processExitTimeoutMs: 1_000 });
+  f.control.linger = true;
+  const deletion = f.manager.deleteSession(f.request.prKey, f.request.session);
+  await new Promise((done) => setImmediate(done));
+  const blocked = new FakePeer();
+  await f.manager.attach(blocked, f.request);
+  assert.ok(blocked.messages.some((message) => message.type === "error" && /being deleted/.test(message.message)));
+  assert.equal(f.spawns(), 1);
+  f.control.gone = true;
+  await deletion;
+  await assert.rejects(access(join(f.root, "github.com-org-repo-1", "main")));
+});
+
+test("session-cap cleanup failures prevent an extra PTY from being spawned", async (t) => {
+  const f = await failingSignalFixture(t, { maxSessions: 1 });
+  f.control.denyTerm = true;
+  f.peer.closeListener();
+  const blocked = new FakePeer();
+  await f.manager.attach(blocked, { ...f.request, session: "second" });
+  assert.equal(f.spawns(), 1);
+  assert.ok(blocked.messages.some((message) => message.type === "error" && /EPERM/.test(message.message)));
+});
+
+test("unverified groups still count toward the terminal cap after their leader exits", async (t) => {
+  const f = await failingSignalFixture(t, { maxSessions: 1 });
+  f.fake.exitListener({ exitCode: 0 });
+  await new Promise((done) => setImmediate(done));
+  const blocked = new FakePeer();
+  await f.manager.attach(blocked, { prKey: "github.com/org/other#2", session: "main" });
+  assert.equal(f.spawns(), 1);
+  assert.ok(blocked.messages.some((message) => message.type === "error" && /has not exited/.test(message.message)));
+});
+
+test("group signaling uses the captured positive PID, not the mutable PTY getter", async (t) => {
+  const f = await failingSignalFixture(t);
+  f.fake.pid = 1;
+  f.control.gone = true;
+  assert.doesNotThrow(() => f.fake.exitListener({ exitCode: 0 }));
+  assert.ok(f.signals.every(({ pgid }) => pgid === 42));
+  await f.manager.disposePr(f.request.prKey);
+});
+
+test("native PTY stop verifies its process group without a post-exit force kill", { timeout: 15_000, skip: process.platform === "win32" }, async (t) => {
+  t.mock.method(SettingsManager, "create", () => SettingsManager.inMemory({ defaultProvider: "openai", defaultModel: "gpt-6-astra" }));
+  const root = await mkdtemp(join(tmpdir(), "pi-review-native-stop-"));
+  const command = join(root, "fake-pi");
+  await writeFile(command, "#!/bin/sh\ntrap 'exit 0' TERM INT HUP\nprintf 'fixture ready\\n'\nsleep 2\n");
+  await chmod(command, 0o755);
+  const manager = createPiTerminalManager({ cwdForPr: () => root, piCommand: command, sessionRoot: join(root, "sessions") });
+  t.after(async () => { await manager.dispose(); await rm(root, { recursive: true, force: true }); });
+  const peer = new FakePeer();
+  await manager.attach(peer, { prKey: "github.com/fixture/repo#1", session: "main" });
+  const deadline = Date.now() + 3_000;
+  while (!peer.messages.some((message) => message.type === "output" && message.data.includes("fixture ready")) && Date.now() < deadline) await new Promise((done) => setTimeout(done, 10));
+  assert.ok(peer.messages.some((message) => message.type === "output" && message.data.includes("fixture ready")));
+  await manager.disposePr("github.com/fixture/repo#1");
+  assert.equal(peer.messages.some((message) => message.type === "error"), false);
+});
 
 test("validates Pi terminal connection URLs", () => {
   assert.deepEqual(parsePiTerminalRequest("/api/pi/terminal?prKey=github.com%2Forg%2Frepo%231&session=main&context=Review+line+7"), { prKey: "github.com/org/repo#1", session: "main", context: "Review line 7" });

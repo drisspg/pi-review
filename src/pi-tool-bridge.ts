@@ -67,16 +67,19 @@ export async function createPiToolBridge(tools: ToolDefinition[]) {
   });
   const address = server.address();
   if (address == null || typeof address === "string") throw new Error("Pi tool bridge did not bind");
+  let closing: Promise<void> | undefined;
   return {
     env: { PI_REVIEW_TOOL_URL: `http://127.0.0.1:${address.port}`, PI_REVIEW_TOOL_TOKEN: token },
     metadata,
-    async close() {
-      for (const controller of controllers) controller.abort();
-      server.closeAllConnections();
-      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-      // Abort can return before a server-owned tool finishes committing state.
-      // Preserve the checkout-transition barrier until those executions settle.
-      await Promise.allSettled(executions);
+    close(): Promise<void> {
+      return closing ??= (async () => {
+        for (const controller of controllers) controller.abort();
+        server.closeAllConnections();
+        await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+        // Abort can return before a server-owned tool finishes committing state.
+        // Preserve this same barrier across concurrent callers and disposal retries.
+        await Promise.allSettled(executions);
+      })();
     },
   };
 }

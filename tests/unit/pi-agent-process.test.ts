@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 
-import { PiAgentProcess } from "../../src/pi-agent-process.js";
+import { PiAgentProcess, PiAgentStartupError } from "../../src/pi-agent-process.js";
 import { piFinalAssistantAnswer } from "../../src/pi-session.js";
 import { createPiToolBridge } from "../../src/pi-tool-bridge.js";
 
@@ -72,6 +72,97 @@ test("launcher-backed agents stream through retries, call server-owned tools, sw
   }
 });
 
+for (const mode of ["exit", "timer", "probe"] as const) {
+  test(`headless ${mode} cleanup cannot throw SIGKILL errors from event callbacks`, { timeout: 15_000, skip: process.platform === "win32" }, async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "pi-agent-signal-error-"));
+    const command = fileURLToPath(new URL("../fixtures/pi-rpc.mjs", import.meta.url));
+    await chmod(command, 0o755);
+    const previous = process.env.PI_REVIEW_PI_COMMAND;
+    process.env.PI_REVIEW_PI_COMMAND = command;
+    t.mock.method(SettingsManager, "create", () => SettingsManager.inMemory({ defaultProvider: "openai", defaultModel: "gpt-6-astra" }));
+    let session: PiAgentProcess | undefined;
+    try {
+      session = await PiAgentProcess.create({ cwd: root, sessionDir: root, thinkingLevel: "low", customTools: [] });
+      const internal = session as unknown as { child: { pid?: number }; signal: (signal: NodeJS.Signals) => void; exited: Promise<void> };
+      const originalSignal = internal.signal.bind(session);
+      const signals: string[] = [];
+      const signalMock = t.mock.method(internal, "signal", (signal) => {
+        signals.push(signal);
+        if (signal === "SIGKILL") throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+        if (mode !== "timer") originalSignal(signal);
+      });
+      try {
+        if (mode === "exit") {
+          await assert.rejects(session.prompt("exit"), /exited \(7\)/);
+          await session.dispose();
+          assert.equal(signals.includes("SIGKILL"), false);
+        } else if (mode === "timer") {
+          await assert.rejects(session.dispose(), /EPERM/);
+          assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+        } else {
+          const pid = internal.child.pid;
+          assert.ok(pid != null && pid > 1);
+          const kill = process.kill.bind(process);
+          const destructiveSignals: unknown[] = [];
+          const probe = t.mock.method(process, "kill", (target, signal) => {
+            if (target === -pid) {
+              if (signal === 0) throw Object.assign(new Error("probe EPERM"), { code: "EPERM" });
+              assert.equal(destructiveSignals.length, 0, "must not signal a reaped process group");
+              destructiveSignals.push(signal);
+            }
+            return kill(target, signal);
+          });
+          try {
+            await assert.rejects(session.dispose(), new RegExp(`group ${pid} cleanup is unverified: probe EPERM`));
+            originalSignal("SIGKILL"); // Exercise the real post-exit guard, without permitting an OS signal.
+            assert.deepEqual(destructiveSignals, ["SIGTERM"]);
+          } finally { probe.mock.restore(); }
+        }
+      } finally {
+        signalMock.mock.restore();
+        originalSignal("SIGTERM");
+        await internal.exited;
+        await session.dispose(); // Retry must verify cleanup after the injected denial.
+      }
+    } finally {
+      if (previous == null) delete process.env.PI_REVIEW_PI_COMMAND;
+      else process.env.PI_REVIEW_PI_COMMAND = previous;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("startup and cleanup failures preserve both causes and the owned process for retry", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-startup-error-"));
+  const command = fileURLToPath(new URL("../fixtures/pi-rpc.mjs", import.meta.url));
+  await chmod(command, 0o755);
+  const previous = process.env.PI_REVIEW_PI_COMMAND;
+  process.env.PI_REVIEW_PI_COMMAND = command;
+  t.mock.method(SettingsManager, "create", () => SettingsManager.inMemory({ defaultProvider: "openai", defaultModel: "missing-extension" }));
+  let owned: PiAgentProcess | undefined;
+  const denied = t.mock.method(PiAgentProcess.prototype, "dispose", async function (this: PiAgentProcess) {
+    owned = this;
+    throw new Error("cleanup denied");
+  });
+  try {
+    await assert.rejects(PiAgentProcess.create({ cwd: root, sessionDir: root, thinkingLevel: "low", customTools: [] }), (error: unknown) => {
+      assert.ok(error instanceof PiAgentStartupError);
+      assert.match(error.message, /tool extension did not initialize/);
+      assert.match(error.message, /cleanup denied/);
+      assert.equal(error.session, owned);
+      assert.equal(error.errors.length, 2);
+      assert.equal(JSON.stringify(error), "{}"); // Never serialize the process/bridge credentials.
+      return true;
+    });
+  } finally {
+    denied.mock.restore();
+    await owned?.dispose();
+    if (previous == null) delete process.env.PI_REVIEW_PI_COMMAND;
+    else process.env.PI_REVIEW_PI_COMMAND = previous;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("tool bridge rejects unauthenticated and browser requests, and surfaces tool errors", async () => {
   const bridge = await createPiToolBridge([{
     name: "fail", label: "Fail", description: "Fail", parameters: Type.Object({}),
@@ -105,7 +196,9 @@ test("tool bridge shutdown waits for server-side state mutations after client ca
   }).catch(() => undefined);
   await running;
   let closed = false;
-  const closing = bridge.close().then(() => { closed = true; });
+  const barrier = bridge.close();
+  assert.equal(bridge.close(), barrier);
+  const closing = barrier.then(() => { closed = true; });
   try {
     await delay(10);
     assert.equal(closed, false);
@@ -115,4 +208,5 @@ test("tool bridge shutdown waits for server-side state mutations after client ca
     await request;
   }
   assert.equal(closed, true);
+  await bridge.close();
 });

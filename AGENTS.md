@@ -126,7 +126,11 @@ Keep Playwright cache roots outside `test-results/` (which it wipes) and use gra
 shutdown so test runs release lifetime ownership locks. Shutdown signal handlers must remain
 installed throughout asynchronous startup/teardown; terminate owned WebSocket clients rather than
 waiting for dead browsers to acknowledge closure. The npm launcher must forward signals and await
-server exit. See `tests/unit/server-shutdown.test.ts` for the stale-lock regression.
+server exit. See `tests/unit/server-shutdown.test.ts` for the stale-lock regression. Never send
+SIGKILL from a PTY/RPC exit callback: a reaped leader's numeric process group can be reused.
+Contain signal/probe errors in awaited teardown, verify group absence with signal 0, and retain
+failed terminal barriers across retries/session eviction. Unknown cleanup must block Refresh,
+checkout/session deletion, and cache release—not crash the server or count as successful exit.
 Explicit Refresh fetches uncached PR data,
 awaits Pi session/terminal teardown, then resets the linked checkout to the matching remote PR HEAD
 and cleans ordinary non-ignored untracked files. Only `/api/pr/refresh` resets; opening and

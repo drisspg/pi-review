@@ -86,6 +86,8 @@ git clone https://github.com/drisspg/pi-review && cd pi-review && npm start
 Stop it with Ctrl-C. The launcher forwards stop signals and waits for server cleanup; repeated
 interrupts do not abandon an in-progress shutdown. Browser terminal sockets are closed without
 waiting for disconnected clients, and cache ownership is released after Pi process teardown.
+If process cleanup cannot be verified, shutdown reports the problem, retains cache ownership,
+and retries cleanup rather than exiting unsafely. Do not remove that live owner's lock.
 A force-kill or machine crash can still leave a stale lock requiring the verification described below.
 
 ## Pi launcher and model
@@ -290,7 +292,11 @@ runs `git clean -fd`. Local tracked/staged edits and ordinary non-ignored untrac
 ignored files (such as environments/build caches), nested Git repositories, local branch refs,
 saved reviews/drafts, and session history remain. Close external editors/jobs using the checkout before Refresh. A remote
 HEAD race or failed fetch aborts before resetting files; retry Refresh for a moved HEAD.
-Sessions may already be stopped if checkout validation or fetching fails.
+Sessions may already be stopped if checkout validation or fetching fails. Terminal signal errors
+(such as `EPERM`) are reported without crashing the server. A PTY exit is not enough: its process
+group must also be confirmed gone before reset or deletion. Remaining/permission-denied groups
+keep the operation blocked; retry after closing the relevant processes. Exit callbacks only probe
+old group IDs and never force-kill them. Session history is not deleted after failed cleanup.
 
 Opening a PR and automatic activity updates after comment/review actions remain non-destructive:
 a different local HEAD returns a recoverable conflict. If opening is blocked, the error banner

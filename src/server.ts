@@ -36,6 +36,7 @@ import { createReviewPromptApi } from "./review-prompt-api.js";
 import { createReviewSubmitRouteApi, defaultReviewSubmitRouteApiDeps } from "./review-submit-route-api.js";
 import { createSavedAnalysisApi } from "./saved-analysis-api.js";
 import { createServerRoute, createRequestListener } from "./server-router.js";
+import { createShutdownRequest } from "./server-shutdown.js";
 import { createShellApi } from "./shell-api.js";
 import { withTtlCache } from "./ttl-cache.js";
 import { createUsageApi, defaultUsageApiDeps, defaultUsageLogPath } from "./usage-api.js";
@@ -231,12 +232,8 @@ const route = createServerRoute({
 const server = createServer(createRequestListener(route, logger, (name, data) => usageApi.record("server", name, data), assetsVersion));
 const detachPiTerminalWebSocketServer = attachPiTerminalWebSocketServer(server, piTerminalManager, logger);
 
-let shuttingDown = false;
-
 async function shutdown(signal: string): Promise<void> {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  logger.info("server", "shutdown", { signal });
+  if (signal !== "retry") logger.info("server", "shutdown", { signal });
   detachPiTerminalWebSocketServer();
   server.closeAllConnections();
   await Promise.all([
@@ -244,13 +241,15 @@ async function shutdown(signal: string): Promise<void> {
     piTerminalManager.dispose(),
     disposePiSessions(),
   ]);
-  releaseCheckoutCache();
-  process.exit(0);
 }
 
-requestShutdown = (signal) => { void shutdown(signal); };
+requestShutdown = createShutdownRequest({
+  stop: shutdown,
+  stopped: () => { releaseCheckoutCache(); process.exit(0); },
+  failed: (error, signal) => logger.error("server", "shutdown blocked; cache ownership retained — close remaining Pi processes; cleanup will retry", { signal, pid: process.pid, error: error instanceof Error ? error.message : String(error) }),
+});
 if (pendingShutdown != null) {
-  await shutdown(pendingShutdown);
+  requestShutdown(pendingShutdown);
 } else {
   server.listen(port, "127.0.0.1", () => {
     logger.info("server", "listening", { url: `http://127.0.0.1:${port}`, webRoot: WEB_ROOT });

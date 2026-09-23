@@ -9,6 +9,62 @@ import { resolve } from "node:path";
 import test from "node:test";
 
 import { ownCheckoutCache } from "../../src/checkout-cache.js";
+import { createShutdownRequest } from "../../src/server-shutdown.js";
+
+test("failed shutdown retains ownership without unhandled rejection and allows a verified retry", async () => {
+  let reject!: (error: Error) => void;
+  const firstStop = new Promise<void>((_resolve, fail) => { reject = fail; });
+  let calls = 0, holds = 0, releases = 0, stopped = 0;
+  let safe = false;
+  const errors: string[] = [];
+  const request = createShutdownRequest({
+    stop: async () => { if (++calls === 1) await firstStop; else if (!safe) throw new Error("still unsafe"); },
+    stopped: () => { stopped++; },
+    failed: (error) => { errors.push(String(error)); },
+    holdOpen: () => { holds++; return () => { releases++; }; },
+  });
+  const first = request("SIGINT");
+  await request("SIGTERM");
+  assert.equal(calls, 1);
+  reject(new Error("kill EPERM"));
+  await first;
+  assert.equal(stopped, 0);
+  assert.equal(holds, 1);
+  assert.equal(releases, 0);
+  assert.match(errors[0], /EPERM/);
+  await request("SIGINT");
+  assert.equal(holds, 1);
+  assert.equal(stopped, 0);
+  safe = true;
+  await request("SIGTERM");
+  assert.equal(stopped, 1);
+  assert.equal(releases, 1);
+  await request("SIGINT");
+  assert.equal(calls, 3);
+});
+
+test("blocked shutdown retries safely and does not repeat an unchanged error", async () => {
+  let retry!: () => void;
+  let safe = false, stops = 0, completed = 0, released = 0, errors = 0;
+  const request = createShutdownRequest({
+    stop: async () => { stops++; if (!safe) throw new Error("unverified group"); },
+    stopped: () => { completed++; },
+    failed: () => { errors++; },
+    holdOpen: (again) => { retry = again; return () => { released++; }; },
+  });
+  await request("SIGINT");
+  retry();
+  await new Promise((done) => setImmediate(done));
+  assert.equal(errors, 1);
+  assert.equal(completed, 0);
+  assert.equal(released, 0);
+  safe = true;
+  retry();
+  await new Promise((done) => setImmediate(done));
+  assert.equal(stops, 3);
+  assert.equal(completed, 1);
+  assert.equal(released, 1);
+});
 
 async function waitFor(check: () => boolean | Promise<boolean>, message: string, timeout = 30_000): Promise<void> {
   const deadline = Date.now() + timeout;

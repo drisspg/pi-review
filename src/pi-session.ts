@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import { createGpuWorkspaceTool } from "./gpu-workspace-tool.js";
 import { logger } from "./logger.js";
 import { reviewSessionRoot } from "./storage-paths.js";
-import { PiAgentProcess } from "./pi-agent-process.js";
+import { PiAgentProcess, PiAgentStartupError } from "./pi-agent-process.js";
 import { createReviewDraftTool, type ReviewDraftToolContext } from "./review-draft-tool.js";
 import { createReviewSuggestionTool } from "./review-suggestion-tool.js";
 import type { PiPromptEvent } from "./types.js";
@@ -55,7 +55,8 @@ const PI_TOOLS_BY_PURPOSE: Record<string, string[]> = {
 };
 
 const generationByPr = new Map<string, number>();
-const disposalsByPr = new Map<string, Promise<void>>();
+type SessionDisposal = { promise: Promise<void>; failed: boolean; retry: () => Promise<void> };
+const disposalsByPr = new Map<string, SessionDisposal>();
 const sessions = new Map<string, Promise<PiAgentProcess>>();
 const cwdByPr = new Map<string, string>();
 const reviewContextByPr = new Map<string, ReviewDraftToolContext>();
@@ -136,7 +137,7 @@ export function piSessionReviewContext(prKey: string): ReviewDraftToolContext | 
 
 /** Register the checkout and current diff used by PR-scoped conversational tools. */
 export async function registerPiSessionContext(prKey: string, cwd: string, context: ReviewDraftToolContext): Promise<void> {
-  await disposalsByPr.get(prKey);
+  await disposalsByPr.get(prKey)?.promise;
   const existingCwd = cwdByPr.get(prKey);
   const existingContext = reviewContextByPr.get(prKey);
   if (existingCwd != null && (existingCwd !== cwd || existingContext?.headSha !== context.headSha)) await disposePiSession(prKey);
@@ -182,7 +183,10 @@ function getSession(prKey: string, purpose = "chat"): Promise<PiAgentProcess> {
     return getSession(prKey, purpose);
   });
   const created = createSession(prKey, purpose).catch((error) => {
-    if (sessions.get(sessionKey) === created) sessions.delete(sessionKey);
+    if (sessions.get(sessionKey) === created) {
+      if (error instanceof PiAgentStartupError) sessions.set(sessionKey, Promise.resolve(error.session));
+      else sessions.delete(sessionKey);
+    }
     throw error;
   });
   sessions.set(sessionKey, created);
@@ -298,31 +302,36 @@ export async function setPiModel(prKey: string, provider: string, modelId: strin
 
 export function disposePiSession(prKey: string): Promise<void> {
   invalidatePiSession(prKey);
-  const existingDisposal = disposalsByPr.get(prKey);
-  if (existingDisposal != null) return existingDisposal;
   const prefix = sessionPrefixForPr(prKey);
-  const sessionEntries = sessionEntriesForPr(prKey);
-  for (const [sessionKey] of sessionEntries) sessions.delete(sessionKey);
   deleteEntriesWithPrefix(lastPromptByPr, prefix);
   deleteEntriesWithPrefix(promptQueueByPr, prefix);
   deleteEntriesWithPrefix(promptStateByPr, prefix);
-  const disposal = (async () => {
-    const settled = await Promise.allSettled(sessionEntries.map(([, pending]) => pending));
-    await Promise.all(settled.map(async (result) => {
-      if (result.status !== "fulfilled") return;
-      try {
-        await result.value.abort();
-      } finally {
-        await result.value.dispose();
-      }
-    }));
-  })();
-  disposalsByPr.set(prKey, disposal);
-  // A failed abort must remain a barrier to registering a replacement checkout.
-  void disposal.then(() => {
-    if (disposalsByPr.get(prKey) === disposal) disposalsByPr.delete(prKey);
-  }).catch(() => undefined);
-  return disposal;
+  const existingDisposal = disposalsByPr.get(prKey);
+  if (existingDisposal != null) return existingDisposal.failed ? existingDisposal.retry() : existingDisposal.promise;
+  const sessionEntries = sessionEntriesForPr(prKey);
+  for (const [sessionKey] of sessionEntries) sessions.delete(sessionKey);
+  function runDisposal(): Promise<void> {
+    const promise = (async () => {
+      const settled = await Promise.allSettled(sessionEntries.map(([, pending]) => pending));
+      await Promise.all(settled.map(async (result) => {
+        const session = result.status === "fulfilled" ? result.value : result.reason instanceof PiAgentStartupError ? result.reason.session : null;
+        if (session == null) return;
+        try {
+          await session.abort();
+        } finally {
+          await session.dispose();
+        }
+      }));
+    })();
+    const disposal: SessionDisposal = { promise, failed: false, retry: runDisposal };
+    disposalsByPr.set(prKey, disposal);
+    // Keep the captured sessions and failed barrier until an explicit retry verifies cleanup.
+    void promise.then(() => {
+      if (disposalsByPr.get(prKey) === disposal) disposalsByPr.delete(prKey);
+    }, () => { disposal.failed = true; });
+    return promise;
+  }
+  return runDisposal();
 }
 
 export async function disposePiSessions(): Promise<void> {

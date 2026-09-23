@@ -44,14 +44,14 @@ export class PiAgentProcess {
   private constructor(launch: ReturnType<typeof piLaunch>, cwd: string, bridge: PiAgentProcess["bridge"]) {
     this.bridge = bridge;
     this.child = spawn(launch.command, launch.args, { cwd, env: launch.env, stdio: "pipe", detached: process.platform !== "win32" });
+    this.child.once("exit", () => { this.processExited = true; });
     this.exited = new Promise((resolve) => {
       this.child.once("close", (code, signal) => {
-        // Reap any launcher children that outlive the group leader.
-        this.signal("SIGKILL");
+        // Once reaped, a numeric process group can be reused. Never force-kill from close.
         this.processExited = true;
         this.fail(new Error(`Pi agent exited (${signal ?? code}). ${this.stderr}`));
         resolve();
-        void this.dispose();
+        this.disposeAfterFailure();
       });
     });
     this.child.once("error", (error) => this.fail(error));
@@ -86,7 +86,9 @@ export class PiAgentProcess {
       }
       return session;
     } catch (error) {
-      await session.dispose();
+      try { await session.dispose(); } catch (cleanupError) {
+        throw new PiAgentStartupError(session, error, cleanupError);
+      }
       throw error;
     }
   }
@@ -154,28 +156,66 @@ export class PiAgentProcess {
 
   /** Stop the entire owned process group and wait for exit before releasing tools/checkouts. */
   dispose(): Promise<void> {
-    this.disposal ??= (async () => {
+    if (this.disposal != null) return this.disposal;
+    const disposal = (async () => {
       this.fail(new Error("Pi session disposed"));
-      this.signal("SIGTERM");
-      const timer = setTimeout(() => this.signal("SIGKILL"), 1_000);
+      let escalation: NodeJS.Timeout | undefined;
+      let timeout: NodeJS.Timeout | undefined;
       try {
-        await this.exited;
+        this.signal("SIGTERM");
+        const signalFailure = new Promise<never>((_, reject) => {
+          escalation = setTimeout(() => { try { this.signal("SIGKILL"); } catch (error) { reject(error); } }, 1_000);
+          timeout = setTimeout(() => reject(new Error(`Pi agent process group ${this.child.pid ?? "unknown"} did not finish cleanup (leader exited: ${this.processExited}); checkout replacement is unsafe.`)), 5_000);
+        });
+        await Promise.race([this.exited, signalFailure]);
+        clearTimeout(escalation);
+        clearTimeout(timeout);
+        await this.waitForGroupExit();
       } finally {
-        clearTimeout(timer);
+        clearTimeout(escalation);
+        clearTimeout(timeout);
         await this.bridge.close();
       }
     })();
-    return this.disposal;
+    this.disposal = disposal;
+    void disposal.catch(() => { if (this.disposal === disposal) this.disposal = null; });
+    return disposal;
   }
 
-  /** Signal only the process group created by this instance. */
+  /** Event/timer-driven disposal must never leave a rejected promise unobserved. */
+  private disposeAfterFailure(): void {
+    void this.dispose().catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      this.stderr = `${this.stderr}\nCleanup failed: ${message}`.slice(-8_000);
+      this.fail(error instanceof Error ? error : new Error(message));
+    });
+  }
+
+  private async waitForGroupExit(): Promise<void> {
+    const pid = this.child.pid;
+    if (pid == null || process.platform === "win32") return;
+    if (!Number.isInteger(pid) || pid <= 1) throw new Error(`Invalid Pi agent process group ${pid}`);
+    const deadline = performance.now() + 5_000;
+    while (true) {
+      let detail = "group still exists";
+      try { process.kill(-pid, 0); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ESRCH") return;
+        detail = error instanceof Error ? error.message : String(error);
+      }
+      if (performance.now() >= deadline) throw new Error(`Pi agent group ${pid} cleanup is unverified: ${detail}`);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+
+  /** Signal only the process group created by this instance, before its leader exits. */
   private signal(signal: NodeJS.Signals): void {
     if (this.child.pid == null || this.processExited) return;
+    if (!Number.isInteger(this.child.pid) || this.child.pid <= 1) throw new Error(`Invalid Pi agent process group ${this.child.pid}`);
     try {
       if (process.platform === "win32") this.child.kill(signal);
       else process.kill(-this.child.pid, signal);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw new Error(`Pi agent ${this.child.pid} cleanup failed (${signal}: ${error instanceof Error ? error.message : String(error)})`, { cause: error });
     }
   }
 
@@ -198,7 +238,7 @@ export class PiAgentProcess {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.fail(new Error(`Pi ${type} timed out. ${this.stderr}`));
-        void this.dispose();
+        this.disposeAfterFailure();
       }, COMMAND_TIMEOUT_MS);
       this.pending.set(id, { resolve: (value) => resolve(value as RpcData[K]), reject, timer });
       this.child.stdin.write(`${JSON.stringify({ type, id, ...payload })}\n`);
@@ -212,7 +252,7 @@ export class PiAgentProcess {
     while ((newline = this.output.indexOf("\n")) !== -1) {
       if (newline > MAX_RECORD_CHARS) {
         this.fail(new Error("Pi RPC record exceeded the size limit"));
-        void this.dispose();
+        this.disposeAfterFailure();
         return;
       }
       const line = this.output.slice(0, newline);
@@ -251,7 +291,17 @@ export class PiAgentProcess {
     }
     if (this.output.length > MAX_RECORD_CHARS) {
       this.fail(new Error("Pi RPC record exceeded the size limit"));
-      void this.dispose();
+      this.disposeAfterFailure();
     }
   }
+}
+
+/** Failed initialization must not lose ownership of a process whose cleanup also failed. */
+export class PiAgentStartupError extends AggregateError {
+  readonly #session: PiAgentProcess;
+  constructor(session: PiAgentProcess, startupError: unknown, cleanupError: unknown) {
+    super([startupError, cleanupError], `Pi startup failed (${String(startupError)}); cleanup failed (${String(cleanupError)}).`);
+    this.#session = session;
+  }
+  get session(): PiAgentProcess { return this.#session; }
 }
