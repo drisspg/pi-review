@@ -835,6 +835,9 @@ test("pulls private GitHub comments and copies an agent handoff", async ({ page,
   await expect(page.getByRole("button", { name: "Copied agent handoff" })).toBeVisible();
   const text = await page.evaluate(() => navigator.clipboard.readText());
   expect(text).toContain("private GitHub review drafts");
+  expect(text).toContain("I am the reviewer who authored these private drafts");
+  expect(text).toContain("Task: Implement each valid requested change");
+  expect(text).toContain("do not mark them as needing replies");
   expect(text).toContain(`${path}:${line}`);
   expect(text).toContain("send this private note to the coding agent");
 });
@@ -1859,7 +1862,7 @@ test("copies local draft comments in a feedback prompt from the Review tab", asy
     const body = route.request().postDataJSON() as Record<string, unknown>;
     if (body.mode === "review-feedback") {
       feedbackPayload = body;
-      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ prompt: "COPIED REVIEW FEEDBACK PROMPT", purpose: "review-feedback" }) });
+      await route.continue();
       return;
     }
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ prompt: `prompt for ${String(body.mode)}`, purpose: String(body.mode) }) });
@@ -1875,7 +1878,7 @@ test("copies local draft comments in a feedback prompt from the Review tab", asy
   await panel.getByRole("button", { name: /Full review|Refresh findings/ }).click();
   await expect(panel).toContainText("Global feedback from Pi");
   await panel.getByRole("button", { name: /Focus scan|Refresh focus scan/ }).click();
-  await expect(panel).toContainText("copied focus area");
+  await expect(page.locator(".focus-area-inline")).toContainText("copied focus area");
   await openSideTab(page, "Review");
   const reviewPanel = page.locator(".side .panel");
   const finalDraftSave = page.waitForResponse((response) => response.url().endsWith("/api/draft-review/save") && (response.request().postDataJSON() as { body?: string }).body === "Keep this overall note local too.");
@@ -1885,14 +1888,22 @@ test("copies local draft comments in a feedback prompt from the Review tab", asy
 
   await expect(reviewPanel.getByRole("button", { name: "Copied feedback prompt" })).toBeVisible();
   await expect(reviewPanel.locator(".draft-card", { hasText: "Keep this local feedback out of GitHub." })).toBeVisible();
-  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("COPIED REVIEW FEEDBACK PROMPT");
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain("# Task: assess my review notes");
+  const prompt = await page.evaluate(() => navigator.clipboard.readText());
+  expect(prompt).toContain("Mode: Triage only");
+  expect(prompt).toContain("Never classify my drafts as needing replies");
+  const ownNotes = prompt.split("## Requester-authored private review notes")[1].split("## GitHub discussion")[0];
+  expect(ownNotes).toContain("### R0.");
+  expect(ownNotes).toContain("### D1.");
+  expect(ownNotes).toContain("Keep this local feedback out of GitHub.");
+  expect(ownNotes).not.toContain("Before #2448");
   await expect.poll(() => feedbackPayload?.mode).toBe("review-feedback");
-  const userComments = feedbackPayload?.userComments as Array<{ body?: string }> | undefined;
+  const userComments = feedbackPayload?.userComments as Array<{ body?: string; source?: string; id?: string }> | undefined;
   const aiComments = feedbackPayload?.aiComments as Array<{ role?: string; text?: string }> | undefined;
   const focusAreas = feedbackPayload?.focusAreas as Array<{ path?: string; startLine?: number; title?: string }> | undefined;
-  expect(userComments?.some((comment) => comment.body === "Keep this overall note local too.")).toBe(true);
-  expect(userComments?.some((comment) => comment.body === "Keep this local feedback out of GitHub.")).toBe(true);
-  expect(userComments?.some((comment) => comment.body?.includes("Before #2448"))).toBe(true);
+  expect(userComments?.find((comment) => comment.body === "Keep this overall note local too.")).toMatchObject({ source: "requester-draft", id: "R0" });
+  expect(userComments?.find((comment) => comment.body === "Keep this local feedback out of GitHub.")).toMatchObject({ source: "requester-draft", id: "D1" });
+  expect(userComments?.find((comment) => comment.body?.includes("Before #2448"))).toMatchObject({ source: "github" });
   expect(aiComments).toEqual([]);
   expect(focusAreas?.[0]).toMatchObject({ path, startLine: lineNumber, title: "copied focus area" });
   expect(feedbackPayload?.globalFeedback).toBe("Global feedback from Pi.");

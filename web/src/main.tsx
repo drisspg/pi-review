@@ -241,6 +241,9 @@ ${draftDiffHunk(files, draft)}
 \`\`\``);
   return `# PR review draft context
 
+Author: the requester (reviewer).
+Publication: private, unpublished drafts — not incoming review threads.
+
 PR: ${pr.key}
 URL: ${pr.url}
 Title: ${pr.title}
@@ -288,10 +291,10 @@ function commentUpdatedAt(comment: PullReviewComment | PullIssueComment | PullRe
 }
 
 function reviewFeedbackPromptPayload(review: OpenResponse, drafts: DraftComment[], overallBody: string, aiReview: AiReview, focusAreas: FocusArea[], viewedFocusIds: Record<string, boolean>): Record<string, unknown> {
-  const localReviewComments = [overallBody.trim().length > 0 ? { kind: "Local overall review", author: "You", body: overallBody.trim() } : null, ...drafts.filter((draft) => draft.body.trim().length > 0).map((draft) => ({ kind: "Local draft comment", author: "You", body: draft.body.trim(), location: draftLocation(draft) }))].filter((comment) => comment != null);
-  const reviewSummaries = review.reviewSummaries.filter((comment) => comment.body.trim().length > 0).map((comment) => ({ kind: `Review summary (${comment.state.toLowerCase().replace("_", " ")})`, author: commentAuthor(comment), body: comment.body.trim(), url: comment.html_url, updatedAt: commentUpdatedAt(comment) }));
-  const issueComments = review.issueComments.filter((comment) => comment.body.trim().length > 0).map((comment) => ({ kind: "Conversation comment", author: commentAuthor(comment), body: comment.body.trim(), url: comment.html_url, updatedAt: commentUpdatedAt(comment) }));
-  const reviewComments = review.comments.filter((comment) => comment.body.trim().length > 0).map((comment) => ({ kind: comment.in_reply_to_id == null ? "Inline review comment" : "Inline review reply", author: commentAuthor(comment), body: comment.body.trim(), location: targetLabel(commentTarget(comment)), state: comment.thread_resolved == null ? undefined : comment.thread_resolved ? "resolved thread" : "unresolved thread", url: comment.html_url, updatedAt: commentUpdatedAt(comment) }));
+  const localReviewComments = [overallBody.trim().length > 0 ? { source: "requester-draft", id: "R0", kind: "Local overall review", author: "You", body: overallBody.trim() } : null, ...drafts.map((draft, index) => ({ source: "requester-draft", id: `D${index + 1}`, kind: "Local draft comment", author: "You", body: draft.body.trim(), location: draftLocation(draft) })).filter((draft) => draft.body.length > 0)].filter((comment) => comment != null);
+  const reviewSummaries = review.reviewSummaries.filter((comment) => comment.body.trim().length > 0).map((comment) => ({ source: "github", id: `G-review-${comment.id}`, kind: `Review summary (${comment.state.toLowerCase().replace("_", " ")})`, author: commentAuthor(comment), body: comment.body.trim(), url: comment.html_url, updatedAt: commentUpdatedAt(comment) }));
+  const issueComments = review.issueComments.filter((comment) => comment.body.trim().length > 0).map((comment) => ({ source: "github", id: `G-conversation-${comment.id}`, kind: "Conversation comment", author: commentAuthor(comment), body: comment.body.trim(), url: comment.html_url, updatedAt: commentUpdatedAt(comment) }));
+  const reviewComments = review.comments.filter((comment) => comment.body.trim().length > 0).map((comment) => ({ source: "github", id: `G-inline-${comment.id}`, kind: comment.in_reply_to_id == null ? "Inline review comment" : "Inline review reply", author: commentAuthor(comment), body: comment.body.trim(), location: targetLabel(commentTarget(comment)), state: comment.thread_resolved == null ? undefined : comment.thread_resolved ? "resolved thread" : "unresolved thread", url: comment.html_url, updatedAt: commentUpdatedAt(comment) }));
   return {
     mode: "review-feedback",
     prKey: review.pr.key,

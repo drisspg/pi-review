@@ -128,10 +128,13 @@ test("review prompt API builds copyable review feedback bundles", async () => {
   });
 
   assert.equal(result.purpose, "review-feedback");
-  assert.match(result.prompt, /source-of-truth reviewer feedback/);
-  // The engineer writes thread replies; the model only flags threads and explains them.
+  assert.match(result.prompt, /Role: I am the reviewer/);
+  assert.match(result.prompt, /Mode: Triage only/);
+  // My own review notes are not incoming threads or communication tasks.
   assert.match(result.prompt, /Never draft, suggest, or return reply text/);
   assert.doesNotMatch(result.prompt, /suggest reply text/);
+  assert.doesNotMatch(result.prompt, /For each thread that needs a human response/);
+  assert.match(result.prompt, /Do not add "needs reply" or communication follow-up tasks/);
   assert.match(result.prompt, /PR: org\/repo#1/);
   assert.match(result.prompt, /Inline review comment · @reviewer · src\/a\.ts:4 · unresolved/);
   assert.match(result.prompt, /please handle this edge case/);
@@ -142,6 +145,47 @@ test("review prompt API builds copyable review feedback bundles", async () => {
   assert.doesNotMatch(result.prompt, /dismissed concern/);
   assert.match(result.prompt, /checked off 1 focus area as handled or not worth addressing/);
   assert.match(result.prompt, /Global review says the flow is sound/);
+});
+
+test("feedback provenance separates my five review instructions from GitHub discussion and AI findings", async () => {
+  const notes = ["Why False here?", "Why two variables?", "Do both settings carry one policy?", "Tighten the K3 formatting", "Use my supplied default rationale"];
+  const { prompt } = await api().build({
+    mode: "review-feedback", prKey: "org/repo#1",
+    userComments: [
+      ...notes.map((body, index) => ({ source: "requester-draft", id: `D${index + 1}`, kind: "Local draft comment", author: "You", body })),
+      { source: "github", id: "G-conversation-7", kind: "Conversation comment", author: "bot", body: "Review completed with no findings" },
+    ],
+    globalFeedback: "Routing mocks might have a signature mismatch; verify independently.",
+  });
+  const ownSection = prompt.split("## Requester-authored private review notes")[1].split("## GitHub discussion")[0];
+  const githubSection = prompt.split("## GitHub discussion")[1].split("## AI panel dialogue")[0];
+  for (const [index, body] of notes.entries()) {
+    assert.ok(ownSection.includes(`### D${index + 1}.`));
+    assert.ok(ownSection.includes(body));
+    assert.ok(!githubSection.includes(body));
+  }
+  assert.match(ownSection, /Requester \(you\)/);
+  assert.match(githubSection, /G-conversation-7.*@bot/);
+  assert.match(prompt, /AI global feedback \[AI-GLOBAL\]/);
+  assert.match(prompt, /technical claims still need verification/);
+  assert.match(prompt, /independently verified findings from unchecked claims/);
+  assert.match(prompt, /Deduplicate overlapping points while retaining all contributing IDs/);
+  assert.match(prompt, /Bot\/status-only comments do not create action items/);
+  assert.doesNotMatch(prompt, /## GitHub\/user comments/);
+});
+
+test("legacy drafts are classified by known kind while explicit provenance wins", async () => {
+  const { prompt } = await api().build({ mode: "review-feedback", prKey: "pr", userComments: [
+    { kind: "Local overall review", author: "You", body: "Legacy overall note" },
+    { kind: "Local draft comment", author: "You", body: "Legacy requester note" },
+    { source: "github", kind: "Local draft comment", author: "You", body: "Explicit GitHub context" },
+    { kind: "Inline review comment", author: "You", body: "A GitHub username is not proof of ownership" },
+  ] });
+  const ownSection = prompt.split("## Requester-authored private review notes")[1].split("## GitHub discussion")[0];
+  assert.match(ownSection, /### R0\. Local overall review/);
+  assert.match(ownSection, /### D1\. Local draft comment/);
+  assert.match(ownSection, /Legacy requester note/);
+  assert.doesNotMatch(ownSection, /Explicit GitHub context|A GitHub username/);
 });
 
 test("review prompt API builds private GitHub draft handoff prompts", async () => {
@@ -156,7 +200,10 @@ test("review prompt API builds private GitHub draft handoff prompts", async () =
 
   assert.equal(result.purpose, "github-draft-handoff");
   assert.match(result.prompt, /private GitHub review drafts/);
-  assert.match(result.prompt, /src\/a\.ts:4-6/);
+  assert.match(result.prompt, /I am the reviewer who authored these private drafts/);
+  assert.match(result.prompt, /Task: Implement each valid requested change/);
+  assert.match(result.prompt, /do not mark them as needing replies/);
+  assert.match(result.prompt, /D1\. Private draft: src\/a\.ts:4-6/);
   assert.match(result.prompt, /handle the empty case/);
   assert.match(result.prompt, /Do not publish, submit, edit, or delete/);
 });
@@ -172,7 +219,8 @@ test("review prompt API validates mode and required inputs", async () => {
   await assert.rejects(api().build({ mode: "review-feedback", prKey: "pr", focusAreas: [{ path: "p", body: "b", startLine: 1 }] }), /Expected focusAreas location/);
   // A scan can emit a location with a title but no description; the copy must not fail on it.
   const bodyless = await api().build({ mode: "review-feedback", prKey: "pr", focusAreas: [{ path: "src/a.ts", startLine: 4, endLine: 4, title: "edge case", body: "" }] });
-  assert.match(bodyless.prompt, /### 1\. src\/a\.ts:4 — edge case\n\n/);
+  assert.match(bodyless.prompt, /### F1\. src\/a\.ts:4 — edge case\n\n/);
+  await assert.rejects(api().build({ mode: "review-feedback", prKey: "pr", userComments: [{ source: "unknown", body: "note" }] }), /Expected userComments.source/);
   await assert.rejects(api().build({ mode: "github-draft-handoff", prKey: "pr", comments: [] }), /Expected GitHub draft comments/);
   await assert.rejects(api().build({ mode: "github-draft-handoff", prKey: "pr", comments: [{ path: "p", body: "" }] }), /Expected GitHub draft comment location and body/);
 });

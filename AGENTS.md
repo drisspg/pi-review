@@ -145,7 +145,9 @@ contract before relying on the frontend.
   `src/server-router.ts` or a feature API module.
 - Add or extend typed backend contracts before wiring UI text/protocols into React. Use
   `/api/pi/prompt` modes for durable agent prompts instead of constructing long prompts in the
-  frontend.
+  frontend. Feedback handoffs must distinguish requester-authored private drafts from GitHub
+  discussion and AI suggestions using explicit provenance and source IDs. Own drafts are review
+  instructions/questions, not threads needing replies; keep triage and implementation modes distinct.
 - For "test this PR" or "have an agent try this out" flows, use the `test-pr` prompt contract via
   `/api/pi/prompt` with `{ mode: "test-pr", prKey, testIntent, files?, gpuRequired? }`.
 - Validate backend behavior from the CLI first: targeted unit tests, direct module calls, local
@@ -259,9 +261,10 @@ Component conventions:
   `--single-process --no-sandbox` launch args in playwright.config.ts) and run one test per
   invocation — start the server once yourself and use `PI_REVIEW_FAST_TESTS=1` per-test runs so
   it's reused;
-  under that harness, "minimizes focus area links" and "copies local draft comments" fail on
-  `HEAD` too — everything else must pass. Never store wrapper configs or state you care about in
-  `test-results/` (Playwright wipes it at startup).
+  under that harness, "minimizes focus area links" fails on `HEAD` too — everything else must pass.
+  The feedback-copy test now checks focus findings inline, not in the Pi panel, and passes in
+  single-process mode. Never store wrapper configs or state you care about in `test-results/`
+  (Playwright wipes it at startup).
 
 ## Skills
 

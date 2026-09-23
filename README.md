@@ -133,6 +133,15 @@ comment using GitHub's `suggestion` block. In a line thread it uses the selected
 range; otherwise supply `path`, `line`, and optionally `startLine`. Publish the draft normally,
 and the PR author can use GitHub's **Apply suggestion** action. The tool does not edit the checkout.
 
+**Copy feedback prompt** produces a triage-only handoff from your perspective as the reviewer.
+Your private drafts are labeled as requester-authored instructions/questions, separate from GitHub
+discussion and unverified AI suggestions. Draft references (`D1`, `D2`, …; `R0` for the overall
+note) survive the handoff. The requested response gives per-item dispositions, evidence, and
+code/test follow-ups—not thread replies or “needs reply” tasks. **Copy agent handoff** under
+GitHub private drafts is different: it asks a coding agent to implement valid notes while keeping
+the GitHub drafts unchanged. **Copy draft context** exports context and ownership metadata without
+choosing a new task. None of these copy actions publishes anything.
+
 After updating Pi, run `npm run pi:smoke` to exercise a real background response, an in-memory draft
 tool, a real terminal response, reconnection, and process cleanup. It uses your configured model
 (and therefore incurs model usage), creates no GitHub comments, and removes its temporary sessions.
