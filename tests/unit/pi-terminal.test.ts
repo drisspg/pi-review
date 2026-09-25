@@ -7,6 +7,9 @@ import test, { type TestContext } from "node:test";
 
 import { createPiTerminalManager, parsePiTerminalClientMessage, parsePiTerminalRequest, resolvePiTerminalCommand, type PiTerminalPeer, type PiTerminalServerMessage } from "../../src/pi-terminal.js";
 
+// Keep the developer's machine-local launcher/model overrides out of these hermetic tests.
+process.env.PI_REVIEW_LOCAL_CONFIG = "/nonexistent/.pi-review.local.json";
+
 class FakeProcess {
   pid = 42;
   writes: string[] = [];

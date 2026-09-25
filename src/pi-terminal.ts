@@ -7,7 +7,7 @@ import type { IPty } from "node-pty";
 
 import { ghstackWorkspaceInstructions } from "./ghstack-guidance.js";
 import { reviewSessionRoot } from "./storage-paths.js";
-import { piLaunch, piModelArgs } from "./pi-launch.js";
+import { piLaunch, piModelArgs, readPiReviewLocalConfig } from "./pi-launch.js";
 import { reviewWorkspaceEnvironment } from "./pi-review-workspace.js";
 export { resolvePiTerminalCommand } from "./pi-launch.js";
 import type { DraftReview } from "./types.js";
@@ -267,6 +267,8 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
     delete env.PI_SESSION_FILE;
     delete env.PI_SESSION_ID;
     const args = ["--session-dir", sessionDir, "--continue", "--name", `Pi Review · ${request.session}`, ...piModelArgs(cwd)];
+    const thinkingLevel = readPiReviewLocalConfig().thinkingLevel;
+    if (thinkingLevel) args.push("--thinking", thinkingLevel);
     if (deps.extensionPath != null) args.push("--extension", deps.extensionPath);
     args.push("--append-system-prompt", [ghstackWorkspaceInstructions(request.prKey), request.context].filter(Boolean).join("\n\n"));
     const launch = piLaunch(args, { ...env, ...(deps.piCommand == null ? {} : { PI_REVIEW_PI_COMMAND: deps.piCommand }) });

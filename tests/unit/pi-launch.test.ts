@@ -4,7 +4,7 @@ import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import test from "node:test";
 
-import { piLaunch, piModelArgs, readPiLauncherCommand } from "../../src/pi-launch.js";
+import { piLaunch, piModelArgs, piThinkingLevel, readPiLauncherCommand, readPiReviewLocalConfig } from "../../src/pi-launch.js";
 
 test("Pi launch preserves the authenticated wrapper and removes parent session identity", () => {
   const env = { PI_BIN: "/user/pi-work", SHELL: "/bin/zsh", PI_SESSION_ID: "parent", PI_SESSION_FILE: "/parent.jsonl", PI_BINARY_OVERRIDE: "/fork", PATH: ["/repo/node_modules/.bin", "/user/bin"].join(delimiter) };
@@ -39,19 +39,26 @@ test("Pi model selection follows global settings, ignores PR settings, and fails
     assert.equal(readPiLauncherCommand(localConfig), null);
     await writeFile(localConfig, JSON.stringify({ piCommand: "~/bin/pi-work" }));
     assert.equal(readPiLauncherCommand(localConfig), "~/bin/pi-work");
-    await writeFile(localConfig, "{}");
-    assert.throws(() => readPiLauncherCommand(localConfig), /Expected piCommand/);
+    await writeFile(localConfig, JSON.stringify({ piCommand: "" }));
+    assert.throws(() => readPiLauncherCommand(localConfig), /piCommand/);
+    await writeFile(localConfig, JSON.stringify({ model: "gpt-6-astra" }));
+    assert.throws(() => readPiReviewLocalConfig(localConfig), /provider\/id/);
+    await writeFile(localConfig, JSON.stringify({ model: "openai/gpt-6-astra", thinkingLevel: "high" }));
+    const local = readPiReviewLocalConfig(localConfig);
+    assert.equal(piThinkingLevel("medium", local), "high");
+    assert.equal(piThinkingLevel("medium", {}), "medium");
     await mkdir(join(cwd, ".pi"), { recursive: true });
     await writeFile(join(cwd, ".pi", "settings.json"), JSON.stringify({ defaultProvider: "untrusted", defaultModel: "untrusted" }));
-    assert.deepEqual(piModelArgs(cwd, agentDir), []);
+    assert.deepEqual(piModelArgs(cwd, agentDir, {}), []);
     await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: "openai", defaultModel: "gpt-6-astra" }));
-    assert.deepEqual(piModelArgs(cwd, agentDir), ["--provider", "openai", "--model", "gpt-6-astra"]);
+    assert.deepEqual(piModelArgs(cwd, agentDir, {}), ["--provider", "openai", "--model", "gpt-6-astra"]);
     await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: "anthropic", defaultModel: "claude-fable-5-1" }));
-    assert.deepEqual(piModelArgs(cwd, agentDir), ["--provider", "anthropic", "--model", "claude-fable-5-1"]);
+    assert.deepEqual(piModelArgs(cwd, agentDir, {}), ["--provider", "anthropic", "--model", "claude-fable-5-1"]);
+    assert.deepEqual(piModelArgs(cwd, agentDir, local), ["--provider", "openai", "--model", "gpt-6-astra"]);
     await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: "openai" }));
-    assert.throws(() => piModelArgs(cwd, agentDir), /both defaultProvider and defaultModel/);
+    assert.throws(() => piModelArgs(cwd, agentDir, {}), /both defaultProvider and defaultModel/);
     await writeFile(join(agentDir, "settings.json"), "invalid json");
-    assert.throws(() => piModelArgs(cwd, agentDir), /Cannot read Pi settings/);
+    assert.throws(() => piModelArgs(cwd, agentDir, {}), /Cannot read Pi settings/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

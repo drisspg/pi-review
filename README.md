@@ -118,6 +118,14 @@ sessions. Pi Review no longer hardcodes a personal Codex provider. Background re
 fallback to a different configured model. Existing running agents keep their model until stopped
 or explicitly changed; restarting Pi Review picks up the new launcher for all agents.
 
+To use a different model or thinking level for Pi Review only, add them to `.pi-review.local.json`
+(`model` is `provider/id`; `thinkingLevel` overrides every agent and terminal). The file path can
+be overridden with `PI_REVIEW_LOCAL_CONFIG`:
+
+```json
+{"piCommand": "~/dotfiles/scripts/pi-work", "model": "openai/gpt-6-astra", "thinkingLevel": "high"}
+```
+
 To override the shared launcher for Pi Review only, set `PI_REVIEW_PI_COMMAND=/absolute/path/to/pi-wrapper`
 before `npm start`. This is an executable path, not a shell command with arguments. Authentication
 and transport stay inside that launcher; Pi Review does not copy credentials or reimplement the

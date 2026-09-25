@@ -3,7 +3,7 @@ import type { AgentSessionEvent, RpcSessionState, ToolDefinition } from "@earend
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { piLaunch, piModelArgs } from "./pi-launch.js";
+import { piLaunch, piModelArgs, piThinkingLevel } from "./pi-launch.js";
 import { createPiToolBridge } from "./pi-tool-bridge.js";
 import { REVIEW_WORKSPACE_ENV, reviewWorkspaceEnvironment, type PiReviewWorkspace } from "./pi-review-workspace.js";
 
@@ -64,7 +64,7 @@ export class PiAgentProcess {
   static async create(options: Options): Promise<PiAgentProcess> {
     const modelArgs = piModelArgs(options.cwd);
     const extension = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./pi-agent-extension.ts" : "./pi-agent-extension.js", import.meta.url));
-    const args = ["--mode", "rpc", "--session-dir", options.sessionDir, ...modelArgs, "--thinking", options.thinkingLevel, "--extension", extension];
+    const args = ["--mode", "rpc", "--session-dir", options.sessionDir, ...modelArgs, "--thinking", piThinkingLevel(options.thinkingLevel), "--extension", extension];
     if (options.tools?.length === 0) args.push("--no-tools");
     else if (options.tools) args.push("--tools", options.tools.join(","));
     const launch = piLaunch(args);

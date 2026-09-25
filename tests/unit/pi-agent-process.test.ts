@@ -12,6 +12,9 @@ import { PiAgentProcess, PiAgentStartupError } from "../../src/pi-agent-process.
 import { piFinalAssistantAnswer } from "../../src/pi-session.js";
 import { createPiToolBridge } from "../../src/pi-tool-bridge.js";
 
+// Keep the developer's machine-local launcher/model overrides out of these hermetic tests.
+process.env.PI_REVIEW_LOCAL_CONFIG = "/nonexistent/.pi-review.local.json";
+
 test("launcher-backed agents stream through retries, call server-owned tools, switch models, abort, and reject exits", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "pi-agent-process-"));
   const command = fileURLToPath(new URL("../fixtures/pi-rpc.mjs", import.meta.url));
