@@ -1258,6 +1258,18 @@ test("collapses all review threads from the view menu", async ({ page }) => {
   await expect(thread).not.toHaveClass(/minimized/);
 });
 
+test("collapses all files from the view menu without marking them viewed", async ({ page }) => {
+  await expect(page.locator("section.file .patch").first()).toBeVisible();
+  await page.getByRole("button", { name: /^View/ }).click();
+  await page.getByRole("menuitem", { name: "Collapse all files" }).click();
+  await expect(page.locator("section.file .patch")).toHaveCount(0);
+  await expect(page.locator("section.file .viewed-toggle input:checked")).toHaveCount(0);
+
+  await page.getByRole("button", { name: /^View/ }).click();
+  await page.getByRole("menuitem", { name: "Expand all files" }).click();
+  await expect(page.locator("section.file .patch").first()).toBeVisible();
+});
+
 test("switches and persists Primer-backed GitHub themes", async ({ page }) => {
   await openTools(page);
   const theme = page.getByLabel("Theme");

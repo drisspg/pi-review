@@ -1414,6 +1414,13 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { r
   }, [wantInterdiff, interdiff, pr.url, pr.headSha, sinceSha, props.review.files]);
   const interdiffFiles = wantInterdiff ? interdiff?.files ?? null : null;
   const diffFiles = interdiffFiles ?? props.review.files;
+  const anyFileOpen = diffFiles.some((file) => props.openFiles[file.filename] ?? true);
+  /** Collapse or expand every file body without touching viewed state. */
+  function toggleAllFiles() {
+    logUsage("ui:toggle-all-files", { open: !anyFileOpen });
+    props.setOpenFiles({ ...props.openFiles, ...Object.fromEntries(diffFiles.map((file) => [file.filename, !anyFileOpen])) });
+    if (anyFileOpen) window.scrollTo({ top: 0 });
+  }
   // Interdiff LEFT lines belong to the previously reviewed head, not the PR base, so GitHub cannot anchor comments there.
   const diffPlumbing: typeof props = interdiffFiles == null ? props : {
     ...props,
@@ -1545,6 +1552,7 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { r
                 {canInterdiff && <ActionMenuItem onSelect={() => { const scope = diffScope === "all" ? "since-review" : "all"; logUsage("ui:diff-scope", { scope }); setInterdiffError(null); setDiffScope(scope); }}>{diffScope === "all" ? "Changes since last review" : "All changes"}</ActionMenuItem>}
                 <ActionMenuItem onSelect={() => { const mode = props.diffViewMode === "unified" ? "split" : "unified"; logUsage("ui:diff-view-mode", { mode }); props.setDiffViewMode(mode); }}>{diffViewLabel}</ActionMenuItem>
                 {commentCount > 0 && <ActionMenuItem onSelect={props.toggleAllComments}>{props.commentsCollapsed ? "Expand review threads" : "Collapse review threads"}</ActionMenuItem>}
+                <ActionMenuItem onSelect={toggleAllFiles}>{anyFileOpen ? "Collapse all files" : "Expand all files"}</ActionMenuItem>
               </ActionMenu>
               <Button variant="muted" className="small-muted-button panel-launch-button" onClick={() => openSidePanel("comments")}>Comments{commentCount > 0 ? ` ${commentCount}` : ""}</Button>
               <Button variant="muted" className="small-muted-button panel-launch-button" onClick={() => openSidePanel("pi")}>Pi review{piBadge != null ? ` ${piBadge}` : ""}</Button>
