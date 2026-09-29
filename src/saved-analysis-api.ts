@@ -8,7 +8,11 @@ export type SavedAnalysisApiDeps = {
   saveFocusScan: (scan: Omit<FocusScanRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<FocusScanRecord, "id" | "createdAt">>) => Promise<FocusScanRecord>;
   saveOverview: (record: Omit<GuideReviewRecord, "id" | "createdAt" | "updatedAt" | "stepStates">) => Promise<GuideReviewRecord>;
   saveGuideReview: (review: Omit<GuideReviewRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<GuideReviewRecord, "id" | "createdAt">>) => Promise<GuideReviewRecord>;
+  listAiReviews: (prKey: string) => Promise<AiReviewRecord[]>;
 };
+
+/** The saved Pi "General review" text, without follow-up chat, for agents that validate it. */
+export type GeneralReviewSnapshot = { id: string; headSha: string; createdAt: string; matchesHead: boolean | null; text: string };
 
 export type SavedAnalysisApi = {
   updateFocusScanProgress: (payload: Record<string, unknown>) => Promise<{ scan: FocusScanRecord }>;
@@ -17,6 +21,7 @@ export type SavedAnalysisApi = {
   saveAiReview: (payload: Record<string, unknown>) => Promise<{ review: AiReviewRecord }>;
   saveGuideReview: (payload: Record<string, unknown>) => Promise<{ guide: GuideReviewRecord }>;
   saveOverview: (payload: Record<string, unknown>) => Promise<{ overview: GuideReviewRecord }>;
+  readGeneralReview: (payload: Record<string, unknown>) => Promise<{ review: GeneralReviewSnapshot | null; olderCount: number }>;
 };
 
 function focusAreaStatesFromPayload(payload: Record<string, unknown>): Record<string, FocusAreaReviewState> {
@@ -26,6 +31,11 @@ function focusAreaStatesFromPayload(payload: Record<string, unknown>): Record<st
 
 function aiReviewMessagesFromPayload(payload: Record<string, unknown>): AiReviewMessageRecord[] | undefined {
   return Array.isArray(payload.messages) ? payload.messages as AiReviewMessageRecord[] : undefined;
+}
+
+function generalReviewText(review: AiReviewRecord): string {
+  const general = review.messages?.filter((message) => message.kind === "general-review" && message.text.trim().length > 0).map((message) => message.text.trim()) ?? [];
+  return general.length > 0 ? general.join("\n\n") : review.answer.trim();
 }
 
 export function createSavedAnalysisApi(deps: SavedAnalysisApiDeps): SavedAnalysisApi {
@@ -83,5 +93,18 @@ export function createSavedAnalysisApi(deps: SavedAnalysisApiDeps): SavedAnalysi
     };
   }
 
-  return { updateFocusScanProgress, updateGuideReviewProgress, saveFocusScan, saveAiReview, saveGuideReview, saveOverview };
+  /** Prefer the review for the caller's head; otherwise return the newest one and say it is stale. */
+  async function readGeneralReview(payload: Record<string, unknown>): Promise<{ review: GeneralReviewSnapshot | null; olderCount: number }> {
+    if (typeof payload.prKey !== "string") throw new Error("Expected prKey");
+    const headSha = typeof payload.headSha === "string" && payload.headSha.length > 0 ? payload.headSha : null;
+    const reviews = (await deps.listAiReviews(payload.prKey)).filter((review) => generalReviewText(review).length > 0);
+    const record = reviews.find((review) => review.headSha === headSha) ?? reviews[0];
+    if (record == null) return { review: null, olderCount: 0 };
+    return {
+      review: { id: record.id, headSha: record.headSha, createdAt: record.createdAt, matchesHead: headSha == null ? null : record.headSha === headSha, text: generalReviewText(record) },
+      olderCount: reviews.length - 1,
+    };
+  }
+
+  return { updateFocusScanProgress, updateGuideReviewProgress, saveFocusScan, saveAiReview, saveGuideReview, saveOverview, readGeneralReview };
 }

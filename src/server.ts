@@ -160,7 +160,7 @@ const prApi = createPrApi(defaultPrApiDeps({
 const reviewArchiveApi = createReviewArchiveApi(defaultReviewArchiveApiDeps({ clearDraftReview, listArchivedReviews, fetchPullRequestReviewData: cachedFetchPullRequestReviewData, markPullRequestReviewed, saveReviewMemory }));
 const reviewMemoryApi = createReviewMemoryApi({ askPi, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewMemory, saveReviewProfile });
 const reviewSubmitRouteApi = createReviewSubmitRouteApi(defaultReviewSubmitRouteApiDeps({ clearDraftReview, fetchPullRequestReviewData: cachedFetchPullRequestReviewData, markPullRequestReviewed, saveReviewMemory, submitPullRequestReview }));
-const savedAnalysisApi = createSavedAnalysisApi({ saveAiReview, saveFocusScan, saveGuideReview, saveOverview, updateFocusScanProgress, updateGuideReviewProgress });
+const savedAnalysisApi = createSavedAnalysisApi({ listAiReviews, saveAiReview, saveFocusScan, saveGuideReview, saveOverview, updateFocusScanProgress, updateGuideReviewProgress });
 const shellApi = createShellApi({ listRecentPullRequests, logEntries: logger.entries, hasCheckout: (ref) => existsSync(worktreeDirForRef(ref)) });
 const usageApi = createUsageApi(defaultUsageApiDeps(logger));
 

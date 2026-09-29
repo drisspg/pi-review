@@ -41,6 +41,7 @@ function fakeDeps() {
         guideInputs.push(review as Record<string, unknown>);
         return { ...review, id: review.id ?? "guide-id", createdAt: review.createdAt ?? "then", updatedAt: "now" } as GuideReviewRecord;
       },
+      async listAiReviews(): Promise<AiReviewRecord[]> { return []; },
       async saveOverview(record: Omit<GuideReviewRecord, "id" | "createdAt" | "updatedAt" | "stepStates">) {
         overviewInputs.push(record as Record<string, unknown>);
         return { ...record, id: "overview-id", createdAt: "then", updatedAt: "now" } as GuideReviewRecord;
@@ -135,4 +136,19 @@ test("legacy guide saves forward explicit identity for immutable validation", as
   const { deps, guideInputs } = fakeDeps();
   await createSavedAnalysisApi(deps).saveGuideReview({ prKey: "pr", id: "old", headSha: "head", answer: "guide" });
   assert.equal(guideInputs[0].id, "old");
+});
+
+test("general review read prefers the caller's head, excludes chat, and flags stale reviews", async () => {
+  const record = (id: string, headSha: string, extra: Partial<AiReviewRecord>): AiReviewRecord => ({ id, prKey: "pr", headSha, answer: "", createdAt: id, updatedAt: id, ...extra });
+  const reviews = [
+    record("newest", "new-head", { answer: "raw newest" }),
+    record("current", "session-head", { messages: [{ role: "pi", kind: "general-review", title: "General review", text: "[P1] zero V rows" }, { role: "user", kind: "chat", text: "follow-up question" }] }),
+    record("empty", "session-head", { answer: "  " }),
+  ];
+  const { deps } = fakeDeps();
+  const api = createSavedAnalysisApi({ ...deps, listAiReviews: async (prKey) => prKey === "pr" ? reviews : [] });
+  assert.deepEqual(await api.readGeneralReview({ prKey: "pr", headSha: "session-head" }), { review: { id: "current", headSha: "session-head", createdAt: "current", matchesHead: true, text: "[P1] zero V rows" }, olderCount: 1 });
+  assert.deepEqual((await api.readGeneralReview({ prKey: "pr", headSha: "other" })).review, { id: "newest", headSha: "new-head", createdAt: "newest", matchesHead: false, text: "raw newest" });
+  assert.deepEqual(await api.readGeneralReview({ prKey: "missing" }), { review: null, olderCount: 0 });
+  await assert.rejects(api.readGeneralReview({}), /Expected prKey/);
 });

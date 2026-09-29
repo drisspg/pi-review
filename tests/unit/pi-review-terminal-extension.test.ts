@@ -78,6 +78,7 @@ test("terminal extension reads archived feedback only on demand, without inline 
   responseStatus = 404;
   payload = { error: "Archive not found" };
   await assert.rejects(tool.execute("missing", { archiveId: "missing" }), /Archive not found/);
+
   payload = {};
   await assert.rejects(tool.execute("failure", {}), /404/);
   await assert.rejects(tool.execute("abort", {}, AbortSignal.abort()), /abort/i);
@@ -89,6 +90,18 @@ test("terminal extension reads archived feedback only on demand, without inline 
     process.env[key] = value;
   }
   assert.equal(requests.length, requestCount);
+  responseStatus = 200;
+  const general = tools.get("read_general_review");
+  assert.ok(general);
+  payload = { review: { id: "ai", headSha: "older-head", createdAt: "then", matchesHead: false, text: "[P1] zero unused V rows" }, olderCount: 0 };
+  const generalResult = await general.execute("general", {}, signal);
+  assert.match(generalResult.content[0].text, /\[P1\] zero unused V rows/);
+  assert.match(generalResult.content[0].text, /STALE.*session-head/);
+  assert.deepEqual(requests.at(-1), { url: "http://pi-review.test/api/ai-review/general", init: {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prKey: "github.com/org/repo#1", headSha: "session-head" }), signal,
+  } });
+  payload = { review: null, olderCount: 0 };
+  assert.match((await general.execute("none", {})).content[0].text, /No General review/);
 });
 
 test("suggest_change reuses the inline comment endpoint with a GitHub suggestion body", async (t) => {

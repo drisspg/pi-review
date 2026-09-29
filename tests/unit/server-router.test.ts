@@ -222,6 +222,7 @@ function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
       async saveAiReview() {
         return { review: { answer: "answer", createdAt: "now", headSha: "head", id: "ai", prKey: "pr", updatedAt: "now" } };
       },
+      async readGeneralReview() { return { review: null, olderCount: 0 }; },
       async saveFocusScan() {
         return { scan: { answer: "answer", areaStates: {}, createdAt: "now", headSha: "head", id: "scan", prKey: "pr", updatedAt: "now" } };
       },
