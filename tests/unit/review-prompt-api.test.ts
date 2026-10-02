@@ -251,4 +251,6 @@ test("PyTorch pre-review prompt judges direction: stale descriptions are not a d
   assert.match(prompt, /Descriptions often lag the code/);
   assert.match(prompt, /still Accept when the direction is sound/);
   assert.match(prompt, /linked issue is already fixed or closed/);
+  assert.match(prompt, /Stay high level: read the diff only for the shape of the change/);
+  assert.doesNotMatch(prompt, /checkout/i, "pre-review never asks the model to inspect a checkout");
 });

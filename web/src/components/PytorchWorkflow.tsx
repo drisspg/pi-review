@@ -4,9 +4,8 @@ import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "reac
 
 import { api, errorMessage, logUsage } from "../api";
 import { relativeTime } from "../lib/pr";
-import type { InboxItem, PullFile, PytorchAssessment, PytorchPrStatus, PytorchQueueIssue, PytorchQueuePr, PytorchQueuesResponse, PytorchStageInfo, StoredPullRequest } from "../types";
+import type { InboxItem, PytorchAssessment, PytorchPrStatus, PytorchQueueIssue, PytorchQueuePr, PytorchQueuesResponse, PytorchStageInfo, StoredPullRequest } from "../types";
 import { Button } from "./Button";
-import { MarkdownText } from "./Markdown";
 import { ModalShell } from "./Modal";
 
 /**
@@ -418,12 +417,12 @@ export function PytorchQueuesPanel({ openPr }: { openPr: (url: string) => Promis
 }
 
 /** Review-page strip for pytorch/pytorch PRs: where the PR is in the workflow and the viewer's next action. */
-export function PytorchWorkflowStrip({ pr, files }: { pr: StoredPullRequest; files: PullFile[] }) {
+export function PytorchWorkflowStrip({ pr }: { pr: StoredPullRequest }) {
   const [status, setStatus] = useState<PytorchPrStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [decline, setDecline] = useState<DeclineTarget | null>(null);
-  const [preReview, setPreReview] = useState<{ running: boolean; answer: string | null; error: string | null; open: boolean }>({ running: false, answer: null, error: null, open: false });
+  const [suggesting, setSuggesting] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -450,18 +449,19 @@ export function PytorchWorkflowStrip({ pr, files }: { pr: StoredPullRequest; fil
     }
   }
 
-  async function askPi(): Promise<void> {
+  /** Checkout-free: the server fetches the description, conversation, linked issue and diff, then runs a tool-less model. */
+  async function suggest(): Promise<void> {
     if (status == null) return;
-    setPreReview({ running: true, answer: null, error: null, open: true });
-    logUsage("pytorch:pi-pre-review");
+    setSuggesting(true);
+    setError(null);
+    logUsage("pytorch:pre-review-suggest");
     try {
-      const { prompt, purpose } = await api<{ prompt: string; purpose: string }>("/api/pi/prompt", { method: "POST", body: JSON.stringify({ mode: "pytorch-pre-review", prKey: pr.key, prTitle: pr.title, author: pr.author, body: pr.body ?? "", labels: status.pr.labels, linkedIssues: status.pr.linkedIssues, files: files.map((file) => ({ filename: file.filename, additions: file.additions, deletions: file.deletions, status: file.status })) }) });
-      const { answer } = await api<{ answer: string }>("/api/ask", { method: "POST", body: JSON.stringify({ prKey: pr.key, prompt, purpose }) });
-      setPreReview({ running: false, answer, error: null, open: true });
-      // Persist so the queue row shows it too; an answer without a verdict line stays visible here only.
-      await api("/api/pytorch/pre-review/assessment", { method: "POST", body: JSON.stringify({ number: status.pr.number, markdown: answer, source: "Pi", prUpdatedAt: status.pr.updatedAt }) }).then(load).catch(() => undefined);
+      await api("/api/pytorch/pre-review/assess", { method: "POST", body: JSON.stringify({ number: status.pr.number }) });
+      await load();
     } catch (err) {
-      setPreReview({ running: false, answer: null, error: errorMessage(err), open: true });
+      setError(errorMessage(err));
+    } finally {
+      setSuggesting(false);
     }
   }
 
@@ -479,19 +479,12 @@ export function PytorchWorkflowStrip({ pr, files }: { pr: StoredPullRequest; fil
       {canPreReview && <>
         <Button variant="muted" disabled={busy || status.pr.viewerThumbsUp} title="React 👍 to the PR description (same as @pytorchbot pre-review accept)" onClick={() => void run(async () => { await api("/api/pytorch/pre-review/accept", { method: "POST", body: JSON.stringify({ number: status.pr.number }) }); logUsage("pytorch:pre-review-accept", { from: "review" }); })}><ThumbsupIcon size={14} /> {status.pr.viewerThumbsUp ? "Pre-review accepted" : "Accept pre-review"}</Button>
         <Button variant="muted" className={assessment != null && assessment.recommendation !== "accept" ? "pt-suggested" : undefined} disabled={busy} onClick={() => setDecline(declineFromAssessment(status.pr, assessment))}>{assessment?.recommendation === "draft" ? "Draft…" : assessment?.recommendation === "close" ? "Close…" : "Decline…"}</Button>
-        <Button variant="muted" disabled={preReview.running} title="Ask Pi for a quick four-question pre-review assessment" onClick={() => void askPi()}>{preReview.running ? "Pi is assessing…" : "Pi pre-review"}</Button>
+        <Button variant="muted" disabled={suggesting} title="Quick direction check from the description, conversation, linked issue and diff (no checkout); saved as a suggestion" onClick={() => void suggest()}>{suggesting ? "Assessing…" : assessment == null ? "Suggest pre-review" : "Re-assess"}</Button>
       </>}
       {stage.needsSendBack && !status.viewerIsAuthor && <Button variant="muted" disabled={busy} title="TEMPORARY rule: Request changes does not re-add `in progress` automatically yet" onClick={() => void run(async () => { await api("/api/pytorch/pr/send-back", { method: "POST", body: JSON.stringify({ number: status.pr.number }) }); logUsage("pytorch:send-back", { from: "review" }); })}>Send back to in progress</Button>}
     </span>
     {error != null && <span className="inbox-flag danger" role="alert">{error}</span>}
     {canPreReview && assessment != null && <div className="pt-strip-assessment"><AssessmentSummary assessment={assessment} /></div>}
-    {preReview.open && <div className="pt-pre-review">
-      <div className="pt-pre-review-head">
-        <strong>Pi pre-review</strong>
-        <Button variant="icon" aria-label="Hide Pi pre-review" onClick={() => setPreReview((current) => ({ ...current, open: false }))}><XIcon size={14} /></Button>
-      </div>
-      {preReview.running ? <p className="muted">Reading the description, linked issue, and file list…</p> : preReview.error != null ? <p className="inbox-error" role="alert">{preReview.error}</p> : preReview.answer != null && <MarkdownText text={preReview.answer} fileLinks={{ prUrl: pr.url }} />}
-    </div>}
     <ReasonDialog open={decline != null} title={decline == null ? "Decline pre-review" : `Decline #${decline.number}`} outcomes templates={DECLINE_TEMPLATES} initialText={decline?.text} initialOutcome={decline?.outcome} submitLabel={(outcome) => outcome === "draft" ? "Comment & move to draft" : "Comment & close"} onCancel={() => setDecline(null)} onSubmit={async (reason, outcome) => {
       if (decline == null || outcome == null) return;
       await declinePreReview(decline, reason, outcome);

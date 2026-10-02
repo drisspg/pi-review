@@ -273,3 +273,15 @@ test("assessment candidates are owed pre-reviews without a usable suggestion, in
   assert.deepEqual((await api.assessmentCandidates()).map((item) => item.number), [3], "outdated suggestions are redone after the cool-down");
   assert.equal(h.queries.length, searches, "never searches GitHub");
 });
+
+test("an explicit assessment request runs through the injected assessor and returns the saved suggestion", async () => {
+  const h = harness();
+  let api: ReturnType<typeof createPytorchWorkflowApi> | null = null;
+  h.deps.assessNow = async (number) => { await api!.saveAssessment({ number, markdown: "Recommendation: Close\nWhy (one line): Issue already fixed." }); };
+  api = createPytorchWorkflowApi(h.deps);
+  await api.queues();
+  const { assessment } = await api.requestAssessment({ number: 2 });
+  assert.deepEqual([assessment.recommendation, assessment.why], ["close", "Issue already fixed."]);
+  assert.deepEqual(h.calls, [], "no GitHub writes");
+  await assert.rejects(createPytorchWorkflowApi({ ...h.deps, assessNow: undefined }).requestAssessment({ number: 2 }), /not available/);
+});

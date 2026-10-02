@@ -164,6 +164,8 @@ export type PytorchWorkflowDeps = {
   assessorStatus?: () => PytorchAssessorStatus | null;
   /** Called after each queue refresh so a background assessor can pick up new PRs. */
   onQueuesRefreshed?: () => void;
+  /** Run one checkout-free assessment now (serialized with the background assessor). */
+  assessNow?: (number: number) => Promise<void>;
   readStore: () => Promise<PytorchStore | null>;
   writeStore: (store: PytorchStore) => Promise<void>;
   now: () => string;
@@ -185,6 +187,7 @@ export type PytorchWorkflowApi = {
   saveAssessment: (payload: Record<string, unknown>) => Promise<{ assessment: PytorchPreReviewAssessment }>;
   /** Owed pre-reviews (queue order) without a usable suggestion; reads the cached snapshot, never GitHub. */
   assessmentCandidates: () => Promise<Array<{ number: number; updatedAt: string }>>;
+  requestAssessment: (payload: Record<string, unknown>) => Promise<{ assessment: PytorchPreReviewAssessment }>;
   settle: () => Promise<void>;
 };
 
@@ -425,6 +428,14 @@ export function createPytorchWorkflowApi(deps: PytorchWorkflowDeps): PytorchWork
       const prUpdatedAt = typeof payload.prUpdatedAt === "string" && payload.prUpdatedAt.length > 0 ? payload.prUpdatedAt : known;
       const assessment: PytorchPreReviewAssessment = { number, ...parsed, source: typeof payload.source === "string" && payload.source.trim().length > 0 ? payload.source.trim() : "AI", assessedAt: deps.now(), prUpdatedAt };
       await persist({ ...current(), assessments: { ...current().assessments, [number]: assessment } });
+      return { assessment };
+    },
+    async requestAssessment(payload) {
+      const number = requiredNumber(payload);
+      if (deps.assessNow == null) throw new Error("Pre-review assessments are not available on this server");
+      await deps.assessNow(number);
+      const assessment = current().assessments?.[number];
+      if (assessment == null) throw new Error(`No assessment was saved for #${number}`);
       return { assessment };
     },
     async assessmentCandidates() {

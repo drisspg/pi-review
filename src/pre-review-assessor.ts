@@ -29,6 +29,8 @@ export type PreReviewAssessor = {
   start: () => void;
   /** Wake an idle loop, e.g. after the queue snapshot refreshed. */
   poke: () => void;
+  /** Explicit request (e.g. the PR page button): queued behind any in-flight run; works even when the background loop is off. */
+  assessNow: (number: number) => Promise<void>;
   status: () => PytorchAssessorStatus;
   /** Abort the in-flight model run and wait for the loop to settle. */
   stop: () => Promise<void>;
@@ -36,6 +38,28 @@ export type PreReviewAssessor = {
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Diff budget: enough to see the shape of the change without turning pre-review into a code review. */
+const DIFF_FILE_CHARS = 3000;
+const DIFF_TOTAL_CHARS = 30000;
+
+function formatDiff(files: PytorchPreReviewEvidence["files"]): string {
+  let budget = DIFF_TOTAL_CHARS;
+  const parts: string[] = [];
+  let omitted = 0;
+  for (const file of files) {
+    if (file.patch == null || file.patch.length === 0) continue;
+    if (budget <= 0) {
+      omitted += 1;
+      continue;
+    }
+    const patchText = file.patch.length > Math.min(DIFF_FILE_CHARS, budget) ? `${file.patch.slice(0, Math.min(DIFF_FILE_CHARS, budget))}\n... (truncated)` : file.patch;
+    budget -= patchText.length;
+    parts.push(`### ${file.path}\n\`\`\`diff\n${patchText}\n\`\`\``);
+  }
+  if (omitted > 0) parts.push(`(${omitted} more file diffs omitted for length)`);
+  return parts.length === 0 ? "(no textual diff available)" : parts.join("\n\n");
 }
 
 function formatComments(comments: PytorchEvidenceComment[]): string {
@@ -61,7 +85,10 @@ ${formatComments(evidence.reviews)}
 ${formatComments(evidence.comments)}
 
 ## Linked issues
-${issues}`;
+${issues}
+
+## Diff (size-capped; read for the shape of the change, not line by line)
+${formatDiff(evidence.files)}`;
 }
 
 export function createPreReviewAssessor(deps: PreReviewAssessorDeps): PreReviewAssessor {
@@ -74,13 +101,22 @@ export function createPreReviewAssessor(deps: PreReviewAssessorDeps): PreReviewA
   });
   const failedUntil = new Map<number, number>();
   let cancelTimer: (() => void) | null = null;
-  let loop: Promise<void> | null = null;
+  // Background ticks and explicit requests share one lane, so at most one model run is ever in flight.
+  let lane: Promise<unknown> = Promise.resolve();
+  let ticking = false;
   let controller: AbortController | null = null;
   let stopped = !deps.enabled;
+  let shuttingDown = false;
   let current: PytorchAssessorStatus["current"] = null;
   let pending = 0;
   let completed = 0;
   let lastError: PytorchAssessorStatus["lastError"] = null;
+
+  function serialize<T>(work: () => Promise<T>): Promise<T> {
+    const run = lane.then(work, work);
+    lane = run.catch(() => undefined);
+    return run;
+  }
 
   function schedule(ms: number): void {
     cancelTimer?.();
@@ -90,44 +126,51 @@ export function createPreReviewAssessor(deps: PreReviewAssessorDeps): PreReviewA
     }, ms);
   }
 
+  async function assessOne(number: number): Promise<void> {
+    if (shuttingDown) throw new Error("Pre-review assessor is shutting down");
+    current = { number, startedAt: deps.now() };
+    controller = new AbortController();
+    try {
+      const evidence = await deps.gatherEvidence(number);
+      const markdown = await deps.runModel(await deps.buildPrompt(evidence), controller.signal);
+      if (shuttingDown) throw new Error("Pre-review assessor is shutting down");
+      await deps.save({ number, markdown, prUpdatedAt: evidence.updatedAt, source: deps.source });
+      completed += 1;
+      failedUntil.delete(number);
+      deps.logger?.info("pre-review-assessor", "assessed", { number });
+    } catch (error) {
+      if (!shuttingDown) {
+        failedUntil.set(number, Date.parse(deps.now()) + retryAfterMs);
+        lastError = { number, message: errorText(error).slice(0, 300), at: deps.now() };
+        deps.logger?.warn("pre-review-assessor", "assessment failed", { number, error: lastError.message });
+      }
+      throw error;
+    } finally {
+      current = null;
+      controller = null;
+    }
+  }
+
   async function step(): Promise<number> {
     const nowMs = Date.parse(deps.now());
     const candidates = (await deps.listCandidates()).filter((candidate) => (failedUntil.get(candidate.number) ?? 0) <= nowMs);
     pending = candidates.length;
     const next = candidates[0];
-    if (next == null) return idleMs;
-    current = { number: next.number, startedAt: deps.now() };
-    controller = new AbortController();
-    try {
-      const evidence = await deps.gatherEvidence(next.number);
-      const markdown = await deps.runModel(await deps.buildPrompt(evidence), controller.signal);
-      if (stopped) return idleMs;
-      await deps.save({ number: next.number, markdown, prUpdatedAt: evidence.updatedAt, source: deps.source });
-      completed += 1;
-      pending = Math.max(0, pending - 1);
-      failedUntil.delete(next.number);
-      deps.logger?.info("pre-review-assessor", "assessed", { number: next.number, pending });
-    } catch (error) {
-      if (stopped) return idleMs;
-      failedUntil.set(next.number, Date.parse(deps.now()) + retryAfterMs);
-      lastError = { number: next.number, message: errorText(error).slice(0, 300), at: deps.now() };
-      deps.logger?.warn("pre-review-assessor", "assessment failed", { number: next.number, error: lastError.message });
-    } finally {
-      current = null;
-      controller = null;
-    }
+    if (next == null || stopped) return idleMs;
+    await assessOne(next.number).then(() => { pending = Math.max(0, pending - 1); }, () => undefined);
     return betweenMs;
   }
 
-  function tick(): Promise<void> {
-    if (stopped || loop != null) return loop ?? Promise.resolve();
-    loop = step().catch((error: unknown) => {
+  function tick(): void {
+    if (stopped || ticking) return;
+    ticking = true;
+    void serialize(step).catch((error: unknown) => {
       deps.logger?.warn("pre-review-assessor", "candidate listing failed", { error: errorText(error) });
       return idleMs;
-    }).then((delay) => schedule(delay)).finally(() => {
-      loop = null;
+    }).then((delay) => {
+      ticking = false;
+      schedule(delay);
     });
-    return loop;
   }
 
   return {
@@ -137,17 +180,21 @@ export function createPreReviewAssessor(deps: PreReviewAssessorDeps): PreReviewA
       schedule(0);
     },
     poke() {
-      if (!stopped && loop == null) schedule(0);
+      if (!stopped && !ticking) schedule(0);
+    },
+    assessNow(number) {
+      return serialize(() => assessOne(number));
     },
     status() {
       return { enabled: deps.enabled && !stopped, source: deps.source, current, pending, completed, lastError };
     },
     async stop() {
       stopped = true;
+      shuttingDown = true;
       cancelTimer?.();
       cancelTimer = null;
       controller?.abort();
-      await loop;
+      await lane;
     },
   };
 }

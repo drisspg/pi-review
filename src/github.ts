@@ -756,8 +756,8 @@ export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): Git
   async function fetchPreReviewEvidence(ref: PullRequestRef): Promise<PytorchPreReviewEvidence> {
     type CommentNode = { author?: { login?: string } | null; createdAt?: string; submittedAt?: string; body?: string; state?: string };
     type IssueNode = { number?: number; title?: string; state?: string; body?: string; labels?: { nodes?: Array<{ name?: string }> }; comments?: { nodes?: CommentNode[] } };
-    type EvidencePr = { title?: string; url?: string; body?: string; createdAt?: string; updatedAt?: string; additions?: number; deletions?: number; changedFiles?: number; author?: { login?: string } | null; labels?: { nodes?: Array<{ name?: string }> }; files?: { nodes?: Array<{ path?: string; additions?: number; deletions?: number }> }; reviews?: { nodes?: CommentNode[] }; comments?: { nodes?: CommentNode[] }; closingIssuesReferences?: { nodes?: IssueNode[] } };
-    const query = `query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { title url body createdAt updatedAt additions deletions changedFiles author { login } labels(first: 40) { nodes { name } } files(first: 60) { nodes { path additions deletions } } reviews(last: 15) { nodes { author { login } state submittedAt body } } comments(last: 20) { nodes { author { login } createdAt body } } closingIssuesReferences(first: 3) { nodes { number title state body labels(first: 20) { nodes { name } } comments(last: 6) { nodes { author { login } createdAt body } } } } } } }`;
+    type EvidencePr = { title?: string; url?: string; body?: string; createdAt?: string; updatedAt?: string; additions?: number; deletions?: number; changedFiles?: number; author?: { login?: string } | null; labels?: { nodes?: Array<{ name?: string }> }; reviews?: { nodes?: CommentNode[] }; comments?: { nodes?: CommentNode[] }; closingIssuesReferences?: { nodes?: IssueNode[] } };
+    const query = `query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { title url body createdAt updatedAt additions deletions changedFiles author { login } labels(first: 40) { nodes { name } } reviews(last: 15) { nodes { author { login } state submittedAt body } } comments(last: 20) { nodes { author { login } createdAt body } } closingIssuesReferences(first: 3) { nodes { number title state body labels(first: 20) { nodes { name } } comments(last: 6) { nodes { author { login } createdAt body } } } } } } }`;
     const data = await ghGraphql<{ repository?: { pullRequest?: EvidencePr | null } }>(query, { owner: ref.owner, repo: ref.repo, number: ref.number }, "pre-review evidence", { allowPartial: true, retryOnServerError: true });
     const pr = data.repository?.pullRequest;
     if (pr == null) throw new Error(`GitHub pull request ${ref.owner}/${ref.repo}#${ref.number} was not found`);
@@ -767,6 +767,8 @@ export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): Git
     };
     const comment = (node: CommentNode, max: number): PytorchEvidenceComment => ({ author: node.author?.login ?? null, at: node.submittedAt ?? node.createdAt ?? "", body: trim(node.body, max), ...(node.state == null ? {} : { state: node.state }) });
     const author = pr.author?.login ?? null;
+    // Diff text comes from the files API; no checkout is involved in pre-review.
+    const files = await ghApi<PullFile[]>(`${apiBase(ref)}/files?per_page=100`);
     let authorPermission: string | null = null;
     if (author != null) {
       authorPermission = await ghApi<{ permission?: string }>(`/repos/${ref.owner}/${ref.repo}/collaborators/${encodeURIComponent(author)}/permission`).then((result) => result.permission ?? null).catch(() => null);
@@ -784,7 +786,7 @@ export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): Git
       additions: pr.additions ?? 0,
       deletions: pr.deletions ?? 0,
       changedFiles: pr.changedFiles ?? 0,
-      files: (pr.files?.nodes ?? []).flatMap((file) => typeof file.path === "string" ? [{ path: file.path, additions: file.additions ?? 0, deletions: file.deletions ?? 0 }] : []),
+      files: files.map((file) => ({ path: file.filename, additions: file.additions, deletions: file.deletions, ...(file.patch == null ? {} : { patch: file.patch }) })),
       reviews: (pr.reviews?.nodes ?? []).map((node) => comment(node, 700)),
       comments: (pr.comments?.nodes ?? []).map((node) => comment(node, 700)),
       linkedIssues: (pr.closingIssuesReferences?.nodes ?? []).flatMap((issue) => typeof issue.number === "number" ? [{ number: issue.number, title: issue.title ?? "", state: issue.state ?? "", labels: labelNames(issue), body: trim(issue.body, 2500), comments: (issue.comments?.nodes ?? []).map((node) => comment(node, 600)) }] : []),

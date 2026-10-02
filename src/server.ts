@@ -143,6 +143,7 @@ const pytorchWorkflowApi = createPytorchWorkflowApi({
   listIssueNotifications: async () => (await inboxApi.inbox()).pytorchIssues,
   assessorStatus: () => preReviewAssessor.status(),
   onQueuesRefreshed: () => preReviewAssessor.poke(),
+  assessNow: (number) => preReviewAssessor.assessNow(number),
   logger,
   now: () => new Date().toISOString(),
   async readStore() {

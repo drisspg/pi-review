@@ -378,7 +378,7 @@ Pre-conditions: <which of linked actionable issue / author write access / named 
 Notes:
 - <at most 3 short bullets of evidence; description inaccuracies go here as full-review notes>
 
-If you do not recommend Accept, finish with a short, polite comment to the author in a \`\`\`comment fenced block that explains the reason and the next step. ${evidence == null ? "Skim the checkout only as much as the four questions need; do not do a line-by-line review and do not draft review comments." : "You have no tools: rely only on the evidence below, which was gathered read-only from GitHub, and say so when something cannot be determined from it."}
+If you do not recommend Accept, finish with a short, polite comment to the author in a \`\`\`comment fenced block that explains the reason and the next step. Stay high level: read the diff only for the shape of the change (which areas, how big, what approach), never line by line, and do not draft review comments. ${evidence == null ? "Judge from the description and file list above." : "You have no tools: rely only on the evidence below, which was gathered read-only from GitHub, and say so when something cannot be determined from it."}
 
 PR: ${prKey}
 Title: ${prTitle}

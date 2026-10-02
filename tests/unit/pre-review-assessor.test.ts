@@ -119,3 +119,36 @@ test("evidence rendering carries the facts a tool-less model needs for the pre-c
   assert.match(text, /bob \[CHANGES_REQUESTED\] 2026-09-02: too large/);
   assert.match(text, /eve 2026-09-03: fixed on main/);
 });
+
+test("explicit requests share the single lane with background runs and work with the background loop off", async () => {
+  let active = 0;
+  let peak = 0;
+  const order: number[] = [];
+  const h = harness({ runModel: async (prompt) => {
+    active += 1;
+    peak = Math.max(peak, active);
+    await new Promise((resolve) => setImmediate(resolve));
+    active -= 1;
+    order.push(Number(prompt.split(" ")[1]));
+    return "Recommendation: Accept";
+  } });
+  h.assessor.start();
+  h.timers.shift()?.();
+  await h.assessor.assessNow(7);
+  assert.equal(peak, 1, "never two model runs at once");
+  assert.deepEqual(order, [1, 7], "the request waits for the in-flight background run");
+
+  const off = harness({ enabled: false });
+  await off.assessor.assessNow(5);
+  assert.deepEqual(off.saved.map((item) => item.number), [5]);
+  assert.equal(off.timers.length, 0, "an explicit request does not start the background loop");
+});
+
+test("evidence includes a size-capped diff so the model sees the shape of the change without a checkout", () => {
+  const big = { ...evidence(1), files: [{ path: "a.py", additions: 1, deletions: 0, patch: "@@ -1 +1 @@\n-old\n+new" }, { path: "huge.cpp", additions: 9000, deletions: 0, patch: "+x\n".repeat(5000) }, { path: "img.png", additions: 0, deletions: 0 }] };
+  const text = formatPreReviewEvidence(big);
+  assert.match(text, /### a\.py\n```diff\n@@ -1 \+1 @@\n-old\n\+new\n```/);
+  assert.match(text, /### huge\.cpp[\s\S]*\(truncated\)/);
+  assert.ok(text.length < 40_000);
+  assert.doesNotMatch(text, /### img\.png/);
+});

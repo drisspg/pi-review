@@ -412,7 +412,8 @@ export type PytorchPreReviewEvidence = {
   additions: number;
   deletions: number;
   changedFiles: number;
-  files: Array<{ path: string; additions: number; deletions: number }>;
+  /** From the PR files API; `patch` is GitHub's per-file unified diff (absent for binary/huge files). */
+  files: Array<{ path: string; additions: number; deletions: number; patch?: string }>;
   reviews: PytorchEvidenceComment[];
   comments: PytorchEvidenceComment[];
   linkedIssues: Array<{ number: number; title: string; state: string; labels: string[]; body: string; comments: PytorchEvidenceComment[] }>;
