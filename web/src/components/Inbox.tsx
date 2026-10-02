@@ -59,7 +59,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
 type MyPrView = "open" | "closed";
 
 function needsAttention(pr: ViewerPullRequest): boolean {
-  return pr.checks === "FAILURE" || pr.checks === "ERROR" || pr.mergeable === "CONFLICTING" || pr.reviewDecision === "CHANGES_REQUESTED";
+  return pr.checks === "FAILURE" || pr.checks === "ERROR" || pr.mergeable === "CONFLICTING" || pr.reviewDecision === "CHANGES_REQUESTED" || pr.pytorchStage?.stage === "missing-issue";
 }
 
 /** Repos ordered by their most recent PR activity; PRs inside a repo stay newest-first. */
@@ -243,7 +243,8 @@ export function InboxPanel({ openPr }: { openPr: (url: string) => Promise<void> 
   const total = items.length;
   const backlog = data?.backlog ?? 0;
   const freshness = data == null ? "" : data.fetchedAt == null ? "loading from GitHub…" : data.pausedUntil != null ? `updated ${relativeTime(data.fetchedAt)} · paused (rate limit)` : backlog > 0 ? `updated ${relativeTime(data.fetchedAt)} · filling in details (${backlog} left)…` : refreshing ? `updated ${relativeTime(data.fetchedAt)} · refreshing…` : `updated ${relativeTime(data.fetchedAt)}`;
-  const summary = data == null ? null : data.fetchedAt == null ? freshness : total === 0 ? `Inbox zero · ${freshness}` : `${total} unread · ${counts["needs-you"]} need you · ${counts["review-requests"]} review requests · ${freshness}`;
+  const routed = data == null ? "" : [data.pytorchFlowCount > 0 ? `${data.pytorchFlowCount} pytorch review requests` : null, data.pytorchIssues.length > 0 ? `${data.pytorchIssues.length} pytorch issues` : null].filter((part) => part != null).join(" + ");
+  const summary = data == null ? null : data.fetchedAt == null ? freshness : `${total === 0 ? "Inbox zero" : `${total} unread · ${counts["needs-you"]} need you · ${counts["review-requests"]} review requests`}${routed.length > 0 ? ` · ${routed} in PyTorch queues` : ""} · ${freshness}`;
 
   return <section className="inbox" aria-label="GitHub inbox">
     <header className="inbox-head">
@@ -359,7 +360,7 @@ function MyPullRequests({ open, closed, loading, login, openPr }: { open: Viewer
               <span className={`my-pr-status status-${status.tone}`}>{status.icon}</span>
               <a className="my-pr-body" href={pr.url} onClick={(event) => { if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey) return; event.preventDefault(); logUsage("inbox:open-my-pr", { state: pr.state }); void openPr(pr.url); }}>
                 <span className="my-pr-title">{pr.title}</span>
-                <span className="my-pr-meta"><span>#{pr.number}</span>{pr.isDraft && pr.state === "OPEN" && <span>draft</span>}{status.details.map((detail) => <span key={detail}>{detail}</span>)}<span>{relativeTime(pr.updatedAt)}</span></span>
+                <span className="my-pr-meta"><span>#{pr.number}</span>{pr.pytorchStage != null && pr.state === "OPEN" && pr.pytorchStage.stage !== "draft" && <span className={`pt-my-stage actor-${pr.pytorchStage.actor}`} title={pr.pytorchStage.next}>{pr.pytorchStage.label}{pr.pytorchStage.actor === "author" ? " · your move" : pr.pytorchStage.actor === "reviewers" ? " · with reviewers" : ""}</span>}{pr.isDraft && pr.state === "OPEN" && <span>draft</span>}{status.details.map((detail) => <span key={detail}>{detail}</span>)}<span>{relativeTime(pr.updatedAt)}</span></span>
               </a>
               <span className="my-pr-actions">
                 <Button variant="icon" title="Open on GitHub" aria-label={`Open ${pr.title} on GitHub`} onClick={() => window.open(pr.url, "_blank", "noopener")}><LinkExternalIcon size={16} /></Button>

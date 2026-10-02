@@ -1,6 +1,6 @@
 import { ghstackWorkspaceInstructions } from "./ghstack-guidance.js";
 
-type ReviewPromptMode = "code-walk" | "guide-review" | "main-review" | "focus-review" | "test-pr" | "ai-chat" | "inline-chat" | "focus-chat" | "review-feedback" | "github-draft-handoff";
+type ReviewPromptMode = "code-walk" | "guide-review" | "main-review" | "focus-review" | "test-pr" | "ai-chat" | "inline-chat" | "focus-chat" | "review-feedback" | "github-draft-handoff" | "pytorch-pre-review";
 
 type PromptFile = {
   additions?: number;
@@ -338,6 +338,48 @@ ${changedFiles}`,
   };
 }
 
+function pytorchPreReviewPrompt(payload: Record<string, unknown>): ReviewPromptResponse {
+  const prKey = requiredString(payload, "prKey");
+  const prTitle = optionalString(payload, "prTitle", "(untitled)");
+  const author = optionalString(payload, "author", "(unknown author)");
+  const body = optionalString(payload, "body", "(no description)");
+  const labels = Array.isArray(payload.labels) ? payload.labels.filter((label): label is string => typeof label === "string") : [];
+  const linkedIssues = optionalRecords(payload, "linkedIssues").map((issue) => {
+    const issueLabels = Array.isArray(issue.labels) ? issue.labels.filter((label): label is string => typeof label === "string") : [];
+    return `- #${String(issue.number)} ${String(issue.title ?? "")} [${issueLabels.join(", ") || "no labels"}]`;
+  });
+  const files = Array.isArray(payload.files) ? promptFiles(payload) : [];
+  return {
+    purpose: "pytorch-pre-review",
+    prompt: `Pre-review PyTorch PR ${prKey} under the PyTorch maintainer guide.
+
+Pre-review is a quick check of the PR's direction, not a code review: a maintainer should decide in under a minute whether it is worth the author's time to finish the PR. Rejecting is fine when the description is too unclear to assess quickly. Longer design discussion belongs on the issue, not the PR. PRs from authors without write access need a linked \`actionable\` issue or a named sponsoring maintainer.
+
+Answer these four questions, each in one line, citing the description or diff:
+1. Is the description clear, concise, and reflective of the change?
+2. Does it solve an important problem?
+3. Is the approach clear and in line with the linked issue discussion and the description?
+4. Is it modular and simple enough to review, or does it need a design discussion first?
+
+Then give exactly one recommendation on its own line, one of:
+- "Recommendation: Accept" (direction is sound; it can proceed to automated review)
+- "Recommendation: Back to draft" (only a minor clarification is needed)
+- "Recommendation: Close" (needs a design discussion on the issue, or lacks the justification for a quick decision)
+
+If you do not recommend Accept, finish with a short, polite comment to the author in a \`\`\`comment fenced block that explains the reason and the next step. Skim the checkout only as much as the four questions need; do not do a line-by-line review and do not draft review comments.
+
+PR: ${prKey}
+Title: ${prTitle}
+Author: ${author}
+Labels: ${labels.join(", ") || "none"}
+Linked issues:
+${linkedIssues.length > 0 ? linkedIssues.join("\n") : "none linked"}
+${files.length > 0 ? `\nChanged files:\n${files.map((file) => `- ${file.filename} (+${file.additions ?? 0}/-${file.deletions ?? 0})`).join("\n")}\n` : ""}
+Description:
+${body}`,
+  };
+}
+
 const reviewDraftToolInstructions = `In Pi Review, the checkout is a read-only review workspace: never modify repository files. Deliver proposed changes as private editable drafts: use suggest_change for exact replacement code the PR author can accept with Apply suggestion, or the draft_review_comment tool for explanatory feedback and fenced diffs that cannot be applied directly. Pass only replacement code to suggest_change, preserving indentation; it creates the GitHub \`\`\`suggestion block automatically. Requests to add, leave, post, write, or put a comment on the PR or current line also mean draft_review_comment. Call the appropriate tool once for each concrete comment or suggestion. Draft only comments supported by the current diff, use exact changed-file paths and reviewable diff lines, and write concise comment text in the user's voice. Do not create drafts for ordinary questions or publish anything to GitHub.`;
 
 function aiChatPrompt(payload: Record<string, unknown>): ReviewPromptResponse {
@@ -545,6 +587,8 @@ export function createReviewPromptApi(deps: ReviewPromptApiDeps): ReviewPromptAp
         return reviewFeedbackPrompt(payload);
       case "github-draft-handoff":
         return githubDraftHandoffPrompt(payload);
+      case "pytorch-pre-review":
+        return pytorchPreReviewPrompt(payload);
       default:
         throw new Error(`Unknown prompt mode ${mode}`);
     }

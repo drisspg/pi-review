@@ -5034,6 +5034,317 @@ button.fold:hover {
   font-weight: 500;
 }
 
+/* PyTorch workflow: maintainer queues on the home page + stage strip in the PR header. */
+.pt-logo {
+  font-size: var(--text-md);
+}
+
+.pt-tab-hint {
+  align-self: center;
+  margin-left: auto;
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 55%;
+}
+
+.pt-row {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.pt-row.pt-accepted .inbox-row-title {
+  color: var(--muted);
+}
+
+.pt-stage-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.pt-stage-dot.tone-accent, .pt-stage-pill.tone-accent { --pt-tone: var(--accent); }
+.pt-stage-dot.tone-attention, .pt-stage-pill.tone-attention { --pt-tone: var(--attention); }
+.pt-stage-dot.tone-danger, .pt-stage-pill.tone-danger { --pt-tone: var(--danger); }
+.pt-stage-dot.tone-success, .pt-stage-pill.tone-success { --pt-tone: var(--success); }
+.pt-stage-dot.tone-done, .pt-stage-pill.tone-done { --pt-tone: var(--done); }
+.pt-stage-dot.tone-muted, .pt-stage-pill.tone-muted { --pt-tone: var(--muted); }
+.pt-stage-dot { background: var(--pt-tone, var(--muted)); }
+
+.pt-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 340px;
+}
+
+.pt-triage-actions {
+  flex-wrap: nowrap;
+  max-width: none;
+}
+
+.pt-row-issues,
+.pt-strip-issues {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.pt-issue-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  text-decoration: none;
+}
+
+.pt-issue-chip.actionable {
+  border-color: color-mix(in srgb, var(--success) 50%, var(--border));
+  color: var(--success);
+}
+
+.pt-issue-chip.none,
+.pt-issue-chip.mentioned {
+  border-style: dashed;
+}
+
+.pt-excerpt {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  margin-top: 2px;
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-left: 2px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  white-space: pre-wrap;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.pt-excerpt:hover {
+  border-left-color: var(--accent);
+  color: var(--text);
+}
+
+.pt-excerpt.open {
+  display: block;
+  color: var(--text);
+}
+
+.pt-excerpt-empty {
+  color: var(--attention);
+  font-size: var(--text-sm);
+}
+
+.pt-triage-groups {
+  display: grid;
+}
+
+.pt-triage-group + .pt-triage-group {
+  border-top: 1px solid var(--border);
+}
+
+.pt-triage-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--panel2);
+}
+
+.pt-triage-head a {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.pt-link-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.pt-triage-head .pt-link-button {
+  margin-left: auto;
+  text-transform: none;
+}
+
+.pt-triage-count {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.pt-triage-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pt-triage-empty {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.pt-queues .inbox-footer a {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--muted);
+}
+
+.pt-queues .inbox-empty .ui-button {
+  margin-top: var(--space-2);
+}
+
+.pt-module-editor {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+
+.pt-module-editor p {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.pt-module-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.pt-module-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-1) 2px var(--space-2);
+  border-radius: 999px;
+  background: var(--selected-bg);
+  font-size: var(--text-sm);
+}
+
+.pt-module-chip button {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.pt-module-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.pt-module-actions {
+  display: inline-flex;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.pt-reason-body {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.pt-templates,
+.pt-outcomes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.pt-outcomes {
+  flex-direction: column;
+  font-size: var(--text-sm);
+}
+
+.pt-outcomes label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.pt-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.pt-stage-pill {
+  padding: 1px var(--space-2);
+  border: 1px solid color-mix(in srgb, var(--pt-tone, var(--muted)) 55%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--pt-tone, var(--muted)) 12%, transparent);
+  color: var(--pt-tone, var(--muted));
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.pt-strip-next {
+  min-width: 0;
+}
+
+.pt-strip-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
+.pt-pre-review {
+  flex-basis: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--panel2);
+}
+
+.pt-pre-review-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.pt-pre-review-head .ui-button-icon {
+  margin-left: auto;
+}
+
+.pt-my-stage.actor-author {
+  color: var(--attention);
+}
+
 @media (max-width: 1000px) {
   .inbox-body {
     grid-template-columns: minmax(0, 1fr);

@@ -10,6 +10,7 @@ import { MarkdownEditor } from "./components/MarkdownEditor";
 import { ModalShell } from "./components/Modal";
 import { Tab, TabList, TabPanel, Tabs } from "./components/Tabs";
 import { InboxPanel } from "./components/Inbox";
+import { PytorchQueuesPanel, PytorchWorkflowStrip } from "./components/PytorchWorkflow";
 import { ExistingComments, ExistingReviewThread } from "./components/Threads";
 import type { PiTerminalTarget } from "./components/PiTerminal";
 import { buildDiffAnnotationIndex, commentTarget, commentThreadDomId, diffAnnotationTargetKey, targetKey, targetLabel, type DiffAnnotationIndex } from "./lib/comments";
@@ -1270,6 +1271,7 @@ function StartPage({ prs, openPr, deleteCheckouts, deleting, openInput, setOpenI
         <Button type="submit" disabled={busy || deleting || openInput.trim().length === 0}>{busy ? "Fetching…" : "Open"}</Button>
       </form>
     </section>
+    <PytorchQueuesPanel openPr={openPr} />
     <InboxPanel openPr={openPr} />
     {prs.length === 0 ? <section className="panel start-empty"><GitPullRequestIcon size={24} /><p className="muted">No previous reviews yet. Paste a PR above to get started.</p></section> : <>
       <nav className="start-filters" aria-label="Checkout availability">
@@ -1538,7 +1540,7 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { r
   return <PiTerminalPrContext.Provider value={{ prKey: props.review.pr.key, headSha: props.review.pr.headSha, onDraftReview: (draftReview) => props.setDrafts(draftReview.comments) }}><FocusResolutionContext.Provider value={{ viewedIds: props.piPanel.viewedFocusIds, saving: savingFocusResolution, toggle: toggleFocusResolution }}><GitHubDraftContext.Provider value={props.githubDrafts}><div className={`review-page${sideFocused ? " panel-focused" : ""}`}>
     <div className={`review-layout${sideCollapsed ? " side-collapsed" : ""}${sideFocused ? " side-focused" : ""}`} style={{ gridTemplateColumns }}>
       <div className="review-main">
-        <PrHeaderStrip pr={props.review.pr} refreshingActivity={props.refreshingActivity} refresh={() => props.refreshGithubActivity(true)} />
+        <PrHeaderStrip pr={props.review.pr} files={props.review.files} refreshingActivity={props.refreshingActivity} refresh={() => props.refreshGithubActivity(true)} />
         <div className="review-bar files-toolbar">
           <a className="review-home" aria-label="Home" title="Home (all reviews and inbox)" href={homeHash} onClick={(event) => { if (!isPlainLeftClick(event)) return; event.preventDefault(); props.goHome(); }}>π</a>
           <nav className="review-mode-tabs" aria-label="Review view">
@@ -1598,7 +1600,7 @@ function PrChecks({ checks }: { checks: CommitChecks }) {
   </span>;
 }
 
-function PrHeaderStrip({ pr, refreshingActivity, refresh }: { pr: StoredPullRequest; refreshingActivity: boolean; refresh: () => Promise<void> }) {
+function PrHeaderStrip({ pr, files, refreshingActivity, refresh }: { pr: StoredPullRequest; files: PullFile[]; refreshingActivity: boolean; refresh: () => Promise<void> }) {
   const status = reviewStatus(pr);
   const number = pr.key.match(/#(\d+)$/)?.[1];
   const repository = pr.key.replace(/^github\.com\//, "").replace(/#\d+$/, "");
@@ -1625,6 +1627,7 @@ function PrHeaderStrip({ pr, refreshingActivity, refresh }: { pr: StoredPullRequ
         <span>{shortSha(pr.headSha)}</span>
         {checks != null && checks.total > 0 && <PrChecks checks={checks} />}
       </div>
+      {repository === "pytorch/pytorch" && <PytorchWorkflowStrip key={pr.key} pr={pr} files={files} />}
     </div>
   </section>;
 }

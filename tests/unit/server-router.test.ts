@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import test from "node:test";
 
+import { createPytorchWorkflowApi } from "../../src/pytorch-workflow-api.js";
 import { createRequestListener, createServerRoute, type ServerRoute, type ServerRouteDeps } from "../../src/server-router.js";
 import { CheckoutResetRequiredError } from "../../src/worktrees.js";
 
@@ -129,13 +130,30 @@ function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
         return { done: payload.threadIds as string[] };
       },
       async inbox(options) {
-        return { login: "viewer", fetchedAt: "now", refreshing: false, backlog: 0, pausedUntil: null, items: [], tiers: { "needs-you": 0, "review-requests": 0, "your-prs": 0, fyi: 0, resolved: 0 }, myPrs: [], recentlyClosedPrs: [], warnings: options?.refresh ? ["refreshed"] : [] };
+        return { login: "viewer", fetchedAt: "now", refreshing: false, backlog: 0, pausedUntil: null, items: [], tiers: { "needs-you": 0, "review-requests": 0, "your-prs": 0, fyi: 0, resolved: 0 }, pytorchIssues: [], pytorchFlowCount: 0, myPrs: [], recentlyClosedPrs: [], warnings: options?.refresh ? ["refreshed"] : [] };
       },
       async mute(payload) {
         return { muted: payload.threadIds as string[] };
       },
       async settle() {},
     },
+    pytorchWorkflowApi: createPytorchWorkflowApi({
+      fetchViewerLogin: async () => "viewer",
+      searchPullRequests: async () => ({ total: 0, items: [] }),
+      searchIssues: async () => ({ total: 0, items: [] }),
+      fetchPullRequest: async () => { throw new Error("unused"); },
+      listModuleLabels: async () => ["module: autograd"],
+      addReaction: async () => {},
+      addLabels: async () => {},
+      addComment: async () => {},
+      closeIssue: async () => {},
+      convertToDraft: async () => {},
+      listRecentPullRequests: async () => [],
+      listIssueNotifications: async () => [],
+      readStore: async () => null,
+      writeStore: async () => {},
+      now: () => "2026-09-03T12:00:00Z",
+    }),
     logger,
     analysisApi: {
       async start(payload) { return { run: { id: "run", prKey: String(payload.prKey), headSha: String(payload.headSha), kind: "main-review", status: "running", startedAt: "now" } }; },
@@ -338,6 +356,20 @@ test("server route serves the inbox and forwards refresh + done payloads", async
   const done = await routeRequest(route, "POST", "/api/inbox/done", { threadIds: ["t1", "t2"] });
   assert.equal(done.statusCode, 200);
   assert.deepEqual(jsonBody(done), { done: ["t1", "t2"] });
+});
+
+test("server route wires PyTorch workflow queues, module labels, and validated actions", async () => {
+  const route = createServerRoute(baseDeps());
+
+  const queues = await routeRequest(route, "GET", "/api/pytorch/queues");
+  assert.equal(queues.statusCode, 200);
+  assert.match((jsonBody(queues) as { preReview: { githubUrl: string } }).preReview.githubUrl, /^https:\/\/github\.com\/pytorch\/pytorch\/pulls\?q=/);
+
+  const labels = await routeRequest(route, "GET", "/api/pytorch/module-labels");
+  assert.deepEqual(jsonBody(labels), { labels: ["module: autograd"] });
+
+  const triage = await routeRequest(route, "POST", "/api/pytorch/issue/triage", { number: 7, label: "actionable" });
+  assert.deepEqual(jsonBody(triage), { number: 7, label: "actionable" });
 });
 
 test("server route gets local draft reviews", async () => {

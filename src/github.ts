@@ -9,7 +9,7 @@ import { markGeneratedPullFiles, parseGitattributes, type GitattributesRule } fr
 import { logger } from "./logger.js";
 import { prKey } from "./pr.js";
 import type { InboxSubjectRef } from "./inbox-api.js";
-import type { CheckRollupState, CommitChecks, GitHubDraftComment, GitHubNotification, InboxLatestActivity, GitHubDraftCommentInput, GitHubPendingReview, GitHubPendingReviewLookup, InboxSubjectKind, InboxSubjectSnapshot, PullFile, PullIssueComment, PullRequest, PullRequestRef, PullRequestReviewData, PullRequestReviewDecision, PullRequestReviewSummary, PullReviewComment, StoredPullRequest, ViewerPullRequest, ViewerPullRequestScope } from "./types.js";
+import type { CheckRollupState, CommitChecks, GitHubDraftComment, GitHubNotification, InboxLatestActivity, GitHubDraftCommentInput, GitHubPendingReview, GitHubPendingReviewLookup, InboxSubjectKind, InboxSubjectSnapshot, PullFile, PullIssueComment, PullRequest, PullRequestRef, PullRequestReviewData, PullRequestReviewDecision, PullRequestReviewSummary, PullReviewComment, PytorchIssueSnapshot, PytorchPullSnapshot, PytorchSearchResult, StoredPullRequest, ViewerPullRequest, ViewerPullRequestScope } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -46,6 +46,14 @@ export type GitHubClient = {
   fetchLatestActivity: (urls: string[], login: string | null) => Promise<Map<string, InboxLatestActivity>>;
   markNotificationDone: (threadId: string) => Promise<void>;
   unsubscribeNotification: (threadId: string) => Promise<void>;
+  searchWorkflowPullRequests: (query: string) => Promise<PytorchSearchResult<PytorchPullSnapshot>>;
+  searchWorkflowIssues: (query: string) => Promise<PytorchSearchResult<PytorchIssueSnapshot>>;
+  fetchWorkflowPullRequest: (ref: PullRequestRef) => Promise<PytorchPullSnapshot>;
+  listModuleLabels: (repo: string) => Promise<string[]>;
+  addReaction: (ref: PullRequestRef, content: "+1") => Promise<void>;
+  addLabels: (ref: PullRequestRef, labels: string[]) => Promise<void>;
+  closeIssue: (ref: PullRequestRef) => Promise<void>;
+  convertPullRequestToDraft: (ref: PullRequestRef) => Promise<void>;
 };
 
 const defaultRuntime: GitHubRuntime = {
@@ -76,7 +84,10 @@ type ReviewDecisionGraphql = { data?: { repository?: { pullRequest?: { reviewDec
 type GraphqlResponse<T> = { data?: T; errors?: Array<{ message?: string }> };
 type NotificationRest = { id?: string; reason?: string; unread?: boolean; updated_at?: string; subject?: { title?: string; url?: string | null; latest_comment_url?: string | null; type?: string }; repository?: { full_name?: string } };
 type SnapshotGraphql = { number?: number; url?: string; state?: string; merged?: boolean; isDraft?: boolean; reviewDecision?: PullRequestReviewDecision; updatedAt?: string; author?: { login?: string } | null; commits?: { nodes?: Array<{ commit?: { statusCheckRollup?: { state?: string } | null } }> } };
-type ViewerPullGraphql = SnapshotGraphql & { title?: string; mergeable?: string; closedAt?: string | null; mergedAt?: string | null; headRefOid?: string; repository?: { nameWithOwner?: string }; reviewRequests?: { nodes?: Array<{ requestedReviewer?: { login?: string; name?: string } | null }> }; commits?: { nodes?: Array<{ commit?: { statusCheckRollup?: { state?: string; contexts?: { nodes?: Array<{ name?: string; context?: string; conclusion?: string | null; status?: string; state?: string }> } } | null } }> } };
+type LabelsGraphql = { labels?: { nodes?: Array<{ name?: string }> } };
+type WorkflowPullGraphql = SnapshotGraphql & LabelsGraphql & { id?: string; title?: string; body?: string; createdAt?: string; additions?: number; deletions?: number; changedFiles?: number; reactionGroups?: Array<{ content?: string; viewerHasReacted?: boolean }>; closingIssuesReferences?: { nodes?: Array<LabelsGraphql & { number?: number; title?: string; url?: string }> }; reviewRequests?: { nodes?: Array<{ requestedReviewer?: { login?: string; slug?: string } | null }> } };
+type WorkflowIssueGraphql = LabelsGraphql & { number?: number; title?: string; url?: string; createdAt?: string; updatedAt?: string; author?: { login?: string } | null; assignees?: { nodes?: Array<{ login?: string }> }; comments?: { totalCount?: number } };
+type ViewerPullGraphql = SnapshotGraphql & LabelsGraphql & { title?: string; mergeable?: string; closedAt?: string | null; mergedAt?: string | null; headRefOid?: string; repository?: { nameWithOwner?: string }; reviewRequests?: { nodes?: Array<{ requestedReviewer?: { login?: string; name?: string } | null }> }; commits?: { nodes?: Array<{ commit?: { statusCheckRollup?: { state?: string; contexts?: { nodes?: Array<{ name?: string; context?: string; conclusion?: string | null; status?: string; state?: string }> } } | null } }> } };
 type LatestCommentRest = { user?: { login?: string; type?: string } | null; body?: string | null; html_url?: string };
 type ViewerPullsGraphql = { search?: { nodes?: ViewerPullGraphql[]; pageInfo?: { hasNextPage?: boolean; endCursor?: string | null } } };
 type PendingReviewCommentGraphql = { id?: string; path?: string; line?: number | null; startLine?: number | null; subjectType?: "LINE" | "FILE"; body?: string; url?: string };
@@ -222,6 +233,55 @@ function toViewerPullRequest(node: ViewerPullGraphql): ViewerPullRequest | null 
     updatedAt: node.updatedAt ?? "",
     headSha: node.headRefOid ?? "",
     localPrKey: null,
+    labels: labelNames(node),
+  };
+}
+
+function labelNames(node: LabelsGraphql): string[] {
+  return (node.labels?.nodes ?? []).map((label) => label.name).filter((name): name is string => typeof name === "string");
+}
+
+function toWorkflowPull(node: WorkflowPullGraphql): PytorchPullSnapshot | null {
+  if (typeof node.number !== "number" || typeof node.id !== "string") return null;
+  return {
+    id: node.id,
+    number: node.number,
+    title: node.title ?? "(untitled)",
+    url: node.url ?? "",
+    author: node.author?.login ?? null,
+    body: node.body ?? "",
+    createdAt: node.createdAt ?? "",
+    updatedAt: node.updatedAt ?? "",
+    state: snapshotState(node) ?? "OPEN",
+    isDraft: node.isDraft === true,
+    additions: node.additions ?? 0,
+    deletions: node.deletions ?? 0,
+    changedFiles: node.changedFiles ?? 0,
+    labels: labelNames(node),
+    reviewers: (node.reviewRequests?.nodes ?? []).map((request) => request.requestedReviewer?.login ?? (request.requestedReviewer?.slug == null ? undefined : `team:${request.requestedReviewer.slug}`)).filter((name): name is string => typeof name === "string"),
+    reviewDecision: node.reviewDecision ?? null,
+    checks: checkRollupState(node),
+    viewerThumbsUp: node.reactionGroups?.some((group) => group.content === "THUMBS_UP" && group.viewerHasReacted === true) === true,
+    linkedIssues: (node.closingIssuesReferences?.nodes ?? []).flatMap((issue) => {
+      if (typeof issue.number !== "number") return [];
+      const labels = labelNames(issue);
+      return [{ number: issue.number, title: issue.title ?? "", url: issue.url ?? "", labels, actionable: labels.includes("actionable") }];
+    }),
+  };
+}
+
+function toWorkflowIssue(node: WorkflowIssueGraphql): PytorchIssueSnapshot | null {
+  if (typeof node.number !== "number") return null;
+  return {
+    number: node.number,
+    title: node.title ?? "(untitled)",
+    url: node.url ?? "",
+    author: node.author?.login ?? null,
+    createdAt: node.createdAt ?? "",
+    updatedAt: node.updatedAt ?? "",
+    labels: labelNames(node),
+    assignees: (node.assignees?.nodes ?? []).map((user) => user.login).filter((login): login is string => typeof login === "string"),
+    comments: node.comments?.totalCount ?? 0,
   };
 }
 
@@ -263,6 +323,9 @@ async function mapWithConcurrency<T>(inputs: string[], limit: number, work: (inp
 const SNAPSHOT_FIELDS = "number url state isDraft reviewDecision updatedAt author { login } commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }";
 const ISSUE_FIELDS = "number url state updatedAt author { login }";
 const SNAPSHOT_BATCH = 40;
+const WORKFLOW_PULL_FIELDS = "id number title url body createdAt updatedAt state merged isDraft additions deletions changedFiles reviewDecision author { login } labels(first: 40) { nodes { name } } reactionGroups { content viewerHasReacted } closingIssuesReferences(first: 5) { nodes { number title url labels(first: 30) { nodes { name } } } } reviewRequests(first: 15) { nodes { requestedReviewer { ... on User { login } ... on Team { slug } } } } commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }";
+const WORKFLOW_ISSUE_FIELDS = "number title url createdAt updatedAt author { login } labels(first: 30) { nodes { name } } assignees(first: 5) { nodes { login } } comments { totalCount }";
+const WORKFLOW_SEARCH_LIMIT = 50;
 
 export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): GitHubClient {
   let viewerLoginPromise: Promise<string | null> | null = null;
@@ -585,7 +648,7 @@ export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): Git
   }
 
   async function fetchViewerPullRequests(login: string, scope: ViewerPullRequestScope): Promise<ViewerPullRequest[]> {
-    const query = `query($q: String!, $after: String) { search(query: $q, type: ISSUE, first: 25, after: $after) { pageInfo { hasNextPage endCursor } nodes { ... on PullRequest { number url state merged closedAt mergedAt isDraft reviewDecision updatedAt author { login } title mergeable headRefOid repository { nameWithOwner } reviewRequests(first: 10) { nodes { requestedReviewer { ... on User { login } ... on Team { name } } } } commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 60) { nodes { ... on CheckRun { name conclusion status } ... on StatusContext { context state } } } } } } } } } } }`;
+    const query = `query($q: String!, $after: String) { search(query: $q, type: ISSUE, first: 25, after: $after) { pageInfo { hasNextPage endCursor } nodes { ... on PullRequest { number url state merged closedAt mergedAt isDraft reviewDecision updatedAt author { login } title mergeable headRefOid labels(first: 30) { nodes { name } } repository { nameWithOwner } reviewRequests(first: 10) { nodes { requestedReviewer { ... on User { login } ... on Team { name } } } } commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 60) { nodes { ... on CheckRun { name conclusion status } ... on StatusContext { context state } } } } } } } } } } }`;
     const since = new Date(Date.parse(runtime.now()) - RECENTLY_CLOSED_DAYS * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const filter = scope === "open" ? "is:open" : `is:closed closed:>=${since}`;
     const prs: ViewerPullRequest[] = [];
@@ -626,10 +689,80 @@ export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): Git
     await ghApiArgs<unknown>(["--method", "DELETE", `/notifications/threads/${encodeURIComponent(threadId)}/subscription`]);
   }
 
-  return { fetchPullRequestReviewData, compareCommits, fetchCommitChecks, fetchFileText, fetchPendingPullRequestReview, createPendingPullRequestReview, addPendingPullRequestReviewThread, submitPullRequestReview, replyToReviewComment, addIssueComment, editReviewComment, editIssueComment, editReviewSummary, setReviewThreadResolved, fetchViewerLogin, fetchNotifications, fetchSubjectSnapshots, fetchViewerPullRequests, fetchLatestActivity, markNotificationDone, unsubscribeNotification };
+  async function searchWorkflow<N, T>(graphql: string, query: string, scope: string, convert: (node: N) => T | null): Promise<PytorchSearchResult<T>> {
+    const data = await ghGraphql<{ search?: { issueCount?: number; nodes?: N[] } }>(graphql, { q: query }, scope, { allowPartial: true, retryOnServerError: true });
+    const items = (data.search?.nodes ?? []).map(convert).filter((item): item is T => item != null);
+    return { total: data.search?.issueCount ?? items.length, items };
+  }
+
+  async function searchWorkflowPullRequests(query: string): Promise<PytorchSearchResult<PytorchPullSnapshot>> {
+    if (!/\bis:pr\b/.test(query)) throw new Error("Workflow PR searches must include is:pr");
+    const graphql = `query($q: String!) { search(query: $q, type: ISSUE, first: ${WORKFLOW_SEARCH_LIMIT}) { issueCount nodes { ... on PullRequest { ${WORKFLOW_PULL_FIELDS} } } } }`;
+    return searchWorkflow<WorkflowPullGraphql, PytorchPullSnapshot>(graphql, query, "workflow PR search", toWorkflowPull);
+  }
+
+  async function searchWorkflowIssues(query: string): Promise<PytorchSearchResult<PytorchIssueSnapshot>> {
+    if (!/\bis:issue\b/.test(query)) throw new Error("Workflow issue searches must include is:issue");
+    const graphql = `query($q: String!) { search(query: $q, type: ISSUE, first: ${WORKFLOW_SEARCH_LIMIT}) { issueCount nodes { ... on Issue { ${WORKFLOW_ISSUE_FIELDS} } } } }`;
+    return searchWorkflow<WorkflowIssueGraphql, PytorchIssueSnapshot>(graphql, query, "workflow issue search", toWorkflowIssue);
+  }
+
+  async function fetchWorkflowPullRequest(ref: PullRequestRef): Promise<PytorchPullSnapshot> {
+    const query = `query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { ${WORKFLOW_PULL_FIELDS} } } }`;
+    const data = await ghGraphql<{ repository?: { pullRequest?: WorkflowPullGraphql | null } }>(query, { owner: ref.owner, repo: ref.repo, number: ref.number }, "workflow PR status");
+    const pr = data.repository?.pullRequest == null ? null : toWorkflowPull(data.repository.pullRequest);
+    if (pr == null) throw new Error(`GitHub pull request ${ref.owner}/${ref.repo}#${ref.number} was not found`);
+    return pr;
+  }
+
+  /** `module: *` and `oncall: *` labels; the GraphQL label query is a substring match, so filter by prefix afterwards. */
+  async function listModuleLabels(repo: string): Promise<string[]> {
+    const [owner, name] = repo.split("/");
+    const labels = new Set<string>();
+    const query = `query($owner: String!, $name: String!, $q: String!, $after: String) { repository(owner: $owner, name: $name) { labels(first: 100, query: $q, after: $after) { nodes { name } pageInfo { hasNextPage endCursor } } } }`;
+    type LabelPage = { repository?: { labels?: { nodes?: Array<{ name?: string }>; pageInfo?: { hasNextPage?: boolean; endCursor?: string | null } } } };
+    for (const prefix of ["module:", "oncall:"]) {
+      let after: string | null = null;
+      for (let page = 0; page < 6; page += 1) {
+        const variables: Record<string, string> = { owner, name, q: prefix };
+        if (after != null) variables.after = after;
+        const data: LabelPage = await ghGraphql<LabelPage>(query, variables, "list module labels");
+        for (const label of data.repository?.labels?.nodes ?? []) if (label.name?.startsWith(prefix) === true) labels.add(label.name);
+        if (data.repository?.labels?.pageInfo?.hasNextPage !== true || data.repository.labels.pageInfo.endCursor == null) break;
+        after = data.repository.labels.pageInfo.endCursor;
+      }
+    }
+    return [...labels].sort((a, b) => a.localeCompare(b));
+  }
+
+  function issuePath(ref: PullRequestRef): string {
+    return `/repos/${ref.owner}/${ref.repo}/issues/${ref.number}`;
+  }
+
+  async function addReaction(ref: PullRequestRef, content: "+1"): Promise<void> {
+    await ghApiPost(ref, `${issuePath(ref)}/reactions`, { content }, "add reaction");
+  }
+
+  async function addLabels(ref: PullRequestRef, labels: string[]): Promise<void> {
+    await ghApiPost(ref, `${issuePath(ref)}/labels`, { labels }, "add labels");
+  }
+
+  async function closeIssue(ref: PullRequestRef): Promise<void> {
+    await ghApiPatch(ref, issuePath(ref), { state: "closed" }, "close issue");
+  }
+
+  async function convertPullRequestToDraft(ref: PullRequestRef): Promise<void> {
+    const { id } = await fetchWorkflowPullRequest(ref);
+    await ghGraphql(`mutation($id: ID!) { convertPullRequestToDraft(input: { pullRequestId: $id }) { pullRequest { isDraft } } }`, { id }, "convert PR to draft");
+  }
+
+  return { fetchPullRequestReviewData, compareCommits, fetchCommitChecks, fetchFileText, fetchPendingPullRequestReview, createPendingPullRequestReview, addPendingPullRequestReviewThread, submitPullRequestReview, replyToReviewComment, addIssueComment, editReviewComment, editIssueComment, editReviewSummary, setReviewThreadResolved, fetchViewerLogin, fetchNotifications, fetchSubjectSnapshots, fetchViewerPullRequests, fetchLatestActivity, markNotificationDone, unsubscribeNotification, searchWorkflowPullRequests, searchWorkflowIssues, fetchWorkflowPullRequest, listModuleLabels, addReaction, addLabels, closeIssue, convertPullRequestToDraft };
 }
 
 const defaultClient = createGitHubClient();
+
+/** Shared client for feature modules that take the GitHub surface as injected deps. */
+export const defaultGitHubClient: GitHubClient = defaultClient;
 
 export async function fetchPullRequestReviewData(ref: PullRequestRef): Promise<PullRequestReviewData> {
   return defaultClient.fetchPullRequestReviewData(ref);

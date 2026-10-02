@@ -328,6 +328,73 @@ export type ViewerPullRequest = {
   updatedAt: string;
   headSha: string;
   localPrKey: string | null;
+  /** Optional because inbox snapshots persisted before label tracking lack it. */
+  labels?: string[];
+  /** Set for pytorch/pytorch PRs only; derived per response from labels + review state. */
+  pytorchStage?: PytorchStageInfo | null;
+};
+
+/** Lifecycle stage of a pytorch/pytorch PR under the label-driven issue/PR workflow (CONTRIBUTING.md#pr-lifecycle). */
+export type PytorchStage = "draft" | "awaiting-triage" | "missing-issue" | "pre-review" | "in-progress" | "ready-for-review" | "accepted" | "merged" | "closed";
+export type PytorchActor = "author" | "reviewers" | "bot" | "none";
+export type PytorchStageInfo = {
+  stage: PytorchStage;
+  label: string;
+  /** Who the workflow expects to act next. */
+  actor: PytorchActor;
+  next: string;
+  /** Reviewer requested changes but the PR still carries `ready for review` (TEMPORARY: re-add `in progress` by hand). */
+  needsSendBack: boolean;
+  stale: boolean;
+  highPriority: boolean;
+};
+
+export type PytorchLinkedIssue = { number: number; title: string; url: string; labels: string[]; actionable: boolean };
+
+/** One PR as returned by a workflow queue search or a single-PR status lookup. */
+export type PytorchPullSnapshot = {
+  id: string;
+  number: number;
+  title: string;
+  url: string;
+  author: string | null;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+  state: "OPEN" | "MERGED" | "CLOSED";
+  isDraft: boolean;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  labels: string[];
+  reviewers: string[];
+  reviewDecision: PullRequestReviewDecision;
+  checks: CheckRollupState;
+  /** The viewer reacted 👍 to the PR description, which is how pre-review is accepted. */
+  viewerThumbsUp: boolean;
+  linkedIssues: PytorchLinkedIssue[];
+};
+
+/** `mentionedIssues`: issue numbers referenced in the description that GitHub did not parse as closing references (e.g. `Fixes: <url>`). */
+export type PytorchQueuePr = Omit<PytorchPullSnapshot, "body" | "id"> & { bodyExcerpt: string; mentionedIssues: number[]; stage: PytorchStageInfo; localPrKey: string | null };
+
+export type PytorchIssueSnapshot = { number: number; title: string; url: string; author: string | null; createdAt: string; updatedAt: string; labels: string[]; assignees: string[]; comments: number };
+export type PytorchQueueIssue = PytorchIssueSnapshot & { ageDays: number; overdue: boolean; highPriority: boolean };
+
+export type PytorchSearchResult<T> = { total: number; items: T[] };
+
+export type PytorchQueuesResponse = {
+  login: string | null;
+  /** Null until the first refresh ever completed. */
+  fetchedAt: string | null;
+  refreshing: boolean;
+  modules: string[];
+  preReview: PytorchSearchResult<PytorchQueuePr> & { githubUrl: string };
+  review: PytorchSearchResult<PytorchQueuePr> & { githubUrl: string };
+  triage: Array<PytorchSearchResult<PytorchQueueIssue> & { module: string; githubUrl: string }>;
+  /** Live pytorch/pytorch issue notifications from the inbox snapshot (not part of the cached queue snapshot). */
+  issueNotifications: InboxItem[];
+  warnings: string[];
 };
 
 export type InboxTier = "needs-you" | "review-requests" | "your-prs" | "fyi" | "resolved";
@@ -366,8 +433,13 @@ export type InboxResponse = {
   backlog: number;
   /** Set while refreshes are paused after GitHub reported a rate limit. */
   pausedUntil: string | null;
+  /** General inbox rows; pytorch/pytorch review requests and issues are routed out (see below). */
   items: InboxItem[];
   tiers: Record<InboxTier, number>;
+  /** pytorch/pytorch issue notifications, shown in the PyTorch panel's own Issues section. */
+  pytorchIssues: InboxItem[];
+  /** pytorch/pytorch PR review requests hidden here because the Pre-review/Review queues own them. */
+  pytorchFlowCount: number;
   myPrs: ViewerPullRequest[];
   recentlyClosedPrs: ViewerPullRequest[];
   warnings: string[];

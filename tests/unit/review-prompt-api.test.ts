@@ -231,3 +231,16 @@ test("review prompt API validates mode and required inputs", async () => {
   await assert.rejects(api().build({ mode: "github-draft-handoff", prKey: "pr", comments: [] }), /Expected GitHub draft comments/);
   await assert.rejects(api().build({ mode: "github-draft-handoff", prKey: "pr", comments: [{ path: "p", body: "" }] }), /Expected GitHub draft comment location and body/);
 });
+
+test("PyTorch pre-review prompt asks the four guide questions, one recommendation, and summarizes files without patches", async () => {
+  const result = await api().build({ mode: "pytorch-pre-review", prKey: "github.com/pytorch/pytorch#1", prTitle: "Fix grad", author: "alice", body: "Fixes #9", labels: ["triaged"], linkedIssues: [{ number: 9, title: "grad bug", labels: ["actionable"] }], files });
+
+  assert.equal(result.purpose, "pytorch-pre-review");
+  assert.match(result.prompt, /under a minute/);
+  assert.match(result.prompt, /Recommendation: Accept/);
+  assert.match(result.prompt, /Recommendation: Back to draft/);
+  assert.match(result.prompt, /Recommendation: Close/);
+  assert.match(result.prompt, /- #9 grad bug \[actionable\]/);
+  assert.match(result.prompt, /- src\/a\.ts \(\+3\/-1\)/);
+  assert.doesNotMatch(result.prompt, /\+new/);
+});

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { applyLatestActivity, buildInboxResponse, createInboxApi, isRateLimitError, rankInbox, refreshSnapshot, REFRESH_BUDGET, type InboxApiDeps, type InboxSnapshot } from "../../src/inbox-api.js";
+import { applyLatestActivity, buildInboxResponse, routeInboxItems, createInboxApi, isRateLimitError, rankInbox, refreshSnapshot, REFRESH_BUDGET, type InboxApiDeps, type InboxSnapshot } from "../../src/inbox-api.js";
 import type { GitHubNotification, InboxSubjectSnapshot, StoredPullRequest, ViewerPullRequest } from "../../src/types.js";
 
 const NOW = "2026-09-03T12:00:00Z";
@@ -465,4 +465,23 @@ test("inbox API rejects malformed thread ids", async () => {
   const api = createInboxApi(harness());
   await assert.rejects(api.done({}), /threadIds is required/);
   await assert.rejects(api.done({ threadIds: [""] }), /non-empty strings/);
+});
+
+test("pytorch/pytorch review requests go to the workflow queues, its issues to their own lane, the rest stays", () => {
+  const snap: InboxSnapshot = {
+    version: 2, login: "viewer", fetchedAt: NOW, notificationsAt: NOW,
+    notifications: [
+      notification({ id: "pt-rr", repo: "pytorch/pytorch", reason: "review_requested", subjectNumber: 1 }),
+      notification({ id: "pt-mention", repo: "pytorch/pytorch", reason: "mention", subjectNumber: 2 }),
+      notification({ id: "pt-issue", repo: "pytorch/pytorch", reason: "mention", subjectKind: "issue", subjectNumber: 3 }),
+      notification({ id: "other-rr", repo: "pytorch/torchtitan", reason: "review_requested", subjectNumber: 4 }),
+    ],
+    subjects: {}, latest: {}, viewerPrs: { openAt: null, closedAt: null, open: [], closed: [] }, backlog: 0, warnings: [],
+  };
+  const response = buildInboxResponse(snap, [], NOW, false);
+  assert.deepEqual(response.items.map((item) => item.id).sort(), ["other-rr", "pt-mention"]);
+  assert.deepEqual(response.pytorchIssues.map((item) => item.id), ["pt-issue"]);
+  assert.equal(response.pytorchFlowCount, 1);
+  assert.equal(response.tiers["review-requests"], 1, "tier counts cover only the general lane");
+  assert.equal(routeInboxItems(response.items).inbox.length, 2);
 });

@@ -30,6 +30,17 @@ src/                    Node server (TypeScript, ESM, run via tsx)
                         backlog drained by 10s continuation cycles; a rate-limit error pauses all
                         inbox GitHub traffic for 10 min (`pausedUntil`). Never add a burst here.
                         `POST /api/inbox/done|mute` write through to GitHub
+  pytorch-workflow-api.ts  PyTorch label-driven PR/issue workflow (maintainer guide): pure
+                        `classifyPullRequestStage` (labels + draft + review state → stage, next
+                        actor), queue queries copied verbatim from the guide (pre-review, review,
+                        per-module issue triage), and validated writes (👍 pre-review accept,
+                        decline = reason comment + draft/close, triage labels with won't-fix
+                        requiring a reason, re-add `in progress` after Request changes). Queues are
+                        2 + modules sequential searches, cached 5 min in `<state>.pytorch.json`
+                        with the tracked module list; viewer PRs in the inbox carry `pytorchStage`.
+                        Inbox routing (`routeInboxItems`): pytorch/pytorch PR review requests leave
+                        the inbox (the queues own them), pytorch/pytorch issue notifications move to
+                        the panel's Issues tab, mentions/your-PR activity stay in normal tiers
   state.ts              StateStore: JSON persistence of AppState (PRs, drafts, viewed files,
                         AI/guide/focus-scan records, reviewer memory) at PI_REVIEW_STATE_PATH
   github.ts             gh api / GraphQL calls (PR data, pending reviews, comments,
@@ -62,7 +73,8 @@ web/src/                React frontend (Vite)
                         media queries → mermaid/schematic/file snippets
   components/           Small shared pieces (Button→.ui-button, Modal→ModalShell, ActionMenu,
                         Tabs, Threads (resolved GitHub threads start collapsed), Markdown*,
-                        Mermaid, SchematicDiagram, PiTerminal, Inbox (start-page triage list +
+                        Mermaid, SchematicDiagram, PiTerminal, PytorchWorkflow (start-page
+                        PyTorch queues + PR-header stage strip with Pi pre-review), Inbox (start-page triage list +
                         "Your PRs" board grouped per collapsible repo, newest first, Open / Closed
                         (last 14 days) tabs; j/k ← → m g keyboard triage; opening a PR row marks its thread
                         done))

@@ -1,3 +1,4 @@
+import { classifyPullRequestStage, PYTORCH_REPO } from "./pytorch-workflow-api.js";
 import type { GitHubNotification, InboxItem, InboxLatestActivity, InboxResponse, InboxSubjectKind, InboxSubjectSnapshot, InboxTier, StoredPullRequest, ViewerPullRequest, ViewerPullRequestScope } from "./types.js";
 
 export type InboxSubjectRef = { repo: string; number: number; kind: InboxSubjectKind };
@@ -284,13 +285,35 @@ function emptySnapshot(now: string): InboxSnapshot {
   return { version: 2, login: null, fetchedAt: now, notificationsAt: now, notifications: [], subjects: {}, latest: {}, viewerPrs: { openAt: null, closedAt: null, open: [], closed: [] }, backlog: 0, warnings: [] };
 }
 
+/**
+ * pytorch/pytorch runs a label-driven review workflow: review requests there are owned by the
+ * Pre-review/Review queues (whose searches decide whether it is actually the viewer's turn), and
+ * its issues get a dedicated section. Mentions, assignments and activity on PRs stay in the
+ * general tiers like any other repo.
+ */
+export function routeInboxItems(items: InboxItem[]): { inbox: InboxItem[]; pytorchIssues: InboxItem[]; pytorchFlow: InboxItem[] } {
+  const lanes = { inbox: [] as InboxItem[], pytorchIssues: [] as InboxItem[], pytorchFlow: [] as InboxItem[] };
+  for (const item of items) {
+    if (item.repo !== PYTORCH_REPO) lanes.inbox.push(item);
+    else if (item.kind === "issue") lanes.pytorchIssues.push(item);
+    else if (item.kind === "pr" && item.reason === "review_requested") lanes.pytorchFlow.push(item);
+    else lanes.inbox.push(item);
+  }
+  return lanes;
+}
+
 /** Render the served response from a snapshot; ranking is pure and cheap, so it runs per request with the current clock. */
 export function buildInboxResponse(snapshot: InboxSnapshot, localPrs: StoredPullRequest[], nowIso: string, refreshing: boolean): InboxResponse {
   const localKeys = new Set(localPrs.map((pr) => pr.key));
   const ranked = rankInbox(snapshot.notifications, Object.values(snapshot.subjects).map((entry) => entry.snapshot), localPrs, nowIso);
   const latestByThread = new Map(Object.entries(snapshot.latest).map(([id, entry]) => [id, entry.latest] as const));
-  const items = applyLatestActivity(ranked.items, latestByThread);
-  const withLocalKey = (pr: ViewerPullRequest): ViewerPullRequest => ({ ...pr, localPrKey: localKeys.has(localPrKey(pr.repo, pr.number)) ? localPrKey(pr.repo, pr.number) : null });
+  const lanes = routeInboxItems(applyLatestActivity(ranked.items, latestByThread));
+  const items = lanes.inbox;
+  const withLocalKey = (pr: ViewerPullRequest): ViewerPullRequest => ({
+    ...pr,
+    localPrKey: localKeys.has(localPrKey(pr.repo, pr.number)) ? localPrKey(pr.repo, pr.number) : null,
+    pytorchStage: pr.repo === PYTORCH_REPO ? classifyPullRequestStage({ labels: pr.labels ?? [], isDraft: pr.isDraft, state: pr.state, reviewDecision: pr.reviewDecision }) : null,
+  });
   return {
     login: snapshot.login,
     fetchedAt: snapshot.fetchedAt,
@@ -299,6 +322,8 @@ export function buildInboxResponse(snapshot: InboxSnapshot, localPrs: StoredPull
     pausedUntil: null,
     items,
     tiers: tierCounts(items),
+    pytorchIssues: lanes.pytorchIssues,
+    pytorchFlowCount: lanes.pytorchFlow.length,
     myPrs: snapshot.viewerPrs.open.map(withLocalKey),
     recentlyClosedPrs: snapshot.viewerPrs.closed.map(withLocalKey),
     warnings: snapshot.warnings,

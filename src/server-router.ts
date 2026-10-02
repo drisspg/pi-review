@@ -13,6 +13,7 @@ import type { PiApi } from "./pi-api.js";
 import type { PiTerminalApi } from "./pi-terminal-api.js";
 import type { PiTerminalDraftApi } from "./pi-terminal-draft-api.js";
 import type { PrApi } from "./pr-api.js";
+import type { PytorchWorkflowApi } from "./pytorch-workflow-api.js";
 import type { ReviewArchiveApi } from "./review-archive-api.js";
 import type { ReviewMemoryApi } from "./review-memory-api.js";
 import type { ReviewPromptApi } from "./review-prompt-api.js";
@@ -44,6 +45,7 @@ export type ServerRouteDeps = {
   piTerminalApi: PiTerminalApi;
   piTerminalDraftApi: PiTerminalDraftApi;
   prApi: PrApi;
+  pytorchWorkflowApi: PytorchWorkflowApi;
   reviewArchiveApi: ReviewArchiveApi;
   reviewMemoryApi: ReviewMemoryApi;
   reviewPromptApi: ReviewPromptApi;
@@ -97,6 +99,12 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
     "/api/pi/terminal/delete": (payload) => deps.piTerminalApi.remove(payload),
     "/api/pr/checks": (payload) => deps.prApi.checks(payload),
     "/api/pr/interdiff": (payload) => deps.prApi.interdiff(payload),
+    "/api/pytorch/modules": (payload) => deps.pytorchWorkflowApi.setModules(payload),
+    "/api/pytorch/pr-status": (payload) => deps.pytorchWorkflowApi.prStatus(payload),
+    "/api/pytorch/pre-review/accept": (payload) => deps.pytorchWorkflowApi.acceptPreReview(payload),
+    "/api/pytorch/pre-review/decline": (payload) => deps.pytorchWorkflowApi.declinePreReview(payload),
+    "/api/pytorch/issue/triage": (payload) => deps.pytorchWorkflowApi.triageIssue(payload),
+    "/api/pytorch/pr/send-back": (payload) => deps.pytorchWorkflowApi.sendBackToInProgress(payload),
     "/api/review/archive/history": (payload) => deps.reviewArchiveApi.history(payload),
     "/api/review/archive": (payload) => deps.reviewArchiveApi.archive(payload),
     "/api/usage": async (payload) => deps.usageApi.recordClientEvents(payload),
@@ -132,6 +140,16 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
 
     if (req.method === "GET" && url.pathname === "/api/inbox") {
       sendJson(res, 200, await deps.inboxApi.inbox({ refresh: url.searchParams.get("refresh") === "1" }));
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/pytorch/queues") {
+      sendJson(res, 200, await deps.pytorchWorkflowApi.queues({ refresh: url.searchParams.get("refresh") === "1" }));
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/pytorch/module-labels") {
+      sendJson(res, 200, await deps.pytorchWorkflowApi.moduleLabels());
       return;
     }
 

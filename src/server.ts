@@ -17,9 +17,10 @@ import { createFileApi, defaultFileApiDeps } from "./file-api.js";
 import { createGitHubDraftReviewApi, defaultGitHubDraftReviewApiDeps } from "./github-draft-review-api.js";
 import { gpuWorkspaceCreateResponse, gpuWorkspaceDeleteResponse, gpuWorkspaceExecResponse, gpuWorkspaceStatusResponse } from "./gpu-workspace-api.js";
 import { createInboxApi, type InboxSnapshot } from "./inbox-api.js";
+import { createPytorchWorkflowApi, PYTORCH_REPO, type PytorchStore } from "./pytorch-workflow-api.js";
 import { createGitInterdiff } from "./interdiff-git.js";
 import { createMissingPatchRecovery } from "./missing-patches.js";
-import { addIssueComment, addPendingPullRequestReviewThread, compareCommits, createPendingPullRequestReview, editIssueComment, editReviewComment, editReviewSummary, fetchCommitChecks, fetchFileText, fetchLatestActivity, fetchNotifications, fetchPendingPullRequestReview, fetchPullRequestReviewData, fetchSubjectSnapshots, fetchViewerLogin, fetchViewerPullRequests, markNotificationDone, replyToReviewComment, setReviewThreadResolved, submitPullRequestReview, unsubscribeNotification } from "./github.js";
+import { addIssueComment, addPendingPullRequestReviewThread, compareCommits, createPendingPullRequestReview, defaultGitHubClient, editIssueComment, editReviewComment, editReviewSummary, fetchCommitChecks, fetchFileText, fetchLatestActivity, fetchNotifications, fetchPendingPullRequestReview, fetchPullRequestReviewData, fetchSubjectSnapshots, fetchViewerLogin, fetchViewerPullRequests, markNotificationDone, replyToReviewComment, setReviewThreadResolved, submitPullRequestReview, unsubscribeNotification } from "./github.js";
 import { logger } from "./logger.js";
 import { parsePullRequestRef, prKey } from "./pr.js";
 import { createPiApi } from "./pi-api.js";
@@ -122,6 +123,34 @@ const inboxApi = createInboxApi({
     await rename(tempPath, inboxSnapshotPath);
   },
 });
+// Like the inbox snapshot, the PyTorch workflow store (tracked modules + last queue snapshot) sits next to the state file.
+const pytorchStorePath = `${defaultUsageLogPath().replace(/\.usage\.jsonl$/, "")}.pytorch.json`;
+const pytorchWorkflowApi = createPytorchWorkflowApi({
+  fetchViewerLogin,
+  searchPullRequests: defaultGitHubClient.searchWorkflowPullRequests,
+  searchIssues: defaultGitHubClient.searchWorkflowIssues,
+  fetchPullRequest: defaultGitHubClient.fetchWorkflowPullRequest,
+  listModuleLabels: () => defaultGitHubClient.listModuleLabels(PYTORCH_REPO),
+  addReaction: defaultGitHubClient.addReaction,
+  addLabels: defaultGitHubClient.addLabels,
+  addComment: async (ref, body) => { await addIssueComment(ref, body); },
+  closeIssue: defaultGitHubClient.closeIssue,
+  convertToDraft: defaultGitHubClient.convertPullRequestToDraft,
+  listRecentPullRequests,
+  listIssueNotifications: async () => (await inboxApi.inbox()).pytorchIssues,
+  logger,
+  now: () => new Date().toISOString(),
+  async readStore() {
+    if (!existsSync(pytorchStorePath)) return null;
+    return JSON.parse(await readFile(pytorchStorePath, "utf8")) as PytorchStore;
+  },
+  async writeStore(store) {
+    await mkdir(dirname(pytorchStorePath), { recursive: true });
+    const tempPath = `${pytorchStorePath}.${process.pid}.tmp`;
+    await writeFile(tempPath, JSON.stringify(store), "utf8");
+    await rename(tempPath, pytorchStorePath);
+  },
+});
 const piApi = createPiApi({ askPi, piDiagnostics, setPiModel });
 const piTerminalApi = createPiTerminalApi({ deleteSession: piTerminalManager.deleteSession });
 const piTerminalDraftApi = createPiTerminalDraftApi({ appendDraftReviewComment, contextForPr: piSessionReviewContext, notifyDraftReview: piTerminalManager.broadcastDraftReview });
@@ -219,6 +248,7 @@ const route = createServerRoute({
   piTerminalApi,
   piTerminalDraftApi,
   prApi,
+  pytorchWorkflowApi,
   reviewArchiveApi,
   reviewMemoryApi,
   reviewPromptApi,
