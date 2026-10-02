@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "reac
 
 import { api, errorMessage, logUsage } from "../api";
 import { relativeTime } from "../lib/pr";
-import type { InboxItem, PullFile, PytorchPrStatus, PytorchQueueIssue, PytorchQueuePr, PytorchQueuesResponse, PytorchStageInfo, StoredPullRequest } from "../types";
+import type { InboxItem, PullFile, PytorchAssessment, PytorchPrStatus, PytorchQueueIssue, PytorchQueuePr, PytorchQueuesResponse, PytorchStageInfo, StoredPullRequest } from "../types";
 import { Button } from "./Button";
 import { MarkdownText } from "./Markdown";
 import { ModalShell } from "./Modal";
@@ -16,6 +16,7 @@ import { ModalShell } from "./Modal";
  */
 
 type QueueTab = "pre-review" | "review" | "issues";
+type DeclineTarget = { number: number; title: string; text?: string; outcome?: DeclineOutcome };
 type DeclineOutcome = "draft" | "close";
 type TriageLabel = "needs reproduction" | "needs research" | "needs design" | "actionable" | "won't fix";
 
@@ -59,6 +60,32 @@ function LinkedIssues({ pr }: { pr: PytorchQueuePr }) {
   return <>{mentioned}{pr.linkedIssues.map((issue) => <a key={issue.number} className={`pt-issue-chip${issue.actionable ? " actionable" : ""}`} href={issue.url} target="_blank" rel="noreferrer" title={`${issue.title}\n${issue.labels.join(", ")}`}><IssueOpenedIcon size={12} />#{issue.number}{issue.actionable ? " actionable" : ""}</a>)}</>;
 }
 
+const RECOMMENDATION_LABEL: Record<PytorchAssessment["recommendation"], string> = { accept: "Accept", draft: "Back to draft", close: "Close" };
+
+/** Decline target prefilled from a saved suggestion, so acting on it is review-and-confirm. */
+function declineFromAssessment(pr: { number: number; title: string }, assessment: PytorchAssessment | null): DeclineTarget {
+  if (assessment == null || assessment.recommendation === "accept") return { number: pr.number, title: pr.title };
+  return { number: pr.number, title: pr.title, text: assessment.comment ?? undefined, outcome: assessment.recommendation };
+}
+
+/** Saved AI pre-review suggestion: verdict + one-line reason, expandable to evidence and the drafted comment. */
+function AssessmentSummary({ assessment }: { assessment: PytorchAssessment }) {
+  return <details className={`pt-assessment rec-${assessment.recommendation}`}>
+    <summary>
+      <span className="disclosure-chevron" aria-hidden="true">›</span>
+      <span className="pt-assessment-badge">{assessment.source}: {RECOMMENDATION_LABEL[assessment.recommendation]}</span>
+      <span className="pt-assessment-why">{assessment.why}</span>
+      {assessment.outdated && <span className="inbox-flag attention" title={`Assessed ${new Date(assessment.assessedAt).toLocaleString()}; the PR changed since`}>PR updated since</span>}
+    </summary>
+    <div className="pt-assessment-body">
+      {assessment.preconditions != null && <p><strong>Pre-conditions:</strong> {assessment.preconditions}</p>}
+      {assessment.notes.length > 0 && <ul>{assessment.notes.map((note) => <li key={note}>{note}</li>)}</ul>}
+      {assessment.comment != null && <blockquote className="pt-assessment-comment">{assessment.comment}</blockquote>}
+      <p className="muted">Assessed {relativeTime(assessment.assessedAt)} · suggestion only; nothing is posted until you confirm.</p>
+    </div>
+  </details>;
+}
+
 /** Shared reason composer: the guide asks maintainers to always explain declines and won't-fix. */
 function ReasonDialog({ open, title, submitLabel, initialText, initialOutcome, outcomes, templates, onCancel, onSubmit }: { open: boolean; title: string; submitLabel: (outcome: DeclineOutcome | null) => string; initialText?: string; initialOutcome?: DeclineOutcome; outcomes: boolean; templates?: typeof DECLINE_TEMPLATES; onCancel: () => void; onSubmit: (reason: string, outcome: DeclineOutcome | null) => Promise<void> }) {
   const [text, setText] = useState(initialText ?? "");
@@ -100,7 +127,6 @@ function ReasonDialog({ open, title, submitLabel, initialText, initialOutcome, o
   </ModalShell>;
 }
 
-type DeclineTarget = { number: number; title: string; text?: string; outcome?: DeclineOutcome };
 
 async function declinePreReview(target: DeclineTarget, reason: string, outcome: DeclineOutcome): Promise<void> {
   await api("/api/pytorch/pre-review/decline", { method: "POST", body: JSON.stringify({ number: target.number, outcome, reason }) });
@@ -260,14 +286,15 @@ export function PytorchQueuesPanel({ openPr }: { openPr: (url: string) => Promis
           <span>{prSize(pr)}</span>
           {pr.localPrKey != null && <span className="inbox-row-local">reviewed here</span>}
         </div>
+        {kind === "pre-review" && pr.assessment != null && <AssessmentSummary assessment={pr.assessment} />}
         {kind === "pre-review" && <div className="pt-row-issues"><LinkedIssues pr={pr} /></div>}
         {kind === "pre-review" && pr.bodyExcerpt.length > 0 && <button type="button" className={`pt-excerpt${open ? " open" : ""}`} aria-expanded={open} onClick={() => setExpanded((current) => { const next = new Set(current); if (next.has(pr.number)) next.delete(pr.number); else next.add(pr.number); return next; })}>{pr.bodyExcerpt}</button>}
         {kind === "pre-review" && pr.bodyExcerpt.length === 0 && <span className="pt-excerpt-empty">No description — the guide allows rejecting at pre-review for that.</span>}
       </div>
       <div className="pt-row-actions">
         {kind === "pre-review" && <>
-          <Button variant="muted" disabled={isBusy || pr.viewerThumbsUp} title="React 👍 to the PR description (same as @pytorchbot pre-review accept)" onClick={() => void accept(pr)}><ThumbsupIcon size={14} /> {pr.viewerThumbsUp ? "Accepted" : "Accept"}</Button>
-          <Button variant="muted" disabled={isBusy} title="Comment with a reason, then move to draft or close" onClick={() => setDecline({ number: pr.number, title: pr.title })}>Decline…</Button>
+          <Button variant="muted" className={pr.assessment?.recommendation === "accept" && !pr.viewerThumbsUp ? "pt-suggested" : undefined} disabled={isBusy || pr.viewerThumbsUp} title="React 👍 to the PR description (same as @pytorchbot pre-review accept)" onClick={() => void accept(pr)}><ThumbsupIcon size={14} /> {pr.viewerThumbsUp ? "Accepted" : "Accept"}</Button>
+          <Button variant="muted" className={pr.assessment != null && pr.assessment.recommendation !== "accept" ? "pt-suggested" : undefined} disabled={isBusy} title={pr.assessment?.comment != null ? "Opens with the suggested comment and outcome prefilled" : "Comment with a reason, then move to draft or close"} onClick={() => setDecline(declineFromAssessment(pr, pr.assessment))}>{pr.assessment?.recommendation === "draft" ? "Draft…" : pr.assessment?.recommendation === "close" ? "Close…" : "Decline…"}</Button>
         </>}
         {kind === "review" && pr.stage.needsSendBack && <Button variant="muted" disabled={isBusy} title="TEMPORARY rule: after Request changes, re-add `in progress` so automated review runs again" onClick={() => void sendBack(pr)}>Send back to in progress</Button>}
         <Button variant="icon" title="Open on GitHub" aria-label={`Open #${pr.number} on GitHub`} onClick={() => window.open(pr.url, "_blank", "noopener")}><LinkExternalIcon size={16} /></Button>
@@ -383,13 +410,6 @@ export function PytorchQueuesPanel({ openPr }: { openPr: (url: string) => Promis
   </section>;
 }
 
-function parseRecommendation(answer: string): { outcome: DeclineOutcome | "accept" | null; comment: string | null } {
-  const match = /Recommendation:\s*\**\s*(Accept|Back to draft|Close)/i.exec(answer);
-  const outcome = match == null ? null : match[1].toLowerCase() === "accept" ? "accept" : match[1].toLowerCase() === "close" ? "close" : "draft";
-  const comment = /```comment\s*\n([\s\S]*?)```/.exec(answer)?.[1]?.trim() ?? null;
-  return { outcome, comment };
-}
-
 /** Review-page strip for pytorch/pytorch PRs: where the PR is in the workflow and the viewer's next action. */
 export function PytorchWorkflowStrip({ pr, files }: { pr: StoredPullRequest; files: PullFile[] }) {
   const [status, setStatus] = useState<PytorchPrStatus | null>(null);
@@ -431,6 +451,8 @@ export function PytorchWorkflowStrip({ pr, files }: { pr: StoredPullRequest; fil
       const { prompt, purpose } = await api<{ prompt: string; purpose: string }>("/api/pi/prompt", { method: "POST", body: JSON.stringify({ mode: "pytorch-pre-review", prKey: pr.key, prTitle: pr.title, author: pr.author, body: pr.body ?? "", labels: status.pr.labels, linkedIssues: status.pr.linkedIssues, files: files.map((file) => ({ filename: file.filename, additions: file.additions, deletions: file.deletions, status: file.status })) }) });
       const { answer } = await api<{ answer: string }>("/api/ask", { method: "POST", body: JSON.stringify({ prKey: pr.key, prompt, purpose }) });
       setPreReview({ running: false, answer, error: null, open: true });
+      // Persist so the queue row shows it too; an answer without a verdict line stays visible here only.
+      await api("/api/pytorch/pre-review/assessment", { method: "POST", body: JSON.stringify({ number: status.pr.number, markdown: answer, source: "Pi", prUpdatedAt: status.pr.updatedAt }) }).then(load).catch(() => undefined);
     } catch (err) {
       setPreReview({ running: false, answer: null, error: errorMessage(err), open: true });
     }
@@ -440,7 +462,7 @@ export function PytorchWorkflowStrip({ pr, files }: { pr: StoredPullRequest; fil
   const stage = status.pr.stage;
   const viewerActs = stage.actor === "reviewers" ? status.viewerIsReviewer : stage.actor === "author" && status.viewerIsAuthor;
   const canPreReview = stage.stage === "pre-review" && !status.viewerIsAuthor;
-  const recommendation = preReview.answer == null ? null : parseRecommendation(preReview.answer);
+  const assessment = status.pr.assessment;
   return <div className="pt-strip" aria-label="PyTorch workflow">
     <span className={`pt-stage-pill tone-${stageTone(stage, viewerActs)}`} title="PyTorch PR workflow stage (CONTRIBUTING.md#pr-lifecycle)">{stage.label}</span>
     <span className="pt-strip-next">{viewerActs ? <strong>Your move: </strong> : <span className="muted">Next: </span>}{stage.next}</span>
@@ -449,17 +471,16 @@ export function PytorchWorkflowStrip({ pr, files }: { pr: StoredPullRequest; fil
     <span className="pt-strip-actions">
       {canPreReview && <>
         <Button variant="muted" disabled={busy || status.pr.viewerThumbsUp} title="React 👍 to the PR description (same as @pytorchbot pre-review accept)" onClick={() => void run(async () => { await api("/api/pytorch/pre-review/accept", { method: "POST", body: JSON.stringify({ number: status.pr.number }) }); logUsage("pytorch:pre-review-accept", { from: "review" }); })}><ThumbsupIcon size={14} /> {status.pr.viewerThumbsUp ? "Pre-review accepted" : "Accept pre-review"}</Button>
-        <Button variant="muted" disabled={busy} onClick={() => setDecline({ number: status.pr.number, title: status.pr.title })}>Decline…</Button>
+        <Button variant="muted" className={assessment != null && assessment.recommendation !== "accept" ? "pt-suggested" : undefined} disabled={busy} onClick={() => setDecline(declineFromAssessment(status.pr, assessment))}>{assessment?.recommendation === "draft" ? "Draft…" : assessment?.recommendation === "close" ? "Close…" : "Decline…"}</Button>
         <Button variant="muted" disabled={preReview.running} title="Ask Pi for a quick four-question pre-review assessment" onClick={() => void askPi()}>{preReview.running ? "Pi is assessing…" : "Pi pre-review"}</Button>
       </>}
       {stage.needsSendBack && !status.viewerIsAuthor && <Button variant="muted" disabled={busy} title="TEMPORARY rule: Request changes does not re-add `in progress` automatically yet" onClick={() => void run(async () => { await api("/api/pytorch/pr/send-back", { method: "POST", body: JSON.stringify({ number: status.pr.number }) }); logUsage("pytorch:send-back", { from: "review" }); })}>Send back to in progress</Button>}
     </span>
     {error != null && <span className="inbox-flag danger" role="alert">{error}</span>}
+    {canPreReview && assessment != null && <div className="pt-strip-assessment"><AssessmentSummary assessment={assessment} /></div>}
     {preReview.open && <div className="pt-pre-review">
       <div className="pt-pre-review-head">
         <strong>Pi pre-review</strong>
-        {recommendation?.outcome === "accept" && <Button variant="muted" disabled={busy || status.pr.viewerThumbsUp} onClick={() => void run(async () => { await api("/api/pytorch/pre-review/accept", { method: "POST", body: JSON.stringify({ number: status.pr.number }) }); logUsage("pytorch:pre-review-accept", { from: "pi" }); })}><ThumbsupIcon size={14} /> Accept</Button>}
-        {(recommendation?.outcome === "draft" || recommendation?.outcome === "close") && <Button variant="muted" onClick={() => setDecline({ number: status.pr.number, title: status.pr.title, text: recommendation.comment ?? undefined, outcome: recommendation.outcome as DeclineOutcome })}>Use suggested {recommendation.outcome === "draft" ? "draft" : "close"} comment…</Button>}
         <Button variant="icon" aria-label="Hide Pi pre-review" onClick={() => setPreReview((current) => ({ ...current, open: false }))}><XIcon size={14} /></Button>
       </div>
       {preReview.running ? <p className="muted">Reading the description, linked issue, and file list…</p> : preReview.error != null ? <p className="inbox-error" role="alert">{preReview.error}</p> : preReview.answer != null && <MarkdownText text={preReview.answer} fileLinks={{ prUrl: pr.url }} />}

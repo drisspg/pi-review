@@ -376,7 +376,25 @@ export type PytorchPullSnapshot = {
 };
 
 /** `mentionedIssues`: issue numbers referenced in the description that GitHub did not parse as closing references (e.g. `Fixes: <url>`). */
-export type PytorchQueuePr = Omit<PytorchPullSnapshot, "body" | "id"> & { bodyExcerpt: string; mentionedIssues: number[]; stage: PytorchStageInfo; localPrKey: string | null };
+export type PytorchQueuePr = Omit<PytorchPullSnapshot, "body" | "id"> & { bodyExcerpt: string; mentionedIssues: number[]; stage: PytorchStageInfo; localPrKey: string | null; assessment: PytorchAssessmentView | null };
+
+export type PytorchPreReviewRecommendation = "accept" | "draft" | "close";
+/** A saved AI pre-review suggestion; advisory only, the maintainer still takes the action. */
+export type PytorchPreReviewAssessment = {
+  number: number;
+  recommendation: PytorchPreReviewRecommendation;
+  why: string;
+  preconditions: string | null;
+  notes: string[];
+  /** Suggested author-facing comment for draft/close outcomes. */
+  comment: string | null;
+  /** Who produced it, e.g. "Astra (high)" or "Pi". */
+  source: string;
+  assessedAt: string;
+  /** The PR's updatedAt when assessed; a newer PR update marks the assessment outdated. */
+  prUpdatedAt: string | null;
+};
+export type PytorchAssessmentView = PytorchPreReviewAssessment & { outdated: boolean };
 
 export type PytorchIssueSnapshot = { number: number; title: string; url: string; author: string | null; createdAt: string; updatedAt: string; labels: string[]; assignees: string[]; comments: number };
 export type PytorchQueueIssue = PytorchIssueSnapshot & { ageDays: number; overdue: boolean; highPriority: boolean };

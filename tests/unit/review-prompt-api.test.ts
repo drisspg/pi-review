@@ -244,3 +244,11 @@ test("PyTorch pre-review prompt asks the four guide questions, one recommendatio
   assert.match(result.prompt, /- src\/a\.ts \(\+3\/-1\)/);
   assert.doesNotMatch(result.prompt, /\+new/);
 });
+
+test("PyTorch pre-review prompt judges direction: stale descriptions are not a draft reason, an already-fixed issue is", async () => {
+  const { prompt } = await api().build({ mode: "pytorch-pre-review", prKey: "github.com/pytorch/pytorch#1" });
+
+  assert.match(prompt, /Descriptions often lag the code/);
+  assert.match(prompt, /still Accept when the direction is sound/);
+  assert.match(prompt, /linked issue is already fixed or closed/);
+});

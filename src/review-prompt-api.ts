@@ -361,9 +361,13 @@ Answer these four questions, each in one line, citing the description or diff:
 3. Is the approach clear and in line with the linked issue discussion and the description?
 4. Is it modular and simple enough to review, or does it need a design discussion first?
 
+Judge direction, not polish:
+- Descriptions often lag the code. A stale or slightly inaccurate detail (version numbers, flag names, opt-in vs default) is a note for the full review, not a reason to stop the PR; still Accept when the direction is sound.
+- Do weigh signals that the PR's direction no longer holds: the linked issue is already fixed or closed, a maintainer already rejected the approach or scope, or a competing fix is preferred.
+
 Then give exactly one recommendation on its own line, one of:
 - "Recommendation: Accept" (direction is sound; it can proceed to automated review)
-- "Recommendation: Back to draft" (only a minor clarification is needed)
+- "Recommendation: Back to draft" (the description is too unclear to judge the direction, and a short clarification would fix that)
 - "Recommendation: Close" (needs a design discussion on the issue, or lacks the justification for a quick decision)
 
 If you do not recommend Accept, finish with a short, polite comment to the author in a \`\`\`comment fenced block that explains the reason and the next step. Skim the checkout only as much as the four questions need; do not do a line-by-line review and do not draft review comments.

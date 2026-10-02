@@ -1,4 +1,4 @@
-import type { InboxItem, PullRequestRef, PytorchIssueSnapshot, PytorchPullSnapshot, PytorchQueueIssue, PytorchQueuePr, PytorchQueuesResponse, PytorchSearchResult, PytorchStageInfo, StoredPullRequest } from "./types.js";
+import type { InboxItem, PullRequestRef, PytorchAssessmentView, PytorchPreReviewAssessment, PytorchPreReviewRecommendation, PytorchIssueSnapshot, PytorchPullSnapshot, PytorchQueueIssue, PytorchQueuePr, PytorchQueuesResponse, PytorchSearchResult, PytorchStageInfo, StoredPullRequest } from "./types.js";
 
 /**
  * PyTorch's label-driven issue/PR workflow (CONTRIBUTING.md "Issue and PR Workflow",
@@ -88,14 +88,44 @@ export function mentionedIssues(body: string, linked: number[]): number[] {
   return [...found].filter((number) => !linked.includes(number)).slice(0, 5);
 }
 
-export function toQueuePr(pr: PytorchPullSnapshot, localKeys: Set<string>): PytorchQueuePr {
-  const { body, id: _id, ...rest } = pr;
-  return { ...rest, bodyExcerpt: bodyExcerpt(body), mentionedIssues: mentionedIssues(body, pr.linkedIssues.map((issue) => issue.number)), stage: classifyPullRequestStage(pr), localPrKey: localKeys.has(localPrKey(pr.number)) ? localPrKey(pr.number) : null };
+function assessmentView(assessment: PytorchPreReviewAssessment | undefined, prUpdatedAt: string): PytorchAssessmentView | null {
+  if (assessment == null) return null;
+  return { ...assessment, outdated: assessment.prUpdatedAt != null && prUpdatedAt > assessment.prUpdatedAt };
 }
 
-/** Accepted pre-reviews stay in GitHub's queue until every reviewer accepts; sink them below the ones still owed. */
+export function toQueuePr(pr: PytorchPullSnapshot, localKeys: Set<string>, assessment?: PytorchPreReviewAssessment): PytorchQueuePr {
+  const { body, id: _id, ...rest } = pr;
+  return { ...rest, bodyExcerpt: bodyExcerpt(body), mentionedIssues: mentionedIssues(body, pr.linkedIssues.map((issue) => issue.number)), stage: classifyPullRequestStage(pr), localPrKey: localKeys.has(localPrKey(pr.number)) ? localPrKey(pr.number) : null, assessment: assessmentView(assessment, pr.updatedAt) };
+}
+
+function byRecentlyUpdated(items: PytorchQueuePr[]): PytorchQueuePr[] {
+  return [...items].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+/** Most recently updated first. Accepted pre-reviews stay in GitHub's queue until every reviewer accepts, so they sink below the ones still owed. */
 function sortPreReview(items: PytorchQueuePr[]): PytorchQueuePr[] {
-  return [...items].sort((a, b) => Number(a.viewerThumbsUp) - Number(b.viewerThumbsUp) || a.createdAt.localeCompare(b.createdAt));
+  return byRecentlyUpdated(items).sort((a, b) => Number(a.viewerThumbsUp) - Number(b.viewerThumbsUp));
+}
+
+const RECOMMENDATIONS: Record<string, PytorchPreReviewRecommendation> = { accept: "accept", "back to draft": "draft", close: "close" };
+
+/**
+ * Parse the pre-review answer contract shared by the `pytorch-pre-review` prompt and offline
+ * assessors: a required `Recommendation: Accept | Back to draft | Close` line, optional
+ * `Why`, `Pre-conditions`, `Notes` bullets, and a ```comment fenced block.
+ */
+export function parsePreReviewAssessment(markdown: string): Omit<PytorchPreReviewAssessment, "number" | "source" | "assessedAt" | "prUpdatedAt"> {
+  const recommendation = /Recommendation:\s*\**\s*(Accept|Back to draft|Close)\b/i.exec(markdown)?.[1]?.toLowerCase();
+  if (recommendation == null) throw new Error("Assessment must contain a \"Recommendation: Accept | Back to draft | Close\" line");
+  const field = (name: string) => new RegExp(`^\\**${name}[^:\\n]*:\\**\\s*(.+)$`, "im").exec(markdown)?.[1]?.trim() ?? null;
+  const notesBlock = /^\**Notes[^:\n]*:\**\s*\n((?:[ \t]*[-*] .*\n?)+)/im.exec(markdown)?.[1] ?? "";
+  return {
+    recommendation: RECOMMENDATIONS[recommendation],
+    why: field("Why") ?? "",
+    preconditions: field("Pre-conditions"),
+    notes: notesBlock.split("\n").map((line) => line.replace(/^[ \t]*[-*] /, "").trim()).filter((line) => line.length > 0),
+    comment: /```comment[^\n]*\n([\s\S]*?)```/.exec(markdown)?.[1]?.trim() || null,
+  };
 }
 
 export type PytorchStore = {
@@ -111,6 +141,8 @@ export type PytorchStore = {
     triage: Array<PytorchSearchResult<PytorchIssueSnapshot> & { module: string }>;
     warnings: string[];
   } | null;
+  /** Saved pre-review suggestions keyed by PR number; optional so older store files still load. */
+  assessments?: Record<string, PytorchPreReviewAssessment>;
 };
 
 export type PytorchWorkflowDeps = {
@@ -145,6 +177,7 @@ export type PytorchWorkflowApi = {
   declinePreReview: (payload: Record<string, unknown>) => Promise<{ number: number; outcome: "draft" | "close" }>;
   triageIssue: (payload: Record<string, unknown>) => Promise<{ number: number; label: IssueTriageLabel }>;
   sendBackToInProgress: (payload: Record<string, unknown>) => Promise<{ number: number }>;
+  saveAssessment: (payload: Record<string, unknown>) => Promise<{ assessment: PytorchPreReviewAssessment }>;
   settle: () => Promise<void>;
 };
 
@@ -289,13 +322,14 @@ export function createPytorchWorkflowApi(deps: PytorchWorkflowDeps): PytorchWork
     })]);
     const localKeys = new Set(localPrs.map((pr) => pr.key));
     const queries = pytorchQueueQueries(modules);
+    const assessments = current().assessments ?? {};
     return {
       login: snapshot?.login ?? null,
       fetchedAt: snapshot?.fetchedAt ?? null,
       refreshing: inFlight != null,
       modules,
-      preReview: { total: snapshot?.preReview.total ?? 0, items: sortPreReview((snapshot?.preReview.items ?? []).map((pr) => toQueuePr(pr, localKeys))), githubUrl: githubSearchUrl(queries.preReview) },
-      review: { total: snapshot?.review.total ?? 0, items: (snapshot?.review.items ?? []).map((pr) => toQueuePr(pr, localKeys)), githubUrl: githubSearchUrl(queries.review) },
+      preReview: { total: snapshot?.preReview.total ?? 0, items: sortPreReview((snapshot?.preReview.items ?? []).map((pr) => toQueuePr(pr, localKeys, assessments[pr.number]))), githubUrl: githubSearchUrl(queries.preReview) },
+      review: { total: snapshot?.review.total ?? 0, items: byRecentlyUpdated((snapshot?.review.items ?? []).map((pr) => toQueuePr(pr, localKeys))), githubUrl: githubSearchUrl(queries.review) },
       triage: queries.triage.map(({ module, query }) => {
         const entry = snapshot?.triage.find((candidate) => candidate.module === module);
         // Newest first: the one-week SLA is about fresh issues, and long-triaged backlogs would otherwise bury them.
@@ -330,9 +364,9 @@ export function createPytorchWorkflowApi(deps: PytorchWorkflowDeps): PytorchWork
     },
     async prStatus(payload) {
       const number = parsePytorchPrNumber(payload.prUrl ?? payload.number);
-      const [snapshot, login] = await Promise.all([deps.fetchPullRequest(pytorchRef(number)), deps.fetchViewerLogin()]);
+      const [snapshot, login] = await Promise.all([deps.fetchPullRequest(pytorchRef(number)), deps.fetchViewerLogin(), load()]);
       const localKeys = new Set((await deps.listRecentPullRequests()).map((pr) => pr.key));
-      return { pr: toQueuePr(snapshot, localKeys), login, viewerIsAuthor: login != null && snapshot.author === login, viewerIsReviewer: login != null && snapshot.reviewers.includes(login) };
+      return { pr: toQueuePr(snapshot, localKeys, current().assessments?.[number]), login, viewerIsAuthor: login != null && snapshot.author === login, viewerIsReviewer: login != null && snapshot.reviewers.includes(login) };
     },
     async acceptPreReview(payload) {
       const number = requiredNumber(payload);
@@ -373,6 +407,16 @@ export function createPytorchWorkflowApi(deps: PytorchWorkflowDeps): PytorchWork
       await deps.addLabels(pytorchRef(number), ["in progress"]);
       await updateSnapshot((snapshot) => ({ ...snapshot, review: withoutPr(snapshot.review, number) }));
       return { number };
+    },
+    async saveAssessment(payload) {
+      const number = requiredNumber(payload);
+      const parsed = parsePreReviewAssessment(requiredText(payload, "markdown"));
+      await load();
+      const known = current().snapshot?.preReview.items.find((item) => item.number === number)?.updatedAt ?? null;
+      const prUpdatedAt = typeof payload.prUpdatedAt === "string" && payload.prUpdatedAt.length > 0 ? payload.prUpdatedAt : known;
+      const assessment: PytorchPreReviewAssessment = { number, ...parsed, source: typeof payload.source === "string" && payload.source.trim().length > 0 ? payload.source.trim() : "AI", assessedAt: deps.now(), prUpdatedAt };
+      await persist({ ...current(), assessments: { ...current().assessments, [number]: assessment } });
+      return { assessment };
     },
     async settle() {
       await load();

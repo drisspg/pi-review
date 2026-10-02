@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { classifyPullRequestStage, createPytorchWorkflowApi, mentionedIssues, githubSearchUrl, normalizeModules, parsePytorchPrNumber, pytorchQueueQueries, WHY_CLOSED_URL, type PytorchStore, type PytorchWorkflowDeps } from "../../src/pytorch-workflow-api.js";
+import { classifyPullRequestStage, createPytorchWorkflowApi, mentionedIssues, parsePreReviewAssessment, githubSearchUrl, normalizeModules, parsePytorchPrNumber, pytorchQueueQueries, WHY_CLOSED_URL, type PytorchStore, type PytorchWorkflowDeps } from "../../src/pytorch-workflow-api.js";
 import type { PytorchIssueSnapshot, PytorchPullSnapshot } from "../../src/types.js";
 
 const NOW = "2026-09-10T12:00:00Z";
@@ -26,7 +26,7 @@ function harness(overrides: Partial<PytorchWorkflowDeps> = {}, initial: PytorchS
     searchPullRequests: async (query) => {
       queries.push(query);
       return query.includes("label:triaged")
-        ? { total: 3, items: [pull({ number: 1, labels: ["triaged"], createdAt: "2026-09-01T00:00:00Z", viewerThumbsUp: true }), pull({ number: 2, labels: ["triaged"], createdAt: "2026-09-05T00:00:00Z" }), pull({ number: 3, labels: ["triaged"], createdAt: "2026-09-03T00:00:00Z" })] }
+        ? { total: 3, items: [pull({ number: 1, labels: ["triaged"], createdAt: "2026-09-01T00:00:00Z", updatedAt: "2026-09-07T00:00:00Z", viewerThumbsUp: true }), pull({ number: 2, labels: ["triaged"], createdAt: "2026-09-05T00:00:00Z", updatedAt: "2026-09-09T00:00:00Z" }), pull({ number: 3, labels: ["triaged"], createdAt: "2026-09-03T00:00:00Z", updatedAt: "2026-09-08T00:00:00Z" })] }
         : { total: 1, items: [pull({ number: 4, labels: ["ready for review"], reviewDecision: "CHANGES_REQUESTED" })] };
     },
     searchIssues: async (query) => {
@@ -89,12 +89,12 @@ test("PR references parse from URLs, short refs, and numbers but reject other re
   assert.throws(() => parsePytorchPrNumber("https://github.com/pytorch/vision/pull/1"), /pytorch\/pytorch/);
 });
 
-test("first load awaits one search per queue and module; owed pre-reviews sort oldest first, accepted ones last, triage newest first", async () => {
+test("first load awaits one search per queue and module; owed pre-reviews sort most recently updated first, accepted ones last, triage newest first", async () => {
   const h = harness({}, { version: 1, modules: ["module: autograd"], snapshot: null });
   const api = createPytorchWorkflowApi(h.deps);
   const response = await api.queues();
   assert.equal(h.queries.length, 3);
-  assert.deepEqual(response.preReview.items.map((pr) => pr.number), [3, 2, 1]);
+  assert.deepEqual(response.preReview.items.map((pr) => pr.number), [2, 3, 1]);
   assert.equal(response.preReview.items[0].stage.stage, "pre-review");
   assert.equal(response.review.items[0].stage.needsSendBack, true);
   const triage = response.triage[0];
@@ -149,7 +149,7 @@ test("accepting a pre-review reacts 👍 and keeps the PR visible as accepted", 
   await api.acceptPreReview({ number: 3 });
   assert.deepEqual(h.calls, ["react 3 +1"]);
   const response = await api.queues();
-  assert.deepEqual(response.preReview.items.map((pr) => [pr.number, pr.viewerThumbsUp]), [[2, false], [1, true], [3, true]]);
+  assert.deepEqual(response.preReview.items.map((pr) => [pr.number, pr.viewerThumbsUp]), [[2, false], [3, true], [1, true]]);
 });
 
 test("declining explains the reason, links the FAQ when closing, and drops the PR from the queue", async () => {
@@ -220,4 +220,42 @@ test("issue notifications are read live on every response and a failing read deg
   assert.deepEqual((await api.queues()).issueNotifications, []);
   h.deps.listIssueNotifications = async () => { throw new Error("inbox down"); };
   assert.deepEqual((await createPytorchWorkflowApi(h.deps).queues()).issueNotifications, []);
+});
+
+const ASTRA_ANSWER = `PR: #2 t
+Recommendation: Close
+Why (one line): No pre-condition holds.
+Pre-conditions: None established.
+Notes:
+- Issue is not actionable.
+- Author lacks write access.
+Suggested comment (only if not Accept):
+\`\`\`comment
+Please agree the scope on the issue first.
+\`\`\``;
+
+test("pre-review answers parse into recommendation, reason, notes, and the suggested comment", () => {
+  assert.deepEqual(parsePreReviewAssessment(ASTRA_ANSWER), { recommendation: "close", why: "No pre-condition holds.", preconditions: "None established.", notes: ["Issue is not actionable.", "Author lacks write access."], comment: "Please agree the scope on the issue first." });
+  assert.equal(parsePreReviewAssessment("1. clear\n**Recommendation: Back to draft**").recommendation, "draft");
+  assert.equal(parsePreReviewAssessment("Recommendation: Accept").comment, null);
+  assert.throws(() => parsePreReviewAssessment("Looks fine to me"), /Recommendation/);
+});
+
+test("saved assessments persist, attach to queue rows, and go outdated when the PR changes", async () => {
+  const h = harness();
+  const api = createPytorchWorkflowApi(h.deps);
+  await api.queues();
+  await assert.rejects(api.saveAssessment({ number: 2, markdown: "no verdict" }), /Recommendation/);
+  const { assessment } = await api.saveAssessment({ number: 2, markdown: ASTRA_ANSWER, source: "Astra (high)" });
+  assert.deepEqual([assessment.recommendation, assessment.source, assessment.prUpdatedAt], ["close", "Astra (high)", "2026-09-09T00:00:00Z"]);
+  assert.equal(h.stored()?.assessments?.["2"]?.why, "No pre-condition holds.");
+  assert.deepEqual(h.calls, [], "saving an assessment never writes to GitHub");
+
+  const rows = (await api.queues()).preReview.items;
+  assert.deepEqual([rows[0].number, rows[0].assessment?.recommendation, rows[0].assessment?.outdated], [2, "close", false]);
+  assert.equal(rows[1].assessment, null);
+
+  await api.saveAssessment({ number: 3, markdown: "Recommendation: Accept", prUpdatedAt: "2026-09-01T00:00:00Z" });
+  assert.equal((await api.queues()).preReview.items.find((pr) => pr.number === 3)?.assessment?.outdated, true);
+  assert.equal((await createPytorchWorkflowApi(h.deps).queues()).preReview.items[0].assessment?.recommendation, "close", "assessments survive a restart");
 });
