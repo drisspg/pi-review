@@ -40,7 +40,12 @@ src/                    Node server (TypeScript, ESM, run via tsx)
                         with the tracked module list; viewer PRs in the inbox carry `pytorchStage`.
                         Inbox routing (`routeInboxItems`): pytorch/pytorch PR review requests leave
                         the inbox (the queues own them), pytorch/pytorch issue notifications move to
-                        the panel's Issues tab, mentions/your-PR activity stay in normal tiers
+                        the panel's Issues tab, mentions/your-PR activity stay in normal tiers.
+                        Saved pre-review suggestions (`parsePreReviewAssessment`) are advisory only
+  pre-review-assessor.ts  One background agent: walks owed pre-reviews (queue order), gathers
+                        read-only evidence, runs headless Pi with `--no-tools` + its own system
+                        prompt, saves suggestions. Disabled by PI_REVIEW_DISABLE_AUTO_REVIEWS=1 or
+                        PI_REVIEW_PRE_REVIEW_ASSESSOR=0; never posts to GitHub
   state.ts              StateStore: JSON persistence of AppState (PRs, drafts, viewed files,
                         AI/guide/focus-scan records, reviewer memory) at PI_REVIEW_STATE_PATH
   github.ts             gh api / GraphQL calls (PR data, pending reviews, comments,

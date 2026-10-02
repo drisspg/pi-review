@@ -259,3 +259,17 @@ test("saved assessments persist, attach to queue rows, and go outdated when the 
   assert.equal((await api.queues()).preReview.items.find((pr) => pr.number === 3)?.assessment?.outdated, true);
   assert.equal((await createPytorchWorkflowApi(h.deps).queues()).preReview.items[0].assessment?.recommendation, "close", "assessments survive a restart");
 });
+
+test("assessment candidates are owed pre-reviews without a usable suggestion, in queue order, read from cache only", async () => {
+  const h = harness();
+  const api = createPytorchWorkflowApi(h.deps);
+  await api.queues();
+  const searches = h.queries.length;
+  assert.deepEqual((await api.assessmentCandidates()).map((item) => item.number), [2, 3], "accepted #1 is excluded");
+  await api.saveAssessment({ number: 2, markdown: "Recommendation: Accept" });
+  await api.saveAssessment({ number: 3, markdown: "Recommendation: Close", prUpdatedAt: "2026-09-01T00:00:00Z" });
+  assert.deepEqual(await api.assessmentCandidates(), [], "fresh and recently-assessed outdated suggestions are left alone");
+  h.setNow("2026-09-10T19:00:00Z");
+  assert.deepEqual((await api.assessmentCandidates()).map((item) => item.number), [3], "outdated suggestions are redone after the cool-down");
+  assert.equal(h.queries.length, searches, "never searches GitHub");
+});

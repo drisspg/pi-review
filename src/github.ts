@@ -9,7 +9,7 @@ import { markGeneratedPullFiles, parseGitattributes, type GitattributesRule } fr
 import { logger } from "./logger.js";
 import { prKey } from "./pr.js";
 import type { InboxSubjectRef } from "./inbox-api.js";
-import type { CheckRollupState, CommitChecks, GitHubDraftComment, GitHubNotification, InboxLatestActivity, GitHubDraftCommentInput, GitHubPendingReview, GitHubPendingReviewLookup, InboxSubjectKind, InboxSubjectSnapshot, PullFile, PullIssueComment, PullRequest, PullRequestRef, PullRequestReviewData, PullRequestReviewDecision, PullRequestReviewSummary, PullReviewComment, PytorchIssueSnapshot, PytorchPullSnapshot, PytorchSearchResult, StoredPullRequest, ViewerPullRequest, ViewerPullRequestScope } from "./types.js";
+import type { CheckRollupState, CommitChecks, GitHubDraftComment, GitHubNotification, InboxLatestActivity, GitHubDraftCommentInput, GitHubPendingReview, GitHubPendingReviewLookup, InboxSubjectKind, InboxSubjectSnapshot, PullFile, PullIssueComment, PullRequest, PullRequestRef, PullRequestReviewData, PullRequestReviewDecision, PullRequestReviewSummary, PullReviewComment, PytorchEvidenceComment, PytorchIssueSnapshot, PytorchPreReviewEvidence, PytorchPullSnapshot, PytorchSearchResult, StoredPullRequest, ViewerPullRequest, ViewerPullRequestScope } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -54,6 +54,7 @@ export type GitHubClient = {
   addLabels: (ref: PullRequestRef, labels: string[]) => Promise<void>;
   closeIssue: (ref: PullRequestRef) => Promise<void>;
   convertPullRequestToDraft: (ref: PullRequestRef) => Promise<void>;
+  fetchPreReviewEvidence: (ref: PullRequestRef) => Promise<PytorchPreReviewEvidence>;
 };
 
 const defaultRuntime: GitHubRuntime = {
@@ -751,12 +752,51 @@ export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): Git
     await ghApiPatch(ref, issuePath(ref), { state: "closed" }, "close issue");
   }
 
+  /** One GraphQL read plus one permission read; never writes. Bodies are trimmed so prompts stay bounded. */
+  async function fetchPreReviewEvidence(ref: PullRequestRef): Promise<PytorchPreReviewEvidence> {
+    type CommentNode = { author?: { login?: string } | null; createdAt?: string; submittedAt?: string; body?: string; state?: string };
+    type IssueNode = { number?: number; title?: string; state?: string; body?: string; labels?: { nodes?: Array<{ name?: string }> }; comments?: { nodes?: CommentNode[] } };
+    type EvidencePr = { title?: string; url?: string; body?: string; createdAt?: string; updatedAt?: string; additions?: number; deletions?: number; changedFiles?: number; author?: { login?: string } | null; labels?: { nodes?: Array<{ name?: string }> }; files?: { nodes?: Array<{ path?: string; additions?: number; deletions?: number }> }; reviews?: { nodes?: CommentNode[] }; comments?: { nodes?: CommentNode[] }; closingIssuesReferences?: { nodes?: IssueNode[] } };
+    const query = `query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { title url body createdAt updatedAt additions deletions changedFiles author { login } labels(first: 40) { nodes { name } } files(first: 60) { nodes { path additions deletions } } reviews(last: 15) { nodes { author { login } state submittedAt body } } comments(last: 20) { nodes { author { login } createdAt body } } closingIssuesReferences(first: 3) { nodes { number title state body labels(first: 20) { nodes { name } } comments(last: 6) { nodes { author { login } createdAt body } } } } } } }`;
+    const data = await ghGraphql<{ repository?: { pullRequest?: EvidencePr | null } }>(query, { owner: ref.owner, repo: ref.repo, number: ref.number }, "pre-review evidence", { allowPartial: true, retryOnServerError: true });
+    const pr = data.repository?.pullRequest;
+    if (pr == null) throw new Error(`GitHub pull request ${ref.owner}/${ref.repo}#${ref.number} was not found`);
+    const trim = (text: string | undefined, max: number) => {
+      const clean = (text ?? "").replace(/<!--[\s\S]*?-->/g, "").trim();
+      return clean.length > max ? `${clean.slice(0, max - 1)}\u2026` : clean;
+    };
+    const comment = (node: CommentNode, max: number): PytorchEvidenceComment => ({ author: node.author?.login ?? null, at: node.submittedAt ?? node.createdAt ?? "", body: trim(node.body, max), ...(node.state == null ? {} : { state: node.state }) });
+    const author = pr.author?.login ?? null;
+    let authorPermission: string | null = null;
+    if (author != null) {
+      authorPermission = await ghApi<{ permission?: string }>(`/repos/${ref.owner}/${ref.repo}/collaborators/${encodeURIComponent(author)}/permission`).then((result) => result.permission ?? null).catch(() => null);
+    }
+    return {
+      number: ref.number,
+      title: pr.title ?? "(untitled)",
+      url: pr.url ?? "",
+      author,
+      authorPermission,
+      body: trim(pr.body, 6000),
+      labels: labelNames(pr),
+      createdAt: pr.createdAt ?? "",
+      updatedAt: pr.updatedAt ?? "",
+      additions: pr.additions ?? 0,
+      deletions: pr.deletions ?? 0,
+      changedFiles: pr.changedFiles ?? 0,
+      files: (pr.files?.nodes ?? []).flatMap((file) => typeof file.path === "string" ? [{ path: file.path, additions: file.additions ?? 0, deletions: file.deletions ?? 0 }] : []),
+      reviews: (pr.reviews?.nodes ?? []).map((node) => comment(node, 700)),
+      comments: (pr.comments?.nodes ?? []).map((node) => comment(node, 700)),
+      linkedIssues: (pr.closingIssuesReferences?.nodes ?? []).flatMap((issue) => typeof issue.number === "number" ? [{ number: issue.number, title: issue.title ?? "", state: issue.state ?? "", labels: labelNames(issue), body: trim(issue.body, 2500), comments: (issue.comments?.nodes ?? []).map((node) => comment(node, 600)) }] : []),
+    };
+  }
+
   async function convertPullRequestToDraft(ref: PullRequestRef): Promise<void> {
     const { id } = await fetchWorkflowPullRequest(ref);
     await ghGraphql(`mutation($id: ID!) { convertPullRequestToDraft(input: { pullRequestId: $id }) { pullRequest { isDraft } } }`, { id }, "convert PR to draft");
   }
 
-  return { fetchPullRequestReviewData, compareCommits, fetchCommitChecks, fetchFileText, fetchPendingPullRequestReview, createPendingPullRequestReview, addPendingPullRequestReviewThread, submitPullRequestReview, replyToReviewComment, addIssueComment, editReviewComment, editIssueComment, editReviewSummary, setReviewThreadResolved, fetchViewerLogin, fetchNotifications, fetchSubjectSnapshots, fetchViewerPullRequests, fetchLatestActivity, markNotificationDone, unsubscribeNotification, searchWorkflowPullRequests, searchWorkflowIssues, fetchWorkflowPullRequest, listModuleLabels, addReaction, addLabels, closeIssue, convertPullRequestToDraft };
+  return { fetchPullRequestReviewData, compareCommits, fetchCommitChecks, fetchFileText, fetchPendingPullRequestReview, createPendingPullRequestReview, addPendingPullRequestReviewThread, submitPullRequestReview, replyToReviewComment, addIssueComment, editReviewComment, editIssueComment, editReviewSummary, setReviewThreadResolved, fetchViewerLogin, fetchNotifications, fetchSubjectSnapshots, fetchViewerPullRequests, fetchLatestActivity, markNotificationDone, unsubscribeNotification, searchWorkflowPullRequests, searchWorkflowIssues, fetchWorkflowPullRequest, listModuleLabels, addReaction, addLabels, closeIssue, convertPullRequestToDraft, fetchPreReviewEvidence };
 }
 
 const defaultClient = createGitHubClient();

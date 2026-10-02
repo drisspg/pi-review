@@ -1,4 +1,5 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
@@ -17,6 +18,8 @@ import { createFileApi, defaultFileApiDeps } from "./file-api.js";
 import { createGitHubDraftReviewApi, defaultGitHubDraftReviewApiDeps } from "./github-draft-review-api.js";
 import { gpuWorkspaceCreateResponse, gpuWorkspaceDeleteResponse, gpuWorkspaceExecResponse, gpuWorkspaceStatusResponse } from "./gpu-workspace-api.js";
 import { createInboxApi, type InboxSnapshot } from "./inbox-api.js";
+import { createPreReviewAssessor, formatPreReviewEvidence } from "./pre-review-assessor.js";
+import { piLaunch, piModelArgs, piThinkingLevel, readPiReviewLocalConfig } from "./pi-launch.js";
 import { createPytorchWorkflowApi, PYTORCH_REPO, type PytorchStore } from "./pytorch-workflow-api.js";
 import { createGitInterdiff } from "./interdiff-git.js";
 import { createMissingPatchRecovery } from "./missing-patches.js";
@@ -138,6 +141,8 @@ const pytorchWorkflowApi = createPytorchWorkflowApi({
   convertToDraft: defaultGitHubClient.convertPullRequestToDraft,
   listRecentPullRequests,
   listIssueNotifications: async () => (await inboxApi.inbox()).pytorchIssues,
+  assessorStatus: () => preReviewAssessor.status(),
+  onQueuesRefreshed: () => preReviewAssessor.poke(),
   logger,
   now: () => new Date().toISOString(),
   async readStore() {
@@ -150,6 +155,45 @@ const pytorchWorkflowApi = createPytorchWorkflowApi({
     await writeFile(tempPath, JSON.stringify(store), "utf8");
     await rename(tempPath, pytorchStorePath);
   },
+});
+const PRE_REVIEW_MODEL_TIMEOUT_MS = 10 * 60 * 1000;
+/** Replaces the coding-agent system prompt so personal agent rules (status lines etc.) do not leak into the answer format. */
+const PRE_REVIEW_SYSTEM_PROMPT = "You are a PyTorch maintainer doing a quick pre-review. Answer only in the format the user requests, with no status lines, state summaries, or extra sections.";
+/** Headless, tool-less Pi run on the configured launcher/model; evidence is already in the prompt, so it cannot touch GitHub. */
+function runPreReviewModel(prompt: string, signal: AbortSignal): Promise<string> {
+  const launch = piLaunch(["-p", "--no-session", "--no-tools", "--no-skills", "--no-context-files", "--no-prompt-templates", "--system-prompt", PRE_REVIEW_SYSTEM_PROMPT, ...piModelArgs(), "--thinking", piThinkingLevel("high"), prompt]);
+  return new Promise((resolveRun, rejectRun) => {
+    const child = spawn(launch.command, launch.args, { cwd: tmpdir(), env: launch.env, stdio: ["ignore", "pipe", "pipe"], detached: true });
+    let stdout = "";
+    let stderr = "";
+    // Signal the group only while the leader is still running; a reaped leader's group id can be reused.
+    const terminate = () => { if (child.exitCode == null && child.signalCode == null && child.pid != null) { try { process.kill(-child.pid, "SIGTERM"); } catch { /* already gone */ } } };
+    const timer = setTimeout(terminate, PRE_REVIEW_MODEL_TIMEOUT_MS);
+    signal.addEventListener("abort", terminate, { once: true });
+    child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); });
+    child.stderr.on("data", (chunk: Buffer) => { stderr = (stderr + chunk.toString("utf8")).slice(-2000); });
+    child.on("error", (error) => { clearTimeout(timer); rejectRun(error); });
+    child.on("close", (code, closeSignal) => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", terminate);
+      if (code === 0 && stdout.trim().length > 0) resolveRun(stdout.trim());
+      else rejectRun(new Error(`pre-review model exited ${code ?? closeSignal}: ${stderr.trim().split("\n").slice(-3).join(" ") || "no output"}`));
+    });
+  });
+}
+
+const preReviewModelId = readPiReviewLocalConfig().model?.id ?? null;
+const preReviewAssessor = createPreReviewAssessor({
+  // Like the on-open warmups, test/probe servers must never start real model runs.
+  enabled: process.env.PI_REVIEW_DISABLE_AUTO_REVIEWS !== "1" && process.env.PI_REVIEW_PRE_REVIEW_ASSESSOR !== "0",
+  source: preReviewModelId != null && /astra/i.test(preReviewModelId) ? "Astra" : preReviewModelId ?? "Pi",
+  listCandidates: () => pytorchWorkflowApi.assessmentCandidates(),
+  gatherEvidence: (number) => defaultGitHubClient.fetchPreReviewEvidence({ host: "github.com", owner: "pytorch", repo: "pytorch", number }),
+  buildPrompt: async (evidence) => (await reviewPromptApi.build({ mode: "pytorch-pre-review", prKey: `github.com/${PYTORCH_REPO}#${evidence.number}`, prTitle: evidence.title, author: evidence.author ?? undefined, body: evidence.body, labels: evidence.labels, linkedIssues: evidence.linkedIssues, evidence: formatPreReviewEvidence(evidence) })).prompt,
+  runModel: runPreReviewModel,
+  save: async ({ number, markdown, prUpdatedAt, source }) => { await pytorchWorkflowApi.saveAssessment({ number, markdown, prUpdatedAt, source }); },
+  now: () => new Date().toISOString(),
+  logger,
 });
 const piApi = createPiApi({ askPi, piDiagnostics, setPiModel });
 const piTerminalApi = createPiTerminalApi({ deleteSession: piTerminalManager.deleteSession });
@@ -267,6 +311,7 @@ async function shutdown(signal: string): Promise<void> {
   detachPiTerminalWebSocketServer();
   server.closeAllConnections();
   await Promise.all([
+    preReviewAssessor.stop(),
     new Promise<void>((resolveClose) => server.close(() => resolveClose())),
     piTerminalManager.dispose(),
     disposePiSessions(),
@@ -283,6 +328,7 @@ if (pendingShutdown != null) {
 } else {
   server.listen(port, "127.0.0.1", () => {
     logger.info("server", "listening", { url: `http://127.0.0.1:${port}`, webRoot: WEB_ROOT });
+    preReviewAssessor.start();
     usageApi.record("server", "server:start");
   });
 }

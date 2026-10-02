@@ -349,6 +349,7 @@ function pytorchPreReviewPrompt(payload: Record<string, unknown>): ReviewPromptR
     return `- #${String(issue.number)} ${String(issue.title ?? "")} [${issueLabels.join(", ") || "no labels"}]`;
   });
   const files = Array.isArray(payload.files) ? promptFiles(payload) : [];
+  const evidence = typeof payload.evidence === "string" && payload.evidence.trim().length > 0 ? payload.evidence.trim() : null;
   return {
     purpose: "pytorch-pre-review",
     prompt: `Pre-review PyTorch PR ${prKey} under the PyTorch maintainer guide.
@@ -370,7 +371,14 @@ Then give exactly one recommendation on its own line, one of:
 - "Recommendation: Back to draft" (the description is too unclear to judge the direction, and a short clarification would fix that)
 - "Recommendation: Close" (needs a design discussion on the issue, or lacks the justification for a quick decision)
 
-If you do not recommend Accept, finish with a short, polite comment to the author in a \`\`\`comment fenced block that explains the reason and the next step. Skim the checkout only as much as the four questions need; do not do a line-by-line review and do not draft review comments.
+After the four answers, end with exactly this block:
+Recommendation: Accept | Back to draft | Close
+Why (one line): <single sentence>
+Pre-conditions: <which of linked actionable issue / author write access / named sponsor holds, or none>
+Notes:
+- <at most 3 short bullets of evidence; description inaccuracies go here as full-review notes>
+
+If you do not recommend Accept, finish with a short, polite comment to the author in a \`\`\`comment fenced block that explains the reason and the next step. ${evidence == null ? "Skim the checkout only as much as the four questions need; do not do a line-by-line review and do not draft review comments." : "You have no tools: rely only on the evidence below, which was gathered read-only from GitHub, and say so when something cannot be determined from it."}
 
 PR: ${prKey}
 Title: ${prTitle}
@@ -380,7 +388,7 @@ Linked issues:
 ${linkedIssues.length > 0 ? linkedIssues.join("\n") : "none linked"}
 ${files.length > 0 ? `\nChanged files:\n${files.map((file) => `- ${file.filename} (+${file.additions ?? 0}/-${file.deletions ?? 0})`).join("\n")}\n` : ""}
 Description:
-${body}`,
+${body}${evidence == null ? "" : `\n\n# Evidence (read-only GitHub snapshot)\n\n${evidence}`}`,
   };
 }
 

@@ -23,6 +23,8 @@ type TriageLabel = "needs reproduction" | "needs research" | "needs design" | "a
 /** Queue searches are cached server-side for 5 min; polling also picks up live issue notifications. */
 const POLL_IDLE_MS = 60 * 1000;
 const POLL_REFRESHING_MS = 3000;
+/** While the background assessor works, poll a little faster so new suggestions appear promptly. */
+const POLL_ASSESSING_MS = 15 * 1000;
 const TRIAGE_ACTIONS: Array<{ label: TriageLabel; short: string; hint: string }> = [
   { label: "needs reproduction", short: "Repro", hint: "Not reproduced yet; anyone can reproduce, a maintainer validates." },
   { label: "needs research", short: "Research", hint: "Undecided whether the bug is real or the feature is wanted." },
@@ -201,15 +203,16 @@ export function PytorchQueuesPanel({ openPr }: { openPr: (url: string) => Promis
     }
   }, []);
   const refreshing = data?.refreshing ?? false;
+  const assessing = data?.assessor?.current != null;
   useEffect(() => {
     void load(false);
   }, [load]);
   useEffect(() => {
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") void load(false);
-    }, refreshing ? POLL_REFRESHING_MS : POLL_IDLE_MS);
+    }, refreshing ? POLL_REFRESHING_MS : assessing ? POLL_ASSESSING_MS : POLL_IDLE_MS);
     return () => window.clearInterval(timer);
-  }, [load, refreshing]);
+  }, [load, refreshing, assessing]);
 
   async function act(number: number, work: () => Promise<void>): Promise<void> {
     setBusy((current) => new Set(current).add(number));
@@ -372,7 +375,11 @@ export function PytorchQueuesPanel({ openPr }: { openPr: (url: string) => Promis
     <div className="inbox-list-panel">
       <nav className="inbox-tiers" aria-label="PyTorch queue">
         {tabs.map((item) => <button key={item.id} type="button" className={`inbox-tier${tab === item.id ? " active" : ""}`} title={item.hint} aria-pressed={tab === item.id} onClick={() => setTab(item.id)}>{item.label}<span className="inbox-tier-count">{item.count}</span></button>)}
-        <span className="pt-tab-hint muted">{tabs.find((item) => item.id === tab)?.hint}</span>
+        {tab === "pre-review" && data?.assessor?.enabled ? <span className={`pt-assessor-status${data.assessor.current != null ? " running" : ""}`} title={data.assessor.lastError != null ? `Last failure on #${data.assessor.lastError.number}: ${data.assessor.lastError.message}` : "One background agent pre-reviews owed PRs (most recently updated first) and saves suggestions. It never posts to GitHub."}>
+          <span className="pt-assessor-dot" aria-hidden="true" />
+          {data.assessor.current != null ? `${data.assessor.source} is pre-reviewing #${data.assessor.current.number} · ${Math.max(0, data.assessor.pending - 1)} more queued` : data.assessor.pending > 0 ? `${data.assessor.source}: ${data.assessor.pending} waiting for suggestions` : `${data.assessor.source} suggestions are up to date`}
+          {data.assessor.lastError != null && <span className="pt-assessor-error"> · last failure #{data.assessor.lastError.number}</span>}
+        </span> : <span className="pt-tab-hint muted">{tabs.find((item) => item.id === tab)?.hint}</span>}
       </nav>
       {loading ? <ul className="inbox-rows inbox-skeleton" aria-busy="true">{Array.from({ length: 3 }, (_, index) => <li key={index} className="inbox-row skeleton"><span className="inbox-skeleton-bar icon" /><span className="inbox-skeleton-lines"><span className="inbox-skeleton-bar" style={{ width: `${60 + index * 10}%` }} /><span className="inbox-skeleton-bar short" /></span></li>)}</ul>
         : tab === "pre-review" ? (data.preReview.items.length === 0 ? <div className="inbox-empty"><CheckIcon size={24} /><p>No PRs waiting on your pre-review.</p></div> : <ul className="inbox-rows">{data.preReview.items.map((pr) => prRow(pr, "pre-review"))}</ul>)

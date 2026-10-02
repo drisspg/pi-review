@@ -1,4 +1,4 @@
-import type { InboxItem, PullRequestRef, PytorchAssessmentView, PytorchPreReviewAssessment, PytorchPreReviewRecommendation, PytorchIssueSnapshot, PytorchPullSnapshot, PytorchQueueIssue, PytorchQueuePr, PytorchQueuesResponse, PytorchSearchResult, PytorchStageInfo, StoredPullRequest } from "./types.js";
+import type { InboxItem, PullRequestRef, PytorchAssessmentView, PytorchAssessorStatus, PytorchPreReviewAssessment, PytorchPreReviewRecommendation, PytorchIssueSnapshot, PytorchPullSnapshot, PytorchQueueIssue, PytorchQueuePr, PytorchQueuesResponse, PytorchSearchResult, PytorchStageInfo, StoredPullRequest } from "./types.js";
 
 /**
  * PyTorch's label-driven issue/PR workflow (CONTRIBUTING.md "Issue and PR Workflow",
@@ -16,6 +16,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_STALE_MS = 5 * 60 * 1000;
 const MODULE_LABELS_TTL_MS = 24 * 60 * 60 * 1000;
 const EXCERPT_CHARS = 700;
+const REASSESS_AFTER_MS = 6 * 60 * 60 * 1000;
 
 function quoteLabel(label: string): string {
   return /[\s:']/.test(label) ? `label:"${label}"` : `label:${label}`;
@@ -159,6 +160,10 @@ export type PytorchWorkflowDeps = {
   listRecentPullRequests: () => Promise<StoredPullRequest[]>;
   /** pytorch/pytorch issue notifications, read live from the inbox snapshot on every response. */
   listIssueNotifications: () => Promise<InboxItem[]>;
+  /** Background assessor state, if one is wired; read per response. */
+  assessorStatus?: () => PytorchAssessorStatus | null;
+  /** Called after each queue refresh so a background assessor can pick up new PRs. */
+  onQueuesRefreshed?: () => void;
   readStore: () => Promise<PytorchStore | null>;
   writeStore: (store: PytorchStore) => Promise<void>;
   now: () => string;
@@ -178,6 +183,8 @@ export type PytorchWorkflowApi = {
   triageIssue: (payload: Record<string, unknown>) => Promise<{ number: number; label: IssueTriageLabel }>;
   sendBackToInProgress: (payload: Record<string, unknown>) => Promise<{ number: number }>;
   saveAssessment: (payload: Record<string, unknown>) => Promise<{ assessment: PytorchPreReviewAssessment }>;
+  /** Owed pre-reviews (queue order) without a usable suggestion; reads the cached snapshot, never GitHub. */
+  assessmentCandidates: () => Promise<Array<{ number: number; updatedAt: string }>>;
   settle: () => Promise<void>;
 };
 
@@ -291,6 +298,7 @@ export function createPytorchWorkflowApi(deps: PytorchWorkflowDeps): PytorchWork
     }
     deps.logger?.info("pytorch", "queues refreshed", { preReview: preReview.total, review: review.total, modules: modules.length, warnings: warnings.length });
     await persist({ ...current(), snapshot: { login, fetchedAt: deps.now(), modules, preReview, review, triage, warnings } });
+    deps.onQueuesRefreshed?.();
   }
 
   function startRefresh(): Promise<void> {
@@ -337,6 +345,7 @@ export function createPytorchWorkflowApi(deps: PytorchWorkflowDeps): PytorchWork
         return { module, total: entry?.total ?? 0, items, githubUrl: githubSearchUrl(query) };
       }),
       issueNotifications,
+      assessor: deps.assessorStatus?.() ?? null,
       warnings: snapshot?.warnings ?? [],
     };
   }
@@ -417,6 +426,14 @@ export function createPytorchWorkflowApi(deps: PytorchWorkflowDeps): PytorchWork
       const assessment: PytorchPreReviewAssessment = { number, ...parsed, source: typeof payload.source === "string" && payload.source.trim().length > 0 ? payload.source.trim() : "AI", assessedAt: deps.now(), prUpdatedAt };
       await persist({ ...current(), assessments: { ...current().assessments, [number]: assessment } });
       return { assessment };
+    },
+    async assessmentCandidates() {
+      await load();
+      const assessments = current().assessments ?? {};
+      const nowMs = Date.parse(deps.now());
+      const items = sortPreReview((current().snapshot?.preReview.items ?? []).map((pr) => toQueuePr(pr, new Set(), assessments[pr.number])));
+      // Re-assess an outdated suggestion only after REASSESS_AFTER_MS, so bot comments bumping updatedAt don't cause churn.
+      return items.filter((pr) => !pr.viewerThumbsUp && pr.stage.stage === "pre-review" && (pr.assessment == null || (pr.assessment.outdated && nowMs - Date.parse(pr.assessment.assessedAt) > REASSESS_AFTER_MS))).map((pr) => ({ number: pr.number, updatedAt: pr.updatedAt }));
     },
     async settle() {
       await load();

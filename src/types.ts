@@ -396,6 +396,39 @@ export type PytorchPreReviewAssessment = {
 };
 export type PytorchAssessmentView = PytorchPreReviewAssessment & { outdated: boolean };
 
+export type PytorchEvidenceComment = { author: string | null; at: string; body: string; state?: string };
+/** Read-only facts gathered for an unattended pre-review; the assessor model gets these instead of tools. */
+export type PytorchPreReviewEvidence = {
+  number: number;
+  title: string;
+  url: string;
+  author: string | null;
+  /** GitHub collaborator permission of the author (admin/maintain/write/triage/read/none), when readable. */
+  authorPermission: string | null;
+  body: string;
+  labels: string[];
+  createdAt: string;
+  updatedAt: string;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  files: Array<{ path: string; additions: number; deletions: number }>;
+  reviews: PytorchEvidenceComment[];
+  comments: PytorchEvidenceComment[];
+  linkedIssues: Array<{ number: number; title: string; state: string; labels: string[]; body: string; comments: PytorchEvidenceComment[] }>;
+};
+
+/** Background pre-review assessor state, surfaced on the queues response. */
+export type PytorchAssessorStatus = {
+  enabled: boolean;
+  source: string;
+  current: { number: number; startedAt: string } | null;
+  /** Owed pre-reviews still without a fresh suggestion. */
+  pending: number;
+  completed: number;
+  lastError: { number: number; message: string; at: string } | null;
+};
+
 export type PytorchIssueSnapshot = { number: number; title: string; url: string; author: string | null; createdAt: string; updatedAt: string; labels: string[]; assignees: string[]; comments: number };
 export type PytorchQueueIssue = PytorchIssueSnapshot & { ageDays: number; overdue: boolean; highPriority: boolean };
 
@@ -412,6 +445,7 @@ export type PytorchQueuesResponse = {
   triage: Array<PytorchSearchResult<PytorchQueueIssue> & { module: string; githubUrl: string }>;
   /** Live pytorch/pytorch issue notifications from the inbox snapshot (not part of the cached queue snapshot). */
   issueNotifications: InboxItem[];
+  assessor: PytorchAssessorStatus | null;
   warnings: string[];
 };
 
