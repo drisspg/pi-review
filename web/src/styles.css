@@ -5431,11 +5431,6 @@ button.fold:hover {
   color: var(--attention);
 }
 
-.ui-button.pt-suggested {
-  border-color: var(--accent);
-  box-shadow: inset 0 0 0 1px var(--accent);
-}
-
 .pt-my-stage.actor-author {
   color: var(--attention);
 }

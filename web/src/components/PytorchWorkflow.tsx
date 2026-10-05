@@ -295,8 +295,8 @@ export function PytorchQueuesPanel({ openPr }: { openPr: (url: string) => Promis
       </div>
       <div className="pt-row-actions">
         {kind === "pre-review" && <>
-          <Button variant="muted" className={pr.assessment?.recommendation === "accept" && !pr.viewerThumbsUp ? "pt-suggested" : undefined} disabled={isBusy || pr.viewerThumbsUp} title="React 👍 to the PR description (same as @pytorchbot pre-review accept)" onClick={() => void accept(pr)}><ThumbsupIcon size={14} /> {pr.viewerThumbsUp ? "Accepted" : "Accept"}</Button>
-          <Button variant="muted" className={pr.assessment != null && pr.assessment.recommendation !== "accept" ? "pt-suggested" : undefined} disabled={isBusy} title={pr.assessment?.comment != null ? "Opens with the suggested comment and outcome prefilled" : "Comment with a reason, then move to draft or close"} onClick={() => setDecline(declineFromAssessment(pr, pr.assessment))}>{pr.assessment?.recommendation === "draft" ? "Draft…" : pr.assessment?.recommendation === "close" ? "Close…" : "Decline…"}</Button>
+          <Button variant="muted" disabled={isBusy || pr.viewerThumbsUp} title="React 👍 to the PR description (same as @pytorchbot pre-review accept)" onClick={() => void accept(pr)}><ThumbsupIcon size={14} /> {pr.viewerThumbsUp ? "Accepted" : "Accept"}</Button>
+          <Button variant="muted" disabled={isBusy} title="Comment with a reason, then move to draft or close" onClick={() => setDecline(declineFromAssessment(pr, pr.assessment))}>Decline…</Button>
         </>}
         {kind === "review" && pr.stage.needsSendBack && <Button variant="muted" disabled={isBusy} title="TEMPORARY rule: after Request changes, re-add `in progress` so automated review runs again" onClick={() => void sendBack(pr)}>Send back to in progress</Button>}
         <Button variant="icon" title="Open on GitHub" aria-label={`Open #${pr.number} on GitHub`} onClick={() => window.open(pr.url, "_blank", "noopener")}><LinkExternalIcon size={16} /></Button>
@@ -478,7 +478,7 @@ export function PytorchWorkflowStrip({ pr }: { pr: StoredPullRequest }) {
     <span className="pt-strip-actions">
       {canPreReview && <>
         <Button variant="muted" disabled={busy || status.pr.viewerThumbsUp} title="React 👍 to the PR description (same as @pytorchbot pre-review accept)" onClick={() => void run(async () => { await api("/api/pytorch/pre-review/accept", { method: "POST", body: JSON.stringify({ number: status.pr.number }) }); logUsage("pytorch:pre-review-accept", { from: "review" }); })}><ThumbsupIcon size={14} /> {status.pr.viewerThumbsUp ? "Pre-review accepted" : "Accept pre-review"}</Button>
-        <Button variant="muted" className={assessment != null && assessment.recommendation !== "accept" ? "pt-suggested" : undefined} disabled={busy} onClick={() => setDecline(declineFromAssessment(status.pr, assessment))}>{assessment?.recommendation === "draft" ? "Draft…" : assessment?.recommendation === "close" ? "Close…" : "Decline…"}</Button>
+        <Button variant="muted" disabled={busy} title="Comment with a reason, then move to draft or close" onClick={() => setDecline(declineFromAssessment(status.pr, assessment))}>Decline…</Button>
         <Button variant="muted" disabled={suggesting} title="Quick direction check from the description, conversation, linked issue and diff (no checkout); saved as a suggestion" onClick={() => void suggest()}>{suggesting ? "Assessing…" : assessment == null ? "Suggest pre-review" : "Re-assess"}</Button>
       </>}
       {stage.needsSendBack && !status.viewerIsAuthor && <Button variant="muted" disabled={busy} title="TEMPORARY rule: Request changes does not re-add `in progress` automatically yet" onClick={() => void run(async () => { await api("/api/pytorch/pr/send-back", { method: "POST", body: JSON.stringify({ number: status.pr.number }) }); logUsage("pytorch:send-back", { from: "review" }); })}>Send back to in progress</Button>}
