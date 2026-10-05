@@ -166,6 +166,8 @@ export type PytorchWorkflowDeps = {
   onQueuesRefreshed?: () => void;
   /** Run one checkout-free assessment now (serialized with the background assessor). */
   assessNow?: (number: number) => Promise<void>;
+  /** Successful workflow writes, for the review activity ledger. */
+  onAction?: (input: { action: "pre-review:accept" | "pre-review:draft" | "pre-review:close" | "send-back" | `triage:${string}`; number: number; title: string | null; url: string }) => void;
   readStore: () => Promise<PytorchStore | null>;
   writeStore: (store: PytorchStore) => Promise<void>;
   now: () => string;
@@ -319,6 +321,16 @@ export function createPytorchWorkflowApi(deps: PytorchWorkflowDeps): PytorchWork
     if (snapshot != null) await persist({ ...current(), snapshot: update(snapshot) });
   }
 
+  function snapshotTitle(number: number): string | null {
+    const snapshot = current().snapshot;
+    const items = [...(snapshot?.preReview.items ?? []), ...(snapshot?.review.items ?? []), ...(snapshot?.triage.flatMap((entry) => entry.items) ?? [])];
+    return items.find((item) => item.number === number)?.title ?? null;
+  }
+
+  function reportAction(action: Parameters<NonNullable<PytorchWorkflowDeps["onAction"]>>[0]["action"], number: number, kind: "pull" | "issues"): void {
+    deps.onAction?.({ action, number, title: snapshotTitle(number), url: `https://github.com/${PYTORCH_REPO}/${kind}/${number}` });
+  }
+
   function withoutPr(result: PytorchSearchResult<PytorchPullSnapshot>, number: number): PytorchSearchResult<PytorchPullSnapshot> {
     const items = result.items.filter((item) => item.number !== number);
     return { total: Math.max(0, result.total - (result.items.length - items.length)), items };
@@ -383,6 +395,7 @@ export function createPytorchWorkflowApi(deps: PytorchWorkflowDeps): PytorchWork
     async acceptPreReview(payload) {
       const number = requiredNumber(payload);
       await deps.addReaction(pytorchRef(number), "+1");
+      reportAction("pre-review:accept", number, "pull");
       await updateSnapshot((snapshot) => ({ ...snapshot, preReview: { ...snapshot.preReview, items: snapshot.preReview.items.map((item) => item.number === number ? { ...item, viewerThumbsUp: true } : item) } }));
       return { number, accepted: true };
     },
@@ -393,6 +406,7 @@ export function createPytorchWorkflowApi(deps: PytorchWorkflowDeps): PytorchWork
       const ref = pytorchRef(number);
       await deps.addComment(ref, declineComment(requiredText(payload, "reason"), outcome));
       await (outcome === "draft" ? deps.convertToDraft(ref) : deps.closeIssue(ref));
+      reportAction(outcome === "draft" ? "pre-review:draft" : "pre-review:close", number, "pull");
       await updateSnapshot((snapshot) => ({ ...snapshot, preReview: withoutPr(snapshot.preReview, number) }));
       return { number, outcome };
     },
@@ -405,6 +419,7 @@ export function createPytorchWorkflowApi(deps: PytorchWorkflowDeps): PytorchWork
       const ref = pytorchRef(number);
       await deps.addLabels(ref, [label]);
       if (comment.length > 0) await deps.addComment(ref, comment);
+      reportAction(`triage:${label}`, number, "issues");
       await updateSnapshot((snapshot) => ({
         ...snapshot,
         triage: snapshot.triage.map((entry) => {
@@ -417,6 +432,7 @@ export function createPytorchWorkflowApi(deps: PytorchWorkflowDeps): PytorchWork
     async sendBackToInProgress(payload) {
       const number = requiredNumber(payload);
       await deps.addLabels(pytorchRef(number), ["in progress"]);
+      reportAction("send-back", number, "pull");
       await updateSnapshot((snapshot) => ({ ...snapshot, review: withoutPr(snapshot.review, number) }));
       return { number };
     },

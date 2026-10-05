@@ -7,8 +7,8 @@ import { fileURLToPath } from "node:url";
 
 const localConfigPath = () => process.env.PI_REVIEW_LOCAL_CONFIG?.trim() || fileURLToPath(new URL("../.pi-review.local.json", import.meta.url));
 
-/** Machine-local Pi Review overrides; `model` is `provider/id`. */
-export type PiReviewLocalConfig = { piCommand?: string; model?: { provider: string; id: string }; thinkingLevel?: string };
+/** Machine-local Pi Review overrides; `model` is `provider/id`; `activityLedgerPath` relocates the review activity ledger (e.g. into a notes vault). */
+export type PiReviewLocalConfig = { piCommand?: string; model?: { provider: string; id: string }; thinkingLevel?: string; activityLedgerPath?: string };
 
 /** Read this app checkout's optional machine-local config, never a reviewed PR's config. */
 export function readPiReviewLocalConfig(configPath = localConfigPath()): PiReviewLocalConfig {
@@ -35,6 +35,8 @@ export function readPiReviewLocalConfig(configPath = localConfigPath()): PiRevie
   }
   const thinkingLevel = text("thinkingLevel");
   if (thinkingLevel) result.thinkingLevel = thinkingLevel;
+  const activityLedgerPath = text("activityLedgerPath");
+  if (activityLedgerPath) result.activityLedgerPath = activityLedgerPath;
   return result;
 }
 

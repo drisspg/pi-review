@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import test from "node:test";
 
+import { createActivityApi } from "../../src/activity-api.js";
 import { createPytorchWorkflowApi } from "../../src/pytorch-workflow-api.js";
 import { createRequestListener, createServerRoute, type ServerRoute, type ServerRouteDeps } from "../../src/server-router.js";
 import { CheckoutResetRequiredError } from "../../src/worktrees.js";
@@ -137,6 +138,7 @@ function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
       },
       async settle() {},
     },
+    activityApi: createActivityApi({ readLedger: async () => "", appendLedger: async () => {}, readUsageLog: async () => "", listReviewMemoryRecords: async () => [], listRecentPullRequests: async () => [], now: () => "2026-09-03T12:00:00Z" }),
     pytorchWorkflowApi: createPytorchWorkflowApi({
       fetchViewerLogin: async () => "viewer",
       searchPullRequests: async () => ({ total: 0, items: [] }),

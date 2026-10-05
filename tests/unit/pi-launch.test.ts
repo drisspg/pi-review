@@ -43,6 +43,10 @@ test("Pi model selection follows global settings, ignores PR settings, and fails
     assert.throws(() => readPiLauncherCommand(localConfig), /piCommand/);
     await writeFile(localConfig, JSON.stringify({ model: "gpt-6-astra" }));
     assert.throws(() => readPiReviewLocalConfig(localConfig), /provider\/id/);
+    await writeFile(localConfig, JSON.stringify({ activityLedgerPath: "~/vault/review_activity.jsonl" }));
+    assert.equal(readPiReviewLocalConfig(localConfig).activityLedgerPath, "~/vault/review_activity.jsonl");
+    await writeFile(localConfig, JSON.stringify({ activityLedgerPath: "" }));
+    assert.throws(() => readPiReviewLocalConfig(localConfig), /activityLedgerPath/);
     await writeFile(localConfig, JSON.stringify({ model: "openai/gpt-6-astra", thinkingLevel: "high" }));
     const local = readPiReviewLocalConfig(localConfig);
     assert.equal(piThinkingLevel("medium", local), "high");

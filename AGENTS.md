@@ -42,6 +42,10 @@ src/                    Node server (TypeScript, ESM, run via tsx)
                         the inbox (the queues own them), pytorch/pytorch issue notifications move to
                         the panel's Issues tab, mentions/your-PR activity stay in normal tiers.
                         Saved pre-review suggestions (`parsePreReviewAssessment`) are advisory only
+  activity-api.ts       Review activity: append-only JSONL ledger of focused-time heartbeats (client
+                        counts only visible + focused + input within 90s; <=2 min per beat) and
+                        server-recorded workflow actions; `summary(range)` joins it with reviewMemory
+                        (submitted/archived reviews) and labels pre-ledger time as a usage-log estimate
   pre-review-assessor.ts  One background agent: walks owed pre-reviews (queue order), gathers
                         read-only evidence, runs headless Pi with `--no-tools` + its own system
                         prompt, saves suggestions. Disabled by PI_REVIEW_DISABLE_AUTO_REVIEWS=1 or
@@ -113,7 +117,9 @@ Env vars: `PI_PR_REVIEW_PORT` (API), `PI_REVIEW_WEB_PORT` (Vite), `PI_REVIEW_STA
 JSON; custom state also isolates session records and defaults checkouts to `<state>.cache`),
 `PI_REVIEW_CACHE_DIR` (checkout root override; production default on macOS is
 `~/Library/Caches/pi-review`), `PI_REVIEW_USAGE_LOG_PATH` (usage JSONL; defaults to `<state>.usage.jsonl` next to the
-state file so test/dev instances never pollute the real log), `PI_REVIEW_TEST_PORT` (Playwright
+state file so test/dev instances never pollute the real log), `PI_REVIEW_ACTIVITY_PATH` (review activity
+ledger; else `.pi-review.local.json` `activityLedgerPath`, honored only without a custom state path;
+else `<state>.activity.jsonl`), `PI_REVIEW_TEST_PORT` (Playwright
 port override), `PI_REVIEW_FAST_TESTS=1` (fast e2e mode),
 `PI_REVIEW_DISABLE_AUTO_REVIEWS=1` (suppress the on-open guide/review/focus warmup — REQUIRED for
 any test or probe server, or PR opens will start real Pi jobs);

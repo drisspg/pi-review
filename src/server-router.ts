@@ -1,3 +1,4 @@
+import type { ActivityApi } from "./activity-api.js";
 import type { AnalysisApi } from "./analysis-api.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
@@ -28,6 +29,7 @@ export type ServerLogger = {
 };
 
 export type ServerRouteDeps = {
+  activityApi: ActivityApi;
   analysisApi: AnalysisApi;
   askStreamApi: { stream: (res: AskStreamResponse, payload: Record<string, unknown>) => Promise<void> };
   blameApi: BlameApi;
@@ -71,6 +73,7 @@ async function inputFromRequest(req: IncomingMessage): Promise<string> {
 
 export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
   const jsonPostHandlers: Record<string, JsonPostHandler> = {
+    "/api/activity/heartbeat": (payload) => deps.activityApi.heartbeat(payload),
     "/api/analysis/start": (payload) => deps.analysisApi.start(payload),
     "/api/analysis/status": (payload) => deps.analysisApi.status(payload),
     "/api/focus-scan/progress": (payload) => deps.savedAnalysisApi.updateFocusScanProgress(payload),
@@ -142,6 +145,11 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
 
     if (req.method === "GET" && url.pathname === "/api/inbox") {
       sendJson(res, 200, await deps.inboxApi.inbox({ refresh: url.searchParams.get("refresh") === "1" }));
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/activity/summary") {
+      sendJson(res, 200, await deps.activityApi.summary(url.searchParams.get("range")));
       return;
     }
 
@@ -319,7 +327,7 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
 }
 
 /** High-frequency polling/infra routes that would drown the usage log without adding signal. */
-const usageIgnoredApiPaths = new Set(["/api/health", "/api/logs", "/api/config", "/api/usage", "/api/analysis/status"]);
+const usageIgnoredApiPaths = new Set(["/api/health", "/api/logs", "/api/config", "/api/usage", "/api/analysis/status", "/api/activity/heartbeat"]);
 
 export function createRequestListener(route: ServerRoute, logger: ServerLogger, recordUsage?: (name: string, data: Record<string, unknown>) => void, assetsVersion?: () => string): (req: IncomingMessage, res: ServerResponse) => void {
   return (req, res) => {

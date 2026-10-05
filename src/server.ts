@@ -1,13 +1,14 @@
 import { execFile, spawn } from "node:child_process";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { createServer, type ServerResponse } from "node:http";
 import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
+import { createActivityApi, resolveActivityLedgerPath } from "./activity-api.js";
 import { createAskStreamApi } from "./ask-stream-api.js";
 import { createBlameApi } from "./blame-api.js";
 import { createCommentApi, defaultCommentApiDeps } from "./comment-api.js";
@@ -126,6 +127,22 @@ const inboxApi = createInboxApi({
     await rename(tempPath, inboxSnapshotPath);
   },
 });
+// Activity ledger (focused-time heartbeats + workflow actions) also lives next to the state file.
+const activityLedgerPath = resolveActivityLedgerPath({ env: process.env, configuredPath: readPiReviewLocalConfig().activityLedgerPath, defaultPath: `${defaultUsageLogPath().replace(/\.usage\.jsonl$/, "")}.activity.jsonl`, home: homedir() });
+const activityApi = createActivityApi({
+  readLedger: async () => existsSync(activityLedgerPath) ? await readFile(activityLedgerPath, "utf8") : "",
+  async appendLedger(line) {
+    await mkdir(dirname(activityLedgerPath), { recursive: true });
+    await appendFile(activityLedgerPath, line, "utf8");
+  },
+  readUsageLog: async () => existsSync(defaultUsageLogPath()) ? await readFile(defaultUsageLogPath(), "utf8") : "",
+  // Review history lives in reviewMemory; read all of it, not the prompt-sized default.
+  listReviewMemoryRecords: () => listReviewMemoryRecords(Number.MAX_SAFE_INTEGER),
+  listRecentPullRequests,
+  now: () => new Date().toISOString(),
+});
+logger.info("activity", "ledger path", { path: activityLedgerPath });
+
 // Like the inbox snapshot, the PyTorch workflow store (tracked modules + last queue snapshot) sits next to the state file.
 const pytorchStorePath = `${defaultUsageLogPath().replace(/\.usage\.jsonl$/, "")}.pytorch.json`;
 const pytorchWorkflowApi = createPytorchWorkflowApi({
@@ -144,6 +161,7 @@ const pytorchWorkflowApi = createPytorchWorkflowApi({
   assessorStatus: () => preReviewAssessor.status(),
   onQueuesRefreshed: () => preReviewAssessor.poke(),
   assessNow: (number) => preReviewAssessor.assessNow(number),
+  onAction: ({ action, number, title, url }) => { void activityApi.recordAction({ action, prKey: `github.com/${PYTORCH_REPO}#${number}`, title, url }).catch((error: unknown) => logger.warn("activity", "could not record action", { error: error instanceof Error ? error.message : String(error) })); },
   logger,
   now: () => new Date().toISOString(),
   async readStore() {
@@ -274,6 +292,7 @@ async function sendStatic(res: ServerResponse, pathname: string, head = false): 
 }
 
 const route = createServerRoute({
+  activityApi,
   // localFileText advertises that /api/file/text is served from the PR clone, so the web app may fetch file text freely.
   serverConfig: () => ({ autoReviews: process.env.PI_REVIEW_DISABLE_AUTO_REVIEWS !== "1", localFileText: true }),
   analysisApi,

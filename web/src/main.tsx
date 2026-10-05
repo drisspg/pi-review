@@ -9,7 +9,9 @@ import { CodeText, InlineSnippetsProvider, MarkdownText } from "./components/Mar
 import { MarkdownEditor } from "./components/MarkdownEditor";
 import { ModalShell } from "./components/Modal";
 import { Tab, TabList, TabPanel, Tabs } from "./components/Tabs";
+import { ActivityBadge, ActivityModal } from "./components/Activity";
 import { InboxPanel } from "./components/Inbox";
+import { useActivityTracker } from "./lib/activity";
 import { PytorchQueuesPanel, PytorchWorkflowStrip } from "./components/PytorchWorkflow";
 import { ExistingComments, ExistingReviewThread } from "./components/Threads";
 import type { PiTerminalTarget } from "./components/PiTerminal";
@@ -446,6 +448,8 @@ function App() {
   const [diagnostics, setDiagnostics] = useState<Record<string, unknown> | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(false);
+  useActivityTracker(review == null ? { surface: "home" } : { surface: "review", prKey: review.pr.key });
   const [reviewMemory, setReviewMemory] = useState<ReviewMemoryResponse | null>(null);
   const [memoryLoading, setMemoryLoading] = useState(false);
   const [memoryDistilling, setMemoryDistilling] = useState(false);
@@ -1141,6 +1145,7 @@ function App() {
     <ActionMenuItem onSelect={() => setGpuWorkspaceOpen(true)}>GPU workspace</ActionMenuItem>
     <ActionMenuItem title="Pi session settings" onSelect={() => { setSettingsOpen(true); void loadDiagnostics(); }}>Session settings</ActionMenuItem>
     <ActionMenuItem title="Pi session diagnostics" onSelect={() => void loadDiagnostics()}>Session diagnostics</ActionMenuItem>
+    <ActionMenuItem onSelect={() => setActivityOpen(true)}>Review activity</ActionMenuItem>
     <ActionMenuItem onSelect={() => void showReviewMemory()}>Review memory</ActionMenuItem>
     <ActionMenuItem onSelect={() => { setLogsOpen(true); void refreshLogs(); }}>Server log</ActionMenuItem>
     <div className="menu-theme-row"><Select aria-label="Theme" value={theme} onChange={(event) => { logUsage("ui:theme", { theme: event.target.value }); setTheme(event.target.value as ThemeName); }}>{themes.map((item) => <option key={item.name} value={item.name}>{item.label}</option>)}</Select></div>
@@ -1158,6 +1163,7 @@ function App() {
       openSettings={() => { setSettingsOpen(true); void loadDiagnostics(); }}
       openDiagnostics={() => void loadDiagnostics()}
       openMemory={() => void showReviewMemory()}
+      openActivity={() => setActivityOpen(true)}
       openLogs={() => { setLogsOpen(true); void refreshLogs(); }}
     />}
     {checkoutDeleteStatus != null && <Flash variant="success" role="status">{checkoutDeleteStatus}</Flash>}
@@ -1166,8 +1172,9 @@ function App() {
       <ul>{checkoutDeleteFailures.map(({ prKey, message }) => <li key={prKey}><strong>{prKey}</strong>: {message}</li>)}</ul>
     </details><p>Saved reviews are unchanged. Local files or potentially unique commits still need preservation before these checkouts can be deleted.</p></Flash>}
     {error != null && <Flash variant="danger" className="error" role="alert">{error}{checkoutResetInput != null && <div className="checkout-reset-recovery"><span>Reset discards local code edits and ordinary untracked files. Saved reviews and ignored environments are kept.</span><Button disabled={busy} onClick={() => void openPr(checkoutResetInput, { resetCheckout: true })}>Reset checkout and open</Button></div>}</Flash>}
-    {busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p><Button variant="muted" onClick={cancelOpen}>Cancel</Button></div> : review == null ? <StartPage prs={prs} openPr={openPr} deleteCheckouts={deleteCheckouts} deleting={deletingCheckouts} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} reviewMode={reviewMode} setReviewMode={setReviewMode} overview={overview} runOverview={runOverview} saveGuideProgress={saveGuideProgress} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, copyFeedbackPrompt: copyReviewFeedbackPrompt, guideReview, runGuideReview, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} reviewEvent={reviewEvent} setReviewEvent={setReviewEvent} reviewBody={reviewBody} setReviewBody={setReviewBody} draftSaveStatus={draftSaveStatus} draftSaveError={draftSaveError} retryDraftSave={() => setDraftSaveRetry((retry) => retry + 1)} archiveReview={archiveReview} discardReview={discardReview} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} githubDrafts={{ review: githubDraftReview, loaded: githubDraftLoaded, loading: githubDraftLoading, moving: githubDraftMoving, error: githubDraftError, pull: pullGithubDraftReview, moveLocalDrafts: moveLocalDraftsToGithub, copyHandoff: copyGithubDraftHandoff }} barMenu={reviewBarMenu} goHome={goHome} />}    {diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}
+    {busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p><Button variant="muted" onClick={cancelOpen}>Cancel</Button></div> : review == null ? <StartPage prs={prs} openPr={openPr} openActivity={() => setActivityOpen(true)} deleteCheckouts={deleteCheckouts} deleting={deletingCheckouts} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} reviewMode={reviewMode} setReviewMode={setReviewMode} overview={overview} runOverview={runOverview} saveGuideProgress={saveGuideProgress} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, copyFeedbackPrompt: copyReviewFeedbackPrompt, guideReview, runGuideReview, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} reviewEvent={reviewEvent} setReviewEvent={setReviewEvent} reviewBody={reviewBody} setReviewBody={setReviewBody} draftSaveStatus={draftSaveStatus} draftSaveError={draftSaveError} retryDraftSave={() => setDraftSaveRetry((retry) => retry + 1)} archiveReview={archiveReview} discardReview={discardReview} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} githubDrafts={{ review: githubDraftReview, loaded: githubDraftLoaded, loading: githubDraftLoading, moving: githubDraftMoving, error: githubDraftError, pull: pullGithubDraftReview, moveLocalDrafts: moveLocalDraftsToGithub, copyHandoff: copyGithubDraftHandoff }} barMenu={reviewBarMenu} goHome={goHome} />}    {diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}
     {review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} openDiagnostics={() => { setSettingsOpen(false); void loadDiagnostics(); }} close={() => setSettingsOpen(false)} />}
+    {activityOpen && <ActivityModal close={() => setActivityOpen(false)} openPr={(url) => void openPr(url)} />}
     {memoryOpen && <ReviewMemoryModal memory={reviewMemory} loading={memoryLoading} distilling={memoryDistilling} refresh={() => void loadReviewMemory()} distill={() => void distillReviewMemory()} close={() => setMemoryOpen(false)} />}
     {review != null && gpuWorkspaceOpen && <GpuWorkspaceModal review={review} close={() => setGpuWorkspaceOpen(false)} refreshLogs={refreshLogs} />}
     {logsOpen && <LogsModal logs={logs} refreshLogs={refreshLogs} close={() => setLogsOpen(false)} />}
@@ -1179,7 +1186,7 @@ function toolbarPrLabel(key: string): string {
   return key.replace(/^github\.com\//, "").replace(/#\d+$/, "");
 }
 
-function AppToolbar({ review, theme, setTheme, busy, goHome, openGpuWorkspace, openSettings, openDiagnostics, openMemory, openLogs }: {
+function AppToolbar({ review, theme, setTheme, busy, goHome, openGpuWorkspace, openSettings, openDiagnostics, openMemory, openActivity, openLogs }: {
   review: OpenResponse | null;
   theme: ThemeName;
   setTheme: (theme: ThemeName) => void;
@@ -1189,6 +1196,7 @@ function AppToolbar({ review, theme, setTheme, busy, goHome, openGpuWorkspace, o
   openSettings: () => void;
   openDiagnostics: () => void;
   openMemory: () => void;
+  openActivity: () => void;
   openLogs: () => void;
 }) {
   return <header className="toolbar">
@@ -1206,6 +1214,7 @@ function AppToolbar({ review, theme, setTheme, busy, goHome, openGpuWorkspace, o
           <ActionMenuItem title="Pi session settings" onSelect={openSettings}>Session settings</ActionMenuItem>
           <ActionMenuItem title="Pi session diagnostics" onSelect={openDiagnostics}>Session diagnostics</ActionMenuItem>
         </>}
+        <ActionMenuItem onSelect={openActivity}>Review activity</ActionMenuItem>
         <ActionMenuItem onSelect={openMemory}>Review memory</ActionMenuItem>
         <ActionMenuItem onSelect={openLogs}>Server log</ActionMenuItem>
       </ActionMenu>
@@ -1215,7 +1224,7 @@ function AppToolbar({ review, theme, setTheme, busy, goHome, openGpuWorkspace, o
 
 type StartFilter = "all" | "needs-review" | "in-progress" | "done";
 
-function StartPage({ prs, openPr, deleteCheckouts, deleting, openInput, setOpenInput, busy }: { prs: PullRequestListItem[]; openPr: (input: string) => Promise<void>; deleteCheckouts: (prs: StoredPullRequest[]) => Promise<string[]>; deleting: boolean; openInput: string; setOpenInput: (value: string) => void; busy: boolean }) {
+function StartPage({ prs, openPr, openActivity, deleteCheckouts, deleting, openInput, setOpenInput, busy }: { prs: PullRequestListItem[]; openPr: (input: string) => Promise<void>; openActivity: () => void; deleteCheckouts: (prs: StoredPullRequest[]) => Promise<string[]>; deleting: boolean; openInput: string; setOpenInput: (value: string) => void; busy: boolean }) {
   const [scope, setScope] = useState<"local" | "saved">("local");
   const [filter, setFilter] = useState<StartFilter>("all");
   const [selecting, setSelecting] = useState(false);
@@ -1270,6 +1279,7 @@ function StartPage({ prs, openPr, deleteCheckouts, deleting, openInput, setOpenI
         <TextInput autoFocus block className="hero-url-input" value={openInput} onChange={(event) => setOpenInput(event.target.value)} placeholder="https://github.com/owner/repo/pull/123" />
         <Button type="submit" disabled={busy || deleting || openInput.trim().length === 0}>{busy ? "Fetching…" : "Open"}</Button>
       </form>
+      <ActivityBadge onOpen={openActivity} />
     </section>
     <PytorchQueuesPanel openPr={openPr} />
     <InboxPanel openPr={openPr} />

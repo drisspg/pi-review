@@ -285,3 +285,15 @@ test("an explicit assessment request runs through the injected assessor and retu
   assert.deepEqual(h.calls, [], "no GitHub writes");
   await assert.rejects(createPytorchWorkflowApi({ ...h.deps, assessNow: undefined }).requestAssessment({ number: 2 }), /not available/);
 });
+
+test("successful workflow writes are reported for activity tracking; failed writes are not", async () => {
+  const actions: string[] = [];
+  const h = harness({ onAction: ({ action, number, title }) => { actions.push(`${action} ${number} ${title}`); } });
+  const api = createPytorchWorkflowApi(h.deps);
+  await api.queues();
+  await api.acceptPreReview({ number: 2 });
+  await api.declinePreReview({ number: 3, outcome: "close", reason: "Needs design." });
+  h.deps.addLabels = async () => { throw new Error("gh: HTTP 403"); };
+  await assert.rejects(api.sendBackToInProgress({ number: 4 }), /403/);
+  assert.deepEqual(actions, ["pre-review:accept 2 t", "pre-review:close 3 t"]);
+});
