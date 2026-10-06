@@ -297,3 +297,37 @@ test("successful workflow writes are reported for activity tracking; failed writ
   await assert.rejects(api.sendBackToInProgress({ number: 4 }), /403/);
   assert.deepEqual(actions, ["pre-review:accept 2 t", "pre-review:close 3 t"]);
 });
+
+test("PRs GitHub search still lists after they closed or went draft are dropped from the queues", async () => {
+  const h = harness();
+  h.deps.searchPullRequests = async (query) => query.includes("label:triaged")
+    ? { total: 3, items: [pull({ number: 1, labels: ["triaged"] }), pull({ number: 2, labels: ["triaged"], state: "CLOSED" }), pull({ number: 3, labels: ["triaged"], isDraft: true })] }
+    : { total: 1, items: [pull({ number: 4, labels: ["ready for review"], state: "MERGED" })] };
+  const api = createPytorchWorkflowApi(h.deps);
+  const response = await api.queues();
+  assert.deepEqual(response.preReview.items.map((pr) => pr.number), [1]);
+  assert.equal(response.preReview.total, 1);
+  assert.deepEqual(response.review.items, []);
+  assert.deepEqual((await api.assessmentCandidates()).map((item) => item.number), [1], "the assessor skips them too");
+});
+
+test("hiding kicks a PR out locally until it sees new activity, without touching GitHub", async () => {
+  const h = harness();
+  const api = createPytorchWorkflowApi(h.deps);
+  await api.queues();
+  await api.hidePr({ number: 2 });
+  assert.deepEqual(h.calls, []);
+  assert.deepEqual((await api.queues()).preReview.items.map((pr) => pr.number), [3, 1]);
+  assert.ok(!(await api.assessmentCandidates()).some((item) => item.number === 2), "hidden PRs are not assessed");
+
+  h.deps.searchPullRequests = async (query) => query.includes("label:triaged")
+    ? { total: 1, items: [pull({ number: 2, labels: ["triaged"], updatedAt: "2026-09-11T00:00:00Z" })] }
+    : { total: 0, items: [] };
+  await api.queues({ refresh: true });
+  await api.settle();
+  assert.deepEqual((await api.queues()).preReview.items.map((pr) => pr.number), [2], "new activity after hiding brings it back");
+
+  await api.hidePr({ number: 2 });
+  await api.hidePr({ number: 2, hidden: false });
+  assert.deepEqual((await api.queues()).preReview.items.map((pr) => pr.number), [2], "unhide restores it");
+});

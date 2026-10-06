@@ -1,4 +1,4 @@
-import { BellSlashIcon, CheckIcon, GearIcon, IssueOpenedIcon, LinkExternalIcon, SyncIcon, ThumbsupIcon, XIcon } from "@primer/octicons-react";
+import { BellSlashIcon, CheckIcon, EyeClosedIcon, GearIcon, IssueOpenedIcon, LinkExternalIcon, SyncIcon, ThumbsupIcon, XIcon } from "@primer/octicons-react";
 import { Radio, Textarea, TextInput } from "@primer/react";
 import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
 
@@ -234,6 +234,10 @@ export function PytorchQueuesPanel({ openPr }: { openPr: (url: string) => Promis
     await api("/api/pytorch/pre-review/accept", { method: "POST", body: JSON.stringify({ number: pr.number }) });
     logUsage("pytorch:pre-review-accept", { from: "queue" });
   });
+  const hide = (pr: PytorchQueuePr) => act(pr.number, async () => {
+    await api("/api/pytorch/queue/hide", { method: "POST", body: JSON.stringify({ number: pr.number }) });
+    logUsage("pytorch:hide", { stage: pr.stage.stage });
+  });
   const sendBack = (pr: PytorchQueuePr) => act(pr.number, async () => {
     await api("/api/pytorch/pr/send-back", { method: "POST", body: JSON.stringify({ number: pr.number }) });
     logUsage("pytorch:send-back", { from: "queue" });
@@ -299,6 +303,7 @@ export function PytorchQueuesPanel({ openPr }: { openPr: (url: string) => Promis
           <Button variant="muted" disabled={isBusy} title="Comment with a reason, then move to draft or close" onClick={() => setDecline(declineFromAssessment(pr, pr.assessment))}>Decline…</Button>
         </>}
         {kind === "review" && pr.stage.needsSendBack && <Button variant="muted" disabled={isBusy} title="TEMPORARY rule: after Request changes, re-add `in progress` so automated review runs again" onClick={() => void sendBack(pr)}>Send back to in progress</Button>}
+        <Button variant="icon" disabled={isBusy} title="Hide from this queue (local only; it comes back if the PR gets new activity)" aria-label={`Hide #${pr.number} from the queue`} onClick={() => void hide(pr)}><EyeClosedIcon size={16} /></Button>
         <Button variant="icon" title="Open on GitHub" aria-label={`Open #${pr.number} on GitHub`} onClick={() => window.open(pr.url, "_blank", "noopener")}><LinkExternalIcon size={16} /></Button>
       </div>
     </li>;

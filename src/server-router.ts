@@ -108,6 +108,7 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
     "/api/pytorch/pre-review/decline": (payload) => deps.pytorchWorkflowApi.declinePreReview(payload),
     "/api/pytorch/pre-review/assessment": (payload) => deps.pytorchWorkflowApi.saveAssessment(payload),
     "/api/pytorch/pre-review/assess": (payload) => deps.pytorchWorkflowApi.requestAssessment(payload),
+    "/api/pytorch/queue/hide": (payload) => deps.pytorchWorkflowApi.hidePr(payload),
     "/api/pytorch/issue/triage": (payload) => deps.pytorchWorkflowApi.triageIssue(payload),
     "/api/pytorch/pr/send-back": (payload) => deps.pytorchWorkflowApi.sendBackToInProgress(payload),
     "/api/review/archive/history": (payload) => deps.reviewArchiveApi.history(payload),

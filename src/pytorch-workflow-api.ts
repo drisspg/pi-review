@@ -99,6 +99,20 @@ export function toQueuePr(pr: PytorchPullSnapshot, localKeys: Set<string>, asses
   return { ...rest, bodyExcerpt: bodyExcerpt(body), mentionedIssues: mentionedIssues(body, pr.linkedIssues.map((issue) => issue.number)), stage: classifyPullRequestStage(pr), localPrKey: localKeys.has(localPrKey(pr.number)) ? localPrKey(pr.number) : null, assessment: assessmentView(assessment, pr.updatedAt) };
 }
 
+/**
+ * GitHub's search index lags behind state changes, so an `is:open -is:draft` search can still
+ * return a PR closed seconds ago; trust each node's own state. Hidden PRs stay out until they
+ * see activity after being hidden.
+ */
+export function visibleQueue(result: PytorchSearchResult<PytorchPullSnapshot>, options: { excludeDrafts: boolean; hidden: Record<string, string> }): PytorchSearchResult<PytorchPullSnapshot> {
+  const items = result.items.filter((pr) => {
+    if (pr.state !== "OPEN" || (options.excludeDrafts && pr.isDraft)) return false;
+    const hiddenAt = options.hidden[pr.number];
+    return hiddenAt == null || pr.updatedAt > hiddenAt;
+  });
+  return { total: Math.max(items.length, result.total - (result.items.length - items.length)), items };
+}
+
 function byRecentlyUpdated(items: PytorchQueuePr[]): PytorchQueuePr[] {
   return [...items].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
@@ -144,6 +158,8 @@ export type PytorchStore = {
   } | null;
   /** Saved pre-review suggestions keyed by PR number; optional so older store files still load. */
   assessments?: Record<string, PytorchPreReviewAssessment>;
+  /** PRs the viewer kicked out of their queues (number -> hiddenAt); they return on newer PR activity. */
+  hidden?: Record<string, string>;
 };
 
 export type PytorchWorkflowDeps = {
@@ -190,6 +206,8 @@ export type PytorchWorkflowApi = {
   /** Owed pre-reviews (queue order) without a usable suggestion; reads the cached snapshot, never GitHub. */
   assessmentCandidates: () => Promise<Array<{ number: number; updatedAt: string }>>;
   requestAssessment: (payload: Record<string, unknown>) => Promise<{ assessment: PytorchPreReviewAssessment }>;
+  /** Local-only: kick a PR out of the queues until it sees new activity. Never touches GitHub. */
+  hidePr: (payload: Record<string, unknown>) => Promise<{ number: number; hidden: boolean }>;
   settle: () => Promise<void>;
 };
 
@@ -346,13 +364,16 @@ export function createPytorchWorkflowApi(deps: PytorchWorkflowDeps): PytorchWork
     const localKeys = new Set(localPrs.map((pr) => pr.key));
     const queries = pytorchQueueQueries(modules);
     const assessments = current().assessments ?? {};
+    const hidden = current().hidden ?? {};
+    const preReview = visibleQueue(snapshot?.preReview ?? { total: 0, items: [] }, { excludeDrafts: true, hidden });
+    const review = visibleQueue(snapshot?.review ?? { total: 0, items: [] }, { excludeDrafts: false, hidden });
     return {
       login: snapshot?.login ?? null,
       fetchedAt: snapshot?.fetchedAt ?? null,
       refreshing: inFlight != null,
       modules,
-      preReview: { total: snapshot?.preReview.total ?? 0, items: sortPreReview((snapshot?.preReview.items ?? []).map((pr) => toQueuePr(pr, localKeys, assessments[pr.number]))), githubUrl: githubSearchUrl(queries.preReview) },
-      review: { total: snapshot?.review.total ?? 0, items: byRecentlyUpdated((snapshot?.review.items ?? []).map((pr) => toQueuePr(pr, localKeys))), githubUrl: githubSearchUrl(queries.review) },
+      preReview: { total: preReview.total, items: sortPreReview(preReview.items.map((pr) => toQueuePr(pr, localKeys, assessments[pr.number]))), githubUrl: githubSearchUrl(queries.preReview) },
+      review: { total: review.total, items: byRecentlyUpdated(review.items.map((pr) => toQueuePr(pr, localKeys))), githubUrl: githubSearchUrl(queries.review) },
       triage: queries.triage.map(({ module, query }) => {
         const entry = snapshot?.triage.find((candidate) => candidate.module === module);
         // Newest first: the one-week SLA is about fresh issues, and long-triaged backlogs would otherwise bury them.
@@ -446,6 +467,16 @@ export function createPytorchWorkflowApi(deps: PytorchWorkflowDeps): PytorchWork
       await persist({ ...current(), assessments: { ...current().assessments, [number]: assessment } });
       return { assessment };
     },
+    async hidePr(payload) {
+      const number = requiredNumber(payload);
+      const hidden = payload.hidden !== false;
+      await load();
+      const next = { ...current().hidden };
+      if (hidden) next[number] = deps.now();
+      else delete next[number];
+      await persist({ ...current(), hidden: next });
+      return { number, hidden };
+    },
     async requestAssessment(payload) {
       const number = requiredNumber(payload);
       if (deps.assessNow == null) throw new Error("Pre-review assessments are not available on this server");
@@ -458,7 +489,8 @@ export function createPytorchWorkflowApi(deps: PytorchWorkflowDeps): PytorchWork
       await load();
       const assessments = current().assessments ?? {};
       const nowMs = Date.parse(deps.now());
-      const items = sortPreReview((current().snapshot?.preReview.items ?? []).map((pr) => toQueuePr(pr, new Set(), assessments[pr.number])));
+      const queue = visibleQueue(current().snapshot?.preReview ?? { total: 0, items: [] }, { excludeDrafts: true, hidden: current().hidden ?? {} });
+      const items = sortPreReview(queue.items.map((pr) => toQueuePr(pr, new Set(), assessments[pr.number])));
       // Re-assess an outdated suggestion only after REASSESS_AFTER_MS, so bot comments bumping updatedAt don't cause churn.
       return items.filter((pr) => !pr.viewerThumbsUp && pr.stage.stage === "pre-review" && (pr.assessment == null || (pr.assessment.outdated && nowMs - Date.parse(pr.assessment.assessedAt) > REASSESS_AFTER_MS))).map((pr) => ({ number: pr.number, updatedAt: pr.updatedAt }));
     },
