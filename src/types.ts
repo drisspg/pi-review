@@ -376,7 +376,7 @@ export type PytorchPullSnapshot = {
 };
 
 /** `mentionedIssues`: issue numbers referenced in the description that GitHub did not parse as closing references (e.g. `Fixes: <url>`). */
-export type PytorchQueuePr = Omit<PytorchPullSnapshot, "body" | "id"> & { bodyExcerpt: string; mentionedIssues: number[]; stage: PytorchStageInfo; localPrKey: string | null; assessment: PytorchAssessmentView | null };
+export type PytorchQueuePr = Omit<PytorchPullSnapshot, "body" | "id"> & { bodyExcerpt: string; mentionedIssues: number[]; stage: PytorchStageInfo; localPrKey: string | null; assessment: PytorchAssessmentView | null; chatTurns: number };
 
 export type PytorchPreReviewRecommendation = "accept" | "draft" | "close";
 /** A saved AI pre-review suggestion; advisory only, the maintainer still takes the action. */

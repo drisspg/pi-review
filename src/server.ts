@@ -20,6 +20,7 @@ import { createGitHubDraftReviewApi, defaultGitHubDraftReviewApiDeps } from "./g
 import { gpuWorkspaceCreateResponse, gpuWorkspaceDeleteResponse, gpuWorkspaceExecResponse, gpuWorkspaceStatusResponse } from "./gpu-workspace-api.js";
 import { createInboxApi, type InboxSnapshot } from "./inbox-api.js";
 import { createPreReviewAssessor, formatPreReviewEvidence } from "./pre-review-assessor.js";
+import { createPreReviewChat } from "./pre-review-chat.js";
 import { piLaunch, piModelArgs, piThinkingLevel, readPiReviewLocalConfig } from "./pi-launch.js";
 import { createPytorchWorkflowApi, PYTORCH_REPO, type PytorchStore } from "./pytorch-workflow-api.js";
 import { createGitInterdiff } from "./interdiff-git.js";
@@ -179,8 +180,9 @@ const PRE_REVIEW_MODEL_TIMEOUT_MS = 10 * 60 * 1000;
 /** Replaces the coding-agent system prompt so personal agent rules (status lines etc.) do not leak into the answer format. */
 const PRE_REVIEW_SYSTEM_PROMPT = "You are a PyTorch maintainer doing a quick pre-review. Answer only in the format the user requests, with no status lines, state summaries, or extra sections.";
 /** Headless, tool-less Pi run on the configured launcher/model; evidence is already in the prompt, so it cannot touch GitHub. */
-function runPreReviewModel(prompt: string, signal: AbortSignal): Promise<string> {
-  const launch = piLaunch(["-p", "--no-session", "--no-tools", "--no-skills", "--no-context-files", "--no-prompt-templates", "--system-prompt", PRE_REVIEW_SYSTEM_PROMPT, ...piModelArgs(), "--thinking", piThinkingLevel("high"), prompt]);
+const PRE_REVIEW_CHAT_SYSTEM_PROMPT = "You are a PyTorch maintainer's assistant discussing a pull request. Answer conversationally and concisely, with no status lines or state summaries.";
+function runPreReviewModel(prompt: string, signal: AbortSignal, systemPrompt = PRE_REVIEW_SYSTEM_PROMPT): Promise<string> {
+  const launch = piLaunch(["-p", "--no-session", "--no-tools", "--no-skills", "--no-context-files", "--no-prompt-templates", "--system-prompt", systemPrompt, ...piModelArgs(), "--thinking", piThinkingLevel("high"), prompt]);
   return new Promise((resolveRun, rejectRun) => {
     const child = spawn(launch.command, launch.args, { cwd: tmpdir(), env: launch.env, stdio: ["ignore", "pipe", "pipe"], detached: true });
     let stdout = "";
@@ -209,10 +211,18 @@ const preReviewAssessor = createPreReviewAssessor({
   listCandidates: () => pytorchWorkflowApi.assessmentCandidates(),
   gatherEvidence: (number) => defaultGitHubClient.fetchPreReviewEvidence({ host: "github.com", owner: "pytorch", repo: "pytorch", number }),
   buildPrompt: async (evidence) => (await reviewPromptApi.build({ mode: "pytorch-pre-review", prKey: `github.com/${PYTORCH_REPO}#${evidence.number}`, prTitle: evidence.title, author: evidence.author ?? undefined, body: evidence.body, labels: evidence.labels, linkedIssues: evidence.linkedIssues, evidence: formatPreReviewEvidence(evidence) })).prompt,
-  runModel: runPreReviewModel,
+  runModel: (prompt, signal) => runPreReviewModel(prompt, signal),
   save: async ({ number, markdown, prUpdatedAt, source }) => { await pytorchWorkflowApi.saveAssessment({ number, markdown, prUpdatedAt, source }); },
   now: () => new Date().toISOString(),
   logger,
+});
+const preReviewChat = createPreReviewChat({
+  gatherEvidence: (number) => defaultGitHubClient.fetchPreReviewEvidence({ host: "github.com", owner: "pytorch", repo: "pytorch", number }),
+  runModel: (prompt, signal) => runPreReviewModel(prompt, signal, PRE_REVIEW_CHAT_SYSTEM_PROMPT),
+  readAssessment: (number) => pytorchWorkflowApi.readAssessment(number),
+  readThread: (number) => pytorchWorkflowApi.readChat(number),
+  writeThread: (number, turns) => pytorchWorkflowApi.writeChat(number, turns),
+  now: () => new Date().toISOString(),
 });
 const piApi = createPiApi({ askPi, piDiagnostics, setPiModel });
 const piTerminalApi = createPiTerminalApi({ deleteSession: piTerminalManager.deleteSession });
@@ -313,6 +323,7 @@ const route = createServerRoute({
   piTerminalDraftApi,
   prApi,
   pytorchWorkflowApi,
+  preReviewChat,
   reviewArchiveApi,
   reviewMemoryApi,
   reviewPromptApi,
@@ -332,6 +343,7 @@ async function shutdown(signal: string): Promise<void> {
   server.closeAllConnections();
   await Promise.all([
     preReviewAssessor.stop(),
+    Promise.resolve(preReviewChat.stop()),
     new Promise<void>((resolveClose) => server.close(() => resolveClose())),
     piTerminalManager.dispose(),
     disposePiSessions(),

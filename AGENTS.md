@@ -42,6 +42,9 @@ src/                    Node server (TypeScript, ESM, run via tsx)
                         the inbox (the queues own them), pytorch/pytorch issue notifications move to
                         the panel's Issues tab, mentions/your-PR activity stay in normal tiers.
                         Saved pre-review suggestions (`parsePreReviewAssessment`) are advisory only
+  pre-review-chat.ts    Inline, checkout-free chat per queued PyTorch PR (ask about the saved
+                        suggestion or a quick high-level review): tool-less model over the same
+                        read-only evidence + saved verdict + thread; threads persist in the pytorch store
   activity-api.ts       Review activity: append-only JSONL ledger of focused-time heartbeats (client
                         counts only visible + focused + input within 90s; <=2 min per beat) and
                         server-recorded workflow actions; `summary(range)` joins it with reviewMemory

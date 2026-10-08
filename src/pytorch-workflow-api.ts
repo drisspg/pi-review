@@ -94,9 +94,9 @@ function assessmentView(assessment: PytorchPreReviewAssessment | undefined, prUp
   return { ...assessment, outdated: assessment.prUpdatedAt != null && prUpdatedAt > assessment.prUpdatedAt };
 }
 
-export function toQueuePr(pr: PytorchPullSnapshot, localKeys: Set<string>, assessment?: PytorchPreReviewAssessment): PytorchQueuePr {
+export function toQueuePr(pr: PytorchPullSnapshot, localKeys: Set<string>, assessment?: PytorchPreReviewAssessment, chatTurns = 0): PytorchQueuePr {
   const { body, id: _id, ...rest } = pr;
-  return { ...rest, bodyExcerpt: bodyExcerpt(body), mentionedIssues: mentionedIssues(body, pr.linkedIssues.map((issue) => issue.number)), stage: classifyPullRequestStage(pr), localPrKey: localKeys.has(localPrKey(pr.number)) ? localPrKey(pr.number) : null, assessment: assessmentView(assessment, pr.updatedAt) };
+  return { ...rest, chatTurns, bodyExcerpt: bodyExcerpt(body), mentionedIssues: mentionedIssues(body, pr.linkedIssues.map((issue) => issue.number)), stage: classifyPullRequestStage(pr), localPrKey: localKeys.has(localPrKey(pr.number)) ? localPrKey(pr.number) : null, assessment: assessmentView(assessment, pr.updatedAt) };
 }
 
 /**
@@ -160,6 +160,8 @@ export type PytorchStore = {
   assessments?: Record<string, PytorchPreReviewAssessment>;
   /** PRs the viewer kicked out of their queues (number -> hiddenAt); they return on newer PR activity. */
   hidden?: Record<string, string>;
+  /** Inline pre-review chat threads keyed by PR number. */
+  chats?: Record<string, Array<{ role: "user" | "assistant"; text: string; at: string }>>;
 };
 
 export type PytorchWorkflowDeps = {
@@ -206,6 +208,9 @@ export type PytorchWorkflowApi = {
   /** Owed pre-reviews (queue order) without a usable suggestion; reads the cached snapshot, never GitHub. */
   assessmentCandidates: () => Promise<Array<{ number: number; updatedAt: string }>>;
   requestAssessment: (payload: Record<string, unknown>) => Promise<{ assessment: PytorchPreReviewAssessment }>;
+  readAssessment: (number: number) => Promise<PytorchPreReviewAssessment | null>;
+  readChat: (number: number) => Promise<NonNullable<PytorchStore["chats"]>[string]>;
+  writeChat: (number: number, turns: NonNullable<PytorchStore["chats"]>[string]) => Promise<void>;
   /** Local-only: kick a PR out of the queues until it sees new activity. Never touches GitHub. */
   hidePr: (payload: Record<string, unknown>) => Promise<{ number: number; hidden: boolean }>;
   settle: () => Promise<void>;
@@ -372,8 +377,8 @@ export function createPytorchWorkflowApi(deps: PytorchWorkflowDeps): PytorchWork
       fetchedAt: snapshot?.fetchedAt ?? null,
       refreshing: inFlight != null,
       modules,
-      preReview: { total: preReview.total, items: sortPreReview(preReview.items.map((pr) => toQueuePr(pr, localKeys, assessments[pr.number]))), githubUrl: githubSearchUrl(queries.preReview) },
-      review: { total: review.total, items: byRecentlyUpdated(review.items.map((pr) => toQueuePr(pr, localKeys))), githubUrl: githubSearchUrl(queries.review) },
+      preReview: { total: preReview.total, items: sortPreReview(preReview.items.map((pr) => toQueuePr(pr, localKeys, assessments[pr.number], current().chats?.[pr.number]?.length ?? 0))), githubUrl: githubSearchUrl(queries.preReview) },
+      review: { total: review.total, items: byRecentlyUpdated(review.items.map((pr) => toQueuePr(pr, localKeys, undefined, current().chats?.[pr.number]?.length ?? 0))), githubUrl: githubSearchUrl(queries.review) },
       triage: queries.triage.map(({ module, query }) => {
         const entry = snapshot?.triage.find((candidate) => candidate.module === module);
         // Newest first: the one-week SLA is about fresh issues, and long-triaged backlogs would otherwise bury them.
@@ -466,6 +471,21 @@ export function createPytorchWorkflowApi(deps: PytorchWorkflowDeps): PytorchWork
       const assessment: PytorchPreReviewAssessment = { number, ...parsed, source: typeof payload.source === "string" && payload.source.trim().length > 0 ? payload.source.trim() : "AI", assessedAt: deps.now(), prUpdatedAt };
       await persist({ ...current(), assessments: { ...current().assessments, [number]: assessment } });
       return { assessment };
+    },
+    async readAssessment(number) {
+      await load();
+      return current().assessments?.[number] ?? null;
+    },
+    async readChat(number) {
+      await load();
+      return current().chats?.[number] ?? [];
+    },
+    async writeChat(number, turns) {
+      await load();
+      const chats = { ...current().chats };
+      if (turns.length === 0) delete chats[number];
+      else chats[number] = turns;
+      await persist({ ...current(), chats });
     },
     async hidePr(payload) {
       const number = requiredNumber(payload);

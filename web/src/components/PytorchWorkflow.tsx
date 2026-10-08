@@ -1,11 +1,13 @@
-import { BellSlashIcon, CheckIcon, EyeClosedIcon, GearIcon, IssueOpenedIcon, LinkExternalIcon, SyncIcon, ThumbsupIcon, XIcon } from "@primer/octicons-react";
+import { BellSlashIcon, CheckIcon, CommentDiscussionIcon, EyeClosedIcon, GearIcon, IssueOpenedIcon, LinkExternalIcon, SyncIcon, ThumbsupIcon, XIcon } from "@primer/octicons-react";
 import { Radio, Textarea, TextInput } from "@primer/react";
-import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 
 import { api, errorMessage, logUsage } from "../api";
+import { autoGrowTextarea } from "../lib/dom";
 import { relativeTime } from "../lib/pr";
 import type { InboxItem, PytorchAssessment, PytorchPrStatus, PytorchQueueIssue, PytorchQueuePr, PytorchQueuesResponse, PytorchStageInfo, StoredPullRequest } from "../types";
 import { Button } from "./Button";
+import { MarkdownText } from "./Markdown";
 import { ModalShell } from "./Modal";
 
 /**
@@ -85,6 +87,82 @@ function AssessmentSummary({ assessment }: { assessment: PytorchAssessment }) {
       <p className="muted">Assessed {relativeTime(assessment.assessedAt)} · suggestion only; nothing is posted until you confirm.</p>
     </div>
   </details>;
+}
+
+type ChatTurn = { role: "user" | "assistant"; text: string; at: string };
+
+const CHAT_STARTERS: Record<"pre-review" | "review", string[]> = {
+  "pre-review": ["Why this recommendation?", "What would change your mind?", "Quick high-level review of the diff"],
+  review: ["Quick high-level review of the diff", "What is the riskiest part of this change?", "What should I check first?"],
+};
+
+/**
+ * Inline, checkout-free chat about one queued PR. Each turn runs a tool-less model over the
+ * read-only evidence, the saved suggestion, and this thread; a changed verdict can be saved
+ * as the row's suggestion with one click.
+ */
+function PrChat({ pr, kind, onSuggestionSaved }: { pr: PytorchQueuePr; kind: "pre-review" | "review"; onSuggestionSaved: () => void }) {
+  const [thread, setThread] = useState<ChatTurn[] | null>(null);
+  const [question, setQuestion] = useState("");
+  const [asking, setAsking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => {
+    api<{ thread: ChatTurn[] }>("/api/pytorch/chat/thread", { method: "POST", body: JSON.stringify({ number: pr.number }) }).then((response) => setThread(response.thread)).catch((err: unknown) => setError(errorMessage(err)));
+    inputRef.current?.focus();
+  }, [pr.number]);
+
+  async function ask(text: string): Promise<void> {
+    const trimmed = text.trim();
+    if (trimmed.length === 0 || asking) return;
+    setAsking(true);
+    setError(null);
+    setThread((current) => [...(current ?? []), { role: "user", text: trimmed, at: new Date().toISOString() }]);
+    setQuestion("");
+    logUsage("pytorch:chat", { queue: kind });
+    try {
+      setThread((await api<{ thread: ChatTurn[] }>("/api/pytorch/chat", { method: "POST", body: JSON.stringify({ number: pr.number, question: trimmed }) })).thread);
+    } catch (err) {
+      setError(errorMessage(err));
+      setThread((current) => (current ?? []).slice(0, -1));
+      setQuestion(trimmed);
+    } finally {
+      setAsking(false);
+    }
+  }
+
+  async function saveSuggestion(turn: ChatTurn): Promise<void> {
+    try {
+      await api("/api/pytorch/pre-review/assessment", { method: "POST", body: JSON.stringify({ number: pr.number, markdown: turn.text, source: "Astra (chat)", prUpdatedAt: pr.updatedAt }) });
+      setSaved(turn.at);
+      logUsage("pytorch:chat-save-suggestion");
+      onSuggestionSaved();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  async function clear(): Promise<void> {
+    await api("/api/pytorch/chat/clear", { method: "POST", body: JSON.stringify({ number: pr.number }) }).catch(() => undefined);
+    setThread([]);
+  }
+
+  return <div className="pt-chat" aria-label={`Chat about #${pr.number}`}>
+    {thread == null ? <p className="muted">Loading…</p> : thread.length === 0 ? <div className="pt-chat-starters">{CHAT_STARTERS[kind].map((starter) => <button key={starter} type="button" className="pt-chat-starter" disabled={asking} onClick={() => void ask(starter)}>{starter}</button>)}</div>
+      : <ol className="pt-chat-thread">{thread.map((turn, index) => <li key={`${turn.at}-${index}`} className={`pt-chat-turn ${turn.role}`}>
+        {turn.role === "user" ? <p>{turn.text}</p> : <MarkdownText text={turn.text} fileLinks={{ prUrl: pr.url }} />}
+        {turn.role === "assistant" && kind === "pre-review" && /Recommendation:\s*\**\s*(Accept|Back to draft|Close)\b/i.test(turn.text) && <Button variant="muted" disabled={saved === turn.at} onClick={() => void saveSuggestion(turn)}>{saved === turn.at ? "Saved as suggestion" : "Use as suggestion"}</Button>}
+      </li>)}</ol>}
+    {asking && <p className="muted pt-chat-thinking">Astra is thinking…</p>}
+    {error != null && <p className="inbox-error" role="alert">{error}</p>}
+    <form className="pt-chat-form" onSubmit={(event) => { event.preventDefault(); void ask(question); }}>
+      <textarea ref={inputRef} rows={1} className="pt-chat-input" value={question} placeholder={kind === "pre-review" ? "Ask about the suggestion or the PR…" : "Ask about the PR…"} aria-label="Question" disabled={asking} onChange={(event) => setQuestion(event.target.value)} onInput={(event) => autoGrowTextarea(event.currentTarget)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void ask(question); } }} />
+      <Button variant="muted" type="submit" disabled={asking || question.trim().length === 0}>Ask</Button>
+      {thread != null && thread.length > 0 && <Button variant="muted" type="button" disabled={asking} onClick={() => void clear()}>Clear</Button>}
+    </form>
+    <p className="muted pt-chat-note">Uses the description, conversation, linked issue, and diff from GitHub; no checkout. Nothing is posted.</p>
+  </div>;
 }
 
 /** Shared reason composer: the guide asks maintainers to always explain declines and won't-fix. */
@@ -189,6 +267,13 @@ export function PytorchQueuesPanel({ openPr }: { openPr: (url: string) => Promis
   const [tab, setTab] = useState<QueueTab>("pre-review");
   const [busy, setBusy] = useState<Set<number>>(() => new Set());
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
+  const [chatOpen, setChatOpen] = useState<Set<number>>(() => new Set());
+  const toggleChat = (number: number) => setChatOpen((current) => {
+    const next = new Set(current);
+    if (next.has(number)) next.delete(number);
+    else next.add(number);
+    return next;
+  });
   const [editingModules, setEditingModules] = useState(false);
   const [decline, setDecline] = useState<DeclineTarget | null>(null);
   const [wontFix, setWontFix] = useState<PytorchQueueIssue | null>(null);
@@ -296,6 +381,7 @@ export function PytorchQueuesPanel({ openPr }: { openPr: (url: string) => Promis
         {kind === "pre-review" && <div className="pt-row-issues"><LinkedIssues pr={pr} /></div>}
         {kind === "pre-review" && pr.bodyExcerpt.length > 0 && <button type="button" className={`pt-excerpt${open ? " open" : ""}`} aria-expanded={open} onClick={() => setExpanded((current) => { const next = new Set(current); if (next.has(pr.number)) next.delete(pr.number); else next.add(pr.number); return next; })}>{pr.bodyExcerpt}</button>}
         {kind === "pre-review" && pr.bodyExcerpt.length === 0 && <span className="pt-excerpt-empty">No description — the guide allows rejecting at pre-review for that.</span>}
+        {chatOpen.has(pr.number) && <PrChat pr={pr} kind={kind} onSuggestionSaved={() => void load(false)} />}
       </div>
       <div className="pt-row-actions">
         {kind === "pre-review" && <>
@@ -303,6 +389,7 @@ export function PytorchQueuesPanel({ openPr }: { openPr: (url: string) => Promis
           <Button variant="muted" disabled={isBusy} title="Comment with a reason, then move to draft or close" onClick={() => setDecline(declineFromAssessment(pr, pr.assessment))}>Decline…</Button>
         </>}
         {kind === "review" && pr.stage.needsSendBack && <Button variant="muted" disabled={isBusy} title="TEMPORARY rule: after Request changes, re-add `in progress` so automated review runs again" onClick={() => void sendBack(pr)}>Send back to in progress</Button>}
+        <Button variant="icon" className={chatOpen.has(pr.number) ? "pt-chat-toggle active" : "pt-chat-toggle"} title={kind === "pre-review" ? "Ask about the pre-review suggestion or this PR (no checkout)" : "Ask about this PR or get a quick high-level review (no checkout)"} aria-label={`Ask about #${pr.number}`} aria-expanded={chatOpen.has(pr.number)} onClick={() => toggleChat(pr.number)}><CommentDiscussionIcon size={16} />{pr.chatTurns > 0 && <span className="pt-chat-count">{pr.chatTurns / 2}</span>}</Button>
         <Button variant="icon" disabled={isBusy} title="Hide from this queue (local only; it comes back if the PR gets new activity)" aria-label={`Hide #${pr.number} from the queue`} onClick={() => void hide(pr)}><EyeClosedIcon size={16} /></Button>
         <Button variant="icon" title="Open on GitHub" aria-label={`Open #${pr.number} on GitHub`} onClick={() => window.open(pr.url, "_blank", "noopener")}><LinkExternalIcon size={16} /></Button>
       </div>

@@ -14,6 +14,7 @@ import type { PiApi } from "./pi-api.js";
 import type { PiTerminalApi } from "./pi-terminal-api.js";
 import type { PiTerminalDraftApi } from "./pi-terminal-draft-api.js";
 import type { PrApi } from "./pr-api.js";
+import type { PreReviewChat } from "./pre-review-chat.js";
 import type { PytorchWorkflowApi } from "./pytorch-workflow-api.js";
 import type { ReviewArchiveApi } from "./review-archive-api.js";
 import type { ReviewMemoryApi } from "./review-memory-api.js";
@@ -48,6 +49,7 @@ export type ServerRouteDeps = {
   piTerminalDraftApi: PiTerminalDraftApi;
   prApi: PrApi;
   pytorchWorkflowApi: PytorchWorkflowApi;
+  preReviewChat: PreReviewChat;
   reviewArchiveApi: ReviewArchiveApi;
   reviewMemoryApi: ReviewMemoryApi;
   reviewPromptApi: ReviewPromptApi;
@@ -112,6 +114,9 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
     "/api/pytorch/pre-review/assessment": (payload) => deps.pytorchWorkflowApi.saveAssessment(payload),
     "/api/pytorch/pre-review/assess": (payload) => deps.pytorchWorkflowApi.requestAssessment(payload),
     "/api/pytorch/queue/hide": (payload) => deps.pytorchWorkflowApi.hidePr(payload),
+    "/api/pytorch/chat": (payload) => deps.preReviewChat.ask(payload),
+    "/api/pytorch/chat/thread": (payload) => deps.preReviewChat.thread(payload),
+    "/api/pytorch/chat/clear": (payload) => deps.preReviewChat.clear(payload),
     "/api/pytorch/issue/triage": (payload) => deps.pytorchWorkflowApi.triageIssue(payload),
     "/api/pytorch/pr/send-back": (payload) => deps.pytorchWorkflowApi.sendBackToInProgress(payload),
     "/api/review/archive/history": (payload) => deps.reviewArchiveApi.history(payload),
