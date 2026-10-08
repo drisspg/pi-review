@@ -1,5 +1,7 @@
 import { StringEnum, Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { draftActionGuidelines, draftActionParameters, runDraftAction, type ReviewDraftOps } from "./review-draft-actions.js";
+import type { DraftReviewComment } from "./types.js";
 import { createReviewSuggestionTool } from "./review-suggestion-tool.js";
 import { installReviewWorkspaceGuidance } from "./pi-review-workspace.js";
 
@@ -11,11 +13,29 @@ type ReviewTarget = {
 };
 
 type DraftCommentParams = {
+  action?: "create" | "edit" | "delete" | "list";
+  id?: string;
   path?: string;
   line?: number;
   startLine?: number;
   side?: "RIGHT" | "LEFT";
-  body: string;
+  body?: string;
+};
+
+async function draftRequest<T>(route: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
+  const apiUrl = process.env.PI_REVIEW_API_URL;
+  const prKey = process.env.PI_REVIEW_PR_KEY;
+  if (apiUrl == null || prKey == null) throw new Error("Pi Review did not provide the terminal review context.");
+  const response = await fetch(`${apiUrl}${route}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prKey, ...body }), signal });
+  const result = await response.json() as T & { error?: string };
+  if (!response.ok) throw new Error(result.error ?? `Pi Review rejected the draft request (${response.status}).`);
+  return result;
+}
+
+const terminalDraftOps: ReviewDraftOps = {
+  list: async (signal) => (await draftRequest<{ comments: DraftReviewComment[] }>("/api/pi/draft-comment/list", {}, signal)).comments,
+  edit: async (id, body, signal) => (await draftRequest<{ comment: DraftReviewComment }>("/api/pi/draft-comment/edit", { id, body }, signal)).comment,
+  remove: async (id, signal) => (await draftRequest<{ comment: DraftReviewComment }>("/api/pi/draft-comment/delete", { id }, signal)).comment,
 };
 
 function defaultTarget(): ReviewTarget | null {
@@ -36,21 +56,26 @@ export default function piReviewTerminalExtension(pi: ExtensionAPI) {
     name: "draft_review_comment",
     label: "Draft Review Comment",
     description: target == null
-      ? "Create a private editable Pi Review comment on a changed line. Use this instead of editing source files, both for comment requests and for proposed fixes or diffs."
-      : `Create a private editable Pi Review comment anchored at ${target.path}:${target.startLine == null || target.startLine === target.line ? target.line : `${target.startLine}-${target.line}`}. Use this instead of editing source files, both for comment requests and for proposed fixes or diffs on this thread.`,
+      ? "Create, edit, delete, or list private editable Pi Review comments on changed lines. Use this instead of editing source files, both for comment requests and for proposed fixes or diffs."
+      : `Create, edit, delete, or list private editable Pi Review comments; new comments are anchored at ${target.path}:${target.startLine == null || target.startLine === target.line ? target.line : `${target.startLine}-${target.line}`}. Use this instead of editing source files, both for comment requests and for proposed fixes or diffs on this thread.`,
     promptSnippet: "Create editable PR review comments without modifying source files",
     promptGuidelines: [
       "Never modify repository files in a Pi Review session. Use draft_review_comment for feedback instead of editing repository files; use suggest_change for exact replacement code the PR author can apply.",
       "For an inline Pi Review thread, draft_review_comment already targets the anchored line or range, so normally provide only the comment body.",
+      ...draftActionGuidelines,
     ],
     parameters: Type.Object({
+      ...draftActionParameters,
       path: Type.Optional(Type.String({ description: "Changed-file path. Omit in an inline thread to use its anchored file." })),
       line: Type.Optional(Type.Integer({ minimum: 1, description: "Ending diff line. Omit in an inline thread to use its anchored line." })),
       startLine: Type.Optional(Type.Integer({ minimum: 1, description: "Starting line for a multiline comment." })),
       side: Type.Optional(StringEnum(["RIGHT", "LEFT"] as const)),
-      body: Type.String({ minLength: 1, description: "Concise review comment text in the user's voice." }),
+      body: Type.Optional(Type.String({ minLength: 1, description: "Concise review comment text in the user's voice (required for create and edit; the full replacement for edit)." })),
     }),
     async execute(_toolCallId, params: DraftCommentParams, signal) {
+      const handled = await runDraftAction(terminalDraftOps, params, signal);
+      if (handled != null) return handled;
+      if (params.body == null || params.body.trim().length === 0) throw new Error("Provide the comment body.");
       const apiUrl = process.env.PI_REVIEW_API_URL;
       const prKey = process.env.PI_REVIEW_PR_KEY;
       const headSha = process.env.PI_REVIEW_HEAD_SHA;
@@ -72,12 +97,12 @@ export default function piReviewTerminalExtension(pi: ExtensionAPI) {
         }),
         signal,
       });
-      const result = await response.json() as { comment?: { path: string; line: number; startLine?: number }; created?: boolean; error?: string };
+      const result = await response.json() as { comment?: { id: string; path: string; line: number; startLine?: number }; created?: boolean; error?: string };
       if (!response.ok) throw new Error(result.error ?? `Pi Review rejected the comment (${response.status}).`);
       const comment = result.comment;
       const range = comment?.startLine != null && comment.startLine !== comment.line ? `${comment.startLine}-${comment.line}` : String(comment?.line ?? line);
       return {
-        content: [{ type: "text", text: `${result.created === false ? "Review draft already exists" : "Created editable review draft"} at ${comment?.path ?? path}:${range}. It remains private until the review is submitted.` }],
+        content: [{ type: "text", text: `${result.created === false ? "Review draft already exists" : "Created editable review draft"} ${comment?.id ?? ""} at ${comment?.path ?? path}:${range}. It remains private until the review is submitted; revise it with action "edit" and this id.` }],
         details: result,
       };
     },
@@ -152,7 +177,7 @@ export default function piReviewTerminalExtension(pi: ExtensionAPI) {
   });
 
   pi.on("before_agent_start", (event) => ({
-    systemPrompt: `${event.systemPrompt}\n\nPi Review comment semantics: the checkout is a read-only review workspace — never modify repository files (the edit and write tools are blocked in this session). Requests to add, leave, post, write, or put a comment on the PR or current line mean creating an editable review draft with draft_review_comment. For exact replacement code that the author can accept with Apply suggestion, use suggest_change; use draft_review_comment for explanatory feedback or non-applicable fenced diffs.`,
+    systemPrompt: `${event.systemPrompt}\n\nPi Review comment semantics: the checkout is a read-only review workspace — never modify repository files (the edit and write tools are blocked in this session). Requests to add, leave, post, write, or put a comment on the PR or current line mean creating an editable review draft with draft_review_comment. Requests to update, reword, or remove an existing comment mean draft_review_comment with action "edit" or "delete" on that draft (action "list" finds ids) — never a duplicate replacement draft. For exact replacement code that the author can accept with Apply suggestion, use suggest_change; use draft_review_comment for explanatory feedback or non-applicable fenced diffs.`,
   }));
 
   pi.on("tool_call", (event) => {

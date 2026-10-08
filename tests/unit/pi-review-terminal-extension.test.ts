@@ -186,3 +186,37 @@ test("terminal extension routes inline comment requests to Pi Review", async () 
     }
   }
 });
+
+test("terminal draft_review_comment edits and deletes existing drafts through Pi Review", async () => {
+  let tool: { execute: (...args: unknown[]) => Promise<{ content: Array<{ text: string }> }> } | null = null;
+  const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const server = createServer((request, response) => {
+    let body = "";
+    request.on("data", (chunk) => { body += String(chunk); });
+    request.on("end", () => {
+      requests.push({ url: request.url ?? "", body: JSON.parse(body) });
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ comment: { id: "pi-1", path: "src/a.ts", line: 9, side: "RIGHT", body: "new" } }));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (address == null || typeof address === "string") throw new Error("Missing test server address");
+  const previous = { apiUrl: process.env.PI_REVIEW_API_URL, prKey: process.env.PI_REVIEW_PR_KEY };
+  Object.assign(process.env, { PI_REVIEW_API_URL: `http://127.0.0.1:${address.port}`, PI_REVIEW_PR_KEY: "github.com/org/repo#1" });
+  try {
+    piReviewTerminalExtension({ registerTool(definition) { if (definition.name === "draft_review_comment") tool = definition as typeof tool; }, on() {} } as unknown as ExtensionAPI);
+    assert.ok(tool != null);
+    const edited = await tool.execute("call", { action: "edit", id: "pi-1", body: "new" });
+    assert.match(edited.content[0].text, /Updated private review draft pi-1 at src\/a\.ts:9 in place/);
+    await tool.execute("call", { action: "delete", id: "pi-1" });
+    assert.deepEqual(requests, [
+      { url: "/api/pi/draft-comment/edit", body: { prKey: "github.com/org/repo#1", id: "pi-1", body: "new" } },
+      { url: "/api/pi/draft-comment/delete", body: { prKey: "github.com/org/repo#1", id: "pi-1" } },
+    ]);
+  } finally {
+    server.close();
+    if (previous.apiUrl == null) delete process.env.PI_REVIEW_API_URL; else process.env.PI_REVIEW_API_URL = previous.apiUrl;
+    if (previous.prKey == null) delete process.env.PI_REVIEW_PR_KEY; else process.env.PI_REVIEW_PR_KEY = previous.prKey;
+  }
+});

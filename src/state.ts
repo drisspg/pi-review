@@ -56,6 +56,8 @@ export type StateStore = {
   getDraftReview: (prKey: string) => Promise<DraftReview | null>;
   saveDraftReview: (review: DraftReview) => Promise<DraftReview>;
   appendDraftReviewComment: (prKey: string, headSha: string, comment: Omit<DraftReview["comments"][number], "id">) => Promise<{ draftReview: DraftReview; comment: DraftReview["comments"][number]; created: boolean }>;
+  updateDraftReviewComment: (prKey: string, id: string, body: string) => Promise<{ draftReview: DraftReview; comment: DraftReview["comments"][number] }>;
+  deleteDraftReviewComment: (prKey: string, id: string) => Promise<{ draftReview: DraftReview; comment: DraftReview["comments"][number] }>;
   clearDraftReview: (prKey: string) => Promise<void>;
   updateFocusScanProgress: (input: Pick<FocusScanRecord, "prKey" | "id" | "areaStates">) => Promise<FocusScanRecord>;
   updateGuideReviewProgress: (input: Pick<GuideReviewRecord, "prKey" | "id"> & { stepStates: NonNullable<GuideReviewRecord["stepStates"]> }) => Promise<GuideReviewRecord>;
@@ -319,6 +321,34 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
     });
   }
 
+  /** Atomically replace one draft comment's body (location unchanged) without touching the rest of the review. */
+  async function updateDraftReviewComment(prKey: string, id: string, body: string): Promise<{ draftReview: DraftReview; comment: DraftReview["comments"][number] }> {
+    const text = body.trim();
+    if (text.length === 0) throw new Error("Draft body must not be empty");
+    return mutateState(async (state) => {
+      const existing = state.draftReviews.find((review) => review.prKey === prKey);
+      const current = existing?.comments.find((comment) => comment.id === id);
+      if (existing == null || current == null) throw new Error(`No review draft ${id} on this PR`);
+      const comment = { ...current, body: text };
+      const draftReview: DraftReview = { ...existing, comments: existing.comments.map((candidate) => candidate.id === id ? comment : candidate), updatedAt: runtime.now() };
+      state.draftReviews = [draftReview, ...state.draftReviews.filter((review) => review.prKey !== prKey)];
+      await writeState(state);
+      return { draftReview, comment };
+    });
+  }
+
+  async function deleteDraftReviewComment(prKey: string, id: string): Promise<{ draftReview: DraftReview; comment: DraftReview["comments"][number] }> {
+    return mutateState(async (state) => {
+      const existing = state.draftReviews.find((review) => review.prKey === prKey);
+      const comment = existing?.comments.find((candidate) => candidate.id === id);
+      if (existing == null || comment == null) throw new Error(`No review draft ${id} on this PR`);
+      const draftReview: DraftReview = { ...existing, comments: existing.comments.filter((candidate) => candidate.id !== id), updatedAt: runtime.now() };
+      state.draftReviews = [draftReview, ...state.draftReviews.filter((review) => review.prKey !== prKey)];
+      await writeState(state);
+      return { draftReview, comment };
+    });
+  }
+
   async function clearDraftReview(prKey: string): Promise<void> {
     await mutateState(async (state) => {
       state.draftReviews = state.draftReviews.filter((review) => review.prKey !== prKey);
@@ -462,12 +492,13 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
     });
   }
 
-  return { readState, currentReviewMemoryDistillationSource, currentReviewProfile, listReviewMemoryRecords, listArchivedReviews, reviewMemoryStats, saveReviewProfile, listRecentPullRequests, upsertPullRequest, markPullRequestReviewed, listFileReviews, setFileViewed, getDraftReview, saveDraftReview, appendDraftReviewComment, clearDraftReview, updateFocusScanProgress, updateGuideReviewProgress, listFocusScans, saveFocusScan, listAiReviews, saveAiReview, listGuideReviews, saveGuideReview, listOverviews, saveOverview, saveReviewMemory, currentReviewMemoryPrompt, removePullRequest };
+  return { readState, currentReviewMemoryDistillationSource, currentReviewProfile, listReviewMemoryRecords, listArchivedReviews, reviewMemoryStats, saveReviewProfile, listRecentPullRequests, upsertPullRequest, markPullRequestReviewed, listFileReviews, setFileViewed, getDraftReview, saveDraftReview, appendDraftReviewComment, updateDraftReviewComment, deleteDraftReviewComment, clearDraftReview, updateFocusScanProgress, updateGuideReviewProgress, listFocusScans, saveFocusScan, listAiReviews, saveAiReview, listGuideReviews, saveGuideReview, listOverviews, saveOverview, saveReviewMemory, currentReviewMemoryPrompt, removePullRequest };
 }
 
 export const {
   appendDraftReviewComment,
   clearDraftReview,
+  deleteDraftReviewComment,
   currentReviewMemoryDistillationSource,
   currentReviewMemoryPrompt,
   currentReviewProfile,
@@ -492,6 +523,7 @@ export const {
   saveReviewProfile,
   setFileViewed,
   upsertPullRequest,
+  updateDraftReviewComment,
   updateFocusScanProgress,
   updateGuideReviewProgress,
 } = createStateStore();

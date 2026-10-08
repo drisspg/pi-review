@@ -1,7 +1,8 @@
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 
-import { appendDraftReviewComment } from "./state.js";
+import { draftActionGuidelines, draftActionParameters, runDraftAction, type DraftAction } from "./review-draft-actions.js";
+import { appendDraftReviewComment, deleteDraftReviewComment, getDraftReview, updateDraftReviewComment } from "./state.js";
 import type { DraftReview, PullFile } from "./types.js";
 
 export type ReviewDraftToolContext = {
@@ -10,6 +11,9 @@ export type ReviewDraftToolContext = {
 };
 
 export type ReviewDraftToolDeps = {
+  getDraftReview: (prKey: string) => Promise<DraftReview | null>;
+  updateDraftReviewComment: (prKey: string, id: string, body: string) => Promise<{ comment: DraftReview["comments"][number] }>;
+  deleteDraftReviewComment: (prKey: string, id: string) => Promise<{ comment: DraftReview["comments"][number] }>;
   appendDraftReviewComment: (prKey: string, headSha: string, comment: Omit<DraftReview["comments"][number], "id">) => Promise<{ draftReview: DraftReview; comment: DraftReview["comments"][number]; created: boolean }>;
 };
 
@@ -21,7 +25,7 @@ export type ReviewDraftToolParams = {
   body: string;
 };
 
-const defaultDeps: ReviewDraftToolDeps = { appendDraftReviewComment };
+const defaultDeps: ReviewDraftToolDeps = { appendDraftReviewComment, getDraftReview, updateDraftReviewComment, deleteDraftReviewComment };
 
 /** Return the patch hunk containing an absolute line on the selected diff side. */
 function hunkForLine(patch: string, side: "RIGHT" | "LEFT", targetLine: number): number | null {
@@ -76,22 +80,31 @@ export function createReviewDraftTool(prKey: string, context: ReviewDraftToolCon
   return defineTool({
     name: "draft_review_comment",
     label: "Draft Review Comment",
-    description: "Create a private local Pi Review draft comment for review feedback or a proposed code change. The draft is editable in the UI and is not published to GitHub.",
+    description: "Create, edit, delete, or list private local Pi Review draft comments for review feedback or proposed code changes. Drafts are editable in the UI and never published to GitHub by this tool.",
     promptSnippet: "Create editable PR review comments without modifying source files",
-    promptGuidelines: ["Never modify repository files in Pi Review. Use draft_review_comment for feedback instead of editing repository files; use suggest_change for exact replacement code the PR author can apply."],
+    promptGuidelines: ["Never modify repository files in Pi Review. Use draft_review_comment for feedback instead of editing repository files; use suggest_change for exact replacement code the PR author can apply.", ...draftActionGuidelines],
     parameters: Type.Object({
-      path: Type.String({ description: "Exact changed-file path from the repository root." }),
-      line: Type.Integer({ minimum: 1, description: "Absolute ending line number on the selected diff side." }),
+      ...draftActionParameters,
+      path: Type.Optional(Type.String({ description: "Exact changed-file path from the repository root (create only)." })),
+      line: Type.Optional(Type.Integer({ minimum: 1, description: "Absolute ending line number on the selected diff side (create only)." })),
       startLine: Type.Optional(Type.Integer({ minimum: 1, description: "Absolute starting line for a multiline comment. Omit for a single-line comment." })),
       side: Type.Optional(Type.Union([Type.Literal("RIGHT"), Type.Literal("LEFT")], { description: "RIGHT for new/context lines or LEFT for removed/context lines. Defaults to RIGHT." })),
-      body: Type.String({ minLength: 1, description: "Concise review comment text written in the user's voice." }),
+      body: Type.Optional(Type.String({ minLength: 1, description: "Concise review comment text in the user's voice (required for create and edit; the full replacement for edit)." })),
     }),
-    async execute(_toolCallId, rawParams) {
+    async execute(_toolCallId, rawParams, signal) {
+      const params = rawParams as Partial<ReviewDraftToolParams> & { action?: DraftAction; id?: string };
+      const handled = await runDraftAction({
+        list: async () => (await deps.getDraftReview(prKey))?.comments ?? [],
+        edit: async (id, body) => (await deps.updateDraftReviewComment(prKey, id, body)).comment,
+        remove: async (id) => (await deps.deleteDraftReviewComment(prKey, id)).comment,
+      }, params, signal);
+      if (handled != null) return handled;
+      if (params.path == null || params.line == null || params.body == null) throw new Error("Creating a draft needs path, line, and body.");
       const result = await deps.appendDraftReviewComment(prKey, context.headSha, validateReviewDraftTarget(context, rawParams as ReviewDraftToolParams));
       const range = result.comment.startLine != null && result.comment.startLine !== result.comment.line ? `${result.comment.startLine}-${result.comment.line}` : String(result.comment.line);
       const message = result.created ? "Created private editable draft" : "Private editable draft already exists";
       return {
-        content: [{ type: "text", text: `${message} at ${result.comment.path}:${range}. It remains local until the user submits the review.` }],
+        content: [{ type: "text", text: `${message} ${result.comment.id} at ${result.comment.path}:${range}. It remains local until the user submits the review; revise it with action "edit" and this id.` }],
         details: result,
       };
     },

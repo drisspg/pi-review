@@ -3,6 +3,9 @@ import type { DraftReview } from "./types.js";
 
 export type PiTerminalDraftApiDeps = {
   appendDraftReviewComment: (prKey: string, headSha: string, comment: Omit<DraftReview["comments"][number], "id">) => Promise<{ draftReview: DraftReview; comment: DraftReview["comments"][number]; created: boolean }>;
+  getDraftReview: (prKey: string) => Promise<DraftReview | null>;
+  updateDraftReviewComment: (prKey: string, id: string, body: string) => Promise<{ draftReview: DraftReview; comment: DraftReview["comments"][number] }>;
+  deleteDraftReviewComment: (prKey: string, id: string) => Promise<{ draftReview: DraftReview; comment: DraftReview["comments"][number] }>;
   contextForPr: (prKey: string) => ReviewDraftToolContext | null;
   notifyDraftReview: (prKey: string, draftReview: DraftReview) => Promise<void>;
 };
@@ -29,7 +32,32 @@ export function createPiTerminalDraftApi(deps: PiTerminalDraftApiDeps) {
     return result;
   }
 
-  return { add };
+  function text(payload: Record<string, unknown>, key: string): string {
+    const value = payload[key];
+    if (typeof value !== "string" || value.trim().length === 0) throw new Error(`Expected ${key}`);
+    return value;
+  }
+
+  /** Private drafts only; the UI is told about every change so open review pages stay in sync. */
+  async function list(payload: Record<string, unknown>) {
+    return { comments: (await deps.getDraftReview(text(payload, "prKey")))?.comments ?? [] };
+  }
+
+  async function edit(payload: Record<string, unknown>) {
+    const prKey = text(payload, "prKey");
+    const result = await deps.updateDraftReviewComment(prKey, text(payload, "id"), text(payload, "body"));
+    await deps.notifyDraftReview(prKey, result.draftReview);
+    return result;
+  }
+
+  async function remove(payload: Record<string, unknown>) {
+    const prKey = text(payload, "prKey");
+    const result = await deps.deleteDraftReviewComment(prKey, text(payload, "id"));
+    await deps.notifyDraftReview(prKey, result.draftReview);
+    return result;
+  }
+
+  return { add, list, edit, remove };
 }
 
 export type PiTerminalDraftApi = ReturnType<typeof createPiTerminalDraftApi>;

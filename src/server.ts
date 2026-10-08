@@ -45,7 +45,7 @@ import { createShutdownRequest } from "./server-shutdown.js";
 import { createShellApi } from "./shell-api.js";
 import { withTtlCache } from "./ttl-cache.js";
 import { createUsageApi, defaultUsageApiDeps, defaultUsageLogPath } from "./usage-api.js";
-import { appendDraftReviewComment, clearDraftReview, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, getDraftReview, listAiReviews, listFileReviews, listFocusScans, listGuideReviews, listOverviews, listRecentPullRequests, listReviewMemoryRecords, listArchivedReviews, markPullRequestReviewed, removePullRequest, reviewMemoryStats, saveAiReview, saveDraftReview, saveFocusScan, saveGuideReview, saveOverview, saveReviewMemory, saveReviewProfile, setFileViewed, updateFocusScanProgress, updateGuideReviewProgress, upsertPullRequest } from "./state.js";
+import { appendDraftReviewComment, clearDraftReview, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, getDraftReview, listAiReviews, listFileReviews, listFocusScans, listGuideReviews, listOverviews, listRecentPullRequests, listReviewMemoryRecords, listArchivedReviews, markPullRequestReviewed, removePullRequest, reviewMemoryStats, updateDraftReviewComment, deleteDraftReviewComment, saveAiReview, saveDraftReview, saveFocusScan, saveGuideReview, saveOverview, saveReviewMemory, saveReviewProfile, setFileViewed, updateFocusScanProgress, updateGuideReviewProgress, upsertPullRequest } from "./state.js";
 import { cleanupPrWorktree, deletePrWorktree, preparePrWorktree, repoDirForRef, worktreeDirForRef, withPrWorktree } from "./worktrees.js";
 
 // Install persistent handlers before the asynchronous ownership check. Signals during startup
@@ -216,7 +216,7 @@ const preReviewAssessor = createPreReviewAssessor({
 });
 const piApi = createPiApi({ askPi, piDiagnostics, setPiModel });
 const piTerminalApi = createPiTerminalApi({ deleteSession: piTerminalManager.deleteSession });
-const piTerminalDraftApi = createPiTerminalDraftApi({ appendDraftReviewComment, contextForPr: piSessionReviewContext, notifyDraftReview: piTerminalManager.broadcastDraftReview });
+const piTerminalDraftApi = createPiTerminalDraftApi({ appendDraftReviewComment, getDraftReview, updateDraftReviewComment, deleteDraftReviewComment, contextForPr: piSessionReviewContext, notifyDraftReview: piTerminalManager.broadcastDraftReview });
 const prApi = createPrApi(defaultPrApiDeps({
   cleanupPrWorktree,
   deletePrWorktree,

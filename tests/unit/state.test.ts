@@ -195,6 +195,24 @@ test("appendDraftReviewComment preserves review fields, avoids duplicates, and r
   assert.deepEqual(await store.getDraftReview("pr"), created.draftReview);
 });
 
+test("draft comments can be edited in place and deleted without touching the rest of the review", async () => {
+  const existing = { prKey: "pr", headSha: "head", event: "REQUEST_CHANGES" as const, body: "overall", comments: [{ id: "pi-1", path: "a.ts", line: 4, side: "RIGHT" as const, body: "old" }, { id: "local-2", path: "b.ts", line: 8, side: "RIGHT" as const, body: "mine" }], updatedAt: "first" };
+  const { runtime } = fakeRuntime({ ...emptyState(), draftReviews: [existing] });
+  const store = createStateStore(runtime, paths);
+
+  const edited = await store.updateDraftReviewComment("pr", "pi-1", "  new text  ");
+  assert.deepEqual(edited.comment, { id: "pi-1", path: "a.ts", line: 4, side: "RIGHT", body: "new text" });
+  await assert.rejects(store.updateDraftReviewComment("pr", "pi-1", "   "), /empty/);
+  await assert.rejects(store.updateDraftReviewComment("pr", "missing", "x"), /No review draft missing/);
+
+  const deleted = await store.deleteDraftReviewComment("pr", "local-2");
+  assert.equal(deleted.comment.body, "mine");
+  const stored = await store.getDraftReview("pr");
+  assert.deepEqual(stored?.comments.map((comment) => [comment.id, comment.body]), [["pi-1", "new text"]]);
+  assert.deepEqual([stored?.event, stored?.body], ["REQUEST_CHANGES", "overall"]);
+  await assert.rejects(store.deleteDraftReviewComment("pr", "local-2"), /No review draft/);
+});
+
 test("clearDraftReview removes only the submitted PR draft", async () => {
   const first = { prKey: "first", headSha: "head", event: "COMMENT" as const, body: "", comments: [], updatedAt: "first" };
   const second = { ...first, prKey: "second" };
