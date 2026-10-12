@@ -8,6 +8,7 @@ import { fileFingerprint } from "./file-fingerprint.js";
 import { markGeneratedPullFiles, parseGitattributes, type GitattributesRule } from "./gitattributes.js";
 import { logger } from "./logger.js";
 import { prKey } from "./pr.js";
+import type { GithubReview } from "./activity-api.js";
 import type { InboxSubjectRef } from "./inbox-api.js";
 import type { CheckRollupState, CommitChecks, GitHubDraftComment, GitHubNotification, InboxLatestActivity, GitHubDraftCommentInput, GitHubPendingReview, GitHubPendingReviewLookup, InboxSubjectKind, InboxSubjectSnapshot, PullFile, PullIssueComment, PullRequest, PullRequestRef, PullRequestReviewData, PullRequestReviewDecision, PullRequestReviewSummary, PullReviewComment, PytorchEvidenceComment, PytorchIssueSnapshot, PytorchPreReviewEvidence, PytorchPullSnapshot, PytorchSearchResult, StoredPullRequest, ViewerPullRequest, ViewerPullRequestScope } from "./types.js";
 
@@ -55,6 +56,7 @@ export type GitHubClient = {
   closeIssue: (ref: PullRequestRef) => Promise<void>;
   convertPullRequestToDraft: (ref: PullRequestRef) => Promise<void>;
   fetchPreReviewEvidence: (ref: PullRequestRef) => Promise<PytorchPreReviewEvidence>;
+  fetchViewerReviewContributions: (fromIso: string, toIso: string) => Promise<GithubReview[]>;
 };
 
 const defaultRuntime: GitHubRuntime = {
@@ -793,12 +795,36 @@ export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): Git
     };
   }
 
+  /** The viewer's submitted PR reviews from any client; GitHub caps the window at one year. */
+  async function fetchViewerReviewContributions(fromIso: string, toIso: string): Promise<GithubReview[]> {
+    type Page = { viewer?: { contributionsCollection?: { pullRequestReviewContributions?: { pageInfo?: { hasNextPage?: boolean; endCursor?: string | null }; nodes?: Array<{ occurredAt?: string; pullRequestReview?: { id?: string; state?: string } | null; pullRequest?: { number?: number; title?: string; url?: string; repository?: { nameWithOwner?: string } } | null }> } } } };
+    const query = `query($from: DateTime!, $to: DateTime!, $after: String) { viewer { contributionsCollection(from: $from, to: $to) { pullRequestReviewContributions(first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes { occurredAt pullRequestReview { id state } pullRequest { number title url repository { nameWithOwner } } } } } } }`;
+    const reviews: GithubReview[] = [];
+    let after: string | null = null;
+    for (let page = 0; page < 30; page += 1) {
+      const variables: Record<string, string> = { from: fromIso, to: toIso };
+      if (after != null) variables.after = after;
+      const data: Page = await ghGraphql<Page>(query, variables, `viewer review contributions page ${page + 1}`, { allowPartial: true, retryOnServerError: true });
+      const connection = data.viewer?.contributionsCollection?.pullRequestReviewContributions;
+      for (const node of connection?.nodes ?? []) {
+        const state = node.pullRequestReview?.state;
+        const repo = node.pullRequest?.repository?.nameWithOwner;
+        if (typeof node.pullRequestReview?.id !== "string" || typeof repo !== "string" || typeof node.pullRequest?.number !== "number" || typeof node.occurredAt !== "string") continue;
+        if (state !== "APPROVED" && state !== "CHANGES_REQUESTED" && state !== "COMMENTED" && state !== "DISMISSED") continue;
+        reviews.push({ id: node.pullRequestReview.id, prKey: `github.com/${repo}#${node.pullRequest.number}`, title: node.pullRequest.title ?? "(untitled)", url: node.pullRequest.url ?? `https://github.com/${repo}/pull/${node.pullRequest.number}`, state, at: node.occurredAt });
+      }
+      if (connection?.pageInfo?.hasNextPage !== true || connection.pageInfo.endCursor == null) break;
+      after = connection.pageInfo.endCursor;
+    }
+    return reviews;
+  }
+
   async function convertPullRequestToDraft(ref: PullRequestRef): Promise<void> {
     const { id } = await fetchWorkflowPullRequest(ref);
     await ghGraphql(`mutation($id: ID!) { convertPullRequestToDraft(input: { pullRequestId: $id }) { pullRequest { isDraft } } }`, { id }, "convert PR to draft");
   }
 
-  return { fetchPullRequestReviewData, compareCommits, fetchCommitChecks, fetchFileText, fetchPendingPullRequestReview, createPendingPullRequestReview, addPendingPullRequestReviewThread, submitPullRequestReview, replyToReviewComment, addIssueComment, editReviewComment, editIssueComment, editReviewSummary, setReviewThreadResolved, fetchViewerLogin, fetchNotifications, fetchSubjectSnapshots, fetchViewerPullRequests, fetchLatestActivity, markNotificationDone, unsubscribeNotification, searchWorkflowPullRequests, searchWorkflowIssues, fetchWorkflowPullRequest, listModuleLabels, addReaction, addLabels, closeIssue, convertPullRequestToDraft, fetchPreReviewEvidence };
+  return { fetchPullRequestReviewData, compareCommits, fetchCommitChecks, fetchFileText, fetchPendingPullRequestReview, createPendingPullRequestReview, addPendingPullRequestReviewThread, submitPullRequestReview, replyToReviewComment, addIssueComment, editReviewComment, editIssueComment, editReviewSummary, setReviewThreadResolved, fetchViewerLogin, fetchNotifications, fetchSubjectSnapshots, fetchViewerPullRequests, fetchLatestActivity, markNotificationDone, unsubscribeNotification, searchWorkflowPullRequests, searchWorkflowIssues, fetchWorkflowPullRequest, listModuleLabels, addReaction, addLabels, closeIssue, convertPullRequestToDraft, fetchPreReviewEvidence, fetchViewerReviewContributions };
 }
 
 const defaultClient = createGitHubClient();

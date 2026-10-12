@@ -8,7 +8,7 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import { createActivityApi, resolveActivityLedgerPath } from "./activity-api.js";
+import { createActivityApi, resolveActivityLedgerPath, type GithubReviewStore } from "./activity-api.js";
 import { createAskStreamApi } from "./ask-stream-api.js";
 import { createBlameApi } from "./blame-api.js";
 import { createCommentApi, defaultCommentApiDeps } from "./comment-api.js";
@@ -129,7 +129,16 @@ const inboxApi = createInboxApi({
   },
 });
 // Activity ledger (focused-time heartbeats + workflow actions) also lives next to the state file.
+async function writeFileAtomic(path: string, data: string): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  const tempPath = `${path}.${process.pid}.tmp`;
+  await writeFile(tempPath, data, "utf8");
+  await rename(tempPath, path);
+}
+const activitySyncEnabled = process.env.PI_REVIEW_ACTIVITY_SYNC === "1" || (process.env.PI_REVIEW_ACTIVITY_SYNC !== "0" && process.env.PI_REVIEW_STATE_PATH == null);
 const activityLedgerPath = resolveActivityLedgerPath({ env: process.env, configuredPath: readPiReviewLocalConfig().activityLedgerPath, defaultPath: `${defaultUsageLogPath().replace(/\.usage\.jsonl$/, "")}.activity.jsonl`, home: homedir() });
+const activityGithubPath = activityLedgerPath.replace(/(\.jsonl)?$/, ".github.json");
+const activityReportPath = activityLedgerPath.replace(/(\.jsonl)?$/, ".md");
 const activityApi = createActivityApi({
   readLedger: async () => existsSync(activityLedgerPath) ? await readFile(activityLedgerPath, "utf8") : "",
   async appendLedger(line) {
@@ -141,8 +150,19 @@ const activityApi = createActivityApi({
   listReviewMemoryRecords: () => listReviewMemoryRecords(Number.MAX_SAFE_INTEGER),
   listRecentPullRequests,
   now: () => new Date().toISOString(),
+  // GitHub review sync and the report follow the ledger's isolation rule: real server only, unless forced on.
+  ...(activitySyncEnabled ? { fetchGithubReviews: defaultGitHubClient.fetchViewerReviewContributions } : {}),
+  readGithubReviews: async () => existsSync(activityGithubPath) ? JSON.parse(await readFile(activityGithubPath, "utf8")) as GithubReviewStore : null,
+  writeGithubReviews: (store) => writeFileAtomic(activityGithubPath, `${JSON.stringify(store)}\n`),
+  writeReport: (markdown) => writeFileAtomic(activityReportPath, markdown),
 });
-logger.info("activity", "ledger path", { path: activityLedgerPath });
+logger.info("activity", "ledger path", { path: activityLedgerPath, report: activityReportPath, githubSync: activitySyncEnabled });
+const ACTIVITY_SYNC_CHECK_MS = 6 * 60 * 60 * 1000;
+function syncActivity(): void {
+  void activityApi.sync().then((result) => { if (!result.skipped) logger.info("activity", "GitHub reviews synced", result); }).catch((error: unknown) => logger.warn("activity", "GitHub review sync failed", { error: error instanceof Error ? error.message : String(error) }));
+}
+const activitySyncTimer = setInterval(syncActivity, ACTIVITY_SYNC_CHECK_MS);
+activitySyncTimer.unref();
 
 // Like the inbox snapshot, the PyTorch workflow store (tracked modules + last queue snapshot) sits next to the state file.
 const pytorchStorePath = `${defaultUsageLogPath().replace(/\.usage\.jsonl$/, "")}.pytorch.json`;
@@ -343,6 +363,7 @@ async function shutdown(signal: string): Promise<void> {
   server.closeAllConnections();
   await Promise.all([
     preReviewAssessor.stop(),
+    Promise.resolve(clearInterval(activitySyncTimer)),
     Promise.resolve(preReviewChat.stop()),
     new Promise<void>((resolveClose) => server.close(() => resolveClose())),
     piTerminalManager.dispose(),
@@ -361,6 +382,7 @@ if (pendingShutdown != null) {
   server.listen(port, "127.0.0.1", () => {
     logger.info("server", "listening", { url: `http://127.0.0.1:${port}`, webRoot: WEB_ROOT });
     preReviewAssessor.start();
+    syncActivity();
     usageApi.record("server", "server:start");
   });
 }

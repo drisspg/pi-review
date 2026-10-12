@@ -76,6 +76,7 @@ async function inputFromRequest(req: IncomingMessage): Promise<string> {
 export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
   const jsonPostHandlers: Record<string, JsonPostHandler> = {
     "/api/activity/heartbeat": (payload) => deps.activityApi.heartbeat(payload),
+    "/api/activity/sync": () => deps.activityApi.sync({ force: true }),
     "/api/analysis/start": (payload) => deps.analysisApi.start(payload),
     "/api/analysis/status": (payload) => deps.analysisApi.status(payload),
     "/api/focus-scan/progress": (payload) => deps.savedAnalysisApi.updateFocusScanProgress(payload),

@@ -47,8 +47,9 @@ src/                    Node server (TypeScript, ESM, run via tsx)
                         read-only evidence + saved verdict + thread; threads persist in the pytorch store
   activity-api.ts       Review activity: append-only JSONL ledger of focused-time heartbeats (client
                         counts only visible + focused + input within 90s; <=2 min per beat) and
-                        server-recorded workflow actions; `summary(range)` joins it with reviewMemory
-                        (submitted/archived reviews) and labels pre-ledger time as a usage-log estimate
+                        server-recorded workflow actions; `summary(range)` merges reviewMemory with the
+                        viewer's GitHub review contributions (daily sync, 1-year backfill) as one
+                        review per PR per day, adds weekly trend, and labels pre-ledger time as estimated
   pre-review-assessor.ts  One background agent: walks owed pre-reviews (queue order), gathers
                         read-only evidence, runs headless Pi with `--no-tools` + its own system
                         prompt, saves suggestions. Disabled by PI_REVIEW_DISABLE_AUTO_REVIEWS=1 or
@@ -122,7 +123,8 @@ JSON; custom state also isolates session records and defaults checkouts to `<sta
 `~/Library/Caches/pi-review`), `PI_REVIEW_USAGE_LOG_PATH` (usage JSONL; defaults to `<state>.usage.jsonl` next to the
 state file so test/dev instances never pollute the real log), `PI_REVIEW_ACTIVITY_PATH` (review activity
 ledger; else `.pi-review.local.json` `activityLedgerPath`, honored only without a custom state path;
-else `<state>.activity.jsonl`), `PI_REVIEW_TEST_PORT` (Playwright
+else `<state>.activity.jsonl`; GitHub review sync + `<ledger>.md` year report run only for the default
+state unless `PI_REVIEW_ACTIVITY_SYNC=1`, `=0` disables), `PI_REVIEW_TEST_PORT` (Playwright
 port override), `PI_REVIEW_FAST_TESTS=1` (fast e2e mode),
 `PI_REVIEW_DISABLE_AUTO_REVIEWS=1` (suppress the on-open guide/review/focus warmup — REQUIRED for
 any test or probe server, or PR opens will start real Pi jobs);
