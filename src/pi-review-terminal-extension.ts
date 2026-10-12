@@ -1,6 +1,6 @@
 import { StringEnum, Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { draftActionGuidelines, draftActionParameters, runDraftAction, type ReviewDraftOps } from "./review-draft-actions.js";
+import { AI_DRAFT_FORMAT_GUIDELINE, draftActionGuidelines, draftActionParameters, runDraftAction, type ReviewDraftOps } from "./review-draft-actions.js";
 import type { DraftReviewComment } from "./types.js";
 import { createReviewSuggestionTool } from "./review-suggestion-tool.js";
 import { installReviewWorkspaceGuidance } from "./pi-review-workspace.js";
@@ -177,7 +177,7 @@ export default function piReviewTerminalExtension(pi: ExtensionAPI) {
   });
 
   pi.on("before_agent_start", (event) => ({
-    systemPrompt: `${event.systemPrompt}\n\nPi Review comment semantics: the checkout is a read-only review workspace — never modify repository files (the edit and write tools are blocked in this session). Requests to add, leave, post, write, or put a comment on the PR or current line mean creating an editable review draft with draft_review_comment. Requests to update, reword, or remove an existing comment mean draft_review_comment with action "edit" or "delete" on that draft (action "list" finds ids) — never a duplicate replacement draft. For exact replacement code that the author can accept with Apply suggestion, use suggest_change; use draft_review_comment for explanatory feedback or non-applicable fenced diffs.`,
+    systemPrompt: `${event.systemPrompt}\n\nPi Review comment semantics: the checkout is a read-only review workspace — never modify repository files (the edit and write tools are blocked in this session). Requests to add, leave, post, write, or put a comment on the PR or current line mean creating an editable review draft with draft_review_comment. Requests to update, reword, or remove an existing comment mean draft_review_comment with action "edit" or "delete" on that draft (action "list" finds ids) — never a duplicate replacement draft. ${AI_DRAFT_FORMAT_GUIDELINE} For exact replacement code that the author can accept with Apply suggestion, use suggest_change; use draft_review_comment for explanatory feedback or non-applicable fenced diffs.`,
   }));
 
   pi.on("tool_call", (event) => {

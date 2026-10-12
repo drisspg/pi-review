@@ -23,9 +23,9 @@ test("suggest_change creates a GitHub suggestion on the selected range, without 
   const h = harness({ path: "a.ts", startLine: 10, line: 11, side: "RIGHT" });
   assert.equal(h.tool.name, "suggest_change");
   await h.execute({ code: "  first();\n  second();" });
-  assert.deepEqual(h.saved, [{ path: "a.ts", startLine: 10, line: 11, side: "RIGHT", body: "```suggestion\n  first();\n  second();\n```" }]);
+  assert.deepEqual(h.saved, [{ path: "a.ts", startLine: 10, line: 11, side: "RIGHT", body: "#### AI-assisted\n\n```suggestion\n  first();\n  second();\n```" }]);
   await h.execute({ code: "", line: 12 });
-  assert.deepEqual(h.saved[1], { path: "a.ts", line: 12, side: "RIGHT", body: "```suggestion\n\n```" });
+  assert.deepEqual(h.saved[1], { path: "a.ts", line: 12, side: "RIGHT", body: "#### AI-assisted\n\n```suggestion\n\n```" });
 });
 
 test("suggestion code preserves indentation, trailing newlines, and embedded fences", () => {

@@ -32,7 +32,7 @@ test("creates and broadcasts a validated terminal review draft", async () => {
 
   assert.equal(result.created, true);
   assert.deepEqual(calls, [
-    { prKey: draftReview.prKey, headSha: context.headSha, comment: { path: "src/a.ts", line: 5, side: "RIGHT", body: "Please cover this case." } },
+    { prKey: draftReview.prKey, headSha: context.headSha, comment: { path: "src/a.ts", line: 5, side: "RIGHT", body: "#### AI-assisted\n\nPlease cover this case." } },
     { prKey: draftReview.prKey, review: draftReview },
   ]);
 });
@@ -72,6 +72,6 @@ test("edits and deletes drafts by id and broadcasts the updated review to open p
   assert.deepEqual((await api.list({ prKey: "github.com/org/repo#1" })).comments.map((comment) => comment.id), ["pi-1"]);
   await api.edit({ prKey: "github.com/org/repo#1", id: "pi-1", body: "new" });
   await api.remove({ prKey: "github.com/org/repo#1", id: "pi-1" });
-  assert.deepEqual(broadcasts.map((draft) => draft.comments.map((comment) => comment.body)), [["new"], []]);
+  assert.deepEqual(broadcasts.map((draft) => draft.comments.map((comment) => comment.body)), [["#### AI-assisted\n\nnew"], []], "edits get the disclosure header too");
   await assert.rejects(api.edit({ prKey: "github.com/org/repo#1", id: "pi-1" }), /Expected body/);
 });

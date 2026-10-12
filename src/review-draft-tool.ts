@@ -1,7 +1,7 @@
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 
-import { draftActionGuidelines, draftActionParameters, runDraftAction, type DraftAction } from "./review-draft-actions.js";
+import { draftActionGuidelines, draftActionParameters, formatAiDraftBody, runDraftAction, type DraftAction } from "./review-draft-actions.js";
 import { appendDraftReviewComment, deleteDraftReviewComment, getDraftReview, updateDraftReviewComment } from "./state.js";
 import type { DraftReview, PullFile } from "./types.js";
 
@@ -72,7 +72,7 @@ export function validateReviewDraftTarget(context: ReviewDraftToolContext, param
   const endHunk = hunkForLine(file.patch, side, params.line);
   if (endHunk == null) throw new Error(`${path}:${params.line} is not reviewable on the ${side} side of the current diff.`);
   if (params.startLine != null && hunkForLine(file.patch, side, params.startLine) !== endHunk) throw new Error("startLine and line must be reviewable within the same diff hunk.");
-  return { path, line: params.line, ...(params.startLine == null ? {} : { startLine: params.startLine }), side, body };
+  return { path, line: params.line, ...(params.startLine == null ? {} : { startLine: params.startLine }), side, body: formatAiDraftBody(body) };
 }
 
 /** Create the conversation-only tool that persists editable local review drafts. */
@@ -95,7 +95,7 @@ export function createReviewDraftTool(prKey: string, context: ReviewDraftToolCon
       const params = rawParams as Partial<ReviewDraftToolParams> & { action?: DraftAction; id?: string };
       const handled = await runDraftAction({
         list: async () => (await deps.getDraftReview(prKey))?.comments ?? [],
-        edit: async (id, body) => (await deps.updateDraftReviewComment(prKey, id, body)).comment,
+        edit: async (id, body) => (await deps.updateDraftReviewComment(prKey, id, formatAiDraftBody(body))).comment,
         remove: async (id) => (await deps.deleteDraftReviewComment(prKey, id)).comment,
       }, params, signal);
       if (handled != null) return handled;

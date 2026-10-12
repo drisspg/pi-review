@@ -16,6 +16,31 @@ export type ReviewDraftOps = {
 
 export type DraftAction = "create" | "edit" | "delete" | "list";
 
+/**
+ * Disclosure header for model-drafted review comments. PyTorch's AI policy accepts a labeling
+ * section heading (instead of a quote block); the reviewer directs every draft, so the body
+ * below it is plain text in the reviewer's voice.
+ */
+export const AI_DRAFT_HEADER = "#### AI-assisted";
+
+/**
+ * Normalize a model-drafted body to the header convention: unwrap a whole-body quote block,
+ * drop "AI-assisted …:" lead-ins, and put the header on its own line. Idempotent.
+ */
+export function formatAiDraftBody(body: string): string {
+  let text = body.trim();
+  if (text.startsWith(AI_DRAFT_HEADER)) text = text.slice(AI_DRAFT_HEADER.length).trim();
+  const lines = text.split("\n");
+  if (lines.filter((line) => line.trim().length > 0).every((line) => line.trimStart().startsWith(">"))) {
+    text = lines.map((line) => line.replace(/^\s*> ?/, "")).join("\n").trim();
+  }
+  text = text.replace(/^\**AI[- ]assisted[^:\n]{0,40}:\**\s*/i, "").trim();
+  return `${AI_DRAFT_HEADER}\n\n${text}`;
+}
+
+/** Shared wording so every Pi surface describes the comment format the same way. */
+export const AI_DRAFT_FORMAT_GUIDELINE = `Pi Review adds the "${AI_DRAFT_HEADER}" disclosure header to every draft automatically. Write the body as plain text in the reviewer's voice (the reviewer directs these comments): no quote blocks, no ">" prefixes, and no "AI-assisted suggestion:" lead-ins.`;
+
 /** Schema fields every host adds to draft_review_comment; `body` becomes optional (required for create/edit at run time). */
 export const draftActionParameters = {
   action: Type.Optional(StringEnum(["create", "edit", "delete", "list"] as const, { description: "create (default) a new draft; edit replaces an existing draft's body in place; delete removes a draft; list shows drafts with ids." })),
@@ -23,6 +48,7 @@ export const draftActionParameters = {
 };
 
 export const draftActionGuidelines = [
+  AI_DRAFT_FORMAT_GUIDELINE,
   "To revise or reword an existing review comment, call draft_review_comment with action \"edit\" and its id (action \"list\" shows ids) instead of creating a replacement; use action \"delete\" for superseded or duplicate drafts.",
   "Only edit or delete a reviewer-authored draft (id not starting with pi-) when the user explicitly asks.",
 ];

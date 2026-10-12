@@ -1,3 +1,4 @@
+import { formatAiDraftBody } from "./review-draft-actions.js";
 import { validateReviewDraftTarget, type ReviewDraftToolContext, type ReviewDraftToolParams } from "./review-draft-tool.js";
 import type { DraftReview } from "./types.js";
 
@@ -45,7 +46,7 @@ export function createPiTerminalDraftApi(deps: PiTerminalDraftApiDeps) {
 
   async function edit(payload: Record<string, unknown>) {
     const prKey = text(payload, "prKey");
-    const result = await deps.updateDraftReviewComment(prKey, text(payload, "id"), text(payload, "body"));
+    const result = await deps.updateDraftReviewComment(prKey, text(payload, "id"), formatAiDraftBody(text(payload, "body")));
     await deps.notifyDraftReview(prKey, result.draftReview);
     return result;
   }
