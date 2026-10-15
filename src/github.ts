@@ -329,6 +329,14 @@ const SNAPSHOT_BATCH = 40;
 const WORKFLOW_PULL_FIELDS = "id number title url body createdAt updatedAt state merged isDraft additions deletions changedFiles reviewDecision author { login } labels(first: 40) { nodes { name } } reactionGroups { content viewerHasReacted } closingIssuesReferences(first: 5) { nodes { number title url labels(first: 30) { nodes { name } } } } reviewRequests(first: 15) { nodes { requestedReviewer { ... on User { login } ... on Team { slug } } } } commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }";
 const WORKFLOW_ISSUE_FIELDS = "number title url createdAt updatedAt author { login } labels(first: 30) { nodes { name } } assignees(first: 5) { nodes { login } } comments { totalCount }";
 const WORKFLOW_SEARCH_LIMIT = 50;
+/** Heavy PR selections make 50-node searches time out on GitHub's side (HTTP 502 / "Something went wrong"); page smaller and retry smaller. */
+const WORKFLOW_PAGE_SIZE = 25;
+const WORKFLOW_RETRY_PAGE_SIZE = 10;
+
+function isRetryableSearchError(error: unknown): boolean {
+  const text = `${error instanceof Error ? error.message : String(error)} ${String((error as { stderr?: unknown } | null)?.stderr ?? "")}`;
+  return /HTTP 50[0-9]\b|Something went wrong|timed? ?out|no search results/i.test(text);
+}
 
 export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): GitHubClient {
   let viewerLoginPromise: Promise<string | null> | null = null;
@@ -692,22 +700,54 @@ export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): Git
     await ghApiArgs<unknown>(["--method", "DELETE", `/notifications/threads/${encodeURIComponent(threadId)}/subscription`]);
   }
 
-  async function searchWorkflow<N, T>(graphql: string, query: string, scope: string, convert: (node: N) => T | null): Promise<PytorchSearchResult<T>> {
-    const data = await ghGraphql<{ search?: { issueCount?: number; nodes?: N[] } }>(graphql, { q: query }, scope, { allowPartial: true, retryOnServerError: true });
-    const items = (data.search?.nodes ?? []).map(convert).filter((item): item is T => item != null);
-    return { total: data.search?.issueCount ?? items.length, items };
+  type SearchPage<N> = { issueCount?: number; pageInfo?: { hasNextPage?: boolean; endCursor?: string | null }; nodes?: N[] };
+
+  /**
+   * One search page. A GitHub-side timeout arrives as an HTTP 502 or as a "partial" GraphQL
+   * response whose `search` is null; neither may pass as an empty queue, so retry once with a
+   * smaller page and otherwise throw so callers keep their previous results.
+   */
+  async function searchWorkflowPage<N>(graphql: string, query: string, after: string | null, scope: string): Promise<SearchPage<N>> {
+    let lastError: unknown = null;
+    for (const first of [WORKFLOW_PAGE_SIZE, WORKFLOW_RETRY_PAGE_SIZE]) {
+      if (lastError != null) await runtime.sleep(1500);
+      try {
+        const variables: Record<string, string | number> = { q: query, first };
+        if (after != null) variables.after = after;
+        const data = await ghGraphql<{ search?: SearchPage<N> | null }>(graphql, variables, scope, { allowPartial: true, retryOnServerError: true });
+        if (data.search != null) return data.search;
+        lastError = new Error("GitHub returned no search results (the query timed out on GitHub's side)");
+      } catch (error) {
+        if (!isRetryableSearchError(error)) throw error;
+        lastError = error;
+      }
+    }
+    throw lastError;
+  }
+
+  async function searchWorkflow<N, T>(nodeSelection: string, query: string, scope: string, convert: (node: N) => T | null): Promise<PytorchSearchResult<T>> {
+    const graphql = `query($q: String!, $first: Int!, $after: String) { search(query: $q, type: ISSUE, first: $first, after: $after) { issueCount pageInfo { hasNextPage endCursor } nodes { ${nodeSelection} } } }`;
+    const items: T[] = [];
+    let total = 0;
+    let after: string | null = null;
+    while (items.length < WORKFLOW_SEARCH_LIMIT) {
+      const page: SearchPage<N> = await searchWorkflowPage<N>(graphql, query, after, scope);
+      total = page.issueCount ?? total;
+      items.push(...(page.nodes ?? []).map(convert).filter((item): item is T => item != null));
+      if (page.pageInfo?.hasNextPage !== true || page.pageInfo.endCursor == null) break;
+      after = page.pageInfo.endCursor;
+    }
+    return { total: Math.max(total, items.length), items: items.slice(0, WORKFLOW_SEARCH_LIMIT) };
   }
 
   async function searchWorkflowPullRequests(query: string): Promise<PytorchSearchResult<PytorchPullSnapshot>> {
     if (!/\bis:pr\b/.test(query)) throw new Error("Workflow PR searches must include is:pr");
-    const graphql = `query($q: String!) { search(query: $q, type: ISSUE, first: ${WORKFLOW_SEARCH_LIMIT}) { issueCount nodes { ... on PullRequest { ${WORKFLOW_PULL_FIELDS} } } } }`;
-    return searchWorkflow<WorkflowPullGraphql, PytorchPullSnapshot>(graphql, query, "workflow PR search", toWorkflowPull);
+    return searchWorkflow<WorkflowPullGraphql, PytorchPullSnapshot>(`... on PullRequest { ${WORKFLOW_PULL_FIELDS} }`, query, "workflow PR search", toWorkflowPull);
   }
 
   async function searchWorkflowIssues(query: string): Promise<PytorchSearchResult<PytorchIssueSnapshot>> {
     if (!/\bis:issue\b/.test(query)) throw new Error("Workflow issue searches must include is:issue");
-    const graphql = `query($q: String!) { search(query: $q, type: ISSUE, first: ${WORKFLOW_SEARCH_LIMIT}) { issueCount nodes { ... on Issue { ${WORKFLOW_ISSUE_FIELDS} } } } }`;
-    return searchWorkflow<WorkflowIssueGraphql, PytorchIssueSnapshot>(graphql, query, "workflow issue search", toWorkflowIssue);
+    return searchWorkflow<WorkflowIssueGraphql, PytorchIssueSnapshot>(`... on Issue { ${WORKFLOW_ISSUE_FIELDS} }`, query, "workflow issue search", toWorkflowIssue);
   }
 
   async function fetchWorkflowPullRequest(ref: PullRequestRef): Promise<PytorchPullSnapshot> {

@@ -194,3 +194,56 @@ test("GitHub client summarizes commit check runs", async () => {
 
   assert.deepEqual(checks, { total: 4, success: 1, failure: 1, pending: 1, neutral: 1, failures: [{ name: "lint", url: "lint-url" }] });
 });
+
+function searchRuntime(responses: Array<(args: string[]) => { stdout: string; stderr?: string } | Error>) {
+  const calls: string[][] = [];
+  const sleeps: number[] = [];
+  return {
+    calls,
+    sleeps,
+    runtime: {
+      async execFile(_command: string, args: string[]) {
+        calls.push(args);
+        const respond = responses.shift();
+        if (respond == null) throw new Error(`unexpected gh call: ${args.join(" ")}`);
+        const result = respond(args);
+        if (result instanceof Error) throw result;
+        return { stdout: result.stdout, stderr: result.stderr ?? "" };
+      },
+      async mkdtemp() { return "/tmp/x"; },
+      async rm() {},
+      async writeFile() {},
+      async sleep(ms: number) { sleeps.push(ms); },
+      now() { return "2026-10-15T00:00:00.000Z"; },
+    },
+  };
+}
+
+const pullNode = (number: number) => ({ id: `PR_${number}`, number, title: `pr ${number}`, url: "u", body: "", createdAt: "c", updatedAt: "u", state: "OPEN", isDraft: false, labels: { nodes: [{ name: "triaged" }] } });
+const page = (numbers: number[], next: string | null, total = 27) => ({ stdout: JSON.stringify({ data: { search: { issueCount: total, pageInfo: { hasNextPage: next != null, endCursor: next }, nodes: numbers.map(pullNode) } } }) });
+
+test("workflow searches page through results instead of one heavy 50-node query", async () => {
+  const h = searchRuntime([() => page([1, 2], "c1"), () => page([3], null)]);
+  const result = await createGitHubClient(h.runtime as never).searchWorkflowPullRequests("repo:pytorch/pytorch is:pr is:open");
+  assert.deepEqual(result.items.map((pr) => pr.number), [1, 2, 3]);
+  assert.equal(result.total, 27);
+  assert.ok(h.calls[0].includes("first=25"));
+  assert.ok(h.calls[1].includes("after=c1"));
+});
+
+test("a GitHub-side search timeout is retried smaller and never reported as an empty queue", async () => {
+  // gh exits non-zero but still prints the body: data.search is null next to a "Something went wrong" error.
+  const timeout = () => Object.assign(new Error("Command failed: gh api graphql ...\nGraphQL: Something went wrong while executing your query."), { stdout: JSON.stringify({ data: { search: null }, errors: [{ message: "Something went wrong while executing your query." }] }) });
+  const recovered = searchRuntime([timeout, () => page([7], null, 1)]);
+  const result = await createGitHubClient(recovered.runtime as never).searchWorkflowPullRequests("repo:pytorch/pytorch is:pr is:open");
+  assert.deepEqual(result.items.map((pr) => pr.number), [7]);
+  assert.ok(recovered.calls[1].includes("first=10"), "the retry asks for a smaller page");
+  assert.deepEqual(recovered.sleeps, [1500]);
+
+  const stuck = searchRuntime([timeout, timeout]);
+  await assert.rejects(createGitHubClient(stuck.runtime as never).searchWorkflowPullRequests("repo:pytorch/pytorch is:pr is:open"), /timed out on GitHub/);
+
+  const auth = searchRuntime([() => new Error("Command failed\ngh: HTTP 401")]);
+  await assert.rejects(createGitHubClient(auth.runtime as never).searchWorkflowPullRequests("repo:pytorch/pytorch is:pr is:open"), /401/);
+  assert.equal(auth.calls.length, 1, "non-timeout errors are not retried");
+});
