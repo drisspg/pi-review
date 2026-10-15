@@ -1,3 +1,4 @@
+import { summarizeGhError } from "./gh-error.js";
 import type { InboxItem, PullRequestRef, PytorchAssessmentView, PytorchAssessorStatus, PytorchPreReviewAssessment, PytorchPreReviewRecommendation, PytorchIssueSnapshot, PytorchPullSnapshot, PytorchQueueIssue, PytorchQueuePr, PytorchQueuesResponse, PytorchSearchResult, PytorchStageInfo, StoredPullRequest } from "./types.js";
 
 /**
@@ -220,10 +221,7 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function shortError(error: unknown): string {
-  const text = errorText(error);
-  return (/gh: (.+)$/m.exec(text)?.[1] ?? text).trim().slice(0, 160);
-}
+const shortError = summarizeGhError;
 
 function pytorchRef(number: number): PullRequestRef {
   const [owner, repo] = PYTORCH_REPO.split("/");

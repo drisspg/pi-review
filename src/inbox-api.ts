@@ -1,3 +1,4 @@
+import { summarizeGhError } from "./gh-error.js";
 import { classifyPullRequestStage, PYTORCH_REPO } from "./pytorch-workflow-api.js";
 import type { GitHubNotification, InboxItem, InboxLatestActivity, InboxResponse, InboxSubjectKind, InboxSubjectSnapshot, InboxTier, StoredPullRequest, ViewerPullRequest, ViewerPullRequestScope } from "./types.js";
 
@@ -270,11 +271,7 @@ function errorText(error: unknown): string {
 }
 
 /** gh error messages embed the whole command; keep only the trailing "gh: HTTP 504"-style reason. */
-function shortError(error: unknown): string {
-  const text = errorText(error);
-  const match = /gh: (.+)$/m.exec(text);
-  return (match?.[1] ?? text).trim().slice(0, 160);
-}
+const shortError = summarizeGhError;
 
 export function isRateLimitError(error: unknown): boolean {
   const text = errorText(error);
