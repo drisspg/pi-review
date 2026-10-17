@@ -96,8 +96,16 @@ export function createWorktreeService(runtime: WorktreeRuntime = defaultRuntime,
       if (!runtime.exists(repoDir)) await runtime.git(["clone", cloneUrl, repoDir]);
       else if (!runtime.exists(resolve(repoDir, ".git"))) throw maintenanceRequired(repoDir);
       const remoteRef = `refs/pi-pr-review/pr-${ref.number}`;
+      const previousHead = await runtime.git(["rev-parse", "--verify", "--quiet", `${remoteRef}^{commit}`], repoDir).catch(() => "");
       await runtime.git(["fetch", "--force", "origin", `pull/${ref.number}/head:${remoteRef}`], repoDir);
-      if (mode === "reset" && await runtime.git(["rev-parse", remoteRef], repoDir) !== headSha) {
+      // A force-push replaces the PR ref; keep the previously fetched head under a revision ref so
+      // the reviewed revision (still in the worktree's reflog) stays covered by fetched-PR evidence
+      // and merged checkouts remain deletable.
+      const fetchedHead = await runtime.git(["rev-parse", remoteRef], repoDir);
+      if (/^[0-9a-f]{40}$/.test(previousHead) && previousHead !== fetchedHead) {
+        await runtime.git(["update-ref", `${remoteRef}-rev-${previousHead.slice(0, 12)}`, previousHead], repoDir);
+      }
+      if (mode === "reset" && fetchedHead !== headSha) {
         throw new Error("The remote PR changed while refreshing. Try Refresh again; the checkout has not been reset.");
       }
       if (existing) {

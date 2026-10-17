@@ -18,6 +18,8 @@ function fixture() {
     async git(args: string[], _cwd?: string) {
       calls.push(args);
       if (args[0] === "clone") { paths.add(repo); paths.add(`${repo}/.git`); }
+      if (args[0] === "rev-parse" && args[1] === "--verify") return "";
+      if (args[0] === "rev-parse" && args[1] === "refs/pi-pr-review/pr-185924") return "head";
       if (args[0] === "rev-parse") return args[1] === "HEAD" ? "head" : `${worktree}/index`;
       if (args[0] === "worktree" && args[1] === "add") { paths.add(args[3]); paths.add(`${args[3]}/index`); }
       return "";
@@ -39,7 +41,9 @@ test("prepare clones once, creates detached worktree without force, and reuses i
   assert.equal(await service.preparePrWorktree(ref, "origin", "head"), worktree);
   assert.deepEqual(calls, [
     ["clone", "origin", repo],
+    ["rev-parse", "--verify", "--quiet", "refs/pi-pr-review/pr-185924^{commit}"],
     ["fetch", "--force", "origin", "pull/185924/head:refs/pi-pr-review/pr-185924"],
+    ["rev-parse", "refs/pi-pr-review/pr-185924"],
     ["worktree", "add", "--detach", worktree, "head"],
     ["rev-parse", "HEAD"], ["rev-parse", "--git-path", "index"],
   ]);

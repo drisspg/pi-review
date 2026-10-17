@@ -536,3 +536,22 @@ test("initialized submodules require manual preservation even when Git status is
   await assert.rejects(f.service.preparePrWorktree(ref, f.origin, head, "reset"), /offline maintenance/);
   assert.equal(await readFile(resolve(f.worktree, "dependency", "README.md"), "utf8"), "base content\n");
 });
+
+test("a force-pushed PR stays deletable after refresh: the reviewed revision keeps a fetched ref", async (t) => {
+  const f = await fixture(t);
+  await cacheGit(["checkout", "--detach", "main"], f.origin);
+  await writeFile(resolve(f.origin, "README.md"), "Rewritten PR content\n");
+  await cacheGit(["add", "README.md"], f.origin);
+  const rewritten = await commit(f.origin, "Force-pushed PR commit");
+  await cacheGit(["update-ref", "refs/pull/1/head", rewritten], f.origin);
+  await cacheGit(["checkout", "main"], f.origin);
+
+  const release = ownCheckoutCache(f.root);
+  try {
+    await f.service.preparePrWorktree(ref, f.origin, rewritten, "reset");
+  } finally { release(); }
+  assert.equal(await cacheGit(["rev-parse", `refs/pi-pr-review/pr-1-rev-${f.head.slice(0, 12)}`], f.repo), f.head);
+  const entry = (await f.cache.inventory()).entries.find((candidate) => candidate.id === f.worktreeId);
+  assert.ok(entry != null);
+  assert.ok(!entry.reasons.some((reason) => reason.includes("not covered")), `reviewed revision must stay covered: ${entry.reasons.join("; ")}`);
+});
