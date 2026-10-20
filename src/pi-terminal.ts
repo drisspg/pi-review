@@ -498,7 +498,11 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
     await Promise.all(deletions.values());
   }
 
-  return { attach, broadcastDraftReview, deleteSession, dispose, disposePr };
+  function hasLiveSession(prKey: string): boolean {
+    return [...sessions.keys()].some((key) => key.startsWith(`${prKey}\0`));
+  }
+
+  return { attach, broadcastDraftReview, deleteSession, dispose, disposePr, hasLiveSession };
 }
 
 export type PiTerminalManager = ReturnType<typeof createPiTerminalManager>;

@@ -28,6 +28,7 @@ export type WorktreeService = {
   preparePrWorktree: (ref: PullRequestRef, cloneUrl: string, headSha: string, mode?: "reuse" | "reset") => Promise<string>;
   cleanupPrWorktree: (ref: PullRequestRef) => Promise<string>;
   deletePrWorktree: (ref: PullRequestRef) => Promise<string>;
+  preservePublishedRevisions: (ref: PullRequestRef, isPublished: (sha: string) => Promise<boolean>) => Promise<{ preserved: number; unpublished: string[] }>;
   withPrWorktree: <T>(ref: PullRequestRef, operation: () => Promise<T>) => Promise<T>;
 };
 
@@ -134,7 +135,34 @@ export function createWorktreeService(runtime: WorktreeRuntime = defaultRuntime,
       return worktreeDir;
     });
   }
-  return { worktreeDirForRef, repoDirForRef, preparePrWorktree, cleanupPrWorktree, deletePrWorktree, withPrWorktree: transition };
+  /**
+   * Re-fetch, from GitHub, reviewed revisions in this checkout's reflog that no fetched ref covers
+   * (left behind by force-pushes before revision refs existed), so deletion can verify them.
+   * Commits GitHub cannot serve are reported and left uncovered; deletion will then refuse.
+   */
+  async function preservePublishedRevisions(ref: PullRequestRef, isPublished: (sha: string) => Promise<boolean>): Promise<{ preserved: number; unpublished: string[] }> {
+    return transition(ref, async () => {
+      const worktreeDir = worktreeDirForRef(ref);
+      const repoDir = repoDirForRef(ref);
+      if (!runtime.exists(worktreeDir)) return { preserved: 0, unpublished: [] };
+      const revisions = [...new Set([await runtime.git(["rev-parse", "HEAD"], worktreeDir), ...(await runtime.git(["reflog", "show", "--format=%H", "HEAD"], worktreeDir)).split("\n")].map((sha) => sha.trim()).filter((sha) => /^[0-9a-f]{40}$/.test(sha)))];
+      let preserved = 0;
+      const unpublished: string[] = [];
+      for (const sha of revisions) {
+        const uncovered = await runtime.git(["rev-list", "--max-count=1", sha, "--not", "--remotes=origin", "--glob=refs/pi-pr-review/*"], repoDir);
+        if (uncovered.length === 0) continue;
+        if (!(await isPublished(sha))) {
+          unpublished.push(sha);
+          continue;
+        }
+        await runtime.git(["fetch", "--quiet", "origin", `${sha}:refs/pi-pr-review/pr-${ref.number}-rev-${sha.slice(0, 12)}`], repoDir);
+        preserved += 1;
+      }
+      return { preserved, unpublished };
+    });
+  }
+
+  return { worktreeDirForRef, repoDirForRef, preparePrWorktree, cleanupPrWorktree, deletePrWorktree, preservePublishedRevisions, withPrWorktree: transition };
 }
 
 const defaultService = createWorktreeService();
@@ -147,3 +175,4 @@ export async function preparePrWorktree(ref: PullRequestRef, cloneUrl: string, h
 export const cleanupPrWorktree = defaultService.cleanupPrWorktree;
 export const deletePrWorktree = defaultService.deletePrWorktree;
 export const withPrWorktree = defaultService.withPrWorktree;
+export const preservePublishedRevisions = defaultService.preservePublishedRevisions;

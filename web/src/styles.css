@@ -5734,6 +5734,70 @@ button.fold:hover {
   font-size: var(--text-xs);
 }
 
+.prune-body {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.prune-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 50vh;
+  overflow: auto;
+}
+
+.prune-list label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease);
+}
+
+.prune-list label:hover {
+  background: var(--hover-bg);
+}
+
+.prune-list li.blocked label {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.prune-list code {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.prune-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 55%;
+}
+
+.prune-status {
+  font-size: var(--text-xs);
+}
+
+.prune-status.status-merged,
+.prune-status.status-landed { color: var(--done); }
+.prune-status.status-closed { color: var(--attention); }
+
+.prune-result ul {
+  margin: 0;
+  padding-left: var(--space-4);
+  font-size: var(--text-sm);
+}
+
 .pt-my-stage.actor-author {
   color: var(--attention);
 }

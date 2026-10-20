@@ -434,6 +434,44 @@ for (const partialFailure of [false, true]) {
   });
 }
 
+test("prune previews landed checkouts, deletes only the confirmed ones, and moves them to Saved only", async ({ page }) => {
+  const savedPrs = [
+    { key: "github.com/pytorch/pytorch#1", title: "Landed by merge bot", url: "https://github.com/pytorch/pytorch/pull/1", headSha: "111111111111", lastOpenedAt: "2026-07-23T03:00:00.000Z", filesChanged: 1, existingCommentCount: 0, checkoutPresent: true },
+    { key: "github.com/example/repo#2", title: "Abandoned PR", url: "https://github.com/example/repo/pull/2", headSha: "222222222222", lastOpenedAt: "2026-07-23T02:00:00.000Z", filesChanged: 2, existingCommentCount: 1, checkoutPresent: true },
+    { key: "github.com/example/repo#3", title: "Still open", url: "https://github.com/example/repo/pull/3", headSha: "333333333333", lastOpenedAt: "2026-07-23T01:00:00.000Z", filesChanged: 3, existingCommentCount: 2, checkoutPresent: true },
+  ];
+  const pruneRequests: unknown[] = [];
+  await page.route("**/api/prs", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ prs: savedPrs }) }));
+  await page.route("**/api/pr/checkout/prune/preview", (route) => route.fulfill({ json: { candidates: [
+    { prKey: savedPrs[0].key, url: savedPrs[0].url, title: savedPrs[0].title, status: "landed", blocked: null },
+    { prKey: savedPrs[1].key, url: savedPrs[1].url, title: savedPrs[1].title, status: "closed", blocked: null },
+    { prKey: savedPrs[2].key, url: savedPrs[2].url, title: savedPrs[2].title, status: "open", blocked: null },
+  ] } }));
+  await page.route("**/api/pr/checkout/prune", (route) => {
+    pruneRequests.push(route.request().postDataJSON());
+    return route.fulfill({ json: { deleted: [savedPrs[0].key], kept: [], preserved: 2 } });
+  });
+
+  await page.goto("/");
+  await expect(page.locator(".pr-card")).toHaveCount(3);
+  await page.getByRole("button", { name: "Prune landed…" }).click();
+  const dialog = page.getByRole("dialog", { name: "Prune landed checkouts" });
+  await expect(dialog.getByRole("checkbox")).toHaveCount(2);
+  await expect(dialog.getByRole("checkbox").nth(0)).toBeChecked();
+  await expect(dialog.getByRole("checkbox").nth(1)).not.toBeChecked();
+  await expect(dialog).toContainText("1 checkout for open PRs is left alone");
+  await dialog.getByRole("button", { name: "Delete 1 checkout" }).click();
+
+  await expect(dialog).toContainText("Deleted 1 checkout");
+  await expect(dialog).toContainText("re-fetched 2 older reviewed revisions from GitHub");
+  expect(pruneRequests).toEqual([{ prKeys: [savedPrs[0].key], includeClosed: false }]);
+  await dialog.getByRole("button", { name: "Done" }).click();
+  await expect(page.getByRole("status")).toContainText("Pruned 1 landed checkout");
+  await expect(page.locator(".pr-card")).toHaveCount(2);
+  await showSavedOnly(page);
+  await expect(page.locator(".pr-card")).toHaveCount(1);
+});
+
 test("saved-only reviews are hidden by default and cannot be selected for checkout deletion", async ({ page }) => {
   const prs = [
     { key: "github.com/example/repo#1", url: "https://github.com/example/repo/pull/1", title: "Active checkout", headSha: "111111111111", lastOpenedAt: "2026-09-21T00:00:00Z", checkoutPresent: true },

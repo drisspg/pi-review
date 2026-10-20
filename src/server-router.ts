@@ -5,6 +5,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { inputFromBody, isLocalOrigin, type JsonValue, MalformedJsonError, readBody, recordFromBody, sendJson } from "./http.js";
 import type { AskStreamResponse } from "./ask-stream-api.js";
 import type { BlameApi } from "./blame-api.js";
+import type { CheckoutPruneApi } from "./checkout-prune-api.js";
 import type { CommentApi } from "./comment-api.js";
 import type { DraftReviewApi } from "./draft-review-api.js";
 import type { FileApi } from "./file-api.js";
@@ -34,6 +35,7 @@ export type ServerRouteDeps = {
   analysisApi: AnalysisApi;
   askStreamApi: { stream: (res: AskStreamResponse, payload: Record<string, unknown>) => Promise<void> };
   blameApi: BlameApi;
+  checkoutPruneApi: CheckoutPruneApi;
   commentApi: CommentApi;
   draftReviewApi: DraftReviewApi;
   fileApi: FileApi;
@@ -115,6 +117,8 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
     "/api/pytorch/pre-review/assessment": (payload) => deps.pytorchWorkflowApi.saveAssessment(payload),
     "/api/pytorch/pre-review/assess": (payload) => deps.pytorchWorkflowApi.requestAssessment(payload),
     "/api/pytorch/queue/hide": (payload) => deps.pytorchWorkflowApi.hidePr(payload),
+    "/api/pr/checkout/prune/preview": () => deps.checkoutPruneApi.preview(),
+    "/api/pr/checkout/prune": (payload) => deps.checkoutPruneApi.prune(payload),
     "/api/pytorch/chat": (payload) => deps.preReviewChat.ask(payload),
     "/api/pytorch/chat/thread": (payload) => deps.preReviewChat.thread(payload),
     "/api/pytorch/chat/clear": (payload) => deps.preReviewChat.clear(payload),

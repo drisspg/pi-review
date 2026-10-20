@@ -138,6 +138,7 @@ function baseDeps(overrides: Partial<ServerRouteDeps> = {}): ServerRouteDeps {
       },
       async settle() {},
     },
+    checkoutPruneApi: { async preview() { return { candidates: [] }; }, async prune() { return { deleted: [], kept: [], preserved: 0 }; } },
     preReviewChat: { async ask(payload) { return { number: Number(payload.number), answer: "a", thread: [] }; }, async thread(payload) { return { number: Number(payload.number), thread: [] }; }, async clear(payload) { return { number: Number(payload.number), thread: [] }; }, stop() {} },
     activityApi: createActivityApi({ readLedger: async () => "", appendLedger: async () => {}, readUsageLog: async () => "", listReviewMemoryRecords: async () => [], listRecentPullRequests: async () => [], readGithubReviews: async () => null, writeGithubReviews: async () => {}, now: () => "2026-09-03T12:00:00Z" }),
     pytorchWorkflowApi: createPytorchWorkflowApi({

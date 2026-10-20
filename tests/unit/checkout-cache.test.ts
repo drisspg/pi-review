@@ -555,3 +555,28 @@ test("a force-pushed PR stays deletable after refresh: the reviewed revision kee
   assert.ok(entry != null);
   assert.ok(!entry.reasons.some((reason) => reason.includes("not covered")), `reviewed revision must stay covered: ${entry.reasons.join("; ")}`);
 });
+
+test("reviewed revisions orphaned by an old force-push are re-fetched from origin so deletion can verify them", async (t) => {
+  const f = await fixture(t);
+  // Simulate the pre-fix state: the PR was force-pushed and the old head kept no ref, only the worktree reflog.
+  await cacheGit(["checkout", "--detach", "main"], f.origin);
+  await writeFile(resolve(f.origin, "README.md"), "Rewritten\n");
+  await cacheGit(["add", "README.md"], f.origin);
+  const rewritten = await commit(f.origin, "Force-pushed");
+  await cacheGit(["update-ref", "refs/pull/1/head", rewritten], f.origin);
+  await cacheGit(["update-ref", "refs/pull/1/old", f.head], f.origin);
+  await cacheGit(["checkout", "main"], f.origin);
+  await cacheGit(["fetch", "--force", "origin", "pull/1/head:refs/pi-pr-review/pr-1"], f.repo);
+  await cacheGit(["update-ref", "-d", `refs/pi-pr-review/pr-1-rev-${f.head.slice(0, 12)}`], f.repo).catch(() => "");
+  await cacheGit(["checkout", "--detach", "--force", rewritten], f.worktree);
+  const blocked = (await f.cache.inventory()).entries.find((candidate) => candidate.id === f.worktreeId);
+  assert.ok(blocked?.reasons.some((reason) => reason.includes("not covered")), "precondition: old revision is uncovered");
+
+  const unpublished = await f.service.preservePublishedRevisions(ref, async () => false);
+  assert.deepEqual(unpublished, { preserved: 0, unpublished: [f.head] }, "commits GitHub cannot serve stay uncovered");
+
+  const preserved = await f.service.preservePublishedRevisions(ref, async (sha) => sha === f.head);
+  assert.deepEqual(preserved, { preserved: 1, unpublished: [] });
+  const entry = (await f.cache.inventory()).entries.find((candidate) => candidate.id === f.worktreeId);
+  assert.ok(!entry?.reasons.some((reason) => reason.includes("not covered")), entry?.reasons.join("; "));
+});

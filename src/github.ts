@@ -9,6 +9,7 @@ import { markGeneratedPullFiles, parseGitattributes, type GitattributesRule } fr
 import { logger } from "./logger.js";
 import { prKey } from "./pr.js";
 import type { GithubReview } from "./activity-api.js";
+import type { PrunePrState } from "./checkout-prune-api.js";
 import type { InboxSubjectRef } from "./inbox-api.js";
 import type { CheckRollupState, CommitChecks, GitHubDraftComment, GitHubNotification, InboxLatestActivity, GitHubDraftCommentInput, GitHubPendingReview, GitHubPendingReviewLookup, InboxSubjectKind, InboxSubjectSnapshot, PullFile, PullIssueComment, PullRequest, PullRequestRef, PullRequestReviewData, PullRequestReviewDecision, PullRequestReviewSummary, PullReviewComment, PytorchEvidenceComment, PytorchIssueSnapshot, PytorchPreReviewEvidence, PytorchPullSnapshot, PytorchSearchResult, StoredPullRequest, ViewerPullRequest, ViewerPullRequestScope } from "./types.js";
 
@@ -57,6 +58,8 @@ export type GitHubClient = {
   convertPullRequestToDraft: (ref: PullRequestRef) => Promise<void>;
   fetchPreReviewEvidence: (ref: PullRequestRef) => Promise<PytorchPreReviewEvidence>;
   fetchViewerReviewContributions: (fromIso: string, toIso: string) => Promise<GithubReview[]>;
+  fetchPullRequestStates: (refs: PullRequestRef[]) => Promise<Map<string, PrunePrState>>;
+  commitExists: (repo: string, sha: string) => Promise<boolean>;
 };
 
 const defaultRuntime: GitHubRuntime = {
@@ -859,12 +862,40 @@ export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): Git
     return reviews;
   }
 
+  /** State plus the merge bot's `Merged` label, keyed by prKey; batched like inbox snapshots. */
+  async function fetchPullRequestStates(refs: PullRequestRef[]): Promise<Map<string, PrunePrState>> {
+    const states = new Map<string, PrunePrState>();
+    for (let index = 0; index < refs.length; index += SNAPSHOT_BATCH) {
+      const batch = refs.slice(index, index + SNAPSHOT_BATCH);
+      const aliases = batch.map((ref, position) => `s${position}: repository(owner: ${JSON.stringify(ref.owner)}, name: ${JSON.stringify(ref.repo)}) { pullRequest(number: ${ref.number}) { state merged labels(first: 30) { nodes { name } } } }`);
+      const data = await ghGraphql<Record<string, { pullRequest?: { state?: string; merged?: boolean; labels?: { nodes?: Array<{ name?: string }> } } | null } | null>>(`query { ${aliases.join(" ")} }`, {}, "PR states for prune", { allowPartial: true, retryOnServerError: true });
+      batch.forEach((ref, position) => {
+        const pr = data[`s${position}`]?.pullRequest;
+        if (pr == null) return;
+        const state = pr.merged === true || pr.state === "MERGED" ? "MERGED" : pr.state === "CLOSED" ? "CLOSED" : "OPEN";
+        states.set(prKey(ref), { state, landedLabel: (pr.labels?.nodes ?? []).some((label) => label.name?.trim().toLowerCase() === "merged") });
+      });
+    }
+    return states;
+  }
+
+  /** True when GitHub still serves this exact commit for the repo (including force-pushed PR revisions). */
+  async function commitExists(repo: string, sha: string): Promise<boolean> {
+    if (!/^[0-9a-f]{40}$/.test(sha)) return false;
+    try {
+      const { stdout } = await runtime.execFile("gh", ["api", `repos/${repo}/commits/${sha}`, "--jq", ".sha"], { maxBuffer: 1024 * 1024 });
+      return stdout.trim() === sha;
+    } catch {
+      return false;
+    }
+  }
+
   async function convertPullRequestToDraft(ref: PullRequestRef): Promise<void> {
     const { id } = await fetchWorkflowPullRequest(ref);
     await ghGraphql(`mutation($id: ID!) { convertPullRequestToDraft(input: { pullRequestId: $id }) { pullRequest { isDraft } } }`, { id }, "convert PR to draft");
   }
 
-  return { fetchPullRequestReviewData, compareCommits, fetchCommitChecks, fetchFileText, fetchPendingPullRequestReview, createPendingPullRequestReview, addPendingPullRequestReviewThread, submitPullRequestReview, replyToReviewComment, addIssueComment, editReviewComment, editIssueComment, editReviewSummary, setReviewThreadResolved, fetchViewerLogin, fetchNotifications, fetchSubjectSnapshots, fetchViewerPullRequests, fetchLatestActivity, markNotificationDone, unsubscribeNotification, searchWorkflowPullRequests, searchWorkflowIssues, fetchWorkflowPullRequest, listModuleLabels, addReaction, addLabels, closeIssue, convertPullRequestToDraft, fetchPreReviewEvidence, fetchViewerReviewContributions };
+  return { fetchPullRequestReviewData, compareCommits, fetchCommitChecks, fetchFileText, fetchPendingPullRequestReview, createPendingPullRequestReview, addPendingPullRequestReviewThread, submitPullRequestReview, replyToReviewComment, addIssueComment, editReviewComment, editIssueComment, editReviewSummary, setReviewThreadResolved, fetchViewerLogin, fetchNotifications, fetchSubjectSnapshots, fetchViewerPullRequests, fetchLatestActivity, markNotificationDone, unsubscribeNotification, searchWorkflowPullRequests, searchWorkflowIssues, fetchWorkflowPullRequest, listModuleLabels, addReaction, addLabels, closeIssue, convertPullRequestToDraft, fetchPreReviewEvidence, fetchViewerReviewContributions, fetchPullRequestStates, commitExists };
 }
 
 const defaultClient = createGitHubClient();

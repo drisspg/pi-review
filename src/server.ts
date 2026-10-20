@@ -47,7 +47,8 @@ import { createShellApi } from "./shell-api.js";
 import { withTtlCache } from "./ttl-cache.js";
 import { createUsageApi, defaultUsageApiDeps, defaultUsageLogPath } from "./usage-api.js";
 import { appendDraftReviewComment, clearDraftReview, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, getDraftReview, listAiReviews, listFileReviews, listFocusScans, listGuideReviews, listOverviews, listRecentPullRequests, listReviewMemoryRecords, listArchivedReviews, markPullRequestReviewed, removePullRequest, reviewMemoryStats, updateDraftReviewComment, deleteDraftReviewComment, saveAiReview, saveDraftReview, saveFocusScan, saveGuideReview, saveOverview, saveReviewMemory, saveReviewProfile, setFileViewed, updateFocusScanProgress, updateGuideReviewProgress, upsertPullRequest } from "./state.js";
-import { cleanupPrWorktree, deletePrWorktree, preparePrWorktree, repoDirForRef, worktreeDirForRef, withPrWorktree } from "./worktrees.js";
+import { cleanupPrWorktree, deletePrWorktree, preparePrWorktree, preservePublishedRevisions, repoDirForRef, worktreeDirForRef, withPrWorktree } from "./worktrees.js";
+import { createCheckoutPruneApi } from "./checkout-prune-api.js";
 
 // Install persistent handlers before the asynchronous ownership check. Signals during startup
 // are deferred until lifecycle resources exist; repeated signals must not force Node's default exit.
@@ -283,6 +284,16 @@ const reviewArchiveApi = createReviewArchiveApi(defaultReviewArchiveApiDeps({ cl
 const reviewMemoryApi = createReviewMemoryApi({ askPi, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewMemory, saveReviewProfile });
 const reviewSubmitRouteApi = createReviewSubmitRouteApi(defaultReviewSubmitRouteApiDeps({ clearDraftReview, fetchPullRequestReviewData: cachedFetchPullRequestReviewData, markPullRequestReviewed, saveReviewMemory, submitPullRequestReview }));
 const savedAnalysisApi = createSavedAnalysisApi({ listAiReviews, saveAiReview, saveFocusScan, saveGuideReview, saveOverview, updateFocusScanProgress, updateGuideReviewProgress });
+const checkoutPruneApi = createCheckoutPruneApi({
+  async listLocalCheckouts() {
+    return (await listRecentPullRequests()).filter((pr) => existsSync(worktreeDirForRef(pr.ref))).map((pr) => ({ prKey: pr.key, url: pr.url, title: pr.title, ref: pr.ref }));
+  },
+  fetchPrStates: (refs) => defaultGitHubClient.fetchPullRequestStates(refs),
+  hasLiveTerminal: (key) => piTerminalManager.hasLiveSession(key),
+  preservePublishedRevisions: (ref) => preservePublishedRevisions(ref, (sha) => defaultGitHubClient.commitExists(`${ref.owner}/${ref.repo}`, sha)),
+  deleteCheckout: (url) => prApi.deleteCheckout(url),
+  logger,
+});
 const shellApi = createShellApi({ listRecentPullRequests, logEntries: logger.entries, hasCheckout: (ref) => existsSync(worktreeDirForRef(ref)) });
 const usageApi = createUsageApi(defaultUsageApiDeps(logger));
 
@@ -344,6 +355,7 @@ const route = createServerRoute({
   prApi,
   pytorchWorkflowApi,
   preReviewChat,
+  checkoutPruneApi,
   reviewArchiveApi,
   reviewMemoryApi,
   reviewPromptApi,

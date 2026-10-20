@@ -142,7 +142,10 @@ confirmation and closing checkout users, `npm run cache -- evict [--legacy] --of
 The explicit `/api/pr/checkout/delete` action may delete a clean worktree while its server owns
 the cache: first await PR agent/terminal teardown, serialize with preparation and file users,
 and run the same Git/data safety checks plus an external-user check. Keep the saved PR, drafts,
-reviews, and session history; the shared clone stays cached. UI deletion must not call the
+reviews, and session history; the shared clone stays cached. `/api/pr/checkout/prune` (Local checkouts -> Prune landed...)
+batches that delete for landed PRs (merged, or closed with the merge bot's `Merged` label), skips PRs with a
+live Pi terminal, and first re-fetches force-pushed reviewed revisions from GitHub (`preservePublishedRevisions`;
+unpublished commits stay protected). Refetching a PR keeps its previous head as `refs/pi-pr-review/pr-N-rev-<sha>`. UI deletion must not call the
 legacy saved-review removal contract `/api/pr/cleanup`. Ordinary worktree `sl/` metadata may be
 preserved in durable `checkout-metadata/` before server-owned deletion; verify source and copied
 manifests, keep recovery outside the deleted checkout, and refuse symlinks/special files or copy
