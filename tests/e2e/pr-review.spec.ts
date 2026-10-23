@@ -434,6 +434,20 @@ for (const partialFailure of [false, true]) {
   });
 }
 
+test("stacked PRs show their position, member status, and hop links in the review header", async ({ page }) => {
+  const member = (number: number, position: number, status: string, isCurrent = false) => ({ number, title: `PR ${number}`, url: `https://github.com/Dao-AILab/flash-attention/pull/${number}`, position, isCurrent, status, additions: 1, deletions: 0, viewerReview: status === "approved" ? { state: "APPROVED", freshness: "current" } : null });
+  await page.route("**/api/pr/stack", (route) => route.fulfill({ json: { stack: { format: "sp", currentPosition: 1, nextToLand: 11, counts: { total: 3, landed: 0, reviewedByViewer: 1, approved: 1 }, members: [member(11, 0, "approved"), member(2542, 1, "needs-review", true), member(13, 2, "draft")] } } }));
+  await page.reload(); // beforeEach opened the PR before this mock existed; the hash route reopens it.
+  await expect(page.locator(".review-layout")).toBeVisible({ timeout: 60_000 });
+  const strip = page.getByRole("navigation", { name: "PR stack" });
+  await expect(strip).toContainText("Stack 2/3");
+  await expect(strip.locator(".stack-chip")).toHaveText(["#11✓", "#2542", "#13"]);
+  await expect(strip.locator(".stack-chip.current")).toHaveText("#2542");
+  await expect(strip.locator("a.stack-chip").first()).toHaveAttribute("href", /pull%2F11$/);
+  await expect(strip.locator("a.stack-hop")).toHaveText(["#11", "#13"]);
+  await expect(strip).toContainText("next to land #11");
+});
+
 test("prune previews landed checkouts, deletes only the confirmed ones, and moves them to Saved only", async ({ page }) => {
   const savedPrs = [
     { key: "github.com/pytorch/pytorch#1", title: "Landed by merge bot", url: "https://github.com/pytorch/pytorch/pull/1", headSha: "111111111111", lastOpenedAt: "2026-07-23T03:00:00.000Z", filesChanged: 1, existingCommentCount: 0, checkoutPresent: true },

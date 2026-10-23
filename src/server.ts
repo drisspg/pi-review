@@ -49,6 +49,7 @@ import { createUsageApi, defaultUsageApiDeps, defaultUsageLogPath } from "./usag
 import { appendDraftReviewComment, clearDraftReview, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, getDraftReview, listAiReviews, listFileReviews, listFocusScans, listGuideReviews, listOverviews, listRecentPullRequests, listReviewMemoryRecords, listArchivedReviews, markPullRequestReviewed, removePullRequest, reviewMemoryStats, updateDraftReviewComment, deleteDraftReviewComment, saveAiReview, saveDraftReview, saveFocusScan, saveGuideReview, saveOverview, saveReviewMemory, saveReviewProfile, setFileViewed, updateFocusScanProgress, updateGuideReviewProgress, upsertPullRequest } from "./state.js";
 import { cleanupPrWorktree, deletePrWorktree, preparePrWorktree, preservePublishedRevisions, repoDirForRef, worktreeDirForRef, withPrWorktree } from "./worktrees.js";
 import { createCheckoutPruneApi } from "./checkout-prune-api.js";
+import { createStackApi } from "./stack-api.js";
 
 // Install persistent handlers before the asynchronous ownership check. Signals during startup
 // are deferred until lifecycle resources exist; repeated signals must not force Node's default exit.
@@ -294,6 +295,15 @@ const checkoutPruneApi = createCheckoutPruneApi({
   deleteCheckout: (url) => prApi.deleteCheckout(url),
   logger,
 });
+const stackApi = createStackApi({
+  // The stored body is the one this review was opened with; fall back to GitHub for PRs never opened here.
+  async readBody(ref) {
+    const stored = (await listRecentPullRequests()).find((pr) => pr.key === prKey(ref));
+    return stored?.body ?? await defaultGitHubClient.fetchPullRequestBody(ref);
+  },
+  fetchMembers: (repo, numbers) => defaultGitHubClient.fetchStackMembers(repo, numbers),
+  now: () => Date.now(),
+});
 const shellApi = createShellApi({ listRecentPullRequests, logEntries: logger.entries, hasCheckout: (ref) => existsSync(worktreeDirForRef(ref)) });
 const usageApi = createUsageApi(defaultUsageApiDeps(logger));
 
@@ -356,6 +366,7 @@ const route = createServerRoute({
   pytorchWorkflowApi,
   preReviewChat,
   checkoutPruneApi,
+  stackApi,
   reviewArchiveApi,
   reviewMemoryApi,
   reviewPromptApi,

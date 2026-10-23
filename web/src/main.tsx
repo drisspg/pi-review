@@ -12,6 +12,7 @@ import { Tab, TabList, TabPanel, Tabs } from "./components/Tabs";
 import { ActivityBadge, ActivityModal } from "./components/Activity";
 import { InboxPanel } from "./components/Inbox";
 import { PruneCheckoutsModal, type PruneResult } from "./components/PruneCheckouts";
+import { StackStrip } from "./components/StackStrip";
 import { useActivityTracker } from "./lib/activity";
 import { PytorchQueuesPanel, PytorchWorkflowStrip } from "./components/PytorchWorkflow";
 import { ExistingComments, ExistingReviewThread } from "./components/Threads";
@@ -1655,6 +1656,7 @@ function PrHeaderStrip({ pr, refreshingActivity, refresh }: { pr: StoredPullRequ
         <span>{shortSha(pr.headSha)}</span>
         {checks != null && checks.total > 0 && <PrChecks checks={checks} />}
       </div>
+      <StackStrip key={`stack-${pr.key}`} prUrl={pr.url} headSha={pr.headSha} hrefFor={reviewHash} />
       {repository === "pytorch/pytorch" && <PytorchWorkflowStrip key={pr.key} pr={pr} />}
     </div>
   </section>;

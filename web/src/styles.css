@@ -5798,6 +5798,106 @@ button.fold:hover {
   font-size: var(--text-sm);
 }
 
+.stack-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.stack-strip-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.stack-strip-next {
+  margin-left: var(--space-1);
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+  font-size: var(--text-xs);
+  font-weight: 500;
+}
+
+.stack-strip-hops {
+  display: inline-flex;
+  gap: var(--space-1);
+}
+
+.stack-hop {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: var(--text-xs);
+  text-decoration: none;
+  transition: border-color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease);
+}
+
+a.stack-hop:hover {
+  border-color: var(--accent);
+  background: var(--hover-bg);
+}
+
+.stack-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stack-chip {
+  --chip-tone: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 var(--space-2);
+  border: 1px solid color-mix(in srgb, var(--chip-tone) 45%, var(--border));
+  border-radius: 999px;
+  color: var(--chip-tone);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  text-decoration: none;
+  transition: background-color var(--dur-fast) var(--ease);
+}
+
+a.stack-chip:hover {
+  background: var(--hover-bg);
+}
+
+.stack-chip.current {
+  background: color-mix(in srgb, var(--chip-tone) 18%, transparent);
+  box-shadow: 0 0 0 1px var(--chip-tone);
+  font-weight: 600;
+}
+
+.stack-chip.status-landed { --chip-tone: var(--done); }
+.stack-chip.status-closed { --chip-tone: var(--danger); }
+.stack-chip.status-approved { --chip-tone: var(--success); }
+.stack-chip.status-changes-requested { --chip-tone: var(--attention); }
+.stack-chip.status-needs-review { --chip-tone: var(--accent); }
+.stack-chip.status-draft { --chip-tone: var(--muted); }
+
+.stack-chip-mark:empty {
+  display: none;
+}
+
+.stack-strip-summary {
+  font-size: var(--text-xs);
+}
+
 .pt-my-stage.actor-author {
   color: var(--attention);
 }

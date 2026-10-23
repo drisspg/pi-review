@@ -10,6 +10,7 @@ import { logger } from "./logger.js";
 import { prKey } from "./pr.js";
 import type { GithubReview } from "./activity-api.js";
 import type { PrunePrState } from "./checkout-prune-api.js";
+import type { StackMemberState } from "./stack-api.js";
 import type { InboxSubjectRef } from "./inbox-api.js";
 import type { CheckRollupState, CommitChecks, GitHubDraftComment, GitHubNotification, InboxLatestActivity, GitHubDraftCommentInput, GitHubPendingReview, GitHubPendingReviewLookup, InboxSubjectKind, InboxSubjectSnapshot, PullFile, PullIssueComment, PullRequest, PullRequestRef, PullRequestReviewData, PullRequestReviewDecision, PullRequestReviewSummary, PullReviewComment, PytorchEvidenceComment, PytorchIssueSnapshot, PytorchPreReviewEvidence, PytorchPullSnapshot, PytorchSearchResult, StoredPullRequest, ViewerPullRequest, ViewerPullRequestScope } from "./types.js";
 
@@ -60,6 +61,8 @@ export type GitHubClient = {
   fetchViewerReviewContributions: (fromIso: string, toIso: string) => Promise<GithubReview[]>;
   fetchPullRequestStates: (refs: PullRequestRef[]) => Promise<Map<string, PrunePrState>>;
   commitExists: (repo: string, sha: string) => Promise<boolean>;
+  fetchStackMembers: (repo: string, numbers: number[]) => Promise<StackMemberState[]>;
+  fetchPullRequestBody: (ref: PullRequestRef) => Promise<string | null>;
 };
 
 const defaultRuntime: GitHubRuntime = {
@@ -890,12 +893,43 @@ export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): Git
     }
   }
 
+  /** One query for every PR in a stack, including the viewer's latest submitted review per PR. */
+  async function fetchStackMembers(repo: string, numbers: number[]): Promise<StackMemberState[]> {
+    type Node = { number?: number; title?: string; url?: string; state?: string; merged?: boolean; isDraft?: boolean; reviewDecision?: StackMemberState["reviewDecision"]; headRefOid?: string; additions?: number; deletions?: number; labels?: { nodes?: Array<{ name?: string }> }; reviews?: { nodes?: Array<{ author?: { login?: string } | null; state?: string; submittedAt?: string | null; commit?: { oid?: string } | null }> } };
+    const [owner, name] = repo.split("/");
+    const [login, data] = await Promise.all([
+      fetchViewerLogin(),
+      ghGraphql<{ repository?: Record<string, Node | null> | null }>(`query { repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) { ${numbers.slice(0, 60).map((number, index) => `p${index}: pullRequest(number: ${number}) { number title url state merged isDraft reviewDecision headRefOid additions deletions labels(first: 20) { nodes { name } } reviews(last: 30) { nodes { author { login } state submittedAt commit { oid } } } }`).join(" ")} } }`, {}, "stack members", { allowPartial: true, retryOnServerError: true }),
+    ]);
+    return Object.values(data.repository ?? {}).flatMap((node) => {
+      if (node == null || typeof node.number !== "number") return [];
+      const mine = (node.reviews?.nodes ?? []).filter((review) => login != null && review.author?.login === login && review.state !== "PENDING" && review.submittedAt != null).sort((a, b) => String(b.submittedAt).localeCompare(String(a.submittedAt)))[0];
+      return [{
+        number: node.number,
+        title: node.title ?? "(untitled)",
+        url: node.url ?? `https://github.com/${repo}/pull/${node.number}`,
+        state: node.merged === true || node.state === "MERGED" ? "MERGED" as const : node.state === "CLOSED" ? "CLOSED" as const : "OPEN" as const,
+        landedLabel: (node.labels?.nodes ?? []).some((label) => label.name?.trim().toLowerCase() === "merged"),
+        isDraft: node.isDraft === true,
+        reviewDecision: node.reviewDecision ?? null,
+        headSha: node.headRefOid ?? "",
+        additions: node.additions ?? 0,
+        deletions: node.deletions ?? 0,
+        viewerReview: mine == null ? null : { state: mine.state ?? "COMMENTED", commitSha: mine.commit?.oid ?? null, submittedAt: mine.submittedAt ?? "" },
+      }];
+    });
+  }
+
+  async function fetchPullRequestBody(ref: PullRequestRef): Promise<string | null> {
+    return (await ghApi<{ body?: string | null }>(apiBase(ref))).body ?? null;
+  }
+
   async function convertPullRequestToDraft(ref: PullRequestRef): Promise<void> {
     const { id } = await fetchWorkflowPullRequest(ref);
     await ghGraphql(`mutation($id: ID!) { convertPullRequestToDraft(input: { pullRequestId: $id }) { pullRequest { isDraft } } }`, { id }, "convert PR to draft");
   }
 
-  return { fetchPullRequestReviewData, compareCommits, fetchCommitChecks, fetchFileText, fetchPendingPullRequestReview, createPendingPullRequestReview, addPendingPullRequestReviewThread, submitPullRequestReview, replyToReviewComment, addIssueComment, editReviewComment, editIssueComment, editReviewSummary, setReviewThreadResolved, fetchViewerLogin, fetchNotifications, fetchSubjectSnapshots, fetchViewerPullRequests, fetchLatestActivity, markNotificationDone, unsubscribeNotification, searchWorkflowPullRequests, searchWorkflowIssues, fetchWorkflowPullRequest, listModuleLabels, addReaction, addLabels, closeIssue, convertPullRequestToDraft, fetchPreReviewEvidence, fetchViewerReviewContributions, fetchPullRequestStates, commitExists };
+  return { fetchPullRequestReviewData, compareCommits, fetchCommitChecks, fetchFileText, fetchPendingPullRequestReview, createPendingPullRequestReview, addPendingPullRequestReviewThread, submitPullRequestReview, replyToReviewComment, addIssueComment, editReviewComment, editIssueComment, editReviewSummary, setReviewThreadResolved, fetchViewerLogin, fetchNotifications, fetchSubjectSnapshots, fetchViewerPullRequests, fetchLatestActivity, markNotificationDone, unsubscribeNotification, searchWorkflowPullRequests, searchWorkflowIssues, fetchWorkflowPullRequest, listModuleLabels, addReaction, addLabels, closeIssue, convertPullRequestToDraft, fetchPreReviewEvidence, fetchViewerReviewContributions, fetchPullRequestStates, commitExists, fetchStackMembers, fetchPullRequestBody };
 }
 
 const defaultClient = createGitHubClient();

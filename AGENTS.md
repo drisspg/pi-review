@@ -45,6 +45,10 @@ src/                    Node server (TypeScript, ESM, run via tsx)
   pre-review-chat.ts    Inline, checkout-free chat per queued PyTorch PR (ask about the saved
                         suggestion or a quick high-level review): tool-less model over the same
                         read-only evidence + saved verdict + thread; threads persist in the pytorch store
+  stack-api.ts          Stacked PRs: pure `parseStack` (sp/stack-pr "Stacked PRs:" and ghstack blocks, both
+                        top-first with __->__ current) + one batched member query (landed incl. merge-bot
+                        label, review decision, viewer review vs head); feeds the header StackStrip and
+                        the terminal `read_stack` tool
   activity-api.ts       Review activity: append-only JSONL ledger of focused-time heartbeats (client
                         counts only visible + focused + input within 90s; <=2 min per beat) and
                         server-recorded workflow actions; `summary(range)` merges reviewMemory with the

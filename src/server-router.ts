@@ -6,6 +6,7 @@ import { inputFromBody, isLocalOrigin, type JsonValue, MalformedJsonError, readB
 import type { AskStreamResponse } from "./ask-stream-api.js";
 import type { BlameApi } from "./blame-api.js";
 import type { CheckoutPruneApi } from "./checkout-prune-api.js";
+import type { StackApi } from "./stack-api.js";
 import type { CommentApi } from "./comment-api.js";
 import type { DraftReviewApi } from "./draft-review-api.js";
 import type { FileApi } from "./file-api.js";
@@ -36,6 +37,7 @@ export type ServerRouteDeps = {
   askStreamApi: { stream: (res: AskStreamResponse, payload: Record<string, unknown>) => Promise<void> };
   blameApi: BlameApi;
   checkoutPruneApi: CheckoutPruneApi;
+  stackApi: StackApi;
   commentApi: CommentApi;
   draftReviewApi: DraftReviewApi;
   fileApi: FileApi;
@@ -119,6 +121,7 @@ export function createServerRoute(deps: ServerRouteDeps): ServerRoute {
     "/api/pytorch/queue/hide": (payload) => deps.pytorchWorkflowApi.hidePr(payload),
     "/api/pr/checkout/prune/preview": () => deps.checkoutPruneApi.preview(),
     "/api/pr/checkout/prune": (payload) => deps.checkoutPruneApi.prune(payload),
+    "/api/pr/stack": (payload) => deps.stackApi.stack(payload),
     "/api/pytorch/chat": (payload) => deps.preReviewChat.ask(payload),
     "/api/pytorch/chat/thread": (payload) => deps.preReviewChat.thread(payload),
     "/api/pytorch/chat/clear": (payload) => deps.preReviewChat.clear(payload),

@@ -146,6 +146,30 @@ export default function piReviewTerminalExtension(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
+    name: "read_stack",
+    label: "Read PR Stack",
+    description: "Read the stacked-PR chain this PR belongs to (sp/stack-pr or ghstack), bottom to top: each PR's landed/open state, draft, review decision, and whether the reviewer's latest review is at that PR's current head. Use it for questions like \"is this the bottom of the stack?\", \"is it reviewed?\", or \"what lands next?\".",
+    promptSnippet: "Read this PR's stack: position, landed state, and review status of every PR",
+    promptGuidelines: ["For questions about the PR stack (bottom/top, what is reviewed or landed, what lands next), call read_stack instead of parsing the PR body or reading skills."],
+    parameters: Type.Object({}),
+    async execute(_toolCallId, _params, signal) {
+      const apiUrl = process.env.PI_REVIEW_API_URL;
+      const prKey = process.env.PI_REVIEW_PR_KEY;
+      if (apiUrl == null || prKey == null) throw new Error("Pi Review did not provide the terminal review context.");
+      const match = /^github\.com\/([^#]+)#(\d+)$/.exec(prKey);
+      if (match == null) throw new Error(`Unexpected PR key ${prKey}`);
+      const response = await fetch(`${apiUrl}/api/pr/stack`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prUrl: `https://github.com/${match[1]}/pull/${match[2]}` }), signal });
+      const result = await response.json() as { error?: string; stack?: { members: Array<{ number: number; title: string; status: string; isCurrent: boolean; viewerReview: { state: string; freshness: string } | null }>; nextToLand: number | null; counts: { total: number; landed: number; reviewedByViewer: number } } | null };
+      if (!response.ok) throw new Error(result.error ?? `Pi Review could not read the stack (${response.status}).`);
+      const stack = result.stack;
+      const text = stack == null
+        ? "This PR is not part of a stack (no sp/stack-pr or ghstack block in its description)."
+        : `Stack, bottom (lands first) to top. ${stack.counts.landed}/${stack.counts.total} landed; you reviewed ${stack.counts.reviewedByViewer} at their current head; next to land: ${stack.nextToLand == null ? "none" : `#${stack.nextToLand}`}.\n${stack.members.map((member, index) => `${index + 1}. #${member.number}${member.isCurrent ? " (this PR)" : ""} [${member.status}] ${member.viewerReview == null ? "not reviewed by you" : `your ${member.viewerReview.state.toLowerCase()} review is ${member.viewerReview.freshness}`} — ${member.title}`).join("\n")}`;
+      return { content: [{ type: "text", text }], details: result };
+    },
+  });
+
+  pi.registerTool({
     name: "read_general_review",
     label: "Read General Review",
     description: "Read the Pi Review \"General review\" findings saved for this PR (the report shown in the Pi review panel). Prefers the review for this session's HEAD; otherwise returns the newest one and marks it stale. Follow-up chat is excluded.",
