@@ -1,386 +1,96 @@
 # pi-review
 
-Pi Review is a local PR review cockpit for engineers who want GitHub diffs, draft review comments, and Pi-assisted code review in one focused workspace.
+A local PR-review cockpit: paste a GitHub PR, review the diff, draft comments with help from
+Pi, and submit the review back to GitHub.
+Everything runs on your machine through your own `gh` login and Pi launcher.
 
-Instead of jumping between GitHub, terminal worktrees, and separate agent chats, paste a PR URL and review from a single app: browse the diff, ask Pi about a line or the whole PR, write draft comments, and submit the review back to GitHub.
+## What's in it
 
-![Pi Review home](docs/screenshots/home.png)
+**Reviewing a PR**
+- GitHub-style unified/split diff with viewed files, inline threads, multiline drafts, CI status,
+  blame, and "changes since my last review".
+- Pi at every level: ask about a line, run a general or focus review, follow a guided walkthrough,
+  or open a native Pi terminal on the checked-out PR. Pi drafts private comments (including
+  GitHub "Apply suggestion" blocks), can edit/delete its drafts, and never publishes on its own.
+- Stacked PRs (sp/stack-pr and ghstack) show as a strip in the header: position, what landed,
+  what you reviewed, one click to the PR below/above.
 
-## What it feels like
-
-Open a PR and Pi Review lays out the code review flow as a split workspace:
-
-- the left side is a GitHub-style diff with expandable context, viewed-file state, inline threads, and multiline draft ranges
-- the right side is the review panel for draft comments, existing GitHub activity, and Pi review sessions
-- local state remembers recent PRs, viewed files, draft work, Pi sessions, and reviewer preference memory
-
-![Review workspace](docs/screenshots/review.png)
-
-Ask Pi can work at multiple levels: an inline question on a selected line/range, a full-PR findings pass, or a focus scan that turns the review into concrete areas to inspect.
-
-![Pi side panel](docs/screenshots/pi-panel.png)
-
-## Features
-
-- Open PRs from a GitHub URL or `OWNER/REPO#123`.
-- Review GitHub-style unified or split diffs with expandable hunk context.
-- Add, edit, remove, and submit draft review comments.
-- Select multiline ranges for GitHub review comments.
-- Mark files viewed and keep recent PR review status locally.
-- Fetch existing GitHub comments and activity.
-- Ask Pi about selected lines, focus areas, or the full PR.
-- Resize inline Line review terminals by dragging the bottom-right corner, or use the header's expand/restore button to fill the viewport without reconnecting the session.
-- Reuse PR worktrees and Pi sessions across reloads/server restarts.
-- Store submitted review examples and distill them into a reviewer profile.
-- Re-review with "Since last review": diff only what changed since the head you last reviewed.
-- See CI check-run status in the PR header, with failing checks one click away.
-- See inline blame context (last commit, author, age, originating PR) when opening a line thread.
-- Log feature usage locally (API calls plus key UI actions) to a JSONL file; `npm run usage:report` summarizes what you use, what you don't, and where latency or errors add friction.
-
-## How it works
-
-```mermaid
-flowchart LR
-  Browser[React review UI] --> Server[Local Node server]
-  Server --> GH[gh api + git]
-  Server --> State[~/.pi/agent/state/pi-pr-review]
-  Server --> Worktree[Cached PR worktree]
-  Server --> Pi[Pi CLI sessions: terminals + headless RPC]
-  Pi --> Worktree
-  Server --> Notes[~/agent_notes review profile]
-```
-
-The app is intentionally local-first. GitHub access goes through your authenticated `gh` CLI, repositories are cached as local worktrees, and Pi sessions run against the checked-out PR code so answers can reference real files.
+**Home page**
+- Inbox: GitHub notifications ranked into tiers, plus a board of your own PRs.
+- PyTorch queues: pre-review, review, and issue triage per the
+  [maintainer guide](https://github.com/pytorch/pytorch/blob/main/docs/source/community/maintainer_guide.md).
+  A background agent suggests accept/draft/close for each owed pre-review; you can chat with it
+  inline. Nothing is posted until you click.
+- Review activity: focused time, reviews (synced from GitHub), and pre-review decisions, with a
+  weekly trend and a year-to-date Markdown report.
+- Local checkouts, with **Prune landed…** to delete checkouts whose PRs merged or landed.
 
 ## Requirements
 
-- Node.js/npm
-- `gh` authenticated for GitHub API access
-- `git`
-- Pi CLI installed, with authentication and a default model already configured
-
-Check GitHub auth:
-
-```sh
-gh auth status
-```
+- Node.js and npm
+- `git` and an authenticated `gh` (`gh auth status`)
+- Pi CLI with a default model configured
 
 ## Quick start
-
-From a fresh clone, one command installs dependencies, builds the app, and starts the local server:
-
-```sh
-npm start
-```
-
-Open http://127.0.0.1:43133.
-
-Or clone and start in one shell command:
 
 ```sh
 git clone https://github.com/drisspg/pi-review && cd pi-review && npm start
 ```
 
-`npm start` automatically runs `npm install` when dependencies are missing or stale, runs `npm run build` when the built server/web assets are missing or stale, then starts the production server.
+Open http://127.0.0.1:43133. `npm start` installs dependencies and rebuilds when needed.
+After pulling or rebuilding, restart it (Ctrl-C, then `npm start`); the page tells you when the
+running server is older than the UI.
 
-Stop it with Ctrl-C. The launcher forwards stop signals and waits for server cleanup; repeated
-interrupts do not abandon an in-progress shutdown. Browser terminal sockets are closed without
-waiting for disconnected clients, and cache ownership is released after Pi process teardown.
-If process cleanup cannot be verified, shutdown reports the problem, retains cache ownership,
-and retries cleanup rather than exiting unsafely. Do not remove that live owner's lock.
-A force-kill or machine crash can still leave a stale lock requiring the verification described below.
+## Configuration
 
-## Pi launcher and model
-
-Pi Review uses your installed Pi CLI for **both inline terminals and background reviews**. It uses
-`PI_REVIEW_PI_COMMAND` when explicitly set, then `piCommand` in the app checkout's gitignored
-`.pi-review.local.json`, then `PI_BIN`, then the installed `pi` on PATH. Project-local npm binaries
-are excluded from launcher lookup. For a machine-local wrapper, create `.pi-review.local.json`:
+Machine-local settings live in the gitignored `.pi-review.local.json` in this checkout:
 
 ```json
-{"piCommand": "~/dotfiles/scripts/pi-work"}
+{
+  "piCommand": "~/dotfiles/scripts/pi-work",
+  "model": "openai/gpt-6-astra",
+  "thinkingLevel": "high",
+  "activityLedgerPath": "~/notes/review_activity.jsonl"
+}
 ```
 
-Both `npm start` and `npm run dev` pick this up automatically. Alternatively, export the wrapper
-path once in your shell configuration to share it with Pi Review and other applications:
+| Key | Effect |
+| --- | --- |
+| `piCommand` | Pi launcher for terminals and background agents (else `PI_BIN`, else `pi` on PATH) |
+| `model`, `thinkingLevel` | Override your global Pi model/thinking for Pi Review only |
+| `activityLedgerPath` | Where review-activity data and the year report are written (e.g. a notes vault) |
 
-```sh
-export PI_BIN="$HOME/dotfiles/scripts/pi-work"
-```
+Useful environment variables:
 
-Avoid sourcing an interactive shell per agent just to resolve an alias: prompt plugins can start
-detached helper processes. With a configured launcher, Pi Review needs no separate login or
-per-thread setup.
+| Variable | Effect |
+| --- | --- |
+| `PI_REVIEW_STATE_PATH` | Use a separate state file (and cache/ledger next to it), e.g. for a dev instance |
+| `PI_REVIEW_CACHE_DIR` | Checkout cache location |
+| `PI_REVIEW_DISABLE_AUTO_REVIEWS=1` | No automatic Pi runs (required for tests and probes) |
+| `PI_REVIEW_PRE_REVIEW_ASSESSOR=0` | Turn off the background pre-review agent |
+| `PI_REVIEW_ACTIVITY_SYNC=0` / `=1` | Disable / force the daily GitHub review sync |
 
-The provider/model in your global Pi settings (`~/.pi/agent/settings.json`, or
-`PI_CODING_AGENT_DIR`) applies to new review agents, including terminals resumed from older
-sessions. Pi Review no longer hardcodes a personal Codex provider. Background reviews refuse a
-fallback to a different configured model. Existing running agents keep their model until stopped
-or explicitly changed; restarting Pi Review picks up the new launcher for all agents.
+## Where data lives
 
-To use a different model or thinking level for Pi Review only, add them to `.pi-review.local.json`
-(`model` is `provider/id`; `thinkingLevel` overrides every agent and terminal). The file path can
-be overridden with `PI_REVIEW_LOCAL_CONFIG`:
-
-```json
-{"piCommand": "~/dotfiles/scripts/pi-work", "model": "openai/gpt-6-astra", "thinkingLevel": "high"}
-```
-
-To override the shared launcher for Pi Review only, set `PI_REVIEW_PI_COMMAND=/absolute/path/to/pi-wrapper`
-before `npm start`. This is an executable path, not a shell command with arguments. Authentication
-and transport stay inside that launcher; Pi Review does not copy credentials or reimplement the
-work gateway. Server-owned draft/GPU tools are exposed only to their agent over an ephemeral,
-token-protected loopback connection.
-
-Review agents receive a bounded workspace brief: PR/snapshot, checkout root, task scope, host,
-and environment hints. It makes static review the default, prohibits whole-disk package searches,
-and tells agents to report missing dependencies instead of expanding discovery. The same brief is
-added to delegated subagent tasks. This is guidance, not a sandbox, and does not cancel already
-running work; restart review sessions to pick up new launch context.
-
-The `suggest_change` agent tool accepts exact replacement `code` and creates a private inline
-comment using GitHub's `suggestion` block. In a line thread it uses the selected new-file line or
-range; otherwise supply `path`, `line`, and optionally `startLine`. Publish the draft normally,
-and the PR author can use GitHub's **Apply suggestion** action. The tool does not edit the checkout.
-
-**Copy feedback prompt** produces a triage-only handoff from your perspective as the reviewer.
-Your private drafts are labeled as requester-authored instructions/questions, separate from GitHub
-discussion and unverified AI suggestions. Draft references (`D1`, `D2`, …; `R0` for the overall
-note) survive the handoff. The response leads with a short **Proposed changes for sign-off**
-checklist: concrete, self-contained instructions you can approve and forward to a coding agent.
-Verified AI additions are labeled; intentional behavior and unresolved questions stay in separate
-short sections. It does not presume approval, write thread replies, or add “needs reply” tasks.
-**Copy agent handoff** under
-GitHub private drafts is different: it asks a coding agent to implement valid notes while keeping
-the GitHub drafts unchanged. **Copy draft context** exports context and ownership metadata without
-choosing a new task. None of these copy actions publishes anything.
-
-After updating Pi, run `npm run pi:smoke` to exercise a real background response, an in-memory draft
-tool, a real terminal response, reconnection, and process cleanup. It uses your configured model
-(and therefore incurs model usage), creates no GitHub comments, and removes its temporary sessions.
-Run it from your normal terminal; a nested agent sandbox may not allow another sandbox in a new cwd.
+- **State** (saved PRs, drafts, reviews, Pi sessions): `~/.pi/agent/state/pi-pr-review/`.
+  Submitted reviews also feed a reviewer profile mirrored to `~/agent_notes/findings/`.
+- **Checkouts**: `~/Library/Caches/pi-review/` on macOS (`~/.cache/pi-review/` on Linux).
+  Deleting or pruning a checkout keeps its saved review; reopening the PR recreates it.
+  Deletion refuses anything that might hold unique work. For offline maintenance:
+  `npm run cache -- inventory`, then `npm run cache -- evict --offline <id>` with the server stopped.
+- **Refresh** resets a PR's checkout to the latest remote commit (local edits are discarded);
+  opening a PR never does.
 
 ## Development
 
-Run dev mode with file watching:
-
 ```sh
-npm run dev
-```
-
-Open http://127.0.0.1:5173.
-
-Useful commands:
-
-```sh
-npm run build
-npm run start:built
+npm run dev            # Vite on :5173 + API server, with file watching
 npm run typecheck
-npm run test:e2e
-npm run validate
+npm run test:unit
+npm run test:e2e:fast  # Playwright against a real PR; needs network and gh
+npm run validate       # all of the above
 ```
 
-The Playwright suite opens a real PR by default. Override it with:
-
-```sh
-PI_REVIEW_TEST_PR=https://github.com/OWNER/REPO/pull/123 npm run test:e2e
-```
-
-## Local state
-
-State is stored under:
-
-```text
-~/.pi/agent/state/pi-pr-review/
-```
-
-Important subdirectories:
-
-```text
-state.json                 # recent PRs, viewed files, review memory
-pi-sessions/               # background Pi sessions per PR
-terminal-sessions/         # resumable native Pi terminal threads
-```
-
-`PI_REVIEW_STATE_PATH` still selects the state JSON file. It does not relocate existing
-production state. With a non-default state path, new Pi/terminal records live in `<state-path>.data/`
-and checkouts default to `<state-path>.cache/`, isolating test/dev instances from production.
-Neither session records nor drafts belong in the checkout cache.
-
-### Checkout storage and deletion
-
-Full clones (`repos/`, including their checked-out source trees) and linked PR worktrees
-(`worktrees/`) now live in a separate checkout root:
-
-| Platform | Default |
-| --- | --- |
-| macOS | `~/Library/Caches/pi-review/` |
-| Linux/other Unix | `$XDG_CACHE_HOME/pi-review/`, or `~/.cache/pi-review/` |
-| Windows | `%LOCALAPPDATA%/pi-review/Cache/` |
-
-`PI_REVIEW_CACHE_DIR=/absolute/path` overrides the checkout root, including for custom state
-files. Give concurrent instances different state files **and** cache roots. A server owns its
-cache for its entire lifetime; a second server or maintenance command cannot share it. Use only
-local storage. A conventional cache location is **not** a promise of exclusion by backup or
-security software: those policies are organization-specific. This app does not change them.
-Checkouts may contain user work; never blindly delete the cache directory.
-
-Inventory is read-only, does not fetch, and includes both clones and worktrees:
-
-```sh
-npm run cache -- inventory
-```
-
-The home page defaults to **Local checkouts**. Reviews whose checkout is absent are hidden
-under **Saved only**, with a **No local checkout** label and no checkout-delete controls.
-Deleting a checkout moves its card there immediately; reopening the review recreates the
-checkout and returns it to the default view. Availability is checked from the configured cache
-on each `/api/prs` request, not persisted as review state or inferred from review status.
-
-The saved-PR card's **Delete local checkout** button (also available in bulk selection) stops
-Pi agents/terminals for that PR and deletes only its clean checkout. Saved PR cards, reviews,
-drafts, annotations, and session history remain. The success message confirms that reopening
-will recreate the checkout; the shared clone is retained. Close external editors/jobs first.
-Deletion refuses local changes, ignored files, uncovered commits, unknown Git metadata, or failed
-inspection. Pi sessions may already be stopped when a protection check refuses deletion. Bulk
-results list each retained PR separately; long failure lists start collapsed.
-
-Ordinary Sapling `sl/` worktree metadata is automatically preserved **before** server-owned
-checkout deletion. Verified copies and SHA-256 manifests live in
-`~/.pi/agent/state/pi-pr-review/checkout-metadata/<worktree-id>/<copy-id>/` (or
-`<custom-state-path>.data/checkout-metadata/`), outside the removed checkout. This is metadata
-preservation, not an archive of the source tree or unpublished Git history. Copies are private,
-limited to 64 MiB / 10,000 entries, and must contain only regular files/directories. A failed copy,
-changed source, unsafe recovery location, symlink, or special file refuses deletion. Other Git
-metadata and potentially unique commits remain protected. CLI inventory/eviction still reports
-Sapling metadata for manual handling; automatic preservation belongs to the server-owned flow.
-
-The server must own the cache, and deletion is ordered with PR opens/refreshes, preparation,
-blame, and editor-open requests. `/api/pr/checkout/delete` is the checkout-only contract;
-it never calls the review-state removal API. It does not force-delete or reset protected files.
-
-CLI eviction (including full-clone reclamation) remains offline-only. Stop the owning server
-and close external terminals, editors, and jobs using its checkouts. Then select **one exact ID**
-from the inventory, for example:
-
-```sh
-npm run cache -- evict --offline worktrees/github.com/owner/repo/pr-123
-```
-
-`--offline` is your confirmation that external users are closed, not a force flag. The command
-acquires the cache lock and reruns safety checks. It refuses active processes, failed process/Git
-inspection, missing/locked/broken Git linkage or indexes, tracked/staged/untracked/ignored files,
-index flags that hide changes, populated submodules, and commits (including detached HEAD
-reflogs) not covered by fetched origin/PR refs. Clones additionally require no linked worktrees,
-no uncovered local refs/reflogs or unreachable objects, no tags/notes/stashes/replace refs
-(their remote publication is not verified), and no detected custom Git configuration, hooks,
-excludes, or extra administrative data. Refusals need manual preservation/investigation;
-there is no force-delete fallback. Git operations and process probes have time limits.
-
-The process scan uses `lsof` and `ps` on Unix; if unavailable or incomplete, eviction refuses.
-Warnings (including Linux FUSE/GVFS permission warnings) block eviction; resolve the inspection
-limitation rather than suppressing warnings. It is supplementary, not proof that an arbitrary
-external editor/job cannot start writing later.
-Do not run non-cooperating Git tools or old servers against the cache during maintenance.
-A leftover `.checkout-owner/owner.json` after a crash blocks reuse: verify its host/PID and all
-checkout users, then remove **only that stale lock directory** manually. Locks are never stolen
-based on a PID or an age heuristic.
-
-Eviction never calls the review-state deletion API: drafts, annotations, saved reviews/history,
-and Pi session files remain. Restart the server and reopen the PR to recreate its checkout and
-register its current cwd. Old paths in session transcripts are historical, not authoritative.
-The legacy `/api/pr/cleanup` contract remains a different, destructive review-state operation
-and refuses while a checkout exists. The card and bulk checkout-delete buttons no longer call
-it. Do not remove saved PRs to reclaim checkout storage.
-
-**Refresh resets the PR checkout to the latest remote PR commit**, even when the commit is
-unchanged. It fetches fresh GitHub data, stops Pi Review's agents/terminals for that PR and waits
-for teardown, fetches the PR ref, then force-checks out the matching commit in detached mode and
-runs `git clean -fd`. Local tracked/staged edits and ordinary non-ignored untracked files are discarded;
-ignored files (such as environments/build caches), nested Git repositories, local branch refs,
-saved reviews/drafts, and session history remain. Close external editors/jobs using the checkout before Refresh. A remote
-HEAD race or failed fetch aborts before resetting files; retry Refresh for a moved HEAD.
-Sessions may already be stopped if checkout validation or fetching fails. Terminal signal errors
-(such as `EPERM`) are reported without crashing the server. A PTY exit is not enough: its process
-group must also be confirmed gone before reset or deletion. Remaining/permission-denied groups
-keep the operation blocked; retry after closing the relevant processes. Exit callbacks only probe
-old group IDs and never force-kill them. Session history is not deleted after failed cleanup.
-
-Opening a PR and automatic activity updates after comment/review actions remain non-destructive:
-a different local HEAD returns a recoverable conflict. If opening is blocked, the error banner
-offers **Reset checkout and open**, with a warning about discarded local edits. Only this recovery
-action and the explicit Refresh button call `/api/pr/refresh`; `/api/pr/activity` never resets. Missing indexes, foreign/broken Git
-linkage, locked worktrees, initialized submodules, and in-progress rebases/sequencers still require
-manual handling. Refresh never deletes/recreates the checkout directory or evicts the
-cache. There is no background pruning timer or retention policy.
-
-### Transitioning an existing installation
-
-Old versions stored both clones and worktrees beside durable state. The new default refuses to
-prepare checkouts while that legacy inventory remains, rather than silently creating a second
-complete set. Nothing is automatically moved or deleted.
-
-1. Inventory while the old application is still running (active users appear as blockers):
-   `npm run cache -- inventory --legacy`.
-2. Review the inventory and preserve dirty/ignored data or unpublished commits **outside the
-   cache**. Commits absent from current fetched refs may be old upstream history, not necessarily
-   unpublished work; the tool cannot prove that and refuses. Initialized submodules and custom
-   Git metadata also need manual handling.
-3. When ready, stop **all Pi Review servers** and close their agents/terminals/editors yourself.
-   Old servers do not implement the ownership lock, and new servers still use durable legacy
-   session data, so legacy maintenance conservatively checks for any server process.
-4. Rerun the inventory. Evict eligible worktree IDs one at a time using
-   `npm run cache -- evict --legacy --offline <worktree-id>`.
-5. Inventory again; evict eligible **clone** IDs with the same command. Clones are full working
-   copies too. Protected clones remain for manual preservation; never remove the legacy root,
-   its state JSON, `pi-sessions/`, `terminal-sessions/`, or `artifacts/`.
-6. Once legacy checkout entries are gone, start normally and reopen saved PRs. Git recreates valid
-   linked worktrees in the new root; no plain filesystem renames of linked worktrees are used.
-
-Interrupted clones/checkouts and missing directories with stale Git registrations are protected,
-not auto-repaired. For a missing worktree, inspect its clone with
-`git -C <clone> worktree list --porcelain` and
-`git -C <clone> worktree prune --dry-run --verbose --expire=now`. Preserve detached commits,
-reflogs, and any other user data outside the cache before manually pruning a confirmed stale
-registration (`git -C <clone> worktree prune --verbose --expire=now`). For a missing index or
-non-Git directory, preserve the directory and associated clone metadata outside the cache and
-investigate manually; neither a failed clone nor a failed inspection grants deletion permission.
-Tags, extra tool metadata (for example Sapling state), and unreachable objects from old PR
-force-pushes can keep otherwise clean clones protected. Automatic clone reclamation is intentionally
-limited, and a 60-second inspection timeout also requires manual investigation. Object-database
-inspection is skipped when cheaper checks already establish a protection reason.
-
-If some legacy entries need more time, explicitly set
-`PI_REVIEW_CACHE_DIR="$HOME/.pi/agent/state/pi-pr-review"` when starting the updated server to
-continue using them (after stopping old instances), or explicitly choose a new cache root while
-retaining a reviewed legacy inventory for manual handling. An override is a deliberate transition
-choice, not automatic migration. No backup/battery improvement is claimed until actual storage
-has been reclaimed and a matched measurement has been made.
-
-Submitted review comments are captured as raw preference memory in `state.json` and mirrored to:
-
-```text
-~/agent_notes/findings/pi_review_preferences.md
-```
-
-Distill raw examples into an actionable reviewer profile with:
-
-```sh
-curl -X POST http://127.0.0.1:43133/api/review-memory/distill
-```
-
-The distilled profile is stored in `state.json`, mirrored to:
-
-```text
-~/agent_notes/findings/pi_review_profile.md
-```
-
-and included in future Pi Review prompts.
-
-## Project layout
-
-```text
-src/       local API server, GitHub integration, worktrees, Pi sessions, state
-web/src/   React/Vite review UI
-tests/     Playwright end-to-end tests
-```
+Use separate ports and state when another instance is running, e.g.
+`PI_PR_REVIEW_PORT=43135 PI_REVIEW_WEB_PORT=5175 PI_REVIEW_STATE_PATH=/tmp/pi-review-dev.json npm run dev`.
+Architecture, contracts, and safety rules for contributors and agents are in [AGENTS.md](AGENTS.md).

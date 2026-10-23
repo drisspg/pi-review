@@ -5898,6 +5898,96 @@ a.stack-chip:hover {
   font-size: var(--text-xs);
 }
 
+.section-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.section-toggle .disclosure-chevron {
+  color: var(--muted);
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.section-toggle[aria-expanded="true"] .disclosure-chevron {
+  transform: rotate(90deg);
+}
+
+.section-toggle:hover .disclosure-chevron {
+  color: var(--text);
+}
+
+.pt-row.pt-compact {
+  padding-top: var(--space-1);
+  padding-bottom: var(--space-1);
+}
+
+.stale-server-pill {
+  cursor: default;
+}
+
+/* Home "Checked out" section: a slim, one-line-per-PR list of local (or saved) reviews. */
+.checkouts {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.checkouts-head .checkouts-scope {
+  flex: 0 1 auto;
+  gap: var(--space-3);
+}
+
+.checkouts-more {
+  justify-self: start;
+  font-size: var(--text-sm);
+}
+
+.checkouts-head .start-bulk-actions {
+  margin-left: auto;
+  min-height: 0;
+}
+
+.pr-list .pr-card-body {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+}
+
+.pr-list .pr-card-title {
+  display: block;
+  overflow: hidden;
+  font-size: var(--text-md);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pr-list .pr-card-key {
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.pr-list .pr-card-meta {
+  flex-wrap: nowrap;
+  align-items: center;
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .pr-list .pr-card-body {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+}
+
 .pt-my-stage.actor-author {
   color: var(--attention);
 }

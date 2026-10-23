@@ -2,6 +2,7 @@ import { AlertIcon, BellSlashIcon, CheckCircleFillIcon, CheckIcon, CommentIcon, 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { api, errorMessage, logUsage } from "../api";
+import { useCollapsedSection } from "../lib/collapse";
 import { relativeTime } from "../lib/pr";
 import type { InboxItem, InboxResponse, InboxTier, ViewerPullRequest } from "../types";
 import { Button } from "./Button";
@@ -110,6 +111,7 @@ export function InboxPanel({ openPr }: { openPr: (url: string) => Promise<void> 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busyIds, setBusyIds] = useState<Set<string>>(() => new Set());
   const listRef = useRef<HTMLUListElement | null>(null);
+  const [collapsed, toggleCollapsed] = useCollapsedSection("inbox");
 
   const load = useCallback(async (refresh: boolean) => {
     if (refresh) setLoading(true);
@@ -213,7 +215,7 @@ export function InboxPanel({ openPr }: { openPr: (url: string) => Promise<void> 
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
-      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || isTypingTarget(event.target)) return;
+      if (collapsed || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || isTypingTarget(event.target)) return;
       if (event.key === "j" || event.key === "ArrowDown") {
         event.preventDefault();
         moveSelection(1);
@@ -246,15 +248,16 @@ export function InboxPanel({ openPr }: { openPr: (url: string) => Promise<void> 
   const routed = data == null ? "" : [data.pytorchFlowCount > 0 ? `${data.pytorchFlowCount} pytorch review requests` : null, data.pytorchIssues.length > 0 ? `${data.pytorchIssues.length} pytorch issues` : null].filter((part) => part != null).join(" + ");
   const summary = data == null ? null : data.fetchedAt == null ? freshness : `${total === 0 ? "Inbox zero" : `${total} unread · ${counts["needs-you"]} need you · ${counts["review-requests"]} review requests`}${routed.length > 0 ? ` · ${routed} in PyTorch queues` : ""} · ${freshness}`;
 
-  return <section className="inbox" aria-label="GitHub inbox">
+  return <section className={`inbox${collapsed ? " collapsed" : ""}`} aria-label="GitHub inbox">
     <header className="inbox-head">
-      <h2><InboxIcon size={16} /> Inbox</h2>
+      <h2><button type="button" className="section-toggle" aria-expanded={!collapsed} aria-label={collapsed ? "Expand inbox" : "Collapse inbox"} onClick={toggleCollapsed}><span className="disclosure-chevron" aria-hidden="true">›</span><InboxIcon size={16} /> Inbox</button></h2>
       {summary != null && <span className="inbox-summary">{summary}</span>}
       <div className="inbox-head-actions">
         {resolvedIds.length > 0 && <Button variant="muted" onClick={() => void runAction("/api/inbox/done", resolvedIds, "inbox:clear-resolved")} disabled={resolvedIds.some((id) => busyIds.has(id))}>Clear {resolvedIds.length} resolved</Button>}
         <Button variant="muted" className={`inbox-refresh${loading || refreshing ? " loading" : ""}`} onClick={() => void load(true)} disabled={loading || refreshing} aria-label="Refresh inbox"><SyncIcon size={14} /> Refresh</Button>
       </div>
     </header>
+    {!collapsed && <>
     {error != null && <p className="inbox-error" role="alert">Could not load notifications: {error}{error.includes("scope") ? <> Run <code>{SCOPE_HINT}</code>.</> : null}</p>}
     {actionError != null && <p className="inbox-error" role="alert">{actionError}</p>}
     {data?.warnings.map((warning) => <p key={warning} className="inbox-warning">{warning}</p>)}
@@ -306,6 +309,7 @@ export function InboxPanel({ openPr }: { openPr: (url: string) => Promise<void> 
       </div>
       <MyPullRequests open={data?.myPrs ?? []} closed={data?.recentlyClosedPrs ?? []} loading={data == null || (data.fetchedAt == null && refreshing)} login={data?.login ?? null} openPr={openPr} />
     </div>
+    </>}
   </section>;
 }
 

@@ -2,7 +2,7 @@ import React, { createContext, ReactNode, useContext, useEffect, useMemo, useRef
 import { createRoot } from "react-dom/client";
 import { CheckIcon, CopyIcon, ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, GitPullRequestIcon, KebabHorizontalIcon, ScreenFullIcon, ScreenNormalIcon, SyncIcon, XIcon } from "@primer/octicons-react";
 import { BaseStyles, Checkbox, Flash, Radio, Select, Textarea, TextInput, ThemeProvider } from "@primer/react";
-import { api, ApiError, errorMessage, isStaleBuild, logUsage, subscribeStaleBuild } from "./api";
+import { api, ApiError, errorMessage, isStaleBuild, isStaleServer, logUsage, RESTART_HINT, subscribeStaleBuild, subscribeStaleServer } from "./api";
 import { ActionMenu, ActionMenuItem } from "./components/ActionMenu";
 import { Button } from "./components/Button";
 import { CodeText, InlineSnippetsProvider, MarkdownText } from "./components/Markdown";
@@ -14,6 +14,7 @@ import { InboxPanel } from "./components/Inbox";
 import { PruneCheckoutsModal, type PruneResult } from "./components/PruneCheckouts";
 import { StackStrip } from "./components/StackStrip";
 import { useActivityTracker } from "./lib/activity";
+import { useCollapsedSection } from "./lib/collapse";
 import { PytorchQueuesPanel, PytorchWorkflowStrip } from "./components/PytorchWorkflow";
 import { ExistingComments, ExistingReviewThread } from "./components/Threads";
 import type { PiTerminalTarget } from "./components/PiTerminal";
@@ -1151,6 +1152,7 @@ function App() {
   const primerColorMode = isLightTheme(theme) ? "day" : "night";
   const primerNightScheme = theme === "github-dimmed" ? "dark_dimmed" : "dark";
   const staleBuild = useSyncExternalStore(subscribeStaleBuild, isStaleBuild);
+  const staleServer = useSyncExternalStore(subscribeStaleServer, isStaleServer);
   // Everything that used to live on the app toolbar and PR header rows, folded
   // into the single sticky review bar's trailing menu.
   const reviewBarMenu = review == null ? null : <ActionMenu trigger={<Button variant="icon" className="bar-tools-button" aria-label="Tools"><KebabHorizontalIcon size={16} /></Button>}>
@@ -1166,7 +1168,8 @@ function App() {
   </ActionMenu>;
   return <ThemeProvider colorMode={primerColorMode} dayScheme="light" nightScheme={primerNightScheme}>
     <BaseStyles as="main" className="app-shell">
-    {staleBuild && <button type="button" className="stale-build-pill" onClick={() => window.location.reload()}>Pi Review was rebuilt — reload to pick up the new version</button>}
+    {staleServer ? <div className="stale-build-pill stale-server-pill" role="status">{RESTART_HINT}</div>
+      : staleBuild && <button type="button" className="stale-build-pill" onClick={() => window.location.reload()}>Pi Review was rebuilt — reload to pick up the new version</button>}
     {review == null && <AppToolbar
       review={review}
       theme={theme}
@@ -1236,24 +1239,21 @@ function AppToolbar({ review, theme, setTheme, busy, goHome, openGpuWorkspace, o
   </header>;
 }
 
-type StartFilter = "all" | "needs-review" | "in-progress" | "done";
+
+/** Recent entries shown before "Show all"; selection always lists everything so bulk actions see every row. */
+const CHECKOUT_LIST_LIMIT = 25;
 
 function StartPage({ prs, openPr, openActivity, onPruned, deleteCheckouts, deleting, openInput, setOpenInput, busy }: { prs: PullRequestListItem[]; openPr: (input: string) => Promise<void>; openActivity: () => void; onPruned: (result: PruneResult) => void; deleteCheckouts: (prs: StoredPullRequest[]) => Promise<string[]>; deleting: boolean; openInput: string; setOpenInput: (value: string) => void; busy: boolean }) {
   const [scope, setScope] = useState<"local" | "saved">("local");
-  const [filter, setFilter] = useState<StartFilter>("all");
+  const [collapsed, toggleCollapsed] = useCollapsedSection("checkouts");
+  const [showAll, setShowAll] = useState(false);
   const [selecting, setSelecting] = useState(false);
   const [pruneOpen, setPruneOpen] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
   const localCount = prs.filter((pr) => pr.checkoutPresent).length;
   const scopedPrs = useMemo(() => prs.filter((pr) => scope === "local" ? pr.checkoutPresent : !pr.checkoutPresent), [prs, scope]);
-  const groups = useMemo(() => groupPrsByStatus(scopedPrs), [scopedPrs]);
-  const counts = { all: scopedPrs.length, "needs-review": groups.needsReview.length, "in-progress": groups.inProgress.length, done: groups.done.length } as const;
-  const visibleGroups: Array<{ id: StartFilter; title: string; hint: string; prs: PullRequestListItem[] }> = [
-    { id: "needs-review" as const, title: "Needs review", hint: "Not yet reviewed or new commits since your last pass.", prs: groups.needsReview },
-    { id: "in-progress" as const, title: "In progress", hint: "You commented but did not approve or request changes.", prs: groups.inProgress },
-    { id: "done" as const, title: "Done", hint: "Approved or changes requested at the current head.", prs: groups.done },
-  ].filter((group) => filter === "all" || group.id === filter).filter((group) => group.prs.length > 0);
-  const visiblePrs = visibleGroups.flatMap((group) => group.prs);
+  // Attention comes from the inbox and queues; this is just what is (or was) checked out, newest first.
+  const visiblePrs = useMemo(() => [...scopedPrs].sort((a, b) => (b.lastOpenedAt ?? "").localeCompare(a.lastOpenedAt ?? "")), [scopedPrs]);
   const selectedPrs = visiblePrs.filter((pr) => pr.checkoutPresent && selectedKeys.has(pr.key));
   const allVisibleSelected = visiblePrs.length > 0 && visiblePrs.every((pr) => selectedKeys.has(pr.key));
   function toggleSelected(key: string): void {
@@ -1298,18 +1298,15 @@ function StartPage({ prs, openPr, openActivity, onPruned, deleteCheckouts, delet
     </section>
     <PytorchQueuesPanel openPr={openPr} />
     <InboxPanel openPr={openPr} />
-    {prs.length === 0 ? <section className="panel start-empty"><GitPullRequestIcon size={24} /><p className="muted">No previous reviews yet. Paste a PR above to get started.</p></section> : <>
-      <nav className="start-filters" aria-label="Checkout availability">
-        {(["local", "saved"] as const).map((id) => <button key={id} type="button" className={`start-filter${scope === id ? " active" : ""}`} aria-pressed={scope === id} disabled={deleting} onClick={() => { setScope(id); setFilter("all"); cancelSelection(); }}>
-          {id === "local" ? "Local checkouts" : "Saved only"}<span className="start-filter-count">{id === "local" ? localCount : prs.length - localCount}</span>
-        </button>)}
-      </nav>
-      <p className="muted">{scope === "local" ? "PR checkouts on this machine. Deleting a checkout keeps its saved review." : "Saved reviews without local checkouts. Opening one recreates its checkout."}</p>
-      <div className="start-list-toolbar">
-        <nav className="start-filters" aria-label="Filter previous reviews">
-          {(["all", "needs-review", "in-progress", "done"] as const).map((id) => <button key={id} type="button" className={`start-filter${filter === id ? " active" : ""}`} onClick={() => setFilter(id)}>{filterLabel(id)}<span className="start-filter-count">{counts[id]}</span></button>)}
+    {prs.length === 0 ? <section className="panel start-empty"><GitPullRequestIcon size={24} /><p className="muted">No previous reviews yet. Paste a PR above to get started.</p></section> : <section className={`checkouts${collapsed ? " collapsed" : ""}`} aria-label="Checked-out pull requests">
+      <header className="inbox-head checkouts-head">
+        <h2><button type="button" className="section-toggle" aria-expanded={!collapsed} aria-label={collapsed ? "Expand checkouts" : "Collapse checkouts"} onClick={toggleCollapsed}><span className="disclosure-chevron" aria-hidden="true">›</span><GitPullRequestIcon size={16} /> Checked out</button></h2>
+        <nav className="start-filters checkouts-scope" aria-label="Checkout availability">
+          {(["local", "saved"] as const).map((id) => <button key={id} type="button" className={`start-filter${scope === id ? " active" : ""}`} aria-pressed={scope === id} title={id === "local" ? "PR checkouts on this machine. Deleting one keeps its saved review." : "Saved reviews without a local checkout. Opening one recreates it."} disabled={deleting} onClick={() => { setScope(id); cancelSelection(); }}>
+            {id === "local" ? "Local checkouts" : "Saved only"}<span className="start-filter-count">{id === "local" ? localCount : prs.length - localCount}</span>
+          </button>)}
         </nav>
-        {scope === "local" && <div className="start-bulk-actions">
+        {scope === "local" && !collapsed && <div className="start-bulk-actions">
           {selecting ? <>
             <label className={`start-select-visible${visiblePrs.length === 0 ? " disabled" : ""}`}><Checkbox checked={allVisibleSelected} onChange={toggleVisible} disabled={visiblePrs.length === 0 || deleting} /> Select visible</label>
             <span className="muted">{selectedPrs.length} selected</span>
@@ -1321,51 +1318,29 @@ function StartPage({ prs, openPr, openActivity, onPruned, deleteCheckouts, delet
           </>}
         </div>}
         {pruneOpen && <PruneCheckoutsModal close={() => setPruneOpen(false)} onPruned={onPruned} />}
-      </div>
-      {visibleGroups.length === 0 ? <p className="muted">{scopedPrs.length > 0 ? "Nothing in this category." : scope === "local" ? "No local checkouts. Your saved reviews are under Saved only." : "No saved-only reviews. Deleting a checkout keeps its review here."}</p> : visibleGroups.map((group) => <section className="start-group" key={group.id}>
-        <header className="start-group-head"><h2>{group.title}</h2><span className="muted">{group.hint}</span></header>
-        <div className="pr-grid">{group.prs.map((pr) => <PrCard key={pr.key} pr={pr} openPr={openPr} deleteCheckouts={deleteCheckouts} deleting={deleting} selecting={selecting} selected={selectedKeys.has(pr.key)} toggleSelected={toggleSelected} />)}</div>      </section>)}
-    </>}
+      </header>
+      {!collapsed && (visiblePrs.length === 0 ? <p className="muted">{scope === "local" ? "No local checkouts. Your saved reviews are under Saved only." : "No saved-only reviews. Deleting a checkout keeps its review here."}</p>
+        : <>
+          <div className="pr-grid pr-list">{(showAll || selecting ? visiblePrs : visiblePrs.slice(0, CHECKOUT_LIST_LIMIT)).map((pr) => <PrCard key={pr.key} pr={pr} openPr={openPr} deleteCheckouts={deleteCheckouts} deleting={deleting} selecting={selecting} selected={selectedKeys.has(pr.key)} toggleSelected={toggleSelected} />)}</div>
+          {!selecting && visiblePrs.length > CHECKOUT_LIST_LIMIT && <button type="button" className="pt-link-button checkouts-more" onClick={() => setShowAll(!showAll)}>{showAll ? "Show recent only" : `Show all ${visiblePrs.length}`}</button>}
+        </>)}
+    </section>}
   </div>;
 }
 
-function filterLabel(id: StartFilter): string {
-  if (id === "all") return "All";
-  if (id === "needs-review") return "Needs review";
-  if (id === "in-progress") return "In progress";
-  return "Done";
-}
 
-function groupPrsByStatus(prs: PullRequestListItem[]): { needsReview: PullRequestListItem[]; inProgress: PullRequestListItem[]; done: PullRequestListItem[] } {
-  const sorted = [...prs].sort((a, b) => (b.lastOpenedAt ?? "").localeCompare(a.lastOpenedAt ?? ""));
-  const needsReview: PullRequestListItem[] = [];
-  const inProgress: PullRequestListItem[] = [];
-  const done: PullRequestListItem[] = [];
-  for (const pr of sorted) {
-    const status = reviewStatus(pr);
-    if (status.tone === "success" || status.tone === "danger" || status.tone === "merged") done.push(pr);
-    else if (pr.lastReviewEvent === "COMMENT" && pr.lastReviewedHeadSha === pr.headSha) inProgress.push(pr);
-    else needsReview.push(pr);
-  }
-  return { needsReview, inProgress, done };
-}
 
 function PrCard({ pr, openPr, deleteCheckouts, deleting, selecting, selected, toggleSelected }: { pr: PullRequestListItem; openPr: (input: string) => Promise<void>; deleteCheckouts: (prs: StoredPullRequest[]) => Promise<string[]>; deleting: boolean; selecting: boolean; selected: boolean; toggleSelected: (key: string) => void }) {  const status = reviewStatus(pr);
   return <article className={`pr-card status-${status.tone}${selecting ? " selecting" : ""}${selected ? " selected" : ""}`}>
     {selecting && <label className="pr-card-select"><Checkbox checked={selected} onChange={() => toggleSelected(pr.key)} aria-label={`Select ${pr.key}`} disabled={deleting} /></label>}
     <a className="pr-card-body" href={reviewHash(pr.url)} aria-disabled={deleting} onClick={(event) => { if (!isPlainLeftClick(event)) return; event.preventDefault(); if (deleting) return; if (selecting) toggleSelected(pr.key); else void openPr(pr.url); }}>
-      <div className="pr-card-head">
-        <strong className="pr-card-title">{pr.title}</strong>
+      <strong className="pr-card-title">{pr.title}</strong>
+      <span className="pr-card-key">{pr.key.startsWith("github.com/") ? <><span className="visually-hidden">github.com/</span>{pr.key.slice("github.com/".length)}</> : pr.key}</span>
+      <span className="pr-card-meta">
         <span className={`review-status ${status.tone}`}>{status.label}</span>
-      </div>
-      <span className="pr-card-key">{pr.key}</span>
-      <div className="pr-card-meta">
-        <span>{pr.filesChanged ?? "—"} files</span>
-        <span>{pr.existingCommentCount ?? 0} comments</span>
-        <span>head {shortSha(pr.headSha)}</span>
-        <span>{relativeTime(pr.lastOpenedAt)}</span>
-        <span>{pr.checkoutPresent ? "Local checkout" : "No local checkout"}</span>
-      </div>
+        <span title={`Last opened ${new Date(pr.lastOpenedAt).toLocaleString()} · head ${shortSha(pr.headSha)}`}>{relativeTime(pr.lastOpenedAt)}</span>
+        <span className="pr-card-local visually-hidden">{pr.checkoutPresent ? "Local checkout" : "No local checkout"}</span>
+      </span>
     </a>
     {!selecting && pr.checkoutPresent && <button className="trash-button" title="Delete local checkout" aria-label="Delete local checkout" onClick={() => void deleteCheckouts([pr])} disabled={deleting}><XIcon size={16} /></button>}
   </article>;

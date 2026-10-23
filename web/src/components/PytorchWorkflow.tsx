@@ -3,6 +3,7 @@ import { Radio, Textarea, TextInput } from "@primer/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 
 import { api, errorMessage, logUsage } from "../api";
+import { useCollapsedSection } from "../lib/collapse";
 import { autoGrowTextarea } from "../lib/dom";
 import { relativeTime } from "../lib/pr";
 import type { InboxItem, PytorchAssessment, PytorchPrStatus, PytorchQueueIssue, PytorchQueuePr, PytorchQueuesResponse, PytorchStageInfo, StoredPullRequest } from "../types";
@@ -268,6 +269,7 @@ export function PytorchQueuesPanel({ openPr }: { openPr: (url: string) => Promis
   const [busy, setBusy] = useState<Set<number>>(() => new Set());
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
   const [chatOpen, setChatOpen] = useState<Set<number>>(() => new Set());
+  const [collapsed, toggleCollapsed] = useCollapsedSection("pytorch-queues");
   const toggleChat = (number: number) => setChatOpen((current) => {
     const next = new Set(current);
     if (next.has(number)) next.delete(number);
@@ -358,7 +360,9 @@ export function PytorchQueuesPanel({ openPr }: { openPr: (url: string) => Promis
   function prRow(pr: PytorchQueuePr, kind: "pre-review" | "review") {
     const isBusy = busy.has(pr.number);
     const open = expanded.has(pr.number);
-    return <li key={pr.number} className={`inbox-row pt-row${isBusy ? " busy" : ""}${pr.viewerThumbsUp && kind === "pre-review" ? " pt-accepted" : ""}`}>
+    // Accepted pre-reviews just wait on other reviewers: keep them to one line unless expanded.
+    const compact = kind === "pre-review" && pr.viewerThumbsUp && !open && !chatOpen.has(pr.number);
+    return <li key={pr.number} className={`inbox-row pt-row${isBusy ? " busy" : ""}${pr.viewerThumbsUp && kind === "pre-review" ? " pt-accepted" : ""}${compact ? " pt-compact" : ""}`}>
       <span className={`pt-stage-dot tone-${stageTone(pr.stage, true)}`} title={`${pr.stage.label}: ${pr.stage.next}`} />
       <div className="inbox-row-main">
         <div className="inbox-row-head">
@@ -377,10 +381,10 @@ export function PytorchQueuesPanel({ openPr }: { openPr: (url: string) => Promis
           <span>{prSize(pr)}</span>
           {pr.localPrKey != null && <span className="inbox-row-local">reviewed here</span>}
         </div>
-        {kind === "pre-review" && pr.assessment != null && <AssessmentSummary assessment={pr.assessment} />}
-        {kind === "pre-review" && <div className="pt-row-issues"><LinkedIssues pr={pr} /></div>}
-        {kind === "pre-review" && pr.bodyExcerpt.length > 0 && <button type="button" className={`pt-excerpt${open ? " open" : ""}`} aria-expanded={open} onClick={() => setExpanded((current) => { const next = new Set(current); if (next.has(pr.number)) next.delete(pr.number); else next.add(pr.number); return next; })}>{pr.bodyExcerpt}</button>}
-        {kind === "pre-review" && pr.bodyExcerpt.length === 0 && <span className="pt-excerpt-empty">No description — the guide allows rejecting at pre-review for that.</span>}
+        {!compact && kind === "pre-review" && pr.assessment != null && <AssessmentSummary assessment={pr.assessment} />}
+        {!compact && kind === "pre-review" && <div className="pt-row-issues"><LinkedIssues pr={pr} /></div>}
+        {!compact && kind === "pre-review" && pr.bodyExcerpt.length > 0 && <button type="button" className={`pt-excerpt${open ? " open" : ""}`} aria-expanded={open} onClick={() => setExpanded((current) => { const next = new Set(current); if (next.has(pr.number)) next.delete(pr.number); else next.add(pr.number); return next; })}>{pr.bodyExcerpt}</button>}
+        {!compact && kind === "pre-review" && pr.bodyExcerpt.length === 0 && <span className="pt-excerpt-empty">No description — the guide allows rejecting at pre-review for that.</span>}
         {chatOpen.has(pr.number) && <PrChat pr={pr} kind={kind} onSuggestionSaved={() => void load(false)} />}
       </div>
       <div className="pt-row-actions">
@@ -450,15 +454,16 @@ export function PytorchQueuesPanel({ openPr }: { openPr: (url: string) => Promis
   }
 
   const loading = data == null || (data.fetchedAt == null && refreshing);
-  return <section className="inbox pt-queues" aria-label="PyTorch workflow queues">
+  return <section className={`inbox pt-queues${collapsed ? " collapsed" : ""}`} aria-label="PyTorch workflow queues">
     <header className="inbox-head">
-      <h2><span className="pt-logo" aria-hidden="true">🔥</span> PyTorch queues</h2>
+      <h2><button type="button" className="section-toggle" aria-expanded={!collapsed} aria-label={collapsed ? "Expand PyTorch queues" : "Collapse PyTorch queues"} onClick={toggleCollapsed}><span className="disclosure-chevron" aria-hidden="true">›</span><span className="pt-logo" aria-hidden="true">🔥</span> PyTorch queues</button></h2>
       <span className="inbox-summary">{data == null ? "" : `${owedPreReviews} pre-review · ${data.review.total} review · ${activeNotifications.length} issue notifications · ${triageItems} to triage${overdue > 0 ? ` (${overdue} past SLA)` : ""} · ${freshness}`}</span>
       <div className="inbox-head-actions">
         <Button variant="muted" onClick={() => setEditingModules(!editingModules)} aria-expanded={editingModules}><GearIcon size={14} /> Modules{data != null && data.modules.length > 0 ? ` (${data.modules.length})` : ""}</Button>
         <Button variant="muted" className={`inbox-refresh${refreshing ? " loading" : ""}`} onClick={() => void load(true)} disabled={refreshing} aria-label="Refresh PyTorch queues"><SyncIcon size={14} /> Refresh</Button>
       </div>
     </header>
+    {!collapsed && <>
     {error != null && <p className="inbox-error" role="alert">Could not load PyTorch queues: {error}</p>}
     {actionError != null && <p className="inbox-error" role="alert">{actionError}</p>}
     {data?.warnings.map((warning) => <p key={warning} className="inbox-warning">{warning}</p>)}
@@ -490,6 +495,7 @@ export function PytorchQueuesPanel({ openPr }: { openPr: (url: string) => Promis
         {githubUrl != null && <a href={githubUrl} target="_blank" rel="noreferrer">Same search on GitHub <LinkExternalIcon size={12} /></a>}
       </footer>
     </div>
+    </>}
     <ReasonDialog open={decline != null} title={decline == null ? "Decline pre-review" : `Decline #${decline.number}`} outcomes templates={DECLINE_TEMPLATES} initialText={decline?.text} initialOutcome={decline?.outcome} submitLabel={(outcome) => outcome === "draft" ? "Comment & move to draft" : "Comment & close"} onCancel={() => setDecline(null)} onSubmit={async (reason, outcome) => {
       if (decline == null || outcome == null) return;
       const target = decline;

@@ -15,6 +15,12 @@ class FakeResponse extends EventEmitter {
   headers: Record<string, string> = {};
   statusCode = 200;
 
+  presetHeaders: Record<string, string> = {};
+
+  setHeader(name: string, value: string) {
+    this.presetHeaders[name.toLowerCase()] = value;
+  }
+
   writeHead(status: number, headers: Record<string, string>) {
     this.statusCode = status;
     this.headers = headers;
@@ -678,4 +684,21 @@ test("server route rejects cross-origin browser requests but allows local origin
   const allowed = new FakeResponse();
   await route(localOrigin, allowed as unknown as ServerResponse);
   assert.equal(allowed.statusCode, 200);
+});
+
+test("responses flag a server whose code on disk is newer than the running process", async () => {
+  let stale = false;
+  const deps = baseDeps();
+  const listener = createRequestListener(createServerRoute(deps), deps.logger, undefined, () => "build-1", () => stale);
+  async function headersFor(): Promise<Record<string, string>> {
+    const res = new FakeResponse();
+    await new Promise<void>((resolve) => {
+      res.on("finish", resolve);
+      listener(fakeRequest("GET", "/api/health"), res as unknown as ServerResponse);
+    });
+    return res.presetHeaders;
+  }
+  assert.deepEqual(await headersFor(), { "x-pi-review-assets": "build-1" });
+  stale = true;
+  assert.deepEqual(await headersFor(), { "x-pi-review-assets": "build-1", "x-pi-review-server-stale": "1" });
 });

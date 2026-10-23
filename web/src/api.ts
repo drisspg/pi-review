@@ -29,7 +29,28 @@ export function isStaleBuild(): boolean {
   return staleBuild;
 }
 
+/** Set when the server reports its code was rebuilt after it started: only a restart helps. */
+let staleServer = false;
+const staleServerListeners = new Set<() => void>();
+export const RESTART_HINT = "Pi Review's server is older than this page — restart it (Ctrl-C, then npm start) to use this feature.";
+
+export function subscribeStaleServer(listener: () => void): () => void {
+  staleServerListeners.add(listener);
+  return () => staleServerListeners.delete(listener);
+}
+
+export function isStaleServer(): boolean {
+  return staleServer;
+}
+
+function markStaleServer(): void {
+  if (staleServer) return;
+  staleServer = true;
+  for (const listener of staleServerListeners) listener();
+}
+
 function trackBuild(response: Response): void {
+  if (response.headers.get("x-pi-review-server-stale") === "1") markStaleServer();
   if (staleBuild || import.meta.env.DEV) return;
   const version = response.headers.get("x-pi-review-assets");
   if (version == null || version === "unbuilt") return;
@@ -47,6 +68,10 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { ...init, headers: { "content-type": "application/json", ...init?.headers } });
   trackBuild(response);
   const body = await response.json();
+  if (response.status === 404 && typeof body.error === "string" && body.error.startsWith("No route for")) {
+    markStaleServer();
+    throw new ApiError(RESTART_HINT, "SERVER_RESTART_REQUIRED");
+  }
   if (!response.ok) throw new ApiError(body.error ?? `HTTP ${response.status}`, typeof body.code === "string" ? body.code : undefined);
   return body as T;
 }

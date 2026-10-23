@@ -1,7 +1,7 @@
 import { execFile, spawn } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { createServer, type ServerResponse } from "node:http";
 import { dirname, extname, join, normalize, resolve } from "node:path";
@@ -310,6 +310,27 @@ const usageApi = createUsageApi(defaultUsageApiDeps(logger));
 // Identifies the currently served web build so open tabs can notice in-place
 // rebuilds of dist-web; keyed by index.html's mtime so it tracks rebuilds
 // without restarting the server.
+/**
+ * The checkout doubles as the install, so `npm run build` can replace dist-server under a running
+ * server: the web app then has features whose routes this process lacks. Compare the newest
+ * server-code mtime against startup and tell clients when a restart is needed.
+ */
+const serverCodeDir = dirname(fileURLToPath(import.meta.url));
+const serverCodeExt = extname(fileURLToPath(import.meta.url));
+function newestServerCodeMtime(): number {
+  try {
+    return Math.max(0, ...readdirSync(serverCodeDir).filter((name) => extname(name) === serverCodeExt).map((name) => statSync(join(serverCodeDir, name)).mtimeMs));
+  } catch {
+    return 0;
+  }
+}
+const serverCodeStartedMtime = newestServerCodeMtime();
+let serverStaleCache = { at: 0, stale: false };
+function serverCodeStale(): boolean {
+  if (Date.now() - serverStaleCache.at > 5_000) serverStaleCache = { at: Date.now(), stale: newestServerCodeMtime() > serverCodeStartedMtime + 1_000 };
+  return serverStaleCache.stale;
+}
+
 let assetsVersionCache: { mtimeMs: number; value: string } | null = null;
 function assetsVersion(): string {
   try {
@@ -377,7 +398,7 @@ const route = createServerRoute({
   usageApi,
 });
 
-const server = createServer(createRequestListener(route, logger, (name, data) => usageApi.record("server", name, data), assetsVersion));
+const server = createServer(createRequestListener(route, logger, (name, data) => usageApi.record("server", name, data), assetsVersion, serverCodeStale));
 const detachPiTerminalWebSocketServer = attachPiTerminalWebSocketServer(server, piTerminalManager, logger);
 
 async function shutdown(signal: string): Promise<void> {
