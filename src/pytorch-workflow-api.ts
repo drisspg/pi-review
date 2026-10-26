@@ -416,11 +416,19 @@ export function createPytorchWorkflowApi(deps: PytorchWorkflowDeps): PytorchWork
       const localKeys = new Set((await deps.listRecentPullRequests()).map((pr) => pr.key));
       return { pr: toQueuePr(snapshot, localKeys, current().assessments?.[number]), login, viewerIsAuthor: login != null && snapshot.author === login, viewerIsReviewer: login != null && snapshot.reviewers.includes(login) };
     },
+    /**
+     * 👍 the description and add `in progress` directly. Waiting for every assigned reviewer to
+     * accept routinely stalls PRs (large reviewer lists, reviewers unaware of the process), so the
+     * maintainer's accept moves the PR on. Both writes are idempotent, so re-accepting an already
+     * 👍'd PR just applies the label.
+     */
     async acceptPreReview(payload) {
       const number = requiredNumber(payload);
-      await deps.addReaction(pytorchRef(number), "+1");
+      const ref = pytorchRef(number);
+      await deps.addReaction(ref, "+1");
+      await deps.addLabels(ref, ["in progress"]);
       reportAction("pre-review:accept", number, "pull");
-      await updateSnapshot((snapshot) => ({ ...snapshot, preReview: { ...snapshot.preReview, items: snapshot.preReview.items.map((item) => item.number === number ? { ...item, viewerThumbsUp: true } : item) } }));
+      await updateSnapshot((snapshot) => ({ ...snapshot, preReview: withoutPr(snapshot.preReview, number) }));
       return { number, accepted: true };
     },
     async declinePreReview(payload) {

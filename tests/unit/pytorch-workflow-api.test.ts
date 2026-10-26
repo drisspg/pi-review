@@ -142,14 +142,18 @@ test("a failing queue keeps its previous results and reports a warning", async (
   assert.deepEqual(response.warnings, ["Could not load pre-review queue: HTTP 502"]);
 });
 
-test("accepting a pre-review reacts 👍 and keeps the PR visible as accepted", async () => {
+test("accepting a pre-review reacts 👍, adds in progress, and moves the PR out of the queue", async () => {
   const h = harness();
   const api = createPytorchWorkflowApi(h.deps);
   await api.queues();
   await api.acceptPreReview({ number: 3 });
-  assert.deepEqual(h.calls, ["react 3 +1"]);
+  assert.deepEqual(h.calls, ["react 3 +1", "label 3 in progress"], "does not wait for the other assigned reviewers");
   const response = await api.queues();
-  assert.deepEqual(response.preReview.items.map((pr) => [pr.number, pr.viewerThumbsUp]), [[2, false], [3, true], [1, true]]);
+  assert.deepEqual(response.preReview.items.map((pr) => pr.number), [2, 1]);
+  assert.equal(response.preReview.total, 2);
+
+  await api.acceptPreReview({ number: 1 });
+  assert.deepEqual(h.calls.slice(2), ["react 1 +1", "label 1 in progress"], "an already-👍'd PR stuck in pre-review can be moved on");
 });
 
 test("declining explains the reason, links the FAQ when closing, and drops the PR from the queue", async () => {
@@ -295,6 +299,7 @@ test("successful workflow writes are reported for activity tracking; failed writ
   await api.declinePreReview({ number: 3, outcome: "close", reason: "Needs design." });
   h.deps.addLabels = async () => { throw new Error("gh: HTTP 403"); };
   await assert.rejects(api.sendBackToInProgress({ number: 4 }), /403/);
+  await assert.rejects(api.acceptPreReview({ number: 1 }), /403/, "accept is not reported when the label write fails");
   assert.deepEqual(actions, ["pre-review:accept 2 t", "pre-review:close 3 t"]);
 });
 

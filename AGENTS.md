@@ -33,7 +33,8 @@ src/                    Node server (TypeScript, ESM, run via tsx)
   pytorch-workflow-api.ts  PyTorch label-driven PR/issue workflow (maintainer guide): pure
                         `classifyPullRequestStage` (labels + draft + review state → stage, next
                         actor), queue queries copied verbatim from the guide (pre-review, review,
-                        per-module issue triage), and validated writes (👍 pre-review accept,
+                        per-module issue triage), and validated writes (pre-review accept = 👍 + `in progress` label, deliberately not waiting on
+                        every assigned reviewer,
                         decline = reason comment + draft/close, triage labels with won't-fix
                         requiring a reason, re-add `in progress` after Request changes). Queues are
                         2 + modules sequential searches, cached 5 min in `<state>.pytorch.json`

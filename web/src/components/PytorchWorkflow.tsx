@@ -350,7 +350,7 @@ export function PytorchQueuesPanel({ openPr }: { openPr: (url: string) => Promis
   const resolvedNotificationIds = data?.issueNotifications.filter((item) => item.tier === "resolved").map((item) => item.id) ?? [];
   const overdue = useMemo(() => data?.triage.reduce((sum, entry) => sum + entry.items.filter((issue) => issue.overdue).length, 0) ?? 0, [data]);
   const tabs: Array<{ id: QueueTab; label: string; count: number; hint: string }> = [
-    { id: "pre-review", label: "Pre-review", count: owedPreReviews, hint: "Triaged PRs awaiting your direction check. 👍 the description to accept; aim for under a minute each." },
+    { id: "pre-review", label: "Pre-review", count: owedPreReviews, hint: "Triaged PRs awaiting your direction check; aim for under a minute each. Accept 👍s the description and adds `in progress`, so the PR does not wait on the other assigned reviewers." },
     { id: "review", label: "Review", count: data?.review.total ?? 0, hint: "PRs labeled ready for review where you are a requested reviewer. Review as usual." },
     { id: "issues", label: "Issues", count: activeNotifications.length + triageItems, hint: "pytorch/pytorch issue notifications, then your modules' issues still needing a full-triage label (SLA: one week)." },
   ];
@@ -389,7 +389,7 @@ export function PytorchQueuesPanel({ openPr }: { openPr: (url: string) => Promis
       </div>
       <div className="pt-row-actions">
         {kind === "pre-review" && <>
-          <Button variant="muted" disabled={isBusy || pr.viewerThumbsUp} title="React 👍 to the PR description (same as @pytorchbot pre-review accept)" onClick={() => void accept(pr)}><ThumbsupIcon size={14} /> {pr.viewerThumbsUp ? "Accepted" : "Accept"}</Button>
+          <Button variant="muted" disabled={isBusy} title={pr.viewerThumbsUp ? "You already 👍'd this, but it is still waiting on other reviewers: add `in progress` to move it on" : "👍 the description and add the `in progress` label, without waiting for the other assigned reviewers"} onClick={() => void accept(pr)}><ThumbsupIcon size={14} /> {pr.viewerThumbsUp ? "Move to in progress" : "Accept"}</Button>
           <Button variant="muted" disabled={isBusy} title="Comment with a reason, then move to draft or close" onClick={() => setDecline(declineFromAssessment(pr, pr.assessment))}>Decline…</Button>
         </>}
         {kind === "review" && pr.stage.needsSendBack && <Button variant="muted" disabled={isBusy} title="TEMPORARY rule: after Request changes, re-add `in progress` so automated review runs again" onClick={() => void sendBack(pr)}>Send back to in progress</Button>}
@@ -575,7 +575,7 @@ export function PytorchWorkflowStrip({ pr }: { pr: StoredPullRequest }) {
     {stage.stale && <span className="inbox-flag attention">Stale</span>}
     <span className="pt-strip-actions">
       {canPreReview && <>
-        <Button variant="muted" disabled={busy || status.pr.viewerThumbsUp} title="React 👍 to the PR description (same as @pytorchbot pre-review accept)" onClick={() => void run(async () => { await api("/api/pytorch/pre-review/accept", { method: "POST", body: JSON.stringify({ number: status.pr.number }) }); logUsage("pytorch:pre-review-accept", { from: "review" }); })}><ThumbsupIcon size={14} /> {status.pr.viewerThumbsUp ? "Pre-review accepted" : "Accept pre-review"}</Button>
+        <Button variant="muted" disabled={busy} title={status.pr.viewerThumbsUp ? "You already 👍'd this, but it is still waiting on other reviewers: add `in progress` to move it on" : "👍 the description and add the `in progress` label, without waiting for the other assigned reviewers"} onClick={() => void run(async () => { await api("/api/pytorch/pre-review/accept", { method: "POST", body: JSON.stringify({ number: status.pr.number }) }); logUsage("pytorch:pre-review-accept", { from: "review" }); })}><ThumbsupIcon size={14} /> {status.pr.viewerThumbsUp ? "Move to in progress" : "Accept pre-review"}</Button>
         <Button variant="muted" disabled={busy} title="Comment with a reason, then move to draft or close" onClick={() => setDecline(declineFromAssessment(status.pr, assessment))}>Decline…</Button>
         <Button variant="muted" disabled={suggesting} title="Quick direction check from the description, conversation, linked issue and diff (no checkout); saved as a suggestion" onClick={() => void suggest()}>{suggesting ? "Assessing…" : assessment == null ? "Suggest pre-review" : "Re-assess"}</Button>
       </>}
