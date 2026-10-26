@@ -7,8 +7,14 @@ import { fileURLToPath } from "node:url";
 
 const localConfigPath = () => process.env.PI_REVIEW_LOCAL_CONFIG?.trim() || fileURLToPath(new URL("../.pi-review.local.json", import.meta.url));
 
-/** Machine-local Pi Review overrides; `model` is `provider/id`; `activityLedgerPath` relocates the review activity ledger (e.g. into a notes vault). */
-export type PiReviewLocalConfig = { piCommand?: string; model?: { provider: string; id: string }; thinkingLevel?: string; activityLedgerPath?: string };
+export type PiModelRef = { provider: string; id: string };
+/**
+ * Machine-local Pi Review overrides. `model` is `provider/id` or an ordered list of them: the first
+ * is requested, and any listed model is accepted (launchers may route one provider to another,
+ * e.g. openai -> plugboard-codex). `models` is that list; `model` stays the first entry.
+ * `activityLedgerPath` relocates the review activity ledger (e.g. into a notes vault).
+ */
+export type PiReviewLocalConfig = { piCommand?: string; model?: PiModelRef; models?: PiModelRef[]; thinkingLevel?: string; activityLedgerPath?: string };
 
 /** Read this app checkout's optional machine-local config, never a reviewed PR's config. */
 export function readPiReviewLocalConfig(configPath = localConfigPath()): PiReviewLocalConfig {
@@ -27,11 +33,18 @@ export function readPiReviewLocalConfig(configPath = localConfigPath()): PiRevie
   const result: PiReviewLocalConfig = {};
   const piCommand = text("piCommand");
   if (piCommand) result.piCommand = piCommand;
-  const model = text("model");
-  if (model) {
+  const parseModel = (value: unknown): PiModelRef => {
+    const model = typeof value === "string" ? value.trim() : "";
     const slash = model.indexOf("/");
-    if (slash <= 0 || slash === model.length - 1) throw new Error(`Expected model as provider/id in ${configPath}`);
-    result.model = { provider: model.slice(0, slash), id: model.slice(slash + 1) };
+    if (slash <= 0 || slash === model.length - 1) throw new Error(`Expected model as provider/id (or a list of them) in ${configPath}`);
+    return { provider: model.slice(0, slash), id: model.slice(slash + 1) };
+  };
+  const rawModel = config?.model;
+  if (rawModel !== undefined) {
+    const models = (Array.isArray(rawModel) ? rawModel : [rawModel]).map(parseModel);
+    if (models.length === 0) throw new Error(`Expected at least one model in ${configPath}`);
+    result.models = models;
+    result.model = models[0];
   }
   const thinkingLevel = text("thinkingLevel");
   if (thinkingLevel) result.thinkingLevel = thinkingLevel;
@@ -69,6 +82,13 @@ export function piLaunch(args: string[], env: NodeJS.ProcessEnv = process.env, l
   delete childEnv.PI_SESSION_ID;
   const command = env.PI_REVIEW_PI_COMMAND?.trim() || localCommand || env.PI_BIN?.trim() || resolvePiTerminalCommand(childEnv.PATH);
   return { command: command.startsWith("~/") ? resolve(homedir(), command.slice(2)) : command, args, env: childEnv };
+}
+
+/** Acceptable models in preference order: the Pi Review list, else the single global default (empty = Pi decides). */
+export function piModelCandidates(cwd = process.cwd(), agentDir = getAgentDir(), local = readPiReviewLocalConfig()): PiModelRef[] {
+  if (local.models?.length) return local.models;
+  const args = piModelArgs(cwd, agentDir, local);
+  return args.length === 0 ? [] : [{ provider: args[1], id: args[3] }];
 }
 
 /** Pin the Pi Review override, else the global default, even when continuing an older session on another provider. */

@@ -43,6 +43,11 @@ test("Pi model selection follows global settings, ignores PR settings, and fails
     assert.throws(() => readPiLauncherCommand(localConfig), /piCommand/);
     await writeFile(localConfig, JSON.stringify({ model: "gpt-6-astra" }));
     assert.throws(() => readPiReviewLocalConfig(localConfig), /provider\/id/);
+    await writeFile(localConfig, JSON.stringify({ model: ["plugboard-codex/gpt-6-astra", "openai/gpt-6-astra"] }));
+    assert.deepEqual(readPiReviewLocalConfig(localConfig).models, [{ provider: "plugboard-codex", id: "gpt-6-astra" }, { provider: "openai", id: "gpt-6-astra" }]);
+    assert.deepEqual(readPiReviewLocalConfig(localConfig).model, { provider: "plugboard-codex", id: "gpt-6-astra" }, "the first entry is the one requested");
+    await writeFile(localConfig, JSON.stringify({ model: ["plugboard-codex/gpt-6-astra", "bad"] }));
+    assert.throws(() => readPiReviewLocalConfig(localConfig), /provider\/id/);
     await writeFile(localConfig, JSON.stringify({ activityLedgerPath: "~/vault/review_activity.jsonl" }));
     assert.equal(readPiReviewLocalConfig(localConfig).activityLedgerPath, "~/vault/review_activity.jsonl");
     await writeFile(localConfig, JSON.stringify({ activityLedgerPath: "" }));

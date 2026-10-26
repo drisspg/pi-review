@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import { Type } from "@earendil-works/pi-ai";
-import { chmod, mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -71,6 +71,36 @@ test("launcher-backed agents stream through retries, call server-owned tools, sw
     if (previous == null) delete process.env.PI_REVIEW_PI_COMMAND;
     else process.env.PI_REVIEW_PI_COMMAND = previous;
     await session?.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a configured model list accepts launcher routing between listed providers but never an unlisted one", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-models-"));
+  const command = fileURLToPath(new URL("../fixtures/pi-rpc.mjs", import.meta.url));
+  await chmod(command, 0o755);
+  const previous = { command: process.env.PI_REVIEW_PI_COMMAND, config: process.env.PI_REVIEW_LOCAL_CONFIG };
+  process.env.PI_REVIEW_PI_COMMAND = command;
+  process.env.PI_REVIEW_LOCAL_CONFIG = join(root, ".pi-review.local.json");
+  const start = async (model: string | string[]) => {
+    await writeFile(process.env.PI_REVIEW_LOCAL_CONFIG!, JSON.stringify({ model }));
+    return PiAgentProcess.create({ cwd: root, sessionDir: root, thinkingLevel: "low", customTools: [] });
+  };
+  try {
+    const preferred = await start(["plugboard-codex/routed", "openai/routed"]);
+    assert.deepEqual([preferred.model?.provider, preferred.model?.id], ["plugboard-codex", "routed"]);
+    await preferred.dispose();
+
+    const routed = await start(["openai/routed", "plugboard-codex/routed"]);
+    assert.equal(routed.model?.provider, "plugboard-codex", "openai routed to a listed provider is accepted");
+    await routed.dispose();
+
+    await assert.rejects(start("openai/routed"), /did not select any configured model \(openai\/routed -> plugboard-codex\/routed\); refusing a fallback/);
+    await assert.rejects(start([]), /at least one model/);
+  } finally {
+    if (previous.command == null) delete process.env.PI_REVIEW_PI_COMMAND;
+    else process.env.PI_REVIEW_PI_COMMAND = previous.command;
+    process.env.PI_REVIEW_LOCAL_CONFIG = previous.config;
     await rm(root, { recursive: true, force: true });
   }
 });

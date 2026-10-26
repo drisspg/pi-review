@@ -48,7 +48,7 @@ Machine-local settings live in the gitignored `.pi-review.local.json` in this ch
 ```json
 {
   "piCommand": "~/dotfiles/scripts/pi-work",
-  "model": "openai/gpt-6-astra",
+  "model": ["plugboard-codex/gpt-6-astra", "openai/gpt-6-astra"],
   "thinkingLevel": "high",
   "activityLedgerPath": "~/notes/review_activity.jsonl"
 }
@@ -57,7 +57,8 @@ Machine-local settings live in the gitignored `.pi-review.local.json` in this ch
 | Key | Effect |
 | --- | --- |
 | `piCommand` | Pi launcher for terminals and background agents (else `PI_BIN`, else `pi` on PATH) |
-| `model`, `thinkingLevel` | Override your global Pi model/thinking for Pi Review only |
+| `model` | Model for Pi Review only: `provider/id`, or a preference list. The first is requested; any listed model is accepted (launchers may route one provider to another); anything else is refused |
+| `thinkingLevel` | Thinking level for every Pi Review agent and terminal |
 | `activityLedgerPath` | Where review-activity data and the year report are written (e.g. a notes vault) |
 
 Useful environment variables:

@@ -14,6 +14,8 @@ if (state.model.id !== "missing-extension") {
   await fetch(`${endpoint}/metadata`, { method: "POST", headers, body: JSON.stringify({ tools, activeTools: tools.map((tool) => tool.name) }) });
 }
 if (state.model.id === "fallback") state.model.provider = "personal";
+// Like a launcher that routes one provider to another (e.g. openai -> plugboard-codex).
+if (state.model.provider === "openai" && state.model.id === "routed") state.model.provider = "plugboard-codex";
 
 /** Emit complete JSON records, optionally splitting a UTF-8 character across pipe writes. */
 function emit(packet, split = false) {

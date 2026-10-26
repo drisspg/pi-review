@@ -3,7 +3,7 @@ import type { AgentSessionEvent, RpcSessionState, ToolDefinition } from "@earend
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { piLaunch, piModelArgs, piThinkingLevel } from "./pi-launch.js";
+import { piLaunch, piModelCandidates, piThinkingLevel, type PiModelRef } from "./pi-launch.js";
 import { createPiToolBridge } from "./pi-tool-bridge.js";
 import { REVIEW_WORKSPACE_ENV, reviewWorkspaceEnvironment, type PiReviewWorkspace } from "./pi-review-workspace.js";
 
@@ -24,6 +24,13 @@ type RpcData = {
 };
 
 /** One launcher-owned process with bounded RPC commands and server-owned custom tools. */
+/** Pi started with a model outside the accepted list; create() tries the next candidate. */
+class ModelMismatchError extends Error {
+  constructor(readonly selected: string) {
+    super(`Pi selected ${selected}`);
+  }
+}
+
 export class PiAgentProcess {
   private child: ChildProcessWithoutNullStreams;
   private bridge: Awaited<ReturnType<typeof createPiToolBridge>>;
@@ -60,9 +67,29 @@ export class PiAgentProcess {
     this.child.stdout.setEncoding("utf8").on("data", (text: string) => this.receive(text));
   }
 
-  /** Start one isolated CLI, await actual RPC readiness, and clean up failed startups. */
+  /**
+   * Start one isolated CLI per configured model in preference order until Pi selects an accepted
+   * one. Launchers may route a requested provider to another listed one (accepted); an unlisted
+   * model is never used as a silent fallback.
+   */
   static async create(options: Options): Promise<PiAgentProcess> {
-    const modelArgs = piModelArgs(options.cwd);
+    const candidates = piModelCandidates(options.cwd);
+    if (candidates.length === 0) return PiAgentProcess.start(options, null, []);
+    const rejected: string[] = [];
+    for (const candidate of candidates) {
+      try {
+        return await PiAgentProcess.start(options, candidate, candidates);
+      } catch (error) {
+        if (!(error instanceof ModelMismatchError)) throw error;
+        rejected.push(`${candidate.provider}/${candidate.id} -> ${error.selected}`);
+      }
+    }
+    throw new Error(`Pi did not select any configured model (${rejected.join("; ")}); refusing a fallback. Check \`pi --list-models\` and the model list in .pi-review.local.json.`);
+  }
+
+  /** Start one isolated CLI for `requested`, await actual RPC readiness, and clean up failed startups. */
+  private static async start(options: Options, requested: PiModelRef | null, accepted: PiModelRef[]): Promise<PiAgentProcess> {
+    const modelArgs = requested == null ? [] : ["--provider", requested.provider, "--model", requested.id];
     const extension = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./pi-agent-extension.ts" : "./pi-agent-extension.js", import.meta.url));
     const args = ["--mode", "rpc", "--session-dir", options.sessionDir, ...modelArgs, "--thinking", piThinkingLevel(options.thinkingLevel), "--extension", extension];
     if (options.tools?.length === 0) args.push("--no-tools");
@@ -81,8 +108,8 @@ export class PiAgentProcess {
     try {
       session.state = await session.request("get_state");
       if (!bridge.metadata.ready) throw new Error("Pi Review's tool extension did not initialize. Check Pi extension startup errors.");
-      if (modelArgs.length && (session.model?.provider !== modelArgs[1] || session.model?.id !== modelArgs[3])) {
-        throw new Error(`Pi did not select the configured model ${modelArgs[1]}/${modelArgs[3]}; refusing a fallback.`);
+      if (requested != null && !accepted.some((model) => model.provider === session.model?.provider && model.id === session.model?.id)) {
+        throw new ModelMismatchError(session.model == null ? "no model" : `${session.model.provider}/${session.model.id}`);
       }
       return session;
     } catch (error) {
