@@ -60,8 +60,14 @@ function useSummary(range: ActivityRange, refreshKey = 0): { data: ActivitySumma
 export function ActivityBadge({ onOpen }: { onOpen: () => void }) {
   const [tick, setTick] = useState(0);
   useEffect(() => {
-    const timer = window.setInterval(() => setTick((value) => value + 1), 60_000);
-    return () => window.clearInterval(timer);
+    // Hidden tabs do not poll; becoming visible refreshes at once.
+    const refresh = () => { if (document.visibilityState === "visible") setTick((value) => value + 1); };
+    const timer = window.setInterval(refresh, 60_000);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
+    };
   }, []);
   const today = useSummary("today", tick).data;
   const week = useSummary("7d", tick).data;
