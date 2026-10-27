@@ -298,6 +298,10 @@ Component conventions:
   textbox roles; the diff-view/threads toggles live in the review bar's View menu). When
   restyling, add classes rather than renaming, and keep rendered sticky offsets identical unless
   you update the spec.
+- Pi terminals render with xterm's WebGL addon (canvas, no `.xterm-rows`), falling back to DOM;
+  `data-renderer` on `.pi-native-terminal-surface` says which. E2e tests that read terminal text
+  force DOM via `localStorage["pi-review-terminal-renderer"] = "dom"` (spec `beforeEach`); only
+  the WebGL test keeps the GPU path.
 - Treat e2e failures as real regressions; verify against a clean `HEAD` worktree
   (`git worktree add /tmp/pi-review-head HEAD` + symlinked `node_modules`) before assuming a
   failure is pre-existing. Known machine caveat: on hosts where agent shells cannot spawn Chromium

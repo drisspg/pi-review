@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { FitAddon } from "@xterm/addon-fit";
+import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import "./PiTerminal.css";
@@ -60,6 +61,30 @@ function terminalWebSocketUrl(prKey: string, session: string, headSha: string, c
 /** Cmd+Up/Down -> the xterm Ctrl+Home/Ctrl+End sequences Pi binds to transcript top/bottom. */
 const TRANSCRIPT_JUMP_KEYS: Record<string, string | undefined> = { ArrowUp: "\x1b[1;5H", ArrowDown: "\x1b[1;5F" };
 
+/** `localStorage[TERMINAL_RENDERER_KEY] = "dom"` opts out of the GPU renderer (debugging, DOM-reading tests). */
+export const TERMINAL_RENDERER_KEY = "pi-review-terminal-renderer";
+
+/**
+ * Prefer xterm's WebGL renderer: on Pi's full-screen redraws at 270x54 (M4 Pro, headed Chrome) the
+ * DOM renderer drops to ~37 fps (p95 frame 42ms) while WebGL holds 60. Falls back to DOM when WebGL is
+ * unavailable or its context is lost (e.g. too many live contexts); `data-renderer` records which.
+ */
+function useGpuRenderer(terminal: Terminal, surface: HTMLElement): void {
+  surface.dataset.renderer = "dom";
+  if (localStorage.getItem(TERMINAL_RENDERER_KEY) === "dom") return;
+  try {
+    const webgl = new WebglAddon();
+    webgl.onContextLoss(() => {
+      webgl.dispose();
+      surface.dataset.renderer = "dom";
+    });
+    terminal.loadAddon(webgl);
+    surface.dataset.renderer = "webgl";
+  } catch (error) {
+    console.warn("WebGL terminal renderer unavailable; using DOM", error);
+  }
+}
+
 /** Render a real interactive Pi TUI connected to a server-owned pseudoterminal. */
 export function PiTerminal({ prKey, headSha, session = "main", context, target, compact = false, onDraftReview }: { prKey: string; headSha: string; session?: string; context?: string; target?: PiTerminalTarget; compact?: boolean; onDraftReview?: (draftReview: DraftReview) => void }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -73,17 +98,24 @@ export function PiTerminal({ prKey, headSha, session = "main", context, target, 
     if (containerRef.current == null) return;
     const container: HTMLDivElement = containerRef.current;
     const fontFamily = getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim();
+    // The space below the last full row is xterm's viewport, not the canvas: paint it the same color.
+    function applyTheme() {
+      const theme = terminalTheme();
+      container.style.setProperty("--terminal-bg", theme?.background ?? "");
+      return theme;
+    }
     const terminal = new Terminal({
       cursorBlink: true,
       fontFamily,
       fontSize: 13,
       lineHeight: 1.15,
       scrollback: 10_000,
-      theme: terminalTheme(),
+      theme: applyTheme(),
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     terminal.open(container);
+    useGpuRenderer(terminal, container);
     const socket = new WebSocket(terminalWebSocketUrl(prKey, session, headSha, context, target));
     socketRef.current = socket;
     let ready = false;
@@ -119,7 +151,7 @@ export function PiTerminal({ prKey, headSha, session = "main", context, target, 
     const resizeObserver = new ResizeObserver(fit);
     resizeObserver.observe(container);
     const themeObserver = new MutationObserver(() => {
-      terminal.options.theme = terminalTheme();
+      terminal.options.theme = applyTheme();
     });
     themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     const inputDisposable = terminal.onData((data) => send({ type: "input", data }));

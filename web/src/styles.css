@@ -1595,11 +1595,13 @@ body:has(.review-page) {
   flex-direction: column;
 }
 
+/* xterm's viewport defaults to black; it shows in the leftover space below the last full row. */
+.pi-native-terminal-surface .xterm .xterm-viewport {
+  background: var(--terminal-bg, var(--panel2));
+}
+
 /* Beat .pi-native-terminal.compact's fixed clamp: in the dashboard the terminal
    fills its grid row, and the xterm ResizeObserver refits rows to match. */
-.guide-overview-terminal .xterm-viewport {
-  background: var(--panel2);
-}
 
 .guide-overview-terminal .pi-native-terminal,
 .guide-overview-terminal .pi-native-terminal.compact {

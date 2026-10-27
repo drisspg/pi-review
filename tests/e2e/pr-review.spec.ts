@@ -141,8 +141,10 @@ async function loadDraftReviewFromTerminal(page: Page, comments: Array<{ id: str
   await emitNativeTerminalMessage(page, { type: "draftReview", draftReview: { prKey: openedPr.key, headSha: openedPr.headSha, event: "COMMENT", body, comments, updatedAt: "now" } });
 }
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page }, testInfo) => {
   openedPr = null;
+  // Terminal assertions read xterm's DOM rows; only the WebGL test keeps the default GPU renderer.
+  if (!testInfo.title.includes("WebGL")) await page.addInitScript(() => localStorage.setItem("pi-review-terminal-renderer", "dom"));
   // Unexpected analysis must never escape to live Pi, including after a reload.
   await page.route("**/api/analysis/{start,status}", (route) => route.fulfill({ status: 500, json: { error: "Unmocked analysis request" } }));
   await page.goto("/");
@@ -1385,6 +1387,24 @@ test("opens the native Pi terminal by default and focuses it on demand", async (
   await page.keyboard.type("x");
   await expect.poll(async () => (await terminalMessages()).some((message) => message.includes('"type":"input"') && message.includes('"data":"x"'))).toBe(true);
   await expect.poll(async () => (await terminalMessages()).some((message) => message.includes('"type":"resize"'))).toBe(true);
+});
+
+test("draws the native terminal with WebGL by default and falls back to DOM when the GPU context is lost", async ({ page }) => {
+  await mockNativeTerminal(page);
+  await openSideTab(page, "Pi");
+  const surface = page.locator(".pi-native-terminal-surface");
+  await expect(surface).toHaveAttribute("data-renderer", /webgl|dom/);
+  test.skip(await surface.getAttribute("data-renderer") !== "webgl", "this Chromium has no WebGL");
+  await expect(surface.locator("canvas")).not.toHaveCount(0);
+
+  await page.evaluate(() => {
+    for (const canvas of document.querySelectorAll<HTMLCanvasElement>(".pi-native-terminal-surface canvas")) {
+      (canvas.getContext("webgl2") as WebGL2RenderingContext | null)?.getExtension("WEBGL_lose_context")?.loseContext();
+    }
+  });
+  await expect(surface).toHaveAttribute("data-renderer", "dom");
+  await emitNativeTerminalMessage(page, { type: "output", data: "after context loss\r\n" });
+  await expect(page.locator(".xterm-rows")).toContainText("after context loss");
 });
 
 test("renders terminal Powerline symbols with the bundled font after a delayed load", async ({ page }) => {
