@@ -4576,7 +4576,46 @@ button.fold:hover {
   color: var(--muted);
 }
 
-/* PR / issue kind filter sits at the end of the tier row as a flat segmented control. */
+/* Repo filter, then the PR / issue kind filter, sit together at the end of the tier row. */
+.inbox-filters-end {
+  display: inline-flex;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.inbox-repo-filter {
+  height: var(--control-h-sm);
+  max-width: 168px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.inbox-repo-filter:hover {
+  color: var(--text);
+  background: var(--hover-bg);
+}
+
+.inbox-repo-filter.active {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--selected-bg);
+}
+
+.inbox-repo-filter option {
+  background: var(--panel);
+  color: var(--text);
+}
+
+.inbox-filters-end .inbox-kinds {
+  margin-left: 0;
+}
+
 .inbox-kinds {
   display: inline-flex;
   margin-left: auto;

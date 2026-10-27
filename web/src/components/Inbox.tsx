@@ -21,6 +21,15 @@ const TIER_ORDER: InboxTier[] = ["needs-you", "review-requests", "your-prs", "fy
 const POLL_IDLE_MS = 60 * 1000;
 const POLL_REFRESHING_MS = 3000;
 const SCOPE_HINT = "gh auth refresh -h github.com -s notifications";
+const REPO_FILTER_KEY = "pi-review-inbox-repo";
+
+/** Repos with active (unresolved) items, busiest first; keeps the chosen repo listed even at zero. */
+function repoOptions(items: InboxItem[], selected: string): Array<{ repo: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const item of items) if (item.tier !== "resolved") counts.set(item.repo, (counts.get(item.repo) ?? 0) + 1);
+  if (selected !== "all" && !counts.has(selected)) counts.set(selected, 0);
+  return [...counts.entries()].map(([repo, count]) => ({ repo, count })).sort((a, b) => b.count - a.count || a.repo.localeCompare(b.repo));
+}
 
 function reasonIcon(item: InboxItem): ReactNode {
   switch (item.reason) {
@@ -108,6 +117,12 @@ export function InboxPanel({ openPr }: { openPr: (url: string) => Promise<void> 
   const [actionError, setActionError] = useState<string | null>(null);
   const [filter, setFilter] = useState<TierFilter>("all");
   const [kindFilter, setKindFilter] = useState<"all" | "pr" | "issue">("all");
+  const [repoFilter, setRepoFilterState] = useState<string>(() => localStorage.getItem(REPO_FILTER_KEY) ?? "all");
+  function setRepoFilter(repo: string): void {
+    setRepoFilterState(repo);
+    if (repo === "all") localStorage.removeItem(REPO_FILTER_KEY);
+    else localStorage.setItem(REPO_FILTER_KEY, repo);
+  }
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busyIds, setBusyIds] = useState<Set<string>>(() => new Set());
   const listRef = useRef<HTMLUListElement | null>(null);
@@ -139,13 +154,22 @@ export function InboxPanel({ openPr }: { openPr: (url: string) => Promise<void> 
   }, [load, filling]);
 
   const items = data?.items ?? [];
+  const repos = useMemo(() => repoOptions(items, repoFilter), [items, repoFilter]);
+  // Tier/kind chips, the list, and "Clear resolved" all follow the repo filter; the header summary stays global.
+  const repoItems = useMemo(() => repoFilter === "all" ? items : items.filter((item) => item.repo === repoFilter), [items, repoFilter]);
   const visible = useMemo(() => {
-    const byTier = filter === "all" ? items.filter((item) => item.tier !== "resolved") : items.filter((item) => item.tier === filter);
+    const byTier = filter === "all" ? repoItems.filter((item) => item.tier !== "resolved") : repoItems.filter((item) => item.tier === filter);
     return kindFilter === "all" ? byTier : byTier.filter((item) => item.kind === kindFilter);
-  }, [items, filter, kindFilter]);
-  const kindCounts = useMemo(() => ({ pr: items.filter((item) => item.kind === "pr" && item.tier !== "resolved").length, issue: items.filter((item) => item.kind === "issue" && item.tier !== "resolved").length }), [items]);
-  const resolvedIds = useMemo(() => items.filter((item) => item.tier === "resolved").map((item) => item.id), [items]);
+  }, [repoItems, filter, kindFilter]);
+  const kindCounts = useMemo(() => ({ pr: repoItems.filter((item) => item.kind === "pr" && item.tier !== "resolved").length, issue: repoItems.filter((item) => item.kind === "issue" && item.tier !== "resolved").length }), [repoItems]);
+  const resolvedIds = useMemo(() => repoItems.filter((item) => item.tier === "resolved").map((item) => item.id), [repoItems]);
   const counts = data?.tiers ?? { "needs-you": 0, "review-requests": 0, "your-prs": 0, fyi: 0, resolved: 0 };
+  const tierCounts = useMemo(() => {
+    if (repoFilter === "all") return counts;
+    const scoped: Record<InboxTier, number> = { "needs-you": 0, "review-requests": 0, "your-prs": 0, fyi: 0, resolved: 0 };
+    for (const item of repoItems) scoped[item.tier] += 1;
+    return scoped;
+  }, [counts, repoFilter, repoItems]);
   const selected = visible.find((item) => item.id === selectedId) ?? null;
 
   useEffect(() => {
@@ -264,16 +288,22 @@ export function InboxPanel({ openPr }: { openPr: (url: string) => Promise<void> 
     <div className="inbox-body">
       <div className="inbox-list-panel">
         <nav className="inbox-tiers" aria-label="Filter inbox by tier">
-          <button type="button" className={`inbox-tier${filter === "all" ? " active" : ""}`} onClick={() => setFilter("all")}>All<span className="inbox-tier-count">{total - counts.resolved}</span></button>
-          {TIER_ORDER.map((tier) => <button key={tier} type="button" className={`inbox-tier tier-${tier}${filter === tier ? " active" : ""}`} title={TIER_META[tier].hint} onClick={() => setFilter(tier)}><DotFillIcon size={12} className="inbox-tier-dot" />{TIER_META[tier].label}<span className="inbox-tier-count">{counts[tier]}</span></button>)}
+          <button type="button" className={`inbox-tier${filter === "all" ? " active" : ""}`} onClick={() => setFilter("all")}>All<span className="inbox-tier-count">{repoItems.length - tierCounts.resolved}</span></button>
+          {TIER_ORDER.map((tier) => <button key={tier} type="button" className={`inbox-tier tier-${tier}${filter === tier ? " active" : ""}`} title={TIER_META[tier].hint} onClick={() => setFilter(tier)}><DotFillIcon size={12} className="inbox-tier-dot" />{TIER_META[tier].label}<span className="inbox-tier-count">{tierCounts[tier]}</span></button>)}
+          <span className="inbox-filters-end">
+          {repos.length > 1 || repoFilter !== "all" ? <select className={`inbox-repo-filter${repoFilter !== "all" ? " active" : ""}`} aria-label="Filter by repository" value={repoFilter} onChange={(event) => { setRepoFilter(event.target.value); logUsage("inbox:repo-filter", { scoped: event.target.value !== "all" }); }}>
+            <option value="all">All repos</option>
+            {repos.map(({ repo, count }) => <option key={repo} value={repo}>{repo} ({count})</option>)}
+          </select> : null}
           <span className="inbox-kinds" role="group" aria-label="Filter by kind">
             <button type="button" className={`inbox-kind${kindFilter === "all" ? " active" : ""}`} onClick={() => setKindFilter("all")}>All</button>
             <button type="button" className={`inbox-kind${kindFilter === "pr" ? " active" : ""}`} onClick={() => setKindFilter("pr")}><GitPullRequestIcon size={12} /> PRs<span className="inbox-tier-count">{kindCounts.pr}</span></button>
             <button type="button" className={`inbox-kind${kindFilter === "issue" ? " active" : ""}`} onClick={() => setKindFilter("issue")}><IssueOpenedIcon size={12} /> Issues<span className="inbox-tier-count">{kindCounts.issue}</span></button>
           </span>
+          </span>
         </nav>
         {data == null || (data.fetchedAt == null && refreshing) ? <ul className="inbox-rows inbox-skeleton" aria-busy="true">{Array.from({ length: 6 }, (_, index) => <li key={index} className="inbox-row skeleton"><span className="inbox-skeleton-bar icon" /><span className="inbox-skeleton-lines"><span className="inbox-skeleton-bar" style={{ width: `${55 + (index % 3) * 12}%` }} /><span className="inbox-skeleton-bar short" /></span></li>)}</ul>
-          : visible.length === 0 ? <div className="inbox-empty">{data == null ? "Inbox unavailable." : total === 0 ? <><CheckIcon size={24} /><p>Inbox zero. Nothing on GitHub is waiting on you.</p></> : <p className="muted">Nothing in {filter === "all" ? "the active tiers" : TIER_META[filter].label.toLowerCase()}.</p>}</div>
+          : visible.length === 0 ? <div className="inbox-empty">{data == null ? "Inbox unavailable." : total === 0 ? <><CheckIcon size={24} /><p>Inbox zero. Nothing on GitHub is waiting on you.</p></> : <p className="muted">Nothing in {filter === "all" ? "the active tiers" : TIER_META[filter].label.toLowerCase()}{repoFilter !== "all" ? ` for ${repoFilter}` : ""}.</p>}</div>
             : <ul className="inbox-rows" ref={listRef}>
               {visible.map((item) => {
                 const busy = busyIds.has(item.id);
