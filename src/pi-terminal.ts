@@ -79,7 +79,16 @@ type TerminalSession = {
   lastActivityAt: number;
   paused: boolean;
   unackedChars: Map<PiTerminalPeer, number>;
+  /**
+   * Each attached view's last reported size, least to most recently active. One pty has one size,
+   * so the view being used must own it: otherwise a view that resized last (another tab, or one
+   * since closed) leaves this one drawing Pi's layout for the wrong grid, clipped or with dead rows.
+   */
+  peerSizes: Map<PiTerminalPeer, TerminalSize>;
+  size: TerminalSize;
 };
+
+type TerminalSize = { cols: number; rows: number };
 
 export type PiTerminalManagerDeps = {
   cwdForPr: (prKey: string) => string | null;
@@ -284,7 +293,7 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
     };
     let resolveExit!: () => void;
     const exited = new Promise<void>((resolve) => { resolveExit = resolve; });
-    const terminalSession: TerminalSession = { key, pid: pgid, exitObserved: false, signalGroup, exited, headSha: request.headSha, stopped: false, process: processHandle, peers: new Set(), buffer: "", idleTimer: null, lastActivityAt: Date.now(), paused: false, unackedChars: new Map() };
+    const terminalSession: TerminalSession = { key, pid: pgid, exitObserved: false, signalGroup, exited, headSha: request.headSha, stopped: false, process: processHandle, peers: new Set(), buffer: "", idleTimer: null, lastActivityAt: Date.now(), paused: false, unackedChars: new Map(), peerSizes: new Map(), size: { cols: DEFAULT_COLS, rows: DEFAULT_ROWS } };
     if (signalGroup != null) {
       processHandle.kill = (signal = "SIGTERM") => {
         // After reaping, the numeric PGID can be reused. Only read-only probes are safe then.
@@ -358,6 +367,19 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
     }
   }
 
+  function applySize(session: TerminalSession, size: TerminalSize): void {
+    if (session.size.cols === size.cols && session.size.rows === size.rows) return;
+    session.size = size;
+    session.process.resize(size.cols, size.rows);
+  }
+
+  /** Record `peer` as the most recently active view and size the pty to it. */
+  function markActive(session: TerminalSession, peer: PiTerminalPeer, size: TerminalSize): void {
+    session.peerSizes.delete(peer);
+    session.peerSizes.set(peer, size);
+    applySize(session, size);
+  }
+
   async function attach(peer: PiTerminalPeer, request: PiTerminalRequest): Promise<void> {
     const generation = generations.get(request.prKey) ?? 0;
     let attachedSession: TerminalSession | null = null;
@@ -367,6 +389,9 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
       if (attachedSession == null) return;
       attachedSession.peers.delete(peer);
       attachedSession.unackedChars.delete(peer);
+      attachedSession.peerSizes.delete(peer);
+      const remaining = [...attachedSession.peerSizes.values()].at(-1);
+      if (remaining != null && !attachedSession.stopped) applySize(attachedSession, remaining);
       updateFlowControl(attachedSession);
       attachedSession.lastActivityAt = Date.now();
       scheduleIdleStop(attachedSession);
@@ -394,8 +419,12 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
         const message = parsePiTerminalClientMessage(raw);
         if (message == null) return;
         session.lastActivityAt = Date.now();
-        if (message.type === "input") session.process.write(message.data);
-        else if (message.type === "resize") session.process.resize(message.cols, message.rows);
+        if (message.type === "input") {
+          // Keystrokes, wheel, and clicks come from the view in use: give it the pty size first.
+          const size = session.peerSizes.get(peer);
+          if (size != null) markActive(session, peer, size);
+          session.process.write(message.data);
+        } else if (message.type === "resize") markActive(session, peer, { cols: message.cols, rows: message.rows });
         else if (message.type === "ack") {
           session.unackedChars.set(peer, Math.max(0, (session.unackedChars.get(peer) ?? 0) - message.chars));
           updateFlowControl(session);

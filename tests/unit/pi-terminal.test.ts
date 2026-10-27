@@ -303,10 +303,24 @@ test("attaches a peer to one persistent Pi PTY", async (t) => {
   assert.equal(spawns.length, 1);
   assert.deepEqual(second.messages, [{ type: "ready", pid: 42 }, { type: "output", data: "native output" }]);
 
+
   const draftReview = { prKey: "github.com/org/repo#1", headSha: "abcdef1234567", event: "COMMENT" as const, body: "", comments: [], updatedAt: "now" };
   await manager.broadcastDraftReview("github.com/org/repo#1", draftReview);
   assert.deepEqual(first.messages.at(-1), { type: "draftReview", draftReview });
   assert.deepEqual(second.messages.at(-1), { type: "draftReview", draftReview });
+
+  // One pty, several views: the view being used owns the size, so none draws a layout for another
+  // view's grid (clipped columns, dead rows, an unreachable "jump to latest" bar).
+  second.messageListener(JSON.stringify({ type: "resize", cols: 80, rows: 20 }));
+  first.messageListener(JSON.stringify({ type: "input", data: "\x1b[<65;10;5M" }));
+  assert.deepEqual(process.resizes, [[120, 40], [80, 20], [120, 40]], "wheel input in the first view restores its size");
+  first.messageListener(JSON.stringify({ type: "input", data: "x" }));
+  assert.equal(process.resizes.length, 3, "an unchanged size is not re-applied on every keystroke");
+  const third = new FakePeer();
+  await manager.attach(third, { prKey: "github.com/org/repo#1", session: "main" });
+  third.messageListener(JSON.stringify({ type: "resize", cols: 60, rows: 10 }));
+  third.closeListener();
+  assert.deepEqual(process.resizes.slice(3), [[60, 10], [120, 40]], "closing a view hands the size to the most recently active remaining one");
 
   await manager.disposePr("github.com/org/repo#1");
   assert.equal(process.killed, true);
