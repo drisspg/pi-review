@@ -72,6 +72,10 @@ src/                    Node server (TypeScript, ESM, run via tsx)
                         checkouts, with absent checkouts kept under Saved only. Never persist this flag.
   pi-session.ts         Pi agent sessions (ask, prewarm, activity, diagnostics, model select)
   pi-terminal*.ts       Native Pi terminals (node-pty + WebSocket), persisted across reloads
+                        One pty per session, shared by all attached views: the view sending input owns
+                        the pty size. Late views get a bounded output replay prefixed with the DEC modes
+                        (alt screen, mouse, paste) set by trimmed output; Pi enables them only once, so
+                        dropping that preamble leaves a dead wheel and a stuck "Jump to latest"
   types.ts              Shared backend types
 web/src/                React frontend (Vite)
   main.tsx              Almost all screens/components: App, AppToolbar, StartPage/PrCard,

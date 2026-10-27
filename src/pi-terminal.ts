@@ -24,6 +24,43 @@ const PROCESS_EXIT_TIMEOUT_MS = 5_000;
 const FLOW_PAUSE_CHARS = 512_000;
 const FLOW_RESUME_CHARS = 128_000;
 
+// DEC private modes a fullscreen TUI sets once at startup and a late-attaching xterm must inherit:
+// alternate screen, mouse reporting (without it the wheel scrolls xterm's own scrollback and never
+// reaches Pi), focus events, application cursor keys, cursor visibility, autowrap, bracketed paste.
+const ALT_SCREEN_MODES = [47, 1047, 1049];
+const REPLAYED_MODES = new Set([...ALT_SCREEN_MODES, 1, 7, 25, 1000, 1002, 1003, 1004, 1005, 1006, 1015, 2004]);
+const PRIVATE_MODE_PATTERN = /\x1b\[\?([\d;]+)([hl])/g;
+
+/** Apply every tracked `CSI ? Pm h/l` in `text` to `modes` (mode -> enabled). */
+export function trackTerminalModes(modes: Map<number, boolean>, text: string): void {
+  for (const [, params, action] of text.matchAll(PRIVATE_MODE_PATTERN)) {
+    for (const param of params.split(";")) {
+      const mode = Number(param);
+      if (REPLAYED_MODES.has(mode)) modes.set(mode, action === "h");
+    }
+  }
+}
+
+/** Escape sequences that put a fresh xterm into `modes`; the alternate screen goes first so the replay draws into it. */
+export function terminalModePreamble(modes: Map<number, boolean>): string {
+  const ordered = [...modes.entries()].sort(([a], [b]) => Number(!ALT_SCREEN_MODES.includes(a)) - Number(!ALT_SCREEN_MODES.includes(b)));
+  return ordered.map(([mode, enabled]) => `\x1b[?${mode}${enabled ? "h" : "l"}`).join("");
+}
+
+/**
+ * Index at which to trim a replay buffer so it keeps at most `max` chars without splitting an
+ * escape sequence (a split one would be lost from the mode state and replayed as stray text).
+ */
+function replayCut(buffer: string, max: number): number {
+  let cut = buffer.length - max;
+  const escape = buffer.lastIndexOf("\x1b", cut - 1);
+  if (escape >= 0 && escape >= cut - 64) {
+    const end = /^\x1b\[[0-?]*[ -/]*[@-~]/.exec(buffer.slice(escape, escape + 96));
+    if (end != null && escape + end[0].length > cut) cut = escape + end[0].length;
+  }
+  return cut;
+}
+
 export type PiTerminalServerMessage =
   | { type: "ready"; pid: number }
   | { type: "output"; data: string }
@@ -86,6 +123,8 @@ type TerminalSession = {
    */
   peerSizes: Map<PiTerminalPeer, TerminalSize>;
   size: TerminalSize;
+  /** Terminal modes in effect at the start of `buffer`, i.e. set by output already trimmed from it. */
+  bufferModes: Map<number, boolean>;
 };
 
 type TerminalSize = { cols: number; rows: number };
@@ -293,7 +332,7 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
     };
     let resolveExit!: () => void;
     const exited = new Promise<void>((resolve) => { resolveExit = resolve; });
-    const terminalSession: TerminalSession = { key, pid: pgid, exitObserved: false, signalGroup, exited, headSha: request.headSha, stopped: false, process: processHandle, peers: new Set(), buffer: "", idleTimer: null, lastActivityAt: Date.now(), paused: false, unackedChars: new Map(), peerSizes: new Map(), size: { cols: DEFAULT_COLS, rows: DEFAULT_ROWS } };
+    const terminalSession: TerminalSession = { key, pid: pgid, exitObserved: false, signalGroup, exited, headSha: request.headSha, stopped: false, process: processHandle, peers: new Set(), buffer: "", idleTimer: null, lastActivityAt: Date.now(), paused: false, unackedChars: new Map(), peerSizes: new Map(), size: { cols: DEFAULT_COLS, rows: DEFAULT_ROWS }, bufferModes: new Map() };
     if (signalGroup != null) {
       processHandle.kill = (signal = "SIGTERM") => {
         // After reaping, the numeric PGID can be reused. Only read-only probes are safe then.
@@ -305,7 +344,12 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
     }
     processHandle.onData((data) => {
       terminalSession.lastActivityAt = Date.now();
-      terminalSession.buffer = `${terminalSession.buffer}${data}`.slice(-MAX_BUFFER_CHARS);
+      terminalSession.buffer = `${terminalSession.buffer}${data}`;
+      if (terminalSession.buffer.length > MAX_BUFFER_CHARS) {
+        const cut = replayCut(terminalSession.buffer, MAX_BUFFER_CHARS);
+        trackTerminalModes(terminalSession.bufferModes, terminalSession.buffer.slice(0, cut));
+        terminalSession.buffer = terminalSession.buffer.slice(cut);
+      }
       for (const peer of terminalSession.peers) {
         peer.send({ type: "output", data });
         terminalSession.unackedChars.set(peer, (terminalSession.unackedChars.get(peer) ?? 0) + data.length);
@@ -410,8 +454,11 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
       session.idleTimer = null;
       peer.send({ type: "ready", pid: session.process.pid });
       if (session.buffer.length > 0) {
-        peer.send({ type: "output", data: session.buffer });
-        session.unackedChars.set(peer, session.buffer.length);
+        // Pi enables the alternate screen and mouse reporting once, at startup; once that output is
+        // trimmed, replaying the tail alone leaves a new view with a dead wheel and a stuck "jump to latest".
+        const replay = `${terminalModePreamble(session.bufferModes)}${session.buffer}`;
+        peer.send({ type: "output", data: replay });
+        session.unackedChars.set(peer, replay.length);
         updateFlowControl(session);
       }
       peer.onMessage((raw) => {

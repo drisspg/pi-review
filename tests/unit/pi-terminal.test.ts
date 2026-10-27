@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import test, { type TestContext } from "node:test";
 
-import { createPiTerminalManager, parsePiTerminalClientMessage, parsePiTerminalRequest, resolvePiTerminalCommand, type PiTerminalPeer, type PiTerminalServerMessage } from "../../src/pi-terminal.js";
+import { createPiTerminalManager, parsePiTerminalClientMessage, parsePiTerminalRequest, resolvePiTerminalCommand, terminalModePreamble, trackTerminalModes, type PiTerminalPeer, type PiTerminalServerMessage } from "../../src/pi-terminal.js";
 
 // Keep the developer's machine-local launcher/model overrides out of these hermetic tests.
 process.env.PI_REVIEW_LOCAL_CONFIG = "/nonexistent/.pi-review.local.json";
@@ -326,6 +326,34 @@ test("attaches a peer to one persistent Pi PTY", async (t) => {
   assert.equal(process.killed, true);
   assert.deepEqual(process.killSignals, ["SIGTERM"]);
   assert.deepEqual(first.closed, [1001, "Pull request closed"]);
+});
+
+test("a view attaching after the replay buffer was trimmed still gets Pi's alternate screen and mouse reporting", async () => {
+  const process = new FakeProcess();
+  const manager = createPiTerminalManager({ cwdForPr: () => "/tmp/pr-worktree", piCommand: "/usr/local/bin/pi", sessionRoot: "/tmp/pi-review-terminal-test", spawn: () => process });
+  const first = new FakePeer();
+  await manager.attach(first, { prKey: "github.com/org/repo#1", session: "main" });
+  // Pi's startup output, then enough full-screen redraws to push it out of the 1M-char replay.
+  process.dataListener("\x1b[?1049h\x1b[?7l\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1004h\x1b[?1006h\x1b[?2004h\x1b[?25l\x1b[?1002l");
+  const frame = `\x1b[H${"transcript line\r\n".repeat(2_000)}`;
+  for (let index = 0; index < 40; index += 1) process.dataListener(frame);
+
+  const late = new FakePeer();
+  await manager.attach(late, { prKey: "github.com/org/repo#1", session: "main" });
+  const replay = late.messages.find((message) => message.type === "output");
+  assert.ok(replay?.type === "output");
+  assert.ok(replay.data.length <= 1_000_000 + 200, "the replay stays bounded");
+  const preamble = replay.data.slice(0, replay.data.indexOf("\x1b[H"));
+  assert.ok(preamble.startsWith("\x1b[?1049h"), "the alternate screen is entered before the replayed frames");
+  for (const mode of ["1000h", "1003h", "1006h", "1004h", "2004h", "7l", "25l", "1002l"]) assert.ok(preamble.includes(`\x1b[?${mode}`), `restores ?${mode}`);
+  await manager.disposePr("github.com/org/repo#1");
+});
+
+test("mode tracking follows the last setting, including combined parameters, and ignores unrelated modes", () => {
+  const modes = new Map<number, boolean>();
+  trackTerminalModes(modes, "\x1b[?1049h\x1b[?1000;1006h\x1b[?2026h\x1b[?1000l");
+  assert.deepEqual(Object.fromEntries(modes), { 1049: true, 1000: false, 1006: true });
+  assert.equal(terminalModePreamble(new Map([[1006, true], [1049, true]])), "\x1b[?1049h\x1b[?1006h");
 });
 
 test("stops an explicitly closed terminal and resumes it from the persisted session", async () => {
