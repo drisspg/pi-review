@@ -416,15 +416,15 @@ export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): Git
     }
   }
 
-  async function fetchRootGitattributes(ref: PullRequestRef, sha: string): Promise<GitattributesRule[] | null> {
-    const endpoint = `/repos/${ref.owner}/${ref.repo}/contents/.gitattributes?ref=${sha}`;
+  async function fetchRootGitattributes(ref: PullRequestRef, commitish: string): Promise<GitattributesRule[] | null> {
+    const endpoint = `/repos/${ref.owner}/${ref.repo}/contents/.gitattributes?ref=${encodeURIComponent(commitish)}`;
     try {
       const { stdout } = await runtime.execFile("gh", ["api", endpoint, "-H", "Accept: application/vnd.github.raw"], { maxBuffer: 1024 * 1024 });
       const rules = parseGitattributes(stdout);
-      logger.info("github", "fetched gitattributes", { ref, sha: sha.slice(0, 12), rules: rules.length });
+      logger.info("github", "fetched gitattributes", { ref, at: commitish, rules: rules.length });
       return rules;
     } catch (error) {
-      logger.info("github", "gitattributes unavailable", { ref, sha: sha.slice(0, 12), error: error instanceof Error ? error.message : String(error) });
+      logger.info("github", "gitattributes unavailable", { ref, at: commitish, error: error instanceof Error ? error.message : String(error) });
       return null;
     }
   }
@@ -454,17 +454,17 @@ export function createGitHubClient(runtime: GitHubRuntime = defaultRuntime): Git
 
   async function fetchPullRequestReviewData(ref: PullRequestRef): Promise<PullRequestReviewData> {
     logger.info("github", "fetch PR review data", { ref });
-    const rawPrPromise = ghApi<PullRequest>(apiBase(ref));
-    const gitattributesPromise = rawPrPromise.then((pr) => fetchRootGitattributes(ref, pr.head.sha));
+    // The base repo's refs/pull/N/head names the head commit (forks included), so the lookup need
+    // not wait for the PR call to learn the head SHA.
     const [rawPr, rawFiles, rawComments, issueComments, rawReviewSummaries, threadStates, reviewDecision, gitattributes, viewer] = await Promise.all([
-      rawPrPromise,
+      ghApi<PullRequest>(apiBase(ref)),
       ghApi<PullFile[]>(`${apiBase(ref)}/files`),
       ghApi<PullReviewComment[]>(`${apiBase(ref)}/comments`),
       ghApi<PullIssueComment[]>(`/repos/${ref.owner}/${ref.repo}/issues/${ref.number}/comments`),
       ghApi<PullRequestReviewSummary[]>(`${apiBase(ref)}/reviews`),
       fetchReviewThreadStates(ref),
       fetchReviewDecision(ref),
-      gitattributesPromise,
+      fetchRootGitattributes(ref, `refs/pull/${ref.number}/head`),
       fetchViewerLogin(),
     ]);
     const files = markGeneratedPullFiles(rawFiles, gitattributes);

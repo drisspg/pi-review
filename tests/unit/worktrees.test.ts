@@ -113,3 +113,29 @@ test("different PR preparations share a clone lock; cleanup waits for preparatio
   assert.equal(clones, 1);
   assert.ok(paths.has(worktree));
 });
+
+test("prefetch overlaps only a new checkout's fetch, and preparation refetches when the head moved", async () => {
+  const uncloned = fixture();
+  await uncloned.service.prefetchPrHead(ref);
+  assert.deepEqual(uncloned.calls, [], "no clone yet: the preparation clones and fetches itself");
+
+  const { service, calls, paths } = fixture();
+  paths.add(repo);
+  paths.add(`${repo}/.git`);
+  await service.prefetchPrHead(ref);
+  assert.equal(calls.filter((args) => args[0] === "fetch").length, 1);
+  await service.preparePrWorktree(ref, "origin", "head");
+  assert.equal(calls.filter((args) => args[0] === "fetch").length, 1, "a matching prefetch is reused");
+  assert.ok(calls.some((args) => args[0] === "worktree" && args[1] === "add"));
+
+  const before = calls.length;
+  await service.prefetchPrHead(ref);
+  assert.equal(calls.length, before, "an existing checkout needs no fetch to reopen");
+
+  const moved = fixture();
+  moved.paths.add(repo);
+  moved.paths.add(`${repo}/.git`);
+  await moved.service.prefetchPrHead(ref);
+  await moved.service.preparePrWorktree(ref, "origin", "newer").catch(() => undefined);
+  assert.equal(moved.calls.filter((args) => args[0] === "fetch").length, 2, "a prefetch of an older head is not trusted");
+});

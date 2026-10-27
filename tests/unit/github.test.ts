@@ -84,23 +84,23 @@ test("GitHub client recognizes bot-landed pull requests from their merged label"
   assert.equal(data.pr.merged, true);
 });
 
-test("GitHub client overlaps gitattributes with slower PR detail requests", async () => {
+test("GitHub client starts the gitattributes lookup without waiting for the PR or file requests", async () => {
   const { runtime } = fakeRuntime();
   const execFile = runtime.execFile;
-  let releaseFiles: (() => void) | null = null;
+  const releases: Array<() => void> = [];
   let gitattributesStarted = false;
   runtime.execFile = async (command: string, args: string[]) => {
-    if (args[1] === "/repos/pytorch/pytorch/pulls/185924/files") await new Promise<void>((resolve) => { releaseFiles = resolve; });
-    if (args[1] === "/repos/pytorch/pytorch/contents/.gitattributes?ref=head") gitattributesStarted = true;
+    if (args[1] === "/repos/pytorch/pytorch/pulls/185924" || args[1] === "/repos/pytorch/pytorch/pulls/185924/files") await new Promise<void>((resolve) => { releases.push(resolve); });
+    if (args[1] === `/repos/pytorch/pytorch/contents/.gitattributes?ref=${encodeURIComponent("refs/pull/185924/head")}`) gitattributesStarted = true;
     return execFile(command, args);
   };
 
   const request = createGitHubClient(runtime).fetchPullRequestReviewData(ref);
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(gitattributesStarted, true);
-  assert.notEqual(releaseFiles, null);
-  releaseFiles?.();
+  assert.equal(gitattributesStarted, true, "starts while the PR call (which carries the head SHA) is still pending");
+  assert.equal(releases.length, 2);
+  for (const release of releases) release();
   await request;
 });
 

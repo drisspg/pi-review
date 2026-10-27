@@ -20,6 +20,8 @@ export type PrApiDeps = {
   listOverviews: (prKey: string) => Promise<GuideReviewRecord[]>;
   parsePullRequestRef: (input: string) => PullRequestRef;
   preparePrWorktree: (ref: PullRequestRef, cloneUrl: string, headSha: string, mode?: "reuse" | "reset") => Promise<string>;
+  /** Optional: begin fetching the PR head while GitHub is queried (must never reject). */
+  prefetchPrHead?: (ref: PullRequestRef) => Promise<void>;
   prewarmPiSession: (prKey: string, purposes: string[]) => void;
   registerPiSessionContext: (prKey: string, cwd: string, context: { headSha: string; files: PullRequestReviewData["files"] }) => Promise<void>;
   removePullRequest: (prKey: string) => Promise<void>;
@@ -104,6 +106,7 @@ export function createPrApi(deps: PrApiDeps): PrApi {
   function load(input: string, mode: "open" | "activity" | "refresh"): Promise<PullRequestReviewResponse> {
     const ref = deps.parsePullRequestRef(input);
     return transition(ref, async () => {
+      if (mode !== "refresh") void deps.prefetchPrHead?.(ref);
       const snapshot = await (mode === "refresh" ? deps.fetchFreshPullRequestReviewData(ref) : deps.fetchPullRequestReviewData(ref));
       const key = prKey(ref);
       if (mode === "refresh") {

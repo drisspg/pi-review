@@ -47,7 +47,7 @@ import { createShellApi } from "./shell-api.js";
 import { withTtlCache } from "./ttl-cache.js";
 import { createUsageApi, defaultUsageApiDeps, defaultUsageLogPath } from "./usage-api.js";
 import { appendDraftReviewComment, clearDraftReview, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, getDraftReview, listAiReviews, listFileReviews, listFocusScans, listGuideReviews, listOverviews, listRecentPullRequests, listReviewMemoryRecords, listArchivedReviews, markPullRequestReviewed, removePullRequest, reviewMemoryStats, updateDraftReviewComment, deleteDraftReviewComment, saveAiReview, saveDraftReview, saveFocusScan, saveGuideReview, saveOverview, saveReviewMemory, saveReviewProfile, setFileViewed, updateFocusScanProgress, updateGuideReviewProgress, upsertPullRequest } from "./state.js";
-import { cleanupPrWorktree, deletePrWorktree, preparePrWorktree, preservePublishedRevisions, repoDirForRef, worktreeDirForRef, withPrWorktree } from "./worktrees.js";
+import { cleanupPrWorktree, deletePrWorktree, prefetchPrHead, preparePrWorktree, preservePublishedRevisions, repoDirForRef, worktreeDirForRef, withPrWorktree } from "./worktrees.js";
 import { createCheckoutPruneApi } from "./checkout-prune-api.js";
 import { createStackApi } from "./stack-api.js";
 
@@ -276,6 +276,7 @@ const prApi = createPrApi(defaultPrApiDeps({
   listGuideReviews,
   listOverviews,
   preparePrWorktree,
+  prefetchPrHead,
   prewarmPiSession: process.env.PI_REVIEW_DISABLE_AUTO_REVIEWS === "1" ? () => undefined : prewarmPiSession,
   registerPiSessionContext,
   removePullRequest,

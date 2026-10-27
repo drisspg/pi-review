@@ -26,6 +26,8 @@ export type WorktreeService = {
   worktreeDirForRef: (ref: PullRequestRef) => string;
   repoDirForRef: (ref: PullRequestRef) => string;
   preparePrWorktree: (ref: PullRequestRef, cloneUrl: string, headSha: string, mode?: "reuse" | "reset") => Promise<string>;
+  /** Start fetching a PR head that has no checkout yet, so the fetch overlaps the GitHub API calls. Never throws. */
+  prefetchPrHead: (ref: PullRequestRef) => Promise<void>;
   cleanupPrWorktree: (ref: PullRequestRef) => Promise<string>;
   deletePrWorktree: (ref: PullRequestRef) => Promise<string>;
   preservePublishedRevisions: (ref: PullRequestRef, isPublished: (sha: string) => Promise<boolean>) => Promise<{ preserved: number; unpublished: string[] }>;
@@ -44,8 +46,11 @@ function safe(value: string): string {
 }
 
 /** The server owns this cache for its entire lifetime; maintenance cannot run alongside it. */
-export function createWorktreeService(runtime: WorktreeRuntime = defaultRuntime, cacheRoot = checkoutCacheRoot(), deleteCheckout = createCheckoutCache(cacheRoot).deleteWorktree): WorktreeService {
+export function createWorktreeService(runtime: WorktreeRuntime = defaultRuntime, cacheRoot = checkoutCacheRoot(), deleteCheckout = createCheckoutCache(cacheRoot).deleteWorktree, now: () => number = Date.now): WorktreeService {
   const preparations = new Map<string, Promise<unknown>>();
+  // PR heads fetched by prefetchPrHead, consumed by the next preparation of that PR.
+  const prefetched = new Map<string, { head: string; at: number }>();
+  const PREFETCH_TTL_MS = 60_000;
   function worktreeDirForRef(ref: PullRequestRef): string {
     return resolve(cacheRoot, "worktrees", safe(ref.host), safe(ref.owner), safe(ref.repo), `pr-${ref.number}`);
   }
@@ -63,6 +68,38 @@ export function createWorktreeService(runtime: WorktreeRuntime = defaultRuntime,
   function maintenanceRequired(path: string): Error {
     return new Error(`Checkout retained at ${path}. Inspect and evict it with npm run cache during offline maintenance before replacing/removing it. No user files or review state were deleted.`);
   }
+  /** Fetch the PR head into its pi-pr-review ref and return the fetched commit. */
+  async function fetchPrHead(ref: PullRequestRef, repoDir: string): Promise<string> {
+    const remoteRef = `refs/pi-pr-review/pr-${ref.number}`;
+    const previousHead = await runtime.git(["rev-parse", "--verify", "--quiet", `${remoteRef}^{commit}`], repoDir).catch(() => "");
+    await runtime.git(["fetch", "--force", "origin", `pull/${ref.number}/head:${remoteRef}`], repoDir);
+    // A force-push replaces the PR ref; keep the previously fetched head under a revision ref so
+    // the reviewed revision (still in the worktree's reflog) stays covered by fetched-PR evidence
+    // and merged checkouts remain deletable.
+    const fetchedHead = await runtime.git(["rev-parse", remoteRef], repoDir);
+    if (/^[0-9a-f]{40}$/.test(previousHead) && previousHead !== fetchedHead) {
+      await runtime.git(["update-ref", `${remoteRef}-rev-${previousHead.slice(0, 12)}`, previousHead], repoDir);
+    }
+    return fetchedHead;
+  }
+
+  /**
+   * Only for a PR with no checkout in an existing clone: those opens always pay for a fetch, so
+   * doing it while GitHub is answering saves its full duration. Existing checkouts are skipped
+   * because a matching one needs no fetch at all.
+   */
+  async function prefetchPrHead(ref: PullRequestRef): Promise<void> {
+    const repoDir = repoDirForRef(ref);
+    const worktreeDir = worktreeDirForRef(ref);
+    if (runtime.exists(worktreeDir) || !runtime.exists(resolve(repoDir, ".git"))) return;
+    await transition(ref, async () => {
+      if (runtime.exists(worktreeDir)) return;
+      prefetched.set(worktreeDir, { head: await fetchPrHead(ref, repoDir), at: now() });
+    }).catch((error: unknown) => {
+      logger.info("worktree", "prefetch failed; preparation will fetch", { ref, error: error instanceof Error ? error.message : String(error) });
+    });
+  }
+
   async function preparePrWorktree(ref: PullRequestRef, cloneUrl: string, headSha: string, mode: "reuse" | "reset" = "reuse"): Promise<string> {
     return transition(ref, async () => {
       const repoDir = repoDirForRef(ref);
@@ -96,16 +133,9 @@ export function createWorktreeService(runtime: WorktreeRuntime = defaultRuntime,
       await runtime.mkdir(resolve(worktreeDir, ".."));
       if (!runtime.exists(repoDir)) await runtime.git(["clone", cloneUrl, repoDir]);
       else if (!runtime.exists(resolve(repoDir, ".git"))) throw maintenanceRequired(repoDir);
-      const remoteRef = `refs/pi-pr-review/pr-${ref.number}`;
-      const previousHead = await runtime.git(["rev-parse", "--verify", "--quiet", `${remoteRef}^{commit}`], repoDir).catch(() => "");
-      await runtime.git(["fetch", "--force", "origin", `pull/${ref.number}/head:${remoteRef}`], repoDir);
-      // A force-push replaces the PR ref; keep the previously fetched head under a revision ref so
-      // the reviewed revision (still in the worktree's reflog) stays covered by fetched-PR evidence
-      // and merged checkouts remain deletable.
-      const fetchedHead = await runtime.git(["rev-parse", remoteRef], repoDir);
-      if (/^[0-9a-f]{40}$/.test(previousHead) && previousHead !== fetchedHead) {
-        await runtime.git(["update-ref", `${remoteRef}-rev-${previousHead.slice(0, 12)}`, previousHead], repoDir);
-      }
+      const early = prefetched.get(worktreeDir);
+      prefetched.delete(worktreeDir);
+      const fetchedHead = early != null && early.head === headSha && now() - early.at < PREFETCH_TTL_MS ? early.head : await fetchPrHead(ref, repoDir);
       if (mode === "reset" && fetchedHead !== headSha) {
         throw new Error("The remote PR changed while refreshing. Try Refresh again; the checkout has not been reset.");
       }
@@ -162,7 +192,7 @@ export function createWorktreeService(runtime: WorktreeRuntime = defaultRuntime,
     });
   }
 
-  return { worktreeDirForRef, repoDirForRef, preparePrWorktree, cleanupPrWorktree, deletePrWorktree, preservePublishedRevisions, withPrWorktree: transition };
+  return { worktreeDirForRef, repoDirForRef, preparePrWorktree, prefetchPrHead, cleanupPrWorktree, deletePrWorktree, preservePublishedRevisions, withPrWorktree: transition };
 }
 
 const defaultService = createWorktreeService();
@@ -171,6 +201,10 @@ export const repoDirForRef = defaultService.repoDirForRef;
 export async function preparePrWorktree(ref: PullRequestRef, cloneUrl: string, headSha: string, mode: "reuse" | "reset" = "reuse"): Promise<string> {
   await assertLegacyTransition();
   return defaultService.preparePrWorktree(ref, cloneUrl, headSha, mode);
+}
+export async function prefetchPrHead(ref: PullRequestRef): Promise<void> {
+  // A blocked legacy cache makes the open itself fail with guidance; the prefetch just steps aside.
+  if (await assertLegacyTransition().then(() => true, () => false)) await defaultService.prefetchPrHead(ref);
 }
 export const cleanupPrWorktree = defaultService.cleanupPrWorktree;
 export const deletePrWorktree = defaultService.deletePrWorktree;
