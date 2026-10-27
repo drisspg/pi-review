@@ -1,5 +1,5 @@
 /** Format GitHub-applicable inline suggestions and reuse the existing private comment pipeline. */
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 export type ReviewSuggestionTarget = { path: string; line: number; startLine?: number; side?: "RIGHT" | "LEFT" };

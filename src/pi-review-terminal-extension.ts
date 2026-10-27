@@ -1,4 +1,5 @@
-import { StringEnum, Type } from "@earendil-works/pi-ai";
+import { StringEnum } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { AI_DRAFT_FORMAT_GUIDELINE, draftActionGuidelines, draftActionParameters, runDraftAction, type ReviewDraftOps } from "./review-draft-actions.js";
 import type { DraftReviewComment } from "./types.js";

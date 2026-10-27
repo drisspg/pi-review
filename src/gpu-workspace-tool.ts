@@ -1,4 +1,4 @@
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 
 import { defaultGpuWorkspaceStore, type GpuWorkspaceStore } from "./gpu-workspace.js";
