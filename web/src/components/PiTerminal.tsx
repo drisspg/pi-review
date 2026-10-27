@@ -57,6 +57,9 @@ function terminalWebSocketUrl(prKey: string, session: string, headSha: string, c
   return url.toString();
 }
 
+/** Cmd+Up/Down -> the xterm Ctrl+Home/Ctrl+End sequences Pi binds to transcript top/bottom. */
+const TRANSCRIPT_JUMP_KEYS: Record<string, string | undefined> = { ArrowUp: "\x1b[1;5H", ArrowDown: "\x1b[1;5F" };
+
 /** Render a real interactive Pi TUI connected to a server-owned pseudoterminal. */
 export function PiTerminal({ prKey, headSha, session = "main", context, target, compact = false, onDraftReview }: { prKey: string; headSha: string; session?: string; context?: string; target?: PiTerminalTarget; compact?: boolean; onDraftReview?: (draftReview: DraftReview) => void }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -120,6 +123,17 @@ export function PiTerminal({ prKey, headSha, session = "main", context, target, 
     });
     themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     const inputDisposable = terminal.onData((data) => send({ type: "input", data }));
+    // Pi's transcript jumps are Ctrl+Home/End, which Mac keyboards lack (Fn+Ctrl+arrows are taken by
+    // macOS Spaces). Map the Mac "go to top/end" convention, Cmd+Up/Down, to those sequences.
+    terminal.attachCustomKeyEventHandler((event) => {
+      const jump = event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey ? TRANSCRIPT_JUMP_KEYS[event.key] : undefined;
+      if (jump == null) return true;
+      if (event.type === "keydown") {
+        event.preventDefault();
+        send({ type: "input", data: jump });
+      }
+      return false;
+    });
 
     socket.addEventListener("message", (event) => {
       let message: PiTerminalServerMessage;
