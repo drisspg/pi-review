@@ -1933,7 +1933,7 @@ test("runs the right-sidebar Pi review beside the native terminal", async ({ pag
   await expect(panel).not.toHaveClass(/terminal-focused/);
 });
 
-test("copies local draft comments in a feedback prompt from the Review tab", async ({ page, context }) => {
+test("copies local draft comments in a feedback prompt from the Review tab and archives them locally", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   const rows = await openFileWithAddedRows(page, 1);
   const path = await rows.first().getAttribute("data-path");
@@ -1968,10 +1968,16 @@ test("copies local draft comments in a feedback prompt from the Review tab", asy
   const finalDraftSave = page.waitForResponse((response) => response.url().endsWith("/api/draft-review/save") && (response.request().postDataJSON() as { body?: string }).body === "Keep this overall note local too.");
   await reviewPanel.getByPlaceholder("Overall review body").fill("Keep this overall note local too.");
   await finalDraftSave;
+  const archived = page.waitForRequest((request) => request.url().endsWith("/api/review/archive"));
   await reviewPanel.getByRole("button", { name: "Copy feedback prompt" }).click();
 
   await expect(reviewPanel.getByRole("button", { name: "Copied feedback prompt" })).toBeVisible();
-  await expect(reviewPanel.locator(".draft-card", { hasText: "Keep this local feedback out of GitHub." })).toBeVisible();
+  // Copying feedback ends the review: it is archived locally (not published) and the drafts clear.
+  const archivePayload = (await archived).postDataJSON() as { body?: string; comments?: Array<{ body?: string }> };
+  expect(archivePayload.body).toBe("Keep this overall note local too.");
+  expect(archivePayload.comments?.map((comment) => comment.body)).toEqual(["Keep this local feedback out of GitHub."]);
+  await expect(page.locator(".side")).toContainText("Review archived locally.");
+  await expect(reviewPanel.locator(".draft-card")).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain("# Task: assess my review notes");
   const prompt = await page.evaluate(() => navigator.clipboard.readText());
   expect(prompt).toContain("Mode: Triage only");
@@ -1995,6 +2001,7 @@ test("copies local draft comments in a feedback prompt from the Review tab", asy
   await page.reload();
   await expect(page.locator(".review-layout")).toBeVisible({ timeout: 60_000 });
   await openSideTab(page, "Review");
-  await expect(page.locator(".side .draft-card", { hasText: "Keep this local feedback out of GitHub." })).toBeVisible();
-  await expect(page.getByPlaceholder("Overall review body")).toHaveValue("Keep this overall note local too.");
+  // The archive cleared the saved draft review too, so a reload does not bring the drafts back.
+  await expect(page.locator(".side .draft-card")).toHaveCount(0);
+  await expect(page.locator(".side")).not.toContainText("Keep this local feedback out of GitHub.");
 });

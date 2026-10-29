@@ -178,7 +178,7 @@ type PiPanelProps = {
   aiReviewId: string | null;
   showAiReviewRecord: (record: AiReviewRecord | null | undefined) => void;
   runReview: () => Promise<void>;
-  copyFeedbackPrompt: (overallBody?: string) => Promise<void>;
+  copyFeedbackPrompt: (overallBody?: string) => Promise<boolean>;
   guideReview: FocusReview;
   runGuideReview: () => Promise<void>;
   focusReview: FocusReview;
@@ -952,10 +952,20 @@ function App() {
     return await api<{ prompt: string; purpose: string }>("/api/pi/prompt", { method: "POST", body: JSON.stringify(payload) });
   }
 
-  async function copyReviewFeedbackPrompt(overallBody = ""): Promise<void> {
-    if (review == null) return;
+  /**
+   * Copying feedback is how a review usually ends (paste it into another agent, close this chat), so
+   * it also archives the local review once the clipboard write succeeds: snapshot in Review memory,
+   * head marked reviewed, drafts cleared. Returns whether it archived; nothing to archive just copies.
+   */
+  async function copyReviewFeedbackPrompt(overallBody = ""): Promise<boolean> {
+    if (review == null) return false;
     const { prompt } = await buildPiPrompt(reviewFeedbackPromptPayload(review, drafts, overallBody, aiReview, focusAreas, viewedFocusAreaIds));
     await writeClipboard(prompt);
+    const body = overallBody.trim().length > 0 ? overallBody : reviewBody;
+    if (drafts.length === 0 && body.trim().length === 0) return false;
+    logUsage("review:copy-feedback-archive", { comments: drafts.length });
+    if (!(await archiveReview(reviewEvent, body))) throw new Error("Copied, but archiving the review locally failed");
+    return true;
   }
 
   /** The backend decides freshness and joins existing work, including after navigation/reload. */
@@ -2370,12 +2380,12 @@ function GitHubDraftReviewPanel({ files, localDraftCount, onJumpToTarget }: { fi
   </details>;
 }
 
-function ReviewSummary({ pr, files, drafts, setDrafts, event, setEvent, body, setBody, draftSaveStatus, draftSaveError, retryDraftSave, editingDraftId, setEditingDraftId, archiveReview, discardReview, submitReview, submitting, invalidDraftIds, copyFeedbackPrompt, onJumpToTarget }: { pr: StoredPullRequest; files: PullFile[]; drafts: DraftComment[]; setDrafts: (drafts: DraftComment[]) => void; event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES"; setEvent: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES") => void; body: string; setBody: (body: string) => void; draftSaveStatus: "idle" | "saving" | "saved" | "error"; draftSaveError: string | null; retryDraftSave: () => void; editingDraftId: string | null; setEditingDraftId: (id: string | null) => void; archiveReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; discardReview: () => Promise<boolean>; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; submitting: boolean; invalidDraftIds: Record<string, boolean>; copyFeedbackPrompt: (overallBody?: string) => Promise<void>; onJumpToTarget?: (target: Target) => void }) {
+function ReviewSummary({ pr, files, drafts, setDrafts, event, setEvent, body, setBody, draftSaveStatus, draftSaveError, retryDraftSave, editingDraftId, setEditingDraftId, archiveReview, discardReview, submitReview, submitting, invalidDraftIds, copyFeedbackPrompt, onJumpToTarget }: { pr: StoredPullRequest; files: PullFile[]; drafts: DraftComment[]; setDrafts: (drafts: DraftComment[]) => void; event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES"; setEvent: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES") => void; body: string; setBody: (body: string) => void; draftSaveStatus: "idle" | "saving" | "saved" | "error"; draftSaveError: string | null; retryDraftSave: () => void; editingDraftId: string | null; setEditingDraftId: (id: string | null) => void; archiveReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; discardReview: () => Promise<boolean>; submitReview: (event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES", body: string) => Promise<boolean>; submitting: boolean; invalidDraftIds: Record<string, boolean>; copyFeedbackPrompt: (overallBody?: string) => Promise<boolean>; onJumpToTarget?: (target: Target) => void }) {
   const [finished, setFinished] = useState<"archived" | "published" | null>(null);
   const [copied, setCopied] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [discarding, setDiscarding] = useState(false);
-  const feedbackCopy = useCopyAction(() => copyFeedbackPrompt(body));
+  const feedbackCopy = useCopyAction(async () => { if (await copyFeedbackPrompt(body)) clearForm("archived"); });
   const hasDrafts = drafts.length > 0;
   const hasReviewContent = body.trim().length > 0 || hasDrafts;
   const canPublish = hasReviewContent || event === "APPROVE";
@@ -2420,7 +2430,7 @@ function ReviewSummary({ pr, files, drafts, setDrafts, event, setEvent, body, se
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1600);
   }
-  const copyFeedbackButton = <Button variant="muted" className="small-muted-button pi-copy-feedback" onClick={feedbackCopy.trigger} disabled={feedbackCopy.copying}>{feedbackCopy.copying ? "Copying…" : feedbackCopy.copied ? "Copied feedback prompt" : "Copy feedback prompt"}</Button>;
+  const copyFeedbackButton = <Button variant="muted" className="small-muted-button pi-copy-feedback" title="Copy a feedback prompt for another agent; also archives your local drafts to Review memory" onClick={feedbackCopy.trigger} disabled={feedbackCopy.copying}>{feedbackCopy.copying ? "Copying…" : feedbackCopy.copied ? "Copied feedback prompt" : "Copy feedback prompt"}</Button>;
   const saveStatus = draftSaveStatus !== "idle" && <span className={`draft-save-status is-${draftSaveStatus}`} role={draftSaveStatus === "error" ? "alert" : "status"}>{draftSaveStatus === "saving" ? "Saving…" : draftSaveStatus === "saved" ? "Saved locally" : <>Not saved: {draftSaveError}<button type="button" onClick={retryDraftSave}>Retry</button></>}</span>;
   const finishedDescription = finished === "published" ? "Review published to GitHub." : finished === "archived" ? "Review archived locally. You can find it in Review memory." : draftDescription;
   const githubDraftPanel = <GitHubDraftReviewPanel files={files} localDraftCount={drafts.length} onJumpToTarget={onJumpToTarget} />;
@@ -2469,7 +2479,7 @@ function GeneralReviewEntry({ message, prUrl }: { message: AiReviewMessage; prUr
 
 function AiReviewPanel({ prKey, prUrl, focusPanel, review, aiReviewHistory, aiReviewId, showAiReviewRecord, runReview, copyFeedbackPrompt, focusReview, focusScanHistory, focusScanId, showFocusScanRecord, runFocusReview, focusAreas }: PiPanelProps & { prKey: string; prUrl: string; focusPanel: () => void; focusAreas: FocusArea[] }) {
   const terminalReview = useContext(PiTerminalPrContext);
-  const feedbackCopy = useCopyAction(copyFeedbackPrompt);
+  const feedbackCopy = useCopyAction(async () => { await copyFeedbackPrompt(); });
   const [terminalFocused, setTerminalFocused] = useState(false);
   const messages = review.messages.length > 0 ? review.messages : review.text.trim().length > 0 ? [generalReviewMessage(review.text)] : [];
   const reviewMessages = generalReviewMessages(messages);
@@ -2494,7 +2504,7 @@ function AiReviewPanel({ prKey, prUrl, focusPanel, review, aiReviewHistory, aiRe
   const focusHistoryOptions = focusScanHistory.map((record, index) => <option key={record.id} value={record.id}>{index === 0 ? "Latest · " : ""}{historyTimestamp(record)} · {focusScanSummary(record)}</option>);
   const aiHistoryOptions = aiReviewHistory.map((record, index) => <option key={record.id} value={record.id}>{index === 0 ? "Latest · " : ""}{historyTimestamp(record)} · Findings</option>);
   return <section className={`panel ai-review${viewingHistory ? " viewing-history" : ""}${terminalFocused ? " terminal-focused" : ""}`}>
-    <div className="section-head pi-panel-head"><h2>Pi session{viewingHistory && <span className="pi-history-flag" role="status">Viewing earlier run</span>}</h2><Button type="button" variant="muted" className="small-muted-button pi-copy-feedback" onClick={feedbackCopy.trigger} disabled={feedbackCopy.copying}>{feedbackCopy.copying ? "Copying…" : feedbackCopy.copied ? "Copied feedback prompt" : "Copy feedback prompt"}</Button></div>
+    <div className="section-head pi-panel-head"><h2>Pi session{viewingHistory && <span className="pi-history-flag" role="status">Viewing earlier run</span>}</h2><Button type="button" variant="muted" className="small-muted-button pi-copy-feedback" title="Copy a feedback prompt for another agent; also archives your local drafts to Review memory" onClick={feedbackCopy.trigger} disabled={feedbackCopy.copying}>{feedbackCopy.copying ? "Copying…" : feedbackCopy.copied ? "Copied feedback prompt" : "Copy feedback prompt"}</Button></div>
     {feedbackCopy.error != null && <Flash variant="danger" className="copy-feedback-error" role="alert">Copy failed: {feedbackCopy.error}</Flash>}
     <div className="pi-actions">
       <div className="pi-action">
