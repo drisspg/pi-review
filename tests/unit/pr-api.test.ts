@@ -116,6 +116,9 @@ function fakeDeps() {
         calls.push(`prepare:${requestRef.number}:${cloneUrl}:${headSha}:${mode}`);
         return "/tmp/worktree";
       },
+      hasLiveTerminal(_prKey: string) {
+        return false;
+      },
       prewarmPiSession(prKey: string, purposes: string[]) {
         calls.push(`prewarm:${prKey}:${purposes.join(",")}`);
       },
@@ -393,6 +396,63 @@ test("implicit activity updates reuse the checkout and keep same-HEAD sessions a
   calls.length = 0;
   await assert.rejects(api.activity("url"), /Use Refresh/);
   assert.equal(calls.some((call) => /^(dispose|remove|upsert|context):/.test(call)), false);
+});
+
+function staleCheckout(deps: ReturnType<typeof fakeDeps>["deps"], calls: string[], currentHead = "head") {
+  deps.fetchFreshPullRequestReviewData = async () => { calls.push("fetch-fresh:1"); return reviewData(storedPr({ headSha: "latest" })); };
+  deps.preparePrWorktree = async (_ref, _url, headSha, mode) => {
+    calls.push(`prepare:${headSha}:${mode}`);
+    if (mode === "reuse" && headSha !== currentHead) throw Object.assign(new Error("older revision"), { code: "CHECKOUT_RESET_REQUIRED" });
+    return "/tmp/worktree";
+  };
+}
+
+test("opening a PR whose checkout is behind advances it with a fresh snapshot after Pi teardown", async () => {
+  const { deps, calls } = fakeDeps();
+  staleCheckout(deps, calls, "older");
+  const response = await createPrApi(deps).open("url");
+  assert.equal(response.pr.headSha, "latest");
+  assert.deepEqual(calls.slice(0, 8), ["parse:url", "fetch:1", "prepare:head:reuse", "fetch-fresh:1", "prepare:latest:reuse", "prepare:latest:check-advance", "dispose:github.com/pytorch/pytorch#1", "prepare:latest:advance"]);
+  assert.ok(calls.includes("context:github.com/pytorch/pytorch#1:/tmp/worktree:latest:a.ts"));
+});
+
+test("opening a stale checkout with local work keeps Pi alive and leaves it for an explicit Refresh", async () => {
+  const { deps, calls } = fakeDeps();
+  staleCheckout(deps, calls, "older");
+  const prepare = deps.preparePrWorktree;
+  deps.preparePrWorktree = async (ref, url, headSha, mode) => {
+    await prepare(ref, url, headSha, mode);
+    if (mode === "check-advance") throw Object.assign(new Error("has local changes"), { code: "CHECKOUT_RESET_REQUIRED" });
+    return "/tmp/worktree";
+  };
+  await assert.rejects(createPrApi(deps).open("url"), /local changes/);
+  assert.equal(calls.some((call) => /^(dispose|upsert|context):/.test(call) || call.endsWith(":advance")), false);
+});
+
+test("opening with a stale cached snapshot reuses a checkout already at the fresh head", async () => {
+  const { deps, calls } = fakeDeps();
+  staleCheckout(deps, calls, "latest");
+  const response = await createPrApi(deps).open("url");
+  assert.equal(response.pr.headSha, "latest");
+  assert.equal(calls.some((call) => call.endsWith(":advance") || call.endsWith(":reset")), false);
+});
+
+test("opening a stale checkout with a live Pi terminal leaves it for an explicit Refresh", async () => {
+  const { deps, calls } = fakeDeps();
+  staleCheckout(deps, calls, "older");
+  deps.hasLiveTerminal = () => true;
+  await assert.rejects(createPrApi(deps).open("url"), { code: "CHECKOUT_RESET_REQUIRED" });
+  assert.equal(calls.some((call) => /^(dispose|upsert|context):/.test(call) || call.endsWith(":advance")), false);
+});
+
+test("implicit activity never resets a checkout on another revision", async () => {
+  const { deps, calls } = fakeDeps();
+  deps.preparePrWorktree = async (_ref, _url, headSha, mode) => {
+    calls.push(`prepare:${headSha}:${mode}`);
+    throw Object.assign(new Error("older revision"), { code: "CHECKOUT_RESET_REQUIRED" });
+  };
+  await assert.rejects(createPrApi(deps).activity("url"), { code: "CHECKOUT_RESET_REQUIRED" });
+  assert.equal(calls.some((call) => /^(dispose|fetch-fresh|upsert|context):/.test(call) || call.endsWith(":reset")), false);
 });
 
 test("refresh uses the fresh snapshot rather than cached open data", async () => {

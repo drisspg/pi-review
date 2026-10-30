@@ -29,6 +29,36 @@ function fixture() {
   return { paths, calls, runtime, service: createWorktreeService(runtime, root) };
 }
 
+for (const blocker of ["local changes", "local commits", "none"] as const) {
+  test(`opening advances a stale checkout only when it has ${blocker === "none" ? "no local work" : blocker}`, async () => {
+    const { paths, runtime, calls, service } = fixture();
+    paths.add(repo); paths.add(`${repo}/.git`); paths.add(worktree); paths.add(`${worktree}/index`);
+    const git = runtime.git;
+    runtime.git = async (args, cwd) => {
+      if (args[0] === "rev-parse" && args[1] === "--show-toplevel") { calls.push(args); return worktree; }
+      if (args[0] === "rev-parse" && args[1] === "--git-common-dir") { calls.push(args); return `${repo}/.git`; }
+      if (args[0] === "worktree" && args[1] === "list") { calls.push(args); return `worktree ${worktree}\nHEAD head\ndetached`; }
+      if (args[0] === "rev-parse" && args[1] === "--git-path" && args[2] !== "index") { calls.push(args); return `${worktree}/${args[2]}`; }
+      if (args[0] === "status") { calls.push(args); return blocker === "local changes" ? " M a.py" : ""; }
+      if (args[0] === "rev-list") { calls.push(args); return blocker === "local commits" ? "head" : ""; }
+      if (args[0] === "rev-parse" && args[1] === "refs/pi-pr-review/pr-185924") { calls.push(args); return "new"; }
+      return git(args, cwd);
+    };
+    const checked = service.preparePrWorktree(ref, "origin", "new", "check-advance");
+    if (blocker === "none") assert.equal(await checked, worktree);
+    else await assert.rejects(checked, { code: "CHECKOUT_RESET_REQUIRED" });
+    assert.equal(calls.some((args) => args[0] === "checkout" || args[0] === "clean" || args[0] === "fetch"), false);
+    const prepared = service.preparePrWorktree(ref, "origin", "new", "advance");
+    if (blocker === "none") {
+      assert.equal(await prepared, worktree);
+      assert.ok(calls.some((args) => args.join(" ") === "checkout --detach --force new"));
+    } else {
+      await assert.rejects(prepared, { code: "CHECKOUT_RESET_REQUIRED", message: new RegExp(blocker) });
+      assert.equal(calls.some((args) => args[0] === "checkout" || args[0] === "clean" || args[0] === "fetch"), false);
+    }
+  });
+}
+
 test("worktree paths are cache-root scoped and sanitized", () => {
   const { service } = fixture();
   assert.equal(service.repoDirForRef(ref), repo);

@@ -1,5 +1,6 @@
 import { safeDiffPath, type GitInterdiffResult } from "./interdiff-git.js";
 import { parsePullRequestRef, prKey } from "./pr.js";
+import type { PrepareMode } from "./worktrees.js";
 import type { AiReviewRecord, CommitChecks, DraftReview, FileReviewState, FocusScanRecord, GuideReviewRecord, PullFile, PullRequestRef, PullRequestReviewData, PullRequestReviewResponse, StoredPullRequest } from "./types.js";
 
 export type PrApiDeps = {
@@ -19,7 +20,9 @@ export type PrApiDeps = {
   listGuideReviews: (prKey: string) => Promise<GuideReviewRecord[]>;
   listOverviews: (prKey: string) => Promise<GuideReviewRecord[]>;
   parsePullRequestRef: (input: string) => PullRequestRef;
-  preparePrWorktree: (ref: PullRequestRef, cloneUrl: string, headSha: string, mode?: "reuse" | "reset") => Promise<string>;
+  preparePrWorktree: (ref: PullRequestRef, cloneUrl: string, headSha: string, mode?: PrepareMode) => Promise<string>;
+  /** A live Pi terminal blocks advancing a stale checkout on open. */
+  hasLiveTerminal: (prKey: string) => boolean;
   /** Optional: begin fetching the PR head while GitHub is queried (must never reject). */
   prefetchPrHead?: (ref: PullRequestRef) => Promise<void>;
   prewarmPiSession: (prKey: string, purposes: string[]) => void;
@@ -48,6 +51,10 @@ function shaFromPayload(payload: Record<string, unknown>, key: string): string {
 function prUrlFromPayload(payload: Record<string, unknown>): string {
   if (typeof payload.prUrl !== "string" || payload.prUrl.length === 0) throw new Error("Expected prUrl");
   return payload.prUrl;
+}
+
+function isCheckoutResetRequired(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === "CHECKOUT_RESET_REQUIRED";
 }
 
 export const defaultPrApiDeps = (deps: Omit<PrApiDeps, "parsePullRequestRef">): PrApiDeps => ({ ...deps, parsePullRequestRef });
@@ -102,18 +109,41 @@ export function createPrApi(deps: PrApiDeps): PrApi {
     });
   }
 
-  /** Only explicit Refresh resets local files; opening a PR remains non-destructive. */
+  /**
+   * Refresh resets local files. Opening a PR whose checkout is behind advances it with a fresh
+   * snapshot after Pi teardown, but only when the checkout is clean, on a fetched PR revision, and
+   * has no live Pi terminal; otherwise the user must Refresh. Implicit activity updates never reset.
+   */
   function load(input: string, mode: "open" | "activity" | "refresh"): Promise<PullRequestReviewResponse> {
     const ref = deps.parsePullRequestRef(input);
     return transition(ref, async () => {
       if (mode !== "refresh") void deps.prefetchPrHead?.(ref);
-      const snapshot = await (mode === "refresh" ? deps.fetchFreshPullRequestReviewData(ref) : deps.fetchPullRequestReviewData(ref));
+      let snapshot = await (mode === "refresh" ? deps.fetchFreshPullRequestReviewData(ref) : deps.fetchPullRequestReviewData(ref));
       const key = prKey(ref);
-      if (mode === "refresh") {
+      const prepare = (prepareMode: PrepareMode) => deps.preparePrWorktree(ref, snapshot.raw.base.repo.clone_url, snapshot.pr.headSha, prepareMode);
+      const disposeAndPrepare = async (prepareMode: PrepareMode): Promise<string> => {
         registeredHeads.delete(key);
         await deps.disposePiSession(key);
+        return prepare(prepareMode);
+      };
+      let worktreeDir: string;
+      if (mode === "refresh") worktreeDir = await disposeAndPrepare("reset");
+      else {
+        try {
+          worktreeDir = await prepare("reuse");
+        } catch (error) {
+          if (mode !== "open" || !isCheckoutResetRequired(error)) throw error;
+          // The first snapshot may be cached; only a fresh head is safe to move the checkout to.
+          snapshot = await deps.fetchFreshPullRequestReviewData(ref);
+          worktreeDir = await prepare("reuse").catch(async (retryError: unknown) => {
+            if (!isCheckoutResetRequired(retryError)) throw retryError;
+            // Read-only eligibility first: a refused advance must not tear down Pi work.
+            await prepare("check-advance");
+            if (deps.hasLiveTerminal(key)) throw Object.assign(new Error("This checkout is on an older revision and has a live Pi terminal. Use Refresh to stop it and reset the checkout to the remote PR."), { code: "CHECKOUT_RESET_REQUIRED" });
+            return disposeAndPrepare("advance");
+          });
+        }
       }
-      const worktreeDir = await deps.preparePrWorktree(ref, snapshot.raw.base.repo.clone_url, snapshot.pr.headSha, mode === "refresh" ? "reset" : "reuse");
       if (mode !== "refresh" && registeredHeads.get(key) !== snapshot.pr.headSha) {
         registeredHeads.delete(key);
         await deps.disposePiSession(key);

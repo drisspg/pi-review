@@ -10,10 +10,18 @@ import type { PullRequestRef } from "./types.js";
 export class CheckoutResetRequiredError extends Error {
   readonly code = "CHECKOUT_RESET_REQUIRED";
 
-  constructor(worktreeDir: string) {
-    super(`This checkout is on an older or local revision. Use Refresh to reset it to the remote PR: ${worktreeDir}`);
+  constructor(worktreeDir: string, reason = "is on an older or local revision") {
+    super(`This checkout ${reason}. Use Refresh to reset it to the remote PR: ${worktreeDir}`);
   }
 }
+
+/**
+ * reuse: the checkout must already be at the PR head. reset (explicit Refresh): force it there.
+ * advance (opening a PR): reset only a clean checkout whose HEAD is a fetched PR revision, so local
+ * edits and unpublished commits still need an explicit Refresh. check-advance runs advance's checks
+ * read-only, so callers can tear down Pi only once advancing is known to be allowed.
+ */
+export type PrepareMode = "reuse" | "reset" | "advance" | "check-advance";
 
 type WorktreeRuntime = {
   exists: (path: string) => boolean;
@@ -25,7 +33,7 @@ type WorktreeRuntime = {
 export type WorktreeService = {
   worktreeDirForRef: (ref: PullRequestRef) => string;
   repoDirForRef: (ref: PullRequestRef) => string;
-  preparePrWorktree: (ref: PullRequestRef, cloneUrl: string, headSha: string, mode?: "reuse" | "reset") => Promise<string>;
+  preparePrWorktree: (ref: PullRequestRef, cloneUrl: string, headSha: string, mode?: PrepareMode) => Promise<string>;
   /** Start fetching a PR head that has no checkout yet, so the fetch overlaps the GitHub API calls. Never throws. */
   prefetchPrHead: (ref: PullRequestRef) => Promise<void>;
   cleanupPrWorktree: (ref: PullRequestRef) => Promise<string>;
@@ -100,7 +108,7 @@ export function createWorktreeService(runtime: WorktreeRuntime = defaultRuntime,
     });
   }
 
-  async function preparePrWorktree(ref: PullRequestRef, cloneUrl: string, headSha: string, mode: "reuse" | "reset" = "reuse"): Promise<string> {
+  async function preparePrWorktree(ref: PullRequestRef, cloneUrl: string, headSha: string, mode: PrepareMode = "reuse"): Promise<string> {
     return transition(ref, async () => {
       const repoDir = repoDirForRef(ref);
       const worktreeDir = worktreeDirForRef(ref);
@@ -110,10 +118,8 @@ export function createWorktreeService(runtime: WorktreeRuntime = defaultRuntime,
         const head = await runtime.git(["rev-parse", "HEAD"], worktreeDir);
         const index = resolve(worktreeDir, await runtime.git(["rev-parse", "--git-path", "index"], worktreeDir));
         if (!runtime.exists(index)) throw maintenanceRequired(worktreeDir);
-        if (mode === "reuse") {
-          if (head !== headSha) throw new CheckoutResetRequiredError(worktreeDir);
-          return worktreeDir;
-        }
+        if (mode !== "reset" && head === headSha) return worktreeDir;
+        if (mode === "reuse") throw new CheckoutResetRequiredError(worktreeDir);
         // Canonicalize only the cache root (e.g. macOS /var -> /private/var), not inner symlinks.
         const canonicalRoot = await runtime.realpath(cacheRoot);
         const expectedWorktree = resolve(canonicalRoot, relative(cacheRoot, worktreeDir));
@@ -128,6 +134,12 @@ export function createWorktreeService(runtime: WorktreeRuntime = defaultRuntime,
         for (const state of ["rebase-merge", "rebase-apply", "sequencer", "index.lock"]) {
           if (runtime.exists(resolve(worktreeDir, await runtime.git(["rev-parse", "--git-path", state], worktreeDir)))) throw maintenanceRequired(worktreeDir);
         }
+        if (mode === "advance" || mode === "check-advance") {
+          if ((await runtime.git(["status", "--porcelain"], worktreeDir)).length > 0) throw new CheckoutResetRequiredError(worktreeDir, "has local changes");
+          const unpublished = await runtime.git(["rev-list", "--max-count=1", head, "--not", "--remotes=origin", "--glob=refs/pi-pr-review/*"], repoDir);
+          if (unpublished.length > 0) throw new CheckoutResetRequiredError(worktreeDir, "has local commits");
+          if (mode === "check-advance") return worktreeDir;
+        }
       }
       await runtime.mkdir(resolve(repoDir, ".."));
       await runtime.mkdir(resolve(worktreeDir, ".."));
@@ -136,7 +148,7 @@ export function createWorktreeService(runtime: WorktreeRuntime = defaultRuntime,
       const early = prefetched.get(worktreeDir);
       prefetched.delete(worktreeDir);
       const fetchedHead = early != null && early.head === headSha && now() - early.at < PREFETCH_TTL_MS ? early.head : await fetchPrHead(ref, repoDir);
-      if (mode === "reset" && fetchedHead !== headSha) {
+      if (mode !== "reuse" && fetchedHead !== headSha) {
         throw new Error("The remote PR changed while refreshing. Try Refresh again; the checkout has not been reset.");
       }
       if (existing) {
@@ -198,7 +210,7 @@ export function createWorktreeService(runtime: WorktreeRuntime = defaultRuntime,
 const defaultService = createWorktreeService();
 export const worktreeDirForRef = defaultService.worktreeDirForRef;
 export const repoDirForRef = defaultService.repoDirForRef;
-export async function preparePrWorktree(ref: PullRequestRef, cloneUrl: string, headSha: string, mode: "reuse" | "reset" = "reuse"): Promise<string> {
+export async function preparePrWorktree(ref: PullRequestRef, cloneUrl: string, headSha: string, mode: PrepareMode = "reuse"): Promise<string> {
   await assertLegacyTransition();
   return defaultService.preparePrWorktree(ref, cloneUrl, headSha, mode);
 }

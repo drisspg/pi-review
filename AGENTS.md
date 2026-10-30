@@ -173,9 +173,12 @@ failed terminal barriers across retries/session eviction. Unknown cleanup must b
 checkout/session deletion, and cache release—not crash the server or count as successful exit.
 Explicit Refresh fetches uncached PR data,
 awaits Pi session/terminal teardown, then resets the linked checkout to the matching remote PR HEAD
-and cleans ordinary non-ignored untracked files. Only `/api/pr/refresh` resets; opening and
-`/api/pr/activity` (also used after comment/review actions) remain non-destructive. Never wire those
-implicit activity callbacks to reset mode. Refresh preserves ignored environments, nested repos,
+and cleans ordinary non-ignored untracked files. Opening a PR (`/api/pr/open`) whose existing
+checkout is behind advances it automatically (fresh snapshot, Pi teardown first, worktree mode
+`advance`) only when the checkout is clean, its HEAD is a fetched PR revision, and no live Pi
+terminal is attached; otherwise the open fails with `CHECKOUT_RESET_REQUIRED` and the explicit reset
+button. Opens fire on reload and new tabs, so never let them discard local work. `/api/pr/activity` (used after comment/review actions) stays
+non-destructive. Never wire those implicit activity callbacks to reset mode. Refresh preserves ignored environments, nested repos,
 branch refs, and durable review state; full-clone eviction remains offline-only. See README for protected-entry handling. Production legacy
 cleanup needs a read-only inventory and user confirmation; tests must use temporary Git repos.
 

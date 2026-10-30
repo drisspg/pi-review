@@ -276,6 +276,7 @@ const prApi = createPrApi(defaultPrApiDeps({
   listGuideReviews,
   listOverviews,
   preparePrWorktree,
+  hasLiveTerminal: (key) => piTerminalManager.hasLiveSession(key),
   prefetchPrHead,
   prewarmPiSession: process.env.PI_REVIEW_DISABLE_AUTO_REVIEWS === "1" ? () => undefined : prewarmPiSession,
   registerPiSessionContext,

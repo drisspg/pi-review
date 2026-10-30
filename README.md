@@ -80,7 +80,8 @@ Useful environment variables:
   Deletion refuses anything that might hold unique work. For offline maintenance:
   `npm run cache -- inventory`, then `npm run cache -- evict --offline <id>` with the server stopped.
 - **Refresh** resets a PR's checkout to the latest remote commit (local edits are discarded);
-  opening a PR never does.
+  opening a PR whose clean local checkout is on an older PR revision updates it automatically
+  (local edits, local commits, or a live Pi terminal still require an explicit reset).
 
 ## Development
 
