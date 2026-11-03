@@ -962,7 +962,8 @@ function App() {
     const { prompt } = await buildPiPrompt(reviewFeedbackPromptPayload(review, drafts, overallBody, aiReview, focusAreas, viewedFocusAreaIds));
     await writeClipboard(prompt);
     const body = overallBody.trim().length > 0 ? overallBody : reviewBody;
-    if (drafts.length === 0 && body.trim().length === 0) return false;
+    const hasFeedback = body.trim().length > 0 || drafts.some((draft) => draft.line != null && draft.body.trim().length > 0);
+    if (!hasFeedback) return false;
     logUsage("review:copy-feedback-archive", { comments: drafts.length });
     if (!(await archiveReview(reviewEvent, body))) throw new Error("Copied, but archiving the review locally failed");
     return true;

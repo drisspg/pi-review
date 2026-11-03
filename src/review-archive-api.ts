@@ -21,13 +21,16 @@ export type ArchiveHistoryResponse = { archives: ArchivedReviewSummary[]; nextOf
 
 /** Save and retrieve local review snapshots without publishing or restoring drafts. */
 export function createReviewArchiveApi(deps: ReviewArchiveApiDeps) {
-  async function archive(payload: Record<string, unknown>): Promise<{ memory: ReviewMemoryRecord }> {
+  /** Only reviews with feedback (a body or a nonblank inline comment) are stored; empty ones still finish the review. */
+  async function archive(payload: Record<string, unknown>): Promise<{ memory: ReviewMemoryRecord | null }> {
     const ref = deps.refFromBody(payload);
     const key = prKey(ref);
     const reviewData = await deps.fetchPullRequestReviewData(ref);
-    const memory = await deps.saveReviewMemory({ ...reviewSubmitMemoryRecord(payload, reviewData, key), disposition: "archived" });
+    const record = reviewSubmitMemoryRecord(payload, reviewData, key);
+    const hasFeedback = record.body.length > 0 || record.comments.length > 0;
+    const memory = hasFeedback ? await deps.saveReviewMemory({ ...record, disposition: "archived" }) : null;
     // An archived review still means "I finished looking at this head" — record it so re-opens offer the interdiff.
-    await deps.markPullRequestReviewed(key, reviewData.pr.headSha, memory.event);
+    await deps.markPullRequestReviewed(key, reviewData.pr.headSha, record.event);
     await deps.clearDraftReview(key);
     return { memory };
   }

@@ -42,6 +42,7 @@ test("review archive saves a local snapshot and clears the active draft", async 
 
   const response = await api.archive({ prUrl: reviewData.pr.url, headSha: "head", event: "COMMENT", body: "local", comments: [{ path: "a.ts", line: 4, side: "RIGHT", body: "note" }] });
 
+  assert.ok(response.memory);
   assert.equal(response.memory.disposition, "archived");
   assert.equal(response.memory.body, "local");
   assert.deepEqual(response.memory.changeSet?.files.map((file) => file.path), ["a.ts"]);
@@ -71,6 +72,23 @@ test("review archive validates the review event before clearing drafts", async (
 
   await assert.rejects(api.archive({ prUrl: reviewData.pr.url, event: "BAD", comments: [] }), /Expected review event/);
   assert.equal(cleared, false);
+});
+
+test("review archive stores nothing without feedback but still finishes the review", async () => {
+  const calls: string[] = [];
+  const api = createReviewArchiveApi({
+    async listArchivedReviews() { return []; },
+    async clearDraftReview() { calls.push("clear"); },
+    async fetchPullRequestReviewData() { return reviewData; },
+    async markPullRequestReviewed() { calls.push("reviewed"); return null; },
+    refFromBody() { return ref; },
+    async saveReviewMemory() { throw new Error("empty reviews must not be stored"); },
+  });
+
+  const response = await api.archive({ prUrl: reviewData.pr.url, headSha: "head", event: "COMMENT", body: "  ", comments: [{ path: "a.ts", line: 4, side: "RIGHT", body: " \n" }] });
+
+  assert.equal(response.memory, null);
+  assert.deepEqual(calls, ["reviewed", "clear"]);
 });
 
 test("archive history lists compact pages and retrieves original feedback without restoring or publishing", async () => {
