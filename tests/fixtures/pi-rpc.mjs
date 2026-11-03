@@ -3,6 +3,17 @@
 const args = process.argv.slice(2);
 const option = (name) => args[args.indexOf(name) + 1];
 if (option("--mode") !== "rpc") throw new Error("Expected RPC launch");
+// Simulate losing Pi's startup trust-file lock race for the first N launches.
+const lockFailures = process.env.PI_FIXTURE_LOCK_FAILURES_FILE;
+if (lockFailures) {
+  const { readFileSync, writeFileSync } = await import("node:fs");
+  const remaining = Number(readFileSync(lockFailures, "utf8"));
+  if (remaining > 0) {
+    writeFileSync(lockFailures, String(remaining - 1));
+    process.stderr.write('error: Lock file is already being held\n  file: "/tmp/.pi/agent", code: "ELOCKED"\n');
+    process.exit(1);
+  }
+}
 const state = {
   model: { provider: option("--provider"), id: option("--model"), name: "Fixture" },
   thinkingLevel: option("--thinking"), sessionId: "fixture", isStreaming: false,

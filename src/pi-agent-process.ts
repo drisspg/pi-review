@@ -8,6 +8,13 @@ import { createPiToolBridge } from "./pi-tool-bridge.js";
 import { REVIEW_WORKSPACE_ENV, reviewWorkspaceEnvironment, type PiReviewWorkspace } from "./pi-review-workspace.js";
 
 const COMMAND_TIMEOUT_MS = 30_000;
+/**
+ * Pi takes a short-lived trust-file lock at startup and gives up after ~200ms. Pi Review starts
+ * several CLIs at once (prewarm, focus scan, terminals), so a losing process exits with ELOCKED
+ * before any prompt is sent; restarting it is safe.
+ */
+const STARTUP_LOCK_ATTEMPTS = 5;
+const STARTUP_LOCK_RETRY_MS = 250;
 const MAX_RECORD_CHARS = 16_000_000;
 type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout };
 type Model = NonNullable<RpcSessionState["model"]>;
@@ -74,17 +81,30 @@ export class PiAgentProcess {
    */
   static async create(options: Options): Promise<PiAgentProcess> {
     const candidates = piModelCandidates(options.cwd);
-    if (candidates.length === 0) return PiAgentProcess.start(options, null, []);
+    if (candidates.length === 0) return PiAgentProcess.startRetryingLock(options, null, []);
     const rejected: string[] = [];
     for (const candidate of candidates) {
       try {
-        return await PiAgentProcess.start(options, candidate, candidates);
+        return await PiAgentProcess.startRetryingLock(options, candidate, candidates);
       } catch (error) {
         if (!(error instanceof ModelMismatchError)) throw error;
         rejected.push(`${candidate.provider}/${candidate.id} -> ${error.selected}`);
       }
     }
     throw new Error(`Pi did not select any configured model (${rejected.join("; ")}); refusing a fallback. Check \`pi --list-models\` and the model list in .pi-review.local.json.`);
+  }
+
+  /** Restart a startup that lost Pi's trust-file lock race, with jittered backoff. */
+  private static async startRetryingLock(options: Options, requested: PiModelRef | null, accepted: PiModelRef[]): Promise<PiAgentProcess> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await PiAgentProcess.start(options, requested, accepted);
+      } catch (error) {
+        const lockContention = !(error instanceof PiAgentStartupError) && error instanceof Error && /Lock file is already being held[^]*\bELOCKED\b/.test(error.message);
+        if (!lockContention || attempt >= STARTUP_LOCK_ATTEMPTS) throw error;
+        await new Promise((resolve) => setTimeout(resolve, STARTUP_LOCK_RETRY_MS * attempt * (0.5 + Math.random())));
+      }
+    }
   }
 
   /** Start one isolated CLI for `requested`, await actual RPC readiness, and clean up failed startups. */

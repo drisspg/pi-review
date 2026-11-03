@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import { Type } from "@earendil-works/pi-ai";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -160,6 +160,38 @@ for (const mode of ["exit", "timer", "probe"] as const) {
     } finally {
       if (previous == null) delete process.env.PI_REVIEW_PI_COMMAND;
       else process.env.PI_REVIEW_PI_COMMAND = previous;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const failures of [2, 5] as const) {
+  test(`startup ${failures === 2 ? "retries" : "gives up after repeatedly"} losing Pi's trust-file lock race`, async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "pi-agent-lock-"));
+    const command = fileURLToPath(new URL("../fixtures/pi-rpc.mjs", import.meta.url));
+    await chmod(command, 0o755);
+    const counter = join(root, "lock-failures");
+    await writeFile(counter, String(failures));
+    const previous = { command: process.env.PI_REVIEW_PI_COMMAND, counter: process.env.PI_FIXTURE_LOCK_FAILURES_FILE };
+    process.env.PI_REVIEW_PI_COMMAND = command;
+    process.env.PI_FIXTURE_LOCK_FAILURES_FILE = counter;
+    t.mock.method(SettingsManager, "create", () => SettingsManager.inMemory({ defaultProvider: "openai", defaultModel: "fixture" }));
+    t.mock.method(Math, "random", () => 0);
+    try {
+      const started = PiAgentProcess.create({ cwd: root, sessionDir: root, thinkingLevel: "low", customTools: [] });
+      if (failures === 2) {
+        const session = await started;
+        assert.equal(session.model?.id, "fixture");
+        await session.dispose();
+      } else {
+        await assert.rejects(started, /ELOCKED/);
+      }
+      assert.equal(await readFile(counter, "utf8"), "0");
+    } finally {
+      for (const [key, value] of [["PI_REVIEW_PI_COMMAND", previous.command], ["PI_FIXTURE_LOCK_FAILURES_FILE", previous.counter]] as const) {
+        if (value == null) delete process.env[key];
+        else process.env[key] = value;
+      }
       await rm(root, { recursive: true, force: true });
     }
   });
