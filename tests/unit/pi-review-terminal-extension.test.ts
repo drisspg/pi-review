@@ -164,6 +164,7 @@ test("terminal extension routes inline comment requests to Pi Review", async () 
     const systemPrompt = promptHandler?.({ systemPrompt: "base" }).systemPrompt ?? "";
     assert.match(systemPrompt, /never modify repository files/);
     assert.match(systemPrompt, /Apply suggestion, use suggest_change/);
+    assert.match(systemPrompt, /run `pr-takeover` with no arguments/);
 
     // Review checkouts are read-only: file-editing tools are hard-blocked, inspection tools pass through.
     assert.ok(toolCallHandler != null);
