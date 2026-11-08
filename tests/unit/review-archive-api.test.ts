@@ -38,6 +38,9 @@ test("review archive saves a local snapshot and clears the active draft", async 
       calls.push(`save:${record.disposition}:${record.comments.length}`);
       return { ...record, id: "archive", createdAt: "now" } as ReviewMemoryRecord;
     },
+    async notifyDraftReview(prKey, draftReview) {
+      calls.push(`notify:${prKey}:${draftReview.comments.length}:${draftReview.body}`);
+    },
   });
 
   const response = await api.archive({ prUrl: reviewData.pr.url, headSha: "head", event: "COMMENT", body: "local", comments: [{ path: "a.ts", line: 4, side: "RIGHT", body: "note" }] });
@@ -46,7 +49,8 @@ test("review archive saves a local snapshot and clears the active draft", async 
   assert.equal(response.memory.disposition, "archived");
   assert.equal(response.memory.body, "local");
   assert.deepEqual(response.memory.changeSet?.files.map((file) => file.path), ["a.ts"]);
-  assert.deepEqual(calls, ["ref", "fetch:1", "save:archived:1", "reviewed:github.com/pytorch/pytorch#1:head:COMMENT", "clear:github.com/pytorch/pytorch#1"]);
+  // Open pages hear about the clear only after it happened, so they cannot autosave the archived drafts back.
+  assert.deepEqual(calls, ["ref", "fetch:1", "save:archived:1", "reviewed:github.com/pytorch/pytorch#1:head:COMMENT", "clear:github.com/pytorch/pytorch#1", "notify:github.com/pytorch/pytorch#1:0:"]);
 });
 
 test("review archive validates the review event before clearing drafts", async () => {

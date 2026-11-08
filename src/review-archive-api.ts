@@ -1,7 +1,7 @@
 import { refFromBody } from "./http.js";
 import { prKey } from "./pr.js";
 import { reviewSubmitMemoryRecord } from "./review-memory-api.js";
-import type { PullRequestRef, PullRequestReviewData, ReviewMemoryRecord, StoredPullRequest } from "./types.js";
+import type { DraftReview, PullRequestRef, PullRequestReviewData, ReviewMemoryRecord, StoredPullRequest } from "./types.js";
 
 export type ReviewArchiveApiDeps = {
   clearDraftReview: (prKey: string) => Promise<void>;
@@ -10,6 +10,8 @@ export type ReviewArchiveApiDeps = {
   markPullRequestReviewed: (prKey: string, headSha: string, event: StoredPullRequest["lastReviewEvent"]) => Promise<StoredPullRequest | null>;
   refFromBody: (body: unknown) => PullRequestRef;
   saveReviewMemory: (record: Omit<ReviewMemoryRecord, "id" | "createdAt">) => Promise<ReviewMemoryRecord>;
+  /** Tell open review pages the drafts are gone, so archiving from a terminal (pr-takeover) cannot be undone by a stale page's autosave. */
+  notifyDraftReview?: (prKey: string, draftReview: DraftReview) => Promise<void>;
 };
 
 export type ReviewArchiveApi = ReturnType<typeof createReviewArchiveApi>;
@@ -32,6 +34,7 @@ export function createReviewArchiveApi(deps: ReviewArchiveApiDeps) {
     // An archived review still means "I finished looking at this head" — record it so re-opens offer the interdiff.
     await deps.markPullRequestReviewed(key, reviewData.pr.headSha, record.event);
     await deps.clearDraftReview(key);
+    await deps.notifyDraftReview?.(key, { prKey: key, headSha: reviewData.pr.headSha, event: "COMMENT", body: "", comments: [], updatedAt: new Date().toISOString() });
     return { memory };
   }
 
