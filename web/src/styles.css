@@ -1,4 +1,6 @@
 :root {
+  /* Resolved here, outside Primer's provider, so inline terminal chrome matches xterm's theme (read from root --panel2). */
+  --terminal-surface: var(--panel2);
   color-scheme: dark;
   --bg: #0d1117;
   --panel: #161b22;
@@ -3077,16 +3079,6 @@ body:has(.review-page) {
   margin: var(--space-4) 0;
   border: 0;
   background: var(--border);
-}
-
-.local-thread {
-  max-width: 1180px;
-  margin-right: auto;
-}
-
-.focus-area-inline:not(.focus-area-minimized) {
-  max-width: 1180px;
-  margin-right: auto;
 }
 
 .local-thread > .thread-head {
@@ -6408,9 +6400,83 @@ button.focus-area-collapsed {
 .focus-area-terminal-context .markdown > :first-child { margin-top: 0; }
 .focus-area-terminal-context .markdown > :last-child { margin-bottom: 0; }
 
+/* Inline terminals span the diff width and read as one dark surface: a slim
+   header bar, a hairline blame row, then the terminal edge to edge. */
 .inline-thread.terminal-open {
-  width: min(1180px, calc(100vw - 32px));
-  max-width: 100%;
+  border-color: var(--border-soft);
+  border-radius: var(--radius-lg);
+  background: var(--terminal-surface);
+  box-shadow: inset 2px 0 color-mix(in srgb, var(--accent) 55%, transparent);
+  overflow: hidden;
+}
+
+.inline-thread.terminal-open > .thread-head {
+  min-height: var(--control-h);
+  padding: 0 var(--space-1) 0 var(--space-3);
+  border-bottom: 0;
+  background: transparent;
+}
+
+.inline-thread.terminal-open > .thread-head .thread-title strong {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.inline-thread.terminal-open > .thread-head .thread-title span {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.inline-thread.terminal-open > .thread-head .actions {
+  gap: var(--space-1);
+}
+
+.inline-thread.terminal-open > .thread-head .ui-button-icon {
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
+  min-height: var(--control-h-sm);
+  color: var(--muted);
+}
+
+.inline-thread.terminal-open > .thread-head .ui-button-icon:hover {
+  color: var(--text);
+}
+
+.inline-thread.terminal-open > .thread-head .small-muted-button {
+  height: var(--control-h-sm);
+  min-height: var(--control-h-sm);
+  padding: 0 var(--space-2);
+  font-size: var(--text-xs);
+  background: transparent;
+  border-color: var(--border-soft);
+}
+
+.inline-thread.terminal-open > .thread-blame {
+  padding: 0 var(--space-3) var(--space-1);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.inline-thread.terminal-open > .line-comment-composer {
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.inline-thread.terminal-open > .pi-native-terminal.compact {
+  background: var(--terminal-surface);
+  border-top: 0;
+  padding: var(--space-1) var(--space-1) 0 var(--space-3);
+}
+
+/* Focus areas share the terminal surface but keep their thread-accent identity;
+   the active one is marked by a stronger accent rather than a lighter fill. */
+.inline-thread.terminal-open.focus-area-inline {
+  border-color: color-mix(in srgb, var(--thread-accent) 30%, var(--border));
+  box-shadow: inset 3px 0 color-mix(in srgb, var(--thread-accent) 60%, var(--border));
+}
+
+.inline-thread.terminal-open.focus-area-inline.active {
+  border-color: color-mix(in srgb, var(--thread-accent) 60%, var(--border));
+  box-shadow: inset 3px 0 var(--thread-accent);
 }
 
 .line-review-slot {
@@ -6420,8 +6486,8 @@ button.focus-area-collapsed {
 .local-thread.terminal-open {
   display: flex;
   flex-direction: column;
-  height: clamp(400px, 60vh, 560px);
-  min-height: 280px;
+  height: clamp(360px, 56vh, 540px);
+  min-height: 240px;
   min-width: min(360px, calc(100% - var(--space-4) * 2));
   max-width: calc(100% - var(--space-4) * 2);
   max-height: calc(100dvh - var(--space-4) * 2);

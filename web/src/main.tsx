@@ -819,9 +819,10 @@ function App() {
       .catch((err) => setError(`Saving guide progress failed: ${errorMessage(err)}`));
   }
 
+  /** Outside clicks fold transient comment composers only; a running Pi terminal stays open until explicitly collapsed. */
   function collapseThreads() {
-    setThreads((current) => Object.values(current).some((thread) => !thread.collapsed)
-      ? Object.fromEntries(Object.entries(current).map(([key, thread]) => [key, { ...thread, collapsed: true }]))
+    setThreads((current) => Object.values(current).some((thread) => !thread.collapsed && thread.terminalOpen !== true)
+      ? Object.fromEntries(Object.entries(current).map(([key, thread]) => [key, thread.terminalOpen === true ? thread : { ...thread, collapsed: true }]))
       : current);
     setActiveTarget(null);
   }
@@ -829,7 +830,7 @@ function App() {
   function openThread(target: Target) {
     const key = targetKey(target);
     const existing = threads[key];
-    setThreads({ ...Object.fromEntries(Object.entries(threads).map(([threadKey, thread]) => [threadKey, threadKey === key ? thread : { ...thread, collapsed: true }])), [key]: existing == null ? { key, target, collapsed: false, terminalOpen: false } : { ...existing, collapsed: !existing.collapsed } });
+    setThreads({ ...Object.fromEntries(Object.entries(threads).map(([threadKey, thread]) => [threadKey, threadKey === key || thread.terminalOpen === true ? thread : { ...thread, collapsed: true }])), [key]: existing == null ? { key, target, collapsed: false, terminalOpen: false } : { ...existing, collapsed: !existing.collapsed } });
     setActiveTarget(target);
   }
 

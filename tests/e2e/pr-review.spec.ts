@@ -1458,6 +1458,8 @@ test("opens a line comment by default and starts Pi on demand", async ({ page })
   await expect(thread.locator(".xterm-rows")).toContainText("Native Pi ready");
 
   await page.locator(".pr-header-strip").click();
+  await expect(thread.locator(".pi-native-terminal.compact")).toBeVisible(); // Outside clicks keep a running terminal open.
+  await thread.getByRole("button", { name: "Collapse thread" }).click();
   const marker = page.getByRole("button", { name: /Pi terminal ·/ });
   await expect(thread).toHaveCount(0);
   await expect(marker).toBeVisible();
@@ -1536,7 +1538,7 @@ test("deletes a minimized line terminal", async ({ page }) => {
     deletePayloads.push(route.request().postDataJSON() as Record<string, unknown>);
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true }) });
   });
-  await page.locator(".pr-header-strip").click();
+  await thread.getByRole("button", { name: "Collapse thread" }).click();
   const marker = page.locator(".terminal-marker");
   await expect(marker).toBeVisible();
   await marker.getByRole("button", { name: "Delete terminal" }).click();
