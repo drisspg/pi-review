@@ -18,11 +18,14 @@ export type ReviewDraftOps = {
 export type DraftAction = "create" | "edit" | "delete" | "list";
 
 /**
- * Disclosure header for model-drafted review comments. PyTorch's AI policy accepts a labeling
- * section heading (instead of a quote block); the reviewer directs every draft, so the body
- * below it is plain text in the reviewer's voice.
+ * Disclosure line for model-drafted review comments. It labels AI involvement (instead of a
+ * quote block) while making the reviewer's sign-off explicit; the reviewer directs and approves
+ * every draft, so the body below it is plain text in the reviewer's voice.
  */
-export const AI_DRAFT_HEADER = "#### AI-assisted";
+export const AI_DRAFT_HEADER = "_AI-drafted; I've reviewed and agree._";
+
+/** Earlier disclosure header, stripped so re-formatting old drafts does not stack labels. */
+const LEGACY_AI_DRAFT_HEADER = "#### AI-assisted";
 
 /**
  * Normalize a model-drafted body to the header convention: unwrap a whole-body quote block,
@@ -30,7 +33,9 @@ export const AI_DRAFT_HEADER = "#### AI-assisted";
  */
 export function formatAiDraftBody(body: string): string {
   let text = body.trim();
-  if (text.startsWith(AI_DRAFT_HEADER)) text = text.slice(AI_DRAFT_HEADER.length).trim();
+  for (const header of [AI_DRAFT_HEADER, LEGACY_AI_DRAFT_HEADER]) {
+    if (text.startsWith(header)) text = text.slice(header.length).trim();
+  }
   const lines = text.split("\n");
   if (lines.filter((line) => line.trim().length > 0).every((line) => line.trimStart().startsWith(">"))) {
     text = lines.map((line) => line.replace(/^\s*> ?/, "")).join("\n").trim();
@@ -40,7 +45,7 @@ export function formatAiDraftBody(body: string): string {
 }
 
 /** Shared wording so every Pi surface describes the comment format the same way. */
-export const AI_DRAFT_FORMAT_GUIDELINE = `Pi Review adds the "${AI_DRAFT_HEADER}" disclosure header to every draft automatically. Write the body as plain text in the reviewer's voice (the reviewer directs these comments): no quote blocks, no ">" prefixes, and no "AI-assisted suggestion:" lead-ins.`;
+export const AI_DRAFT_FORMAT_GUIDELINE = `Pi Review adds the "${AI_DRAFT_HEADER}" disclosure line to every draft automatically. Write the body as plain text in the reviewer's voice (the reviewer directs these comments): no quote blocks, no ">" prefixes, and no "AI-assisted suggestion:" lead-ins.`;
 
 /** Schema fields every host adds to draft_review_comment; `body` becomes optional (required for create/edit at run time). */
 export const draftActionParameters = {

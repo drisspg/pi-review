@@ -53,7 +53,7 @@ test("review draft tool creates a private multiline draft on a reviewable diff r
 
   const result = await execute({ path: "src/example.ts", startLine: 10, line: 11, side: "RIGHT", body: "  Could this preserve the old behavior?  " }, deps);
 
-  assert.deepEqual(calls, [{ prKey: "github.com/o/r#1", headSha: "head", comment: { path: "src/example.ts", startLine: 10, line: 11, side: "RIGHT", body: "#### AI-assisted\n\nCould this preserve the old behavior?" } }]);
+  assert.deepEqual(calls, [{ prKey: "github.com/o/r#1", headSha: "head", comment: { path: "src/example.ts", startLine: 10, line: 11, side: "RIGHT", body: "_AI-drafted; I've reviewed and agree._\n\nCould this preserve the old behavior?" } }]);
   assert.equal(result.details.created, true);
   assert.match(result.content[0].text, /Created private editable draft pi-draft-1 at src\/example\.ts:10-11/);
   assert.match(result.content[0].text, /remains local/);
@@ -82,7 +82,7 @@ test("the same tool lists, edits in place, and deletes drafts instead of creatin
 
   const edited = await execute({ action: "edit", id: "pi-old", body: "zeros_and_scatter(shape, indices, grad)" }, fake.deps);
   assert.match(edited.content[0].text, /Updated private review draft pi-old at src\/example\.ts:11 in place/);
-  assert.equal(fake.drafts[0].body, "#### AI-assisted\n\nzeros_and_scatter(shape, indices, grad)");
+  assert.equal(fake.drafts[0].body, "_AI-drafted; I've reviewed and agree._\n\nzeros_and_scatter(shape, indices, grad)");
 
   await execute({ action: "delete", id: "local-7" }, fake.deps);
   assert.deepEqual(fake.drafts.map((comment) => comment.id), ["pi-old"]);
@@ -95,10 +95,11 @@ test("the same tool lists, edits in place, and deletes drafts instead of creatin
 });
 
 test("Pi drafts use a disclosure header with plain reviewer-voice text, never the quote-block convention", () => {
-  assert.equal(formatAiDraftBody("Could we centralize this?"), "#### AI-assisted\n\nCould we centralize this?");
-  assert.equal(formatAiDraftBody("> AI-assisted suggestion: Could we centralize this?\n>\n> The same convention is in:\n> - a.py"), "#### AI-assisted\n\nCould we centralize this?\n\nThe same convention is in:\n- a.py");
-  assert.equal(formatAiDraftBody("**AI-assisted naming nit:** Could `pc` be clearer?"), "#### AI-assisted\n\nCould `pc` be clearer?");
+  assert.equal(formatAiDraftBody("Could we centralize this?"), "_AI-drafted; I've reviewed and agree._\n\nCould we centralize this?");
+  assert.equal(formatAiDraftBody("> AI-assisted suggestion: Could we centralize this?\n>\n> The same convention is in:\n> - a.py"), "_AI-drafted; I've reviewed and agree._\n\nCould we centralize this?\n\nThe same convention is in:\n- a.py");
+  assert.equal(formatAiDraftBody("**AI-assisted naming nit:** Could `pc` be clearer?"), "_AI-drafted; I've reviewed and agree._\n\nCould `pc` be clearer?");
   const once = formatAiDraftBody("> AI-assisted review: x");
   assert.equal(formatAiDraftBody(once), once, "idempotent, so edits do not stack headers");
-  assert.equal(formatAiDraftBody("Context first.\n\n> quoted line from the PR"), "#### AI-assisted\n\nContext first.\n\n> quoted line from the PR", "a quote inside the comment is kept");
+  assert.equal(formatAiDraftBody("#### AI-assisted\n\nOld draft."), "_AI-drafted; I've reviewed and agree._\n\nOld draft.", "drafts with the old header are relabeled, not double-labeled");
+  assert.equal(formatAiDraftBody("Context first.\n\n> quoted line from the PR"), "_AI-drafted; I've reviewed and agree._\n\nContext first.\n\n> quoted line from the PR", "a quote inside the comment is kept");
 });
