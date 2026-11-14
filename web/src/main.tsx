@@ -1675,7 +1675,7 @@ function PrSummary({ pr }: { pr: StoredPullRequest }) {
     </div>
     {!collapsed && <div className="pr-summary-body">
       {description.length === 0 ? <p className="muted">No PR summary provided.</p> : <MarkdownText text={description} fileLinks={{ prUrl: pr.url }} />}
-      {stackNote != null && <p className="pr-summary-stack-note"><StackIcon size={12} /> {stackNote} · listed in the header</p>}
+      {stackNote != null && <p className="pr-summary-stack-note"><StackIcon size={12} /> {stackNote}</p>}
     </div>}
   </section>;
 }

@@ -2,6 +2,7 @@ import { ArrowDownIcon, ArrowUpIcon, StackIcon } from "@primer/octicons-react";
 import { useEffect, useState } from "react";
 
 import { api } from "../api";
+import { chipSlots, FULL_STACK_LIMIT } from "../lib/stack";
 
 type MemberStatus = "landed" | "closed" | "approved" | "changes-requested" | "draft" | "needs-review";
 type StackMember = { number: number; title: string; url: string; position: number; isCurrent: boolean; status: MemberStatus; additions: number; deletions: number; viewerReview: { state: string; freshness: "current" | "stale" } | null };
@@ -17,26 +18,6 @@ function reviewMark(member: StackMember): string {
 function describe(member: StackMember): string {
   const review = member.viewerReview == null ? "not reviewed by you" : `your ${member.viewerReview.state.toLowerCase().replace("_", " ")} review is ${member.viewerReview.freshness === "current" ? "at the current head" : "on an older revision"}`;
   return `#${member.number} ${member.title}\n${STATUS_LABEL[member.status]} · +${member.additions}/−${member.deletions} · ${review}`;
-}
-
-/** Tall stacks show only the ends and a window around the current PR until expanded. */
-const FULL_STACK_LIMIT = 11;
-const WINDOW_RADIUS = 3;
-
-type ChipSlot = { kind: "member"; member: StackMember } | { kind: "gap"; hidden: number };
-
-function chipSlots(members: StackMember[], currentPosition: number, expanded: boolean): ChipSlot[] {
-  if (expanded || members.length <= FULL_STACK_LIMIT) return members.map((member) => ({ kind: "member", member }));
-  const slots: ChipSlot[] = [];
-  let hidden = 0;
-  members.forEach((member, index) => {
-    const visible = index === 0 || index === members.length - 1 || Math.abs(index - currentPosition) <= WINDOW_RADIUS;
-    if (!visible) { hidden += 1; return; }
-    if (hidden > 0) slots.push({ kind: "gap", hidden });
-    hidden = 0;
-    slots.push({ kind: "member", member });
-  });
-  return slots;
 }
 
 /**

@@ -53,6 +53,12 @@ test("the view answers: where am I, what lands next, and is my review current", 
   assert.deepEqual(view.counts, { total: 5, landed: 1, reviewedByViewer: 1, approved: 1 });
 });
 
+test("positions skip members missing from the fetch so the current PR keeps its place", () => {
+  const view = buildStackView(parseStack(SP_BODY)!, "o/r", [member({ number: 3062 }), member({ number: 3044 }), member({ number: 2743 })], 3044);
+  assert.deepEqual(view.members.map((entry) => [entry.number, entry.position]), [[3062, 0], [3044, 1], [2743, 2]]);
+  assert.equal(view.currentPosition, 1);
+});
+
 test("stack lookups cache member state briefly, refresh on demand, and return null without a stack", async () => {
   let fetches = 0;
   let now = 0;

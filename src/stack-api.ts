@@ -111,17 +111,17 @@ export function memberStatus(member: Pick<StackMemberState, "state" | "landedLab
 
 export function buildStackView(parsed: ParsedStack, repo: string, states: StackMemberState[], currentNumber: number): StackView {
   const byNumber = new Map(states.map((state) => [state.number, state] as const));
-  const members: StackMember[] = parsed.members.flatMap((number, position) => {
-    const state = byNumber.get(number);
-    if (state == null) return [];
+  // Positions index the returned members, so PRs missing from the fetch never shift the current one.
+  const members: StackMember[] = parsed.members.flatMap((number) => byNumber.get(number) ?? []).map((state, position) => {
     const { landedLabel: _landed, viewerReview, ...rest } = state;
-    return [{
+    const number = state.number;
+    return {
       ...rest,
       position,
       isCurrent: number === currentNumber,
       status: memberStatus(state),
       viewerReview: viewerReview == null ? null : { state: viewerReview.state, freshness: viewerReview.commitSha != null && viewerReview.commitSha === state.headSha ? "current" : "stale" },
-    }];
+    };
   });
   const current = members.find((member) => member.isCurrent);
   return {
