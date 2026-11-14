@@ -1,6 +1,6 @@
 import React, { createContext, ReactNode, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
-import { CheckIcon, CopyIcon, ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, GitPullRequestIcon, KebabHorizontalIcon, ScreenFullIcon, ScreenNormalIcon, SyncIcon, XIcon } from "@primer/octicons-react";
+import { CheckIcon, CopyIcon, ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, GitPullRequestIcon, KebabHorizontalIcon, ScreenFullIcon, ScreenNormalIcon, StackIcon, SyncIcon, XIcon } from "@primer/octicons-react";
 import { BaseStyles, Checkbox, Flash, Radio, Select, Textarea, TextInput, ThemeProvider } from "@primer/react";
 import { api, ApiError, errorMessage, isStaleBuild, isStaleServer, logUsage, RESTART_HINT, subscribeStaleBuild, subscribeStaleServer } from "./api";
 import { ActionMenu, ActionMenuItem } from "./components/ActionMenu";
@@ -15,6 +15,7 @@ import { PruneCheckoutsModal, type PruneResult } from "./components/PruneCheckou
 import { StackStrip } from "./components/StackStrip";
 import { useActivityTracker } from "./lib/activity";
 import { useCollapsedSection } from "./lib/collapse";
+import { splitStackBlock } from "./lib/stack";
 import { PytorchQueuesPanel, PytorchWorkflowStrip } from "./components/PytorchWorkflow";
 import { ExistingComments, ExistingReviewThread } from "./components/Threads";
 import type { PiTerminalTarget } from "./components/PiTerminal";
@@ -1662,15 +1663,20 @@ function markdownPreviewText(markdown: string, maxWords: number): string {
 
 function PrSummary({ pr }: { pr: StoredPullRequest }) {
   const [collapsed, setCollapsed] = useState(true);
-  const summary = pr.body?.trim();
+  // The stack block is a tall list of bare PR numbers; the header StackStrip already shows it.
+  const { stack, description } = splitStackBlock(pr.body ?? "");
+  const stackNote = stack == null ? null : `Part of a ${stack.members.length}-PR stack`;
   return <section className={`pr-summary github-thread${collapsed ? " minimized" : ""}`}>
     <div className="thread-head">
       <div className="thread-title">
         <Button variant="icon" aria-label={collapsed ? "Expand PR summary" : "Collapse PR summary"} onClick={() => setCollapsed(!collapsed)}>{collapsed ? <ChevronRightIcon size={16} /> : <ChevronDownIcon size={16} />}</Button>
-        <div><strong>Description</strong><span>{summary == null || summary.length === 0 ? "No description provided" : markdownPreviewText(summary, 12)}</span></div>
+        <div><strong>Description</strong><span>{description.length === 0 ? stackNote ?? "No description provided" : markdownPreviewText(description, 24)}</span></div>
       </div>
     </div>
-    {!collapsed && <div className="pr-summary-body">{summary == null || summary.length === 0 ? <p className="muted">No PR summary provided.</p> : <MarkdownText text={summary} fileLinks={{ prUrl: pr.url }} />}</div>}
+    {!collapsed && <div className="pr-summary-body">
+      {description.length === 0 ? <p className="muted">No PR summary provided.</p> : <MarkdownText text={description} fileLinks={{ prUrl: pr.url }} />}
+      {stackNote != null && <p className="pr-summary-stack-note"><StackIcon size={12} /> {stackNote} · listed in the header</p>}
+    </div>}
   </section>;
 }
 

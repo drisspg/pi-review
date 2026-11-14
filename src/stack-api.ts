@@ -58,15 +58,16 @@ export type StackApi = {
 
 const ROW = /^\s*[*-]\s*(?:(?:__)?->(?:__)?\s*)?(?:#(\d+)|https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/(\d+))\b/;
 
-/** Parse a stack block from a PR body; returns null when the body has none (or fewer than two members). */
-export function parseStack(body: string): ParsedStack | null {
-  const lines = body.replace(/\r\n/g, "\n").split("\n");
+/** Locate the stack block: the parsed stack plus the line range it occupies (header through last row). */
+function locateStack(lines: string[]): { stack: ParsedStack; start: number; end: number } | null {
   const header = lines.findIndex((line) => /^\s*Stacked PRs:\s*$/i.test(line) || /^\s*Stack from \[ghstack\]/i.test(line));
   if (header < 0) return null;
   const format: StackFormat = /ghstack/i.test(lines[header]) ? "ghstack" : "sp";
   const topFirst: number[] = [];
   let current: number | null = null;
-  for (const line of lines.slice(header + 1)) {
+  let end = header + 1;
+  for (; end < lines.length; end += 1) {
+    const line = lines[end];
     if (line.trim().length === 0 && topFirst.length === 0) continue;
     const match = ROW.exec(line);
     if (match == null) break;
@@ -75,7 +76,28 @@ export function parseStack(body: string): ParsedStack | null {
     if (!topFirst.includes(number)) topFirst.push(number);
   }
   if (topFirst.length < 2) return null;
-  return { format, members: topFirst.reverse(), current };
+  return { stack: { format, members: topFirst.reverse(), current }, start: header, end };
+}
+
+/** Parse a stack block from a PR body; returns null when the body has none (or fewer than two members). */
+export function parseStack(body: string): ParsedStack | null {
+  return locateStack(body.replace(/\r\n/g, "\n").split("\n"))?.stack ?? null;
+}
+
+/**
+ * Split a PR body into its stack block and the author's actual description, so the description can
+ * render without a tall list of bare PR numbers (the header stack strip shows membership instead).
+ * Drops the sp/stack-pr "--- --- ---" (or a plain "---") separator that follows the block.
+ */
+export function splitStackBlock(body: string): { stack: ParsedStack | null; description: string } {
+  const lines = body.replace(/\r\n/g, "\n").split("\n");
+  const located = locateStack(lines);
+  if (located == null) return { stack: null, description: body.trim() };
+  let resume = located.end;
+  while (resume < lines.length && lines[resume].trim().length === 0) resume += 1;
+  if (resume < lines.length && /^\s*-{3,}(\s+-{3,})*\s*$/.test(lines[resume])) resume += 1;
+  const description = [lines.slice(0, located.start), lines.slice(resume)].map((part) => part.join("\n").trim()).filter((part) => part.length > 0).join("\n\n");
+  return { stack: located.stack, description };
 }
 
 export function memberStatus(member: Pick<StackMemberState, "state" | "landedLabel" | "isDraft" | "reviewDecision">): StackMemberStatus {

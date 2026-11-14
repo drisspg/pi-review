@@ -1890,11 +1890,28 @@ body:has(.review-page) {
 }
 
 .pr-summary-body {
-  padding: 12px;
+  padding: var(--space-3) var(--space-4) var(--space-4);
+}
+
+/* Prose stays readable on wide diff columns. */
+.pr-summary-body > .markdown {
+  max-width: 110ch;
+  line-height: 1.6;
 }
 
 .pr-summary-body > p {
   margin: 0;
+}
+
+.pr-summary-body > .pr-summary-stack-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-soft);
+  color: var(--muted);
+  font-size: var(--text-xs);
 }
 
 .file-navigator {
@@ -5922,6 +5939,23 @@ a.stack-chip:hover {
 .stack-chip.status-changes-requested { --chip-tone: var(--attention); }
 .stack-chip.status-needs-review { --chip-tone: var(--accent); }
 .stack-chip.status-draft { --chip-tone: var(--muted); }
+
+.stack-chips .stack-chip-gap {
+  min-height: 0;
+  padding: 0 var(--space-2);
+  border-style: dashed;
+  background: transparent;
+  font: inherit;
+  line-height: inherit;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.stack-chips .stack-chip-gap:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+}
 
 .stack-chip-mark:empty {
   display: none;

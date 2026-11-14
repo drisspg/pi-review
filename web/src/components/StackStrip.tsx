@@ -19,6 +19,26 @@ function describe(member: StackMember): string {
   return `#${member.number} ${member.title}\n${STATUS_LABEL[member.status]} · +${member.additions}/−${member.deletions} · ${review}`;
 }
 
+/** Tall stacks show only the ends and a window around the current PR until expanded. */
+const FULL_STACK_LIMIT = 11;
+const WINDOW_RADIUS = 3;
+
+type ChipSlot = { kind: "member"; member: StackMember } | { kind: "gap"; hidden: number };
+
+function chipSlots(members: StackMember[], currentPosition: number, expanded: boolean): ChipSlot[] {
+  if (expanded || members.length <= FULL_STACK_LIMIT) return members.map((member) => ({ kind: "member", member }));
+  const slots: ChipSlot[] = [];
+  let hidden = 0;
+  members.forEach((member, index) => {
+    const visible = index === 0 || index === members.length - 1 || Math.abs(index - currentPosition) <= WINDOW_RADIUS;
+    if (!visible) { hidden += 1; return; }
+    if (hidden > 0) slots.push({ kind: "gap", hidden });
+    hidden = 0;
+    slots.push({ kind: "member", member });
+  });
+  return slots;
+}
+
 /**
  * Stacked-PR strip for the review header: every PR in the stack from bottom (lands first) to
  * top, the current one highlighted, with landed/review state at a glance and one-click hops.
@@ -26,6 +46,7 @@ function describe(member: StackMember): string {
  */
 export function StackStrip({ prUrl, headSha, hrefFor }: { prUrl: string; headSha: string; hrefFor: (url: string) => string }) {
   const [stack, setStack] = useState<StackView | null>(null);
+  const [expanded, setExpanded] = useState(false);
   useEffect(() => {
     let cancelled = false;
     api<{ stack: StackView | null }>("/api/pr/stack", { method: "POST", body: JSON.stringify({ prUrl }) })
@@ -46,11 +67,15 @@ export function StackStrip({ prUrl, headSha, hrefFor }: { prUrl: string; headSha
       {below != null ? <a className="stack-hop" href={hrefFor(below.url)} title={`Below: ${describe(below)}`}><ArrowDownIcon size={12} /> #{below.number}</a> : <span className="stack-hop muted">bottom</span>}
       {above != null ? <a className="stack-hop" href={hrefFor(above.url)} title={`Above: ${describe(above)}`}><ArrowUpIcon size={12} /> #{above.number}</a> : <span className="stack-hop muted">top</span>}
     </span>
-    <ol className="stack-chips">{stack.members.map((member) => <li key={member.number}>
-      {member.isCurrent
-        ? <span className={`stack-chip current status-${member.status}`} title={describe(member)} aria-current="page">#{member.number}<span className="stack-chip-mark">{reviewMark(member)}</span></span>
-        : <a className={`stack-chip status-${member.status}`} href={hrefFor(member.url)} title={describe(member)}>#{member.number}<span className="stack-chip-mark">{reviewMark(member)}</span></a>}
-    </li>)}</ol>
+    <ol className="stack-chips">{chipSlots(stack.members, stack.currentPosition, expanded).map((slot, index) => slot.kind === "gap"
+      ? <li key={`gap-${index}`}><button type="button" className="stack-chip stack-chip-gap" title={`Show ${slot.hidden} more PRs in the stack`} onClick={() => setExpanded(true)}>+{slot.hidden}</button></li>
+      : <li key={slot.member.number}>
+        {slot.member.isCurrent
+          ? <span className={`stack-chip current status-${slot.member.status}`} title={describe(slot.member)} aria-current="page">#{slot.member.number}<span className="stack-chip-mark">{reviewMark(slot.member)}</span></span>
+          : <a className={`stack-chip status-${slot.member.status}`} href={hrefFor(slot.member.url)} title={describe(slot.member)}>#{slot.member.number}<span className="stack-chip-mark">{reviewMark(slot.member)}</span></a>}
+      </li>)}
+      {expanded && stack.members.length > FULL_STACK_LIMIT && <li><button type="button" className="stack-chip stack-chip-gap" onClick={() => setExpanded(false)}>less</button></li>}
+    </ol>
     <span className="stack-strip-summary muted">{stack.counts.landed} landed · {stack.counts.approved} approved{stack.counts.reviewedByViewer > 0 ? ` · ${stack.counts.reviewedByViewer} reviewed by you` : ""}{stack.nextToLand != null && !isBottomOpen ? ` · next to land #${stack.nextToLand}` : ""}</span>
   </nav>;
 }

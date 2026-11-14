@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildStackView, createStackApi, memberStatus, parseStack, type StackMemberState } from "../../src/stack-api.js";
+import { buildStackView, createStackApi, memberStatus, parseStack, splitStackBlock, type StackMemberState } from "../../src/stack-api.js";
 
 const SP_BODY = "Stacked PRs:\n * #2743\n * #2741\n * __->__#3044\n * #3062\n * #2733\n\n--- --- ---\n\n## Human Note\n\nSee #2732 for context.";
 const GHSTACK_BODY = "Stack from [ghstack](https://github.com/ezyang/ghstack) (oldest at bottom):\n* #201330\n* __->__ #201329\n* #201328\n\nFixes #9";
@@ -16,6 +16,14 @@ test("sp/stack-pr and ghstack blocks parse bottom-to-top with the current PR mar
   assert.deepEqual(parseStack("Stacked PRs:\n* https://github.com/o/r/pull/5\n* -> https://github.com/o/r/pull/6")?.members, [6, 5]);
   assert.equal(parseStack("Fixes #12 and relates to #13"), null, "plain issue references are not a stack");
   assert.equal(parseStack("Stacked PRs:\n * __->__#1\n\nbody"), null, "a single PR is not a stack");
+});
+
+test("splitting the stack block leaves only the author's description", () => {
+  assert.deepEqual(splitStackBlock(SP_BODY), { stack: parseStack(SP_BODY), description: "## Human Note\n\nSee #2732 for context." });
+  assert.equal(splitStackBlock(GHSTACK_BODY).description, "Fixes #9");
+  assert.equal(splitStackBlock("Intro line\r\n\r\nStacked PRs:\r\n * #2\r\n * __->__#1\r\n\r\n---\r\n\r\nBody").description, "Intro line\n\nBody", "text before the block and plain --- separators are handled");
+  assert.equal(splitStackBlock("Stacked PRs:\n * #1\n * #2\n").description, "", "a body that is only a stack has no description");
+  assert.deepEqual(splitStackBlock("Fixes #12\n\n---\n\nmore"), { stack: null, description: "Fixes #12\n\n---\n\nmore" }, "no stack means no change");
 });
 
 test("member status distinguishes landed (incl. merge-bot label), closed, draft, and review decision", () => {
