@@ -3593,26 +3593,36 @@ button.fold:hover {
   color: var(--link);
 }
 
+/* A full-width row: chevron in the gutter, a quiet label beside it (GitHub-style expander). */
 .expand-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: calc(var(--diff-gutter, 50px) * 2) minmax(0, 1fr);
   align-items: center;
-  justify-content: center;
-  width: calc(var(--diff-gutter, 50px) * 2);
-  min-height: 22px;
+  width: 100%;
+  min-height: 24px;
   padding: 0;
   border: 0;
-  border-right: 1px solid var(--border);
   border-radius: 0;
   color: var(--muted);
+  font: var(--text-xs) / 1 var(--font-system);
+  text-align: left;
   background: var(--panel2);
   cursor: pointer;
   transition: color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease);
 }
+.expand-row-icon {
+  display: grid;
+  place-items: center;
+  align-self: stretch;
+  border-right: 1px solid var(--border);
+}
+.expand-row-label { padding-left: var(--space-3); }
 
 .expand-row:hover {
-  color: var(--on-accent);
-  background: var(--accent);
+  color: var(--text);
+  background: var(--hover-bg);
 }
+.expand-row:hover .expand-row-icon { color: var(--on-accent); background: var(--accent); }
 
 .meta {
   display: flex;
@@ -4194,25 +4204,33 @@ button.fold:hover {
   margin: 16px auto 0;
 }
 
+/* One compact bar: title, the PR field, today's activity. The queues and inbox are the page. */
 .hero {
-  display: grid;
-  gap: 8px;
-  padding: 24px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--panel);
-  justify-items: start;
 }
 
 .hero h1 {
   margin: 0;
-  font-size: 26px;
-  line-height: 1.15;
+  font-size: var(--text-xl);
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
+/* The placeholder already shows the accepted forms; keep the sentence for screen readers. */
 .hero p {
-  margin: 0;
-  max-width: 620px;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 .hero p code {
@@ -4226,14 +4244,14 @@ button.fold:hover {
 .hero-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  width: min(720px, 100%);
-  margin-top: 8px;
+  gap: var(--space-2);
+  flex: 1 1 420px;
+  max-width: 720px;
 }
 
 .hero-form input {
-  padding: 10px 12px;
-  font-size: 0.95rem;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-md);
 }
 
 .hero-form button {
@@ -5177,6 +5195,9 @@ button.fold:hover {
 .pt-stage-dot.tone-muted, .pt-stage-pill.tone-muted { --pt-tone: var(--muted); }
 .pt-stage-dot { background: var(--pt-tone, var(--muted)); }
 
+/* Row actions appear on hover/focus so the queue reads as a list, not a wall of buttons. */
+.pt-row .pt-row-actions { opacity: 0; transition: opacity var(--dur-fast) var(--ease); }
+.pt-row:hover .pt-row-actions, .pt-row:focus-within .pt-row-actions, .pt-row.busy .pt-row-actions { opacity: 1; }
 .pt-row-actions {
   display: flex;
   flex-wrap: wrap;
@@ -8127,3 +8148,7 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
 .file-snippet.loading .file-snippet-head {
   cursor: default;
 }
+
+/* Inline threads live inside the mono diff: keep their chrome in the UI font and one button size. */
+.inline-thread button, .inline-thread button span { font-family: var(--font-system); }
+.inline-thread .actions .ui-button { min-height: var(--control-h-sm); font-size: var(--text-sm); }

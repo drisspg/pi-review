@@ -270,12 +270,13 @@ export function InboxPanel({ openPr }: { openPr: (url: string) => Promise<void> 
   const backlog = data?.backlog ?? 0;
   const freshness = data == null ? "" : data.fetchedAt == null ? "loading from GitHub…" : data.pausedUntil != null ? `updated ${relativeTime(data.fetchedAt)} · paused (rate limit)` : backlog > 0 ? `updated ${relativeTime(data.fetchedAt)} · filling in details (${backlog} left)…` : refreshing ? `updated ${relativeTime(data.fetchedAt)} · refreshing…` : `updated ${relativeTime(data.fetchedAt)}`;
   const routed = data == null ? "" : [data.pytorchFlowCount > 0 ? `${data.pytorchFlowCount} pytorch review requests` : null, data.pytorchIssues.length > 0 ? `${data.pytorchIssues.length} pytorch issues` : null].filter((part) => part != null).join(" + ");
-  const summary = data == null ? null : data.fetchedAt == null ? freshness : `${total === 0 ? "Inbox zero" : `${total} unread · ${counts["needs-you"]} need you · ${counts["review-requests"]} review requests`}${routed.length > 0 ? ` · ${routed} in PyTorch queues` : ""} · ${freshness}`;
+  // Short: the tier chips carry the per-tier counts; what moved to the PyTorch queues is a tooltip.
+  const summary = data == null ? null : data.fetchedAt == null ? freshness : `${total === 0 ? "Inbox zero" : `${total} unread · ${counts["needs-you"]} need you`} · ${freshness}`;
 
   return <section className={`inbox${collapsed ? " collapsed" : ""}`} aria-label="GitHub inbox">
     <header className="inbox-head">
       <h2><button type="button" className="section-toggle" aria-expanded={!collapsed} aria-label={collapsed ? "Expand inbox" : "Collapse inbox"} onClick={toggleCollapsed}><span className="disclosure-chevron" aria-hidden="true">›</span><InboxIcon size={16} /> Inbox</button></h2>
-      {summary != null && <span className="inbox-summary">{summary}</span>}
+      {summary != null && <span className="inbox-summary" title={routed.length > 0 ? routed + " are in the PyTorch queues" : undefined}>{summary}</span>}
       <div className="inbox-head-actions">
         {resolvedIds.length > 0 && <Button variant="muted" onClick={() => void runAction("/api/inbox/done", resolvedIds, "inbox:clear-resolved")} disabled={resolvedIds.some((id) => busyIds.has(id))}>Clear {resolvedIds.length} resolved</Button>}
         <Button variant="muted" className={`inbox-refresh${loading || refreshing ? " loading" : ""}`} onClick={() => void load(true)} disabled={loading || refreshing} aria-label="Refresh inbox"><SyncIcon size={14} /> Refresh</Button>

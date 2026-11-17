@@ -360,7 +360,7 @@ export function PytorchQueuesPanel({ openPr }: { openPr: (url: string) => Promis
   function prRow(pr: PytorchQueuePr, kind: "pre-review" | "review") {
     const isBusy = busy.has(pr.number);
     const open = expanded.has(pr.number);
-    // Accepted pre-reviews just wait on other reviewers: keep them to one line unless expanded.
+    // Accepted pre-reviews only need the `in progress` label: keep them to one line unless expanded.
     const compact = kind === "pre-review" && pr.viewerThumbsUp && !open && !chatOpen.has(pr.number);
     return <li key={pr.number} className={`inbox-row pt-row${isBusy ? " busy" : ""}${pr.viewerThumbsUp && kind === "pre-review" ? " pt-accepted" : ""}${compact ? " pt-compact" : ""}`}>
       <span className={`pt-stage-dot tone-${stageTone(pr.stage, true)}`} title={`${pr.stage.label}: ${pr.stage.next}`} />
@@ -371,7 +371,7 @@ export function PytorchQueuesPanel({ openPr }: { openPr: (url: string) => Promis
             {pr.stage.highPriority && <span className="inbox-flag danger">high priority</span>}
             {(pr.checks === "FAILURE" || pr.checks === "ERROR") && <span className="inbox-flag danger">CI failing</span>}
             {pr.stage.needsSendBack && <span className="inbox-flag attention">changes requested</span>}
-            {pr.viewerThumbsUp && kind === "pre-review" && <span className="inbox-flag success">you accepted · waiting on other reviewers</span>}
+            {pr.viewerThumbsUp && kind === "pre-review" && <span className="inbox-flag success">you 👍'd · not in progress yet</span>}
           </span>
         </div>
         <div className="inbox-row-meta">
@@ -389,7 +389,7 @@ export function PytorchQueuesPanel({ openPr }: { openPr: (url: string) => Promis
       </div>
       <div className="pt-row-actions">
         {kind === "pre-review" && <>
-          <Button variant="muted" disabled={isBusy} title={pr.viewerThumbsUp ? "You already 👍'd this, but it is still waiting on other reviewers: add `in progress` to move it on" : "👍 the description and add the `in progress` label, without waiting for the other assigned reviewers"} onClick={() => void accept(pr)}><ThumbsupIcon size={14} /> {pr.viewerThumbsUp ? "Move to in progress" : "Accept"}</Button>
+          <Button variant="muted" disabled={isBusy} title={pr.viewerThumbsUp ? "You already 👍'd this, but it doesn't have `in progress` yet: add it to move the PR on" : "👍 the description and add the `in progress` label, without waiting for the other assigned reviewers"} onClick={() => void accept(pr)}><ThumbsupIcon size={14} /> {pr.viewerThumbsUp ? "Move to in progress" : "Accept"}</Button>
           <Button variant="muted" disabled={isBusy} title="Comment with a reason, then move to draft or close" onClick={() => setDecline(declineFromAssessment(pr, pr.assessment))}>Decline…</Button>
         </>}
         {kind === "review" && pr.stage.needsSendBack && <Button variant="muted" disabled={isBusy} title="TEMPORARY rule: after Request changes, re-add `in progress` so automated review runs again" onClick={() => void sendBack(pr)}>Send back to in progress</Button>}
@@ -575,7 +575,7 @@ export function PytorchWorkflowStrip({ pr }: { pr: StoredPullRequest }) {
     {stage.stale && <span className="inbox-flag attention">Stale</span>}
     <span className="pt-strip-actions">
       {canPreReview && <>
-        <Button variant="muted" disabled={busy} title={status.pr.viewerThumbsUp ? "You already 👍'd this, but it is still waiting on other reviewers: add `in progress` to move it on" : "👍 the description and add the `in progress` label, without waiting for the other assigned reviewers"} onClick={() => void run(async () => { await api("/api/pytorch/pre-review/accept", { method: "POST", body: JSON.stringify({ number: status.pr.number }) }); logUsage("pytorch:pre-review-accept", { from: "review" }); })}><ThumbsupIcon size={14} /> {status.pr.viewerThumbsUp ? "Move to in progress" : "Accept pre-review"}</Button>
+        <Button variant="muted" disabled={busy} title={status.pr.viewerThumbsUp ? "You already 👍'd this, but it doesn't have `in progress` yet: add it to move the PR on" : "👍 the description and add the `in progress` label, without waiting for the other assigned reviewers"} onClick={() => void run(async () => { await api("/api/pytorch/pre-review/accept", { method: "POST", body: JSON.stringify({ number: status.pr.number }) }); logUsage("pytorch:pre-review-accept", { from: "review" }); })}><ThumbsupIcon size={14} /> {status.pr.viewerThumbsUp ? "Move to in progress" : "Accept pre-review"}</Button>
         <Button variant="muted" disabled={busy} title="Comment with a reason, then move to draft or close" onClick={() => setDecline(declineFromAssessment(status.pr, assessment))}>Decline…</Button>
         <Button variant="muted" disabled={suggesting} title="Quick direction check from the description, conversation, linked issue and diff (no checkout); saved as a suggestion" onClick={() => void suggest()}>{suggesting ? "Assessing…" : assessment == null ? "Suggest pre-review" : "Re-assess"}</Button>
       </>}

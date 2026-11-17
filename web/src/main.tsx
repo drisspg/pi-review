@@ -2156,7 +2156,7 @@ function FoldedRows({ file, rows, expandedNeighborRows, expandNeighbor, ...rowPr
 
     if (start != null) {
       const aboveKey = `${file.filename}:${index}:above`;
-      rendered.push(<button className="expand-row" key={`${aboveKey}:button`} aria-label="Expand lines above" title="Expand lines above" onClick={() => void expandNeighbor(file, aboveKey, Math.max(1, start - (expandedNeighborRows[aboveKey]?.length ?? 0) - 10), start - 1)}><ChevronUpIcon size={16} /></button>);
+      rendered.push(<button className="expand-row" key={`${aboveKey}:button`} aria-label="Expand lines above" title="Expand lines above" onClick={() => void expandNeighbor(file, aboveKey, Math.max(1, start - (expandedNeighborRows[aboveKey]?.length ?? 0) - 10), start - 1)}><span className="expand-row-icon"><ChevronUpIcon size={16} /></span><span className="expand-row-label">Expand 10 lines above</span></button>);
       (expandedNeighborRows[aboveKey] ?? []).forEach((row, offset) => rendered.push(<ConnectedRow key={`${aboveKey}:${offset}`} file={file} row={row} {...rowProps} />));
     }
 
@@ -2165,7 +2165,7 @@ function FoldedRows({ file, rows, expandedNeighborRows, expandNeighbor, ...rowPr
     if (lastLine != null) {
       const belowKey = `${file.filename}:${index}:below`;
       (expandedNeighborRows[belowKey] ?? []).forEach((row, offset) => rendered.push(<ConnectedRow key={`${belowKey}:${offset}`} file={file} row={row} {...rowProps} />));
-      rendered.push(<button className="expand-row" key={`${belowKey}:button`} aria-label="Expand lines below" title="Expand lines below" onClick={() => void expandNeighbor(file, belowKey, lastLine + 1, lastLine + (expandedNeighborRows[belowKey]?.length ?? 0) + 10)}><ChevronDownIcon size={16} /></button>);
+      rendered.push(<button className="expand-row" key={`${belowKey}:button`} aria-label="Expand lines below" title="Expand lines below" onClick={() => void expandNeighbor(file, belowKey, lastLine + 1, lastLine + (expandedNeighborRows[belowKey]?.length ?? 0) + 10)}><span className="expand-row-icon"><ChevronDownIcon size={16} /></span><span className="expand-row-label">Expand 10 lines below</span></button>);
     }
     index = blockEnd - 1;
   }
@@ -2513,7 +2513,7 @@ function AiReviewPanel({ prKey, prUrl, focusPanel, review, aiReviewHistory, aiRe
   const reviewMessages = generalReviewMessages(messages);
   const terminal = <section className="pi-terminal-session" aria-label="Pi terminal session">
     <div className="pi-terminal-session-head">
-      <strong>Native Pi terminal</strong>
+      <strong>Pi terminal</strong>
       <Button variant="muted" className="small-muted-button" onClick={() => {
         const focused = !terminalFocused;
         setTerminalFocused(focused);
