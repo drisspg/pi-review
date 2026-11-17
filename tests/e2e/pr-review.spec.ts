@@ -2007,3 +2007,19 @@ test("copies local draft comments in a feedback prompt from the Review tab and a
   await expect(page.locator(".side .draft-card")).toHaveCount(0);
   await expect(page.locator(".side")).not.toContainText("Keep this local feedback out of GitHub.");
 });
+
+test("hover actions on a diff row: + opens a comment, π opens Pi inline", async ({ page }) => {
+  await mockNativeTerminal(page);
+  const rows = await openFileWithAddedRows(page, 2);
+  await rows.first().hover();
+  await rows.first().getByRole("button", { name: /^Comment on / }).click();
+  const thread = page.locator(".local-thread");
+  await expect(thread).toHaveClass(/comment-open/);
+  await expect(thread.getByRole("textbox", { name: "Review comment" })).toBeFocused();
+
+  await rows.nth(1).hover();
+  await rows.nth(1).getByRole("button", { name: /^Ask Pi about / }).click();
+  const piThread = page.locator(".local-thread.terminal-open");
+  await expect(piThread).toBeVisible();
+  await expect(piThread.locator(".pi-native-terminal.compact")).toBeVisible();
+});

@@ -137,6 +137,7 @@ type DiffProps = {
   updateDrag: (target: Target) => void;
   finishDrag: (target: Target) => void;
   handleRowClick: (target: Target, extend: boolean) => void;
+  openPiThread: (target: Target) => void;
   refreshGithubActivity: (resetCheckout?: boolean) => Promise<void>;
   commentCollapseSignal: number;
   commentsCollapsed: boolean;
@@ -835,6 +836,13 @@ function App() {
     setActiveTarget(target);
   }
 
+  /** π on a diff row: open (never toggle) the line's thread straight into its Pi terminal. */
+  function openPiThread(target: Target) {
+    const key = targetKey(target);
+    setThreads((current) => ({ ...Object.fromEntries(Object.entries(current).map(([threadKey, thread]) => [threadKey, threadKey === key || thread.terminalOpen === true ? thread : { ...thread, collapsed: true }])), [key]: { ...(current[key] ?? { key, target }), collapsed: false, terminalOpen: true } }));
+    setActiveTarget(target);
+  }
+
   function rangeTarget(start: Target, end: Target): Target {
     if (start.path !== end.path || start.side !== end.side || start.line == null || end.line == null) return end;
     return { ...end, startLine: Math.min(start.startLine ?? start.line, end.line), line: Math.max(start.line, end.line) };
@@ -1202,7 +1210,7 @@ function App() {
       <ul>{checkoutDeleteFailures.map(({ prKey, message }) => <li key={prKey}><strong>{prKey}</strong>: {message}</li>)}</ul>
     </details><p>Saved reviews are unchanged. Local files or potentially unique commits still need preservation before these checkouts can be deleted.</p></Flash>}
     {error != null && <Flash variant="danger" className="error" role="alert">{error}{checkoutResetInput != null && <div className="checkout-reset-recovery"><span>Reset discards local code edits and ordinary untracked files. Saved reviews and ignored environments are kept.</span><Button disabled={busy} onClick={() => void openPr(checkoutResetInput, { resetCheckout: true })}>Reset checkout and open</Button></div>}</Flash>}
-    {busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p><Button variant="muted" onClick={cancelOpen}>Cancel</Button></div> : review == null ? <StartPage prs={prs} openPr={openPr} openActivity={() => setActivityOpen(true)} onPruned={applyPruneResult} deleteCheckouts={deleteCheckouts} deleting={deletingCheckouts} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} reviewMode={reviewMode} setReviewMode={setReviewMode} overview={overview} runOverview={runOverview} saveGuideProgress={saveGuideProgress} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, copyFeedbackPrompt: copyReviewFeedbackPrompt, guideReview, runGuideReview, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} reviewEvent={reviewEvent} setReviewEvent={setReviewEvent} reviewBody={reviewBody} setReviewBody={setReviewBody} draftSaveStatus={draftSaveStatus} draftSaveError={draftSaveError} retryDraftSave={() => setDraftSaveRetry((retry) => retry + 1)} archiveReview={archiveReview} discardReview={discardReview} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} githubDrafts={{ review: githubDraftReview, loaded: githubDraftLoaded, loading: githubDraftLoading, moving: githubDraftMoving, error: githubDraftError, pull: pullGithubDraftReview, moveLocalDrafts: moveLocalDraftsToGithub, copyHandoff: copyGithubDraftHandoff }} barMenu={reviewBarMenu} goHome={goHome} />}    {diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}
+    {busy && review == null ? <div className="loading-page"><svg className="loading-cog" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20a1 1 0 0 1-1-1v-1.07A7.002 7.002 0 0 1 5.07 12H4a1 1 0 1 1 0-2h1.07A7.002 7.002 0 0 1 11 4.07V3a1 1 0 1 1 2 0v1.07A7.002 7.002 0 0 1 18.93 10H20a1 1 0 1 1 0 2h-1.07A7.002 7.002 0 0 1 13 18.93V20a1 1 0 0 1-1 1Z" /><circle cx="12" cy="12" r="3" /></svg><p>Loading pull request…</p><Button variant="muted" onClick={cancelOpen}>Cancel</Button></div> : review == null ? <StartPage prs={prs} openPr={openPr} openActivity={() => setActivityOpen(true)} onPruned={applyPruneResult} deleteCheckouts={deleteCheckouts} deleting={deletingCheckouts} openInput={input} setOpenInput={setInput} busy={busy} /> : <ReviewPage review={review} reviewMode={reviewMode} setReviewMode={setReviewMode} overview={overview} runOverview={runOverview} saveGuideProgress={saveGuideProgress} openFiles={openFiles} setOpenFiles={setOpenFiles} diffViewMode={diffViewMode} setDiffViewMode={setDiffViewMode} expandedNeighborRows={expandedNeighborRows} expandNeighbor={expandNeighbor} threads={threads} setThreads={setThreads} setViewed={setViewed} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} sideWidth={sideWidth} setSideWidth={setSideWidth} dragSelection={dragSelection} beginDrag={beginDrag} updateDrag={updateDrag} finishDrag={finishDrag} handleRowClick={handleRowClick} openPiThread={openPiThread} commentCollapseSignal={commentCollapseSignal} commentsCollapsed={commentsCollapsed} toggleAllComments={toggleAllComments} focusAreas={focusAreas} activeFocusAreaId={activeFocusAreaId} setActiveFocusAreaId={setActiveFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} piPanel={{ review: aiReview, aiReviewHistory: review.aiReviews, aiReviewId, showAiReviewRecord, runReview: runAiReview, copyFeedbackPrompt: copyReviewFeedbackPrompt, guideReview, runGuideReview, focusReview, focusScanHistory: review.focusScans, focusScanId, showFocusScanRecord, runFocusReview, viewedFocusIds: viewedFocusAreaIds, setViewedFocusIds: setViewedFocusAreaIds, saveFocusScan }} reviewEvent={reviewEvent} setReviewEvent={setReviewEvent} reviewBody={reviewBody} setReviewBody={setReviewBody} draftSaveStatus={draftSaveStatus} draftSaveError={draftSaveError} retryDraftSave={() => setDraftSaveRetry((retry) => retry + 1)} archiveReview={archiveReview} discardReview={discardReview} submitReview={submitReview} submitting={submitting} invalidDraftIds={invalidDraftIds} refreshGithubActivity={refreshGithubActivity} refreshingActivity={refreshingActivity} githubDrafts={{ review: githubDraftReview, loaded: githubDraftLoaded, loading: githubDraftLoading, moving: githubDraftMoving, error: githubDraftError, pull: pullGithubDraftReview, moveLocalDrafts: moveLocalDraftsToGithub, copyHandoff: copyGithubDraftHandoff }} barMenu={reviewBarMenu} goHome={goHome} />}    {diagnostics != null && !settingsOpen && <DiagnosticsModal diagnostics={diagnostics} aiReview={aiReview} focusReview={focusReview} focusAreaCount={focusAreas.length} refresh={loadDiagnostics} close={() => setDiagnostics(null)} />}
     {review != null && settingsOpen && <PiSettingsModal prKey={review.pr.key} diagnostics={diagnostics} setDiagnostics={setDiagnostics} openDiagnostics={() => { setSettingsOpen(false); void loadDiagnostics(); }} close={() => setSettingsOpen(false)} />}
     {activityOpen && <ActivityModal close={() => setActivityOpen(false)} openPr={(url) => void openPr(url)} />}
     {memoryOpen && <ReviewMemoryModal memory={reviewMemory} loading={memoryLoading} distilling={memoryDistilling} refresh={() => void loadReviewMemory()} distill={() => void distillReviewMemory()} close={() => setMemoryOpen(false)} />}
@@ -1444,6 +1452,7 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { r
   const diffPlumbing: typeof props = interdiffFiles == null ? props : {
     ...props,
     handleRowClick: (target, extend) => { if (target.side !== "LEFT") props.handleRowClick(target, extend); },
+    openPiThread: (target) => { if (target.side !== "LEFT") props.openPiThread(target); },
     beginDrag: (target) => { if (target.side !== "LEFT") props.beginDrag(target); },
     updateDrag: (target) => { if (target.side !== "LEFT") props.updateDrag(target); },
     finishDrag: (target) => props.finishDrag(target.side === "LEFT" && props.dragSelection != null ? props.dragSelection.current : target),
@@ -1637,7 +1646,10 @@ function PrHeaderStrip({ pr, refreshingActivity, refresh }: { pr: StoredPullRequ
         <Button variant="icon" className="pr-header-refresh" aria-label="Refresh pull request" title={refreshingActivity ? "Refreshing pull request…" : "Refresh pull request"} aria-busy={refreshingActivity} disabled={refreshingActivity} onClick={() => void refresh()}><SyncIcon size={16} /></Button>
       </div>
       <div className="pr-header-meta">
+        {/* Merged/Closed already show as the review status; an open PR gets GitHub's filled Open pill. */}
+        {pr.state === "open" && pr.merged !== true && <span className="pr-state-pill"><GitPullRequestIcon size={14} />Open</span>}
         <span className={`review-status ${status.tone}`}>{status.label}</span>
+        {pr.author != null && <span className="pr-header-author">{pr.author}</span>}
         <span>{repository}</span>
         <span>{pr.filesChanged} files changed</span>
         <span>{pr.existingCommentCount} comments</span>
@@ -2018,6 +2030,7 @@ type RowPlumbingProps = {
   updateDrag: (target: Target) => void;
   finishDrag: (target: Target) => void;
   handleRowClick: (target: Target, extend: boolean) => void;
+  openPiThread: (target: Target) => void;
   prUrl: string;
   refreshGithubActivity: () => Promise<void>;
   collapseSignal: number;
@@ -2056,7 +2069,7 @@ function usePatchSeedTexts(file: PullFile, pr: StoredPullRequest): PatchSeedText
   return seeds;
 }
 
-function FileDiff({ file, review, openFiles, setOpenFiles, expandedNeighborRows, expandNeighbor, setThreads, setViewed, drafts, setDrafts, editingDraftId, setEditingDraftId, dragSelection, beginDrag, updateDrag, finishDrag, handleRowClick, refreshGithubActivity, commentCollapseSignal, commentsCollapsed, diffViewMode, focusAreas, activeFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds }: Omit<DiffProps, "threads" | "setActiveFocusAreaId"> & { file: PullFile }) {
+function FileDiff({ file, review, openFiles, setOpenFiles, expandedNeighborRows, expandNeighbor, setThreads, setViewed, drafts, setDrafts, editingDraftId, setEditingDraftId, dragSelection, beginDrag, updateDrag, finishDrag, handleRowClick, openPiThread, refreshGithubActivity, commentCollapseSignal, commentsCollapsed, diffViewMode, focusAreas, activeFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds }: Omit<DiffProps, "threads" | "setActiveFocusAreaId"> & { file: PullFile }) {
   const annotations = useContext(DiffAnnotationsContext);
   const seedTexts = usePatchSeedTexts(file, review.pr);
   const rows = useMemo(() => parsePatchRows(file.patch, seedTexts), [file.patch, seedTexts]);
@@ -2086,7 +2099,7 @@ function FileDiff({ file, review, openFiles, setOpenFiles, expandedNeighborRows,
     const target = commentTarget(thread[0]);
     return !targetIsRendered(rows, target) && !targetIsRendered(commentAnchorRows, target);
   }), [reviewCommentThreads, rows, commentAnchorRows]);
-  const rowProps: RowPlumbingProps = { setThreads, drafts, setDrafts, editingDraftId, setEditingDraftId, dragSelection, beginDrag, updateDrag, finishDrag, handleRowClick, prUrl: review.pr.url, refreshGithubActivity, collapseSignal: commentCollapseSignal, commentsCollapsed, diffViewMode, activeFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds };
+  const rowProps: RowPlumbingProps = { setThreads, drafts, setDrafts, editingDraftId, setEditingDraftId, dragSelection, beginDrag, updateDrag, finishDrag, handleRowClick, openPiThread, prUrl: review.pr.url, refreshGithubActivity, collapseSignal: commentCollapseSignal, commentsCollapsed, diffViewMode, activeFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds };
   const diffBody = patchSetSections.length > 0
     ? <PatchSetRows file={file} sections={patchSetSections} {...rowProps} />
     : rows.length === 0
@@ -2210,7 +2223,7 @@ function DraftView({ draft, index, invalid = false, drafts, setDrafts, editingDr
   </div>;
 }
 
-function DiffRowView({ row, target, languagePath, setThreads, drafts, setDrafts, editingDraftId, setEditingDraftId, dragSelection, beginDrag, updateDrag, finishDrag, handleRowClick, prUrl, refreshGithubActivity, collapseSignal, commentsCollapsed, diffViewMode, activeFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds }: { row: DiffRow; target: Target | null; languagePath?: string } & RowPlumbingProps) {
+function DiffRowView({ row, target, languagePath, setThreads, drafts, setDrafts, editingDraftId, setEditingDraftId, dragSelection, beginDrag, updateDrag, finishDrag, handleRowClick, openPiThread, prUrl, refreshGithubActivity, collapseSignal, commentsCollapsed, diffViewMode, activeFocusAreaId, collapsedFocusAreaIds, setCollapsedFocusAreaIds }: { row: DiffRow; target: Target | null; languagePath?: string } & RowPlumbingProps) {
   const annotations = useContext(DiffAnnotationsContext);
   const annotationKey = target == null ? null : diffAnnotationTargetKey(target);
   const thread = annotationKey == null ? null : annotations.threadsByTarget.get(annotationKey) ?? null;
@@ -2225,8 +2238,15 @@ function DiffRowView({ row, target, languagePath, setThreads, drafts, setDrafts,
   const codeText = diffCodeText(row);
   const showMarker = !(rowHasKind(row, "hunk") || rowHasKind(row, "meta"));
   const codeCell = (className = "code-cell") => <span className={className}>{showMarker && <span className="diff-marker">{diffMarker(row)}</span>}<CodeText code={codeText} language={language} syntaxContext={row.syntaxContext} /></span>;
-  const unifiedCells = <><span className="num old-num">{row.oldLine ?? ""}</span><span className="num new-num">{row.newLine ?? ""}</span>{codeCell()}{threadPill}</>;
-  const splitCells = <><span className="num old-num">{row.oldLine ?? ""}</span><div className="split-code old-code">{row.newLine == null || rowHasKind(row, "context") || rowHasKind(row, "hunk") || rowHasKind(row, "meta") ? codeCell("code-cell split-code-cell") : null}</div><span className="num new-num">{row.newLine ?? ""}</span><div className="split-code new-code">{row.oldLine == null || rowHasKind(row, "context") || rowHasKind(row, "hunk") || rowHasKind(row, "meta") ? codeCell("code-cell split-code-cell") : null}</div>{threadPill}</>;
+  // Hover actions over the gutter: + opens/closes the line's comment (like clicking the row), π opens Pi inline.
+  // Keyboard: the row already takes Enter/Space; the buttons stay mouse-only so rows aren't three tab stops each.
+  const stop = (event: { stopPropagation: () => void }) => event.stopPropagation();
+  const hoverActions = target == null || !showMarker ? null : <span className={"row-hover-actions" + (target.side === "LEFT" ? " left" : " right")} onMouseDown={(event) => { stop(event); event.preventDefault(); }} onClick={stop} onKeyDown={stop}>
+    <button type="button" tabIndex={-1} className="row-hover-comment" aria-label={"Comment on " + targetLabel(target)} title="Review comment on this line (shift-click extends a range)" onClick={(event) => handleRowClick(target, event.shiftKey)}>+</button>
+    <button type="button" tabIndex={-1} className="row-hover-pi" aria-label={"Ask Pi about " + targetLabel(target)} title="Ask Pi about this line (opens inline)" onClick={() => openPiThread(target)}>π</button>
+  </span>;
+  const unifiedCells = <><span className="num old-num">{row.oldLine ?? ""}</span><span className="num new-num">{row.newLine ?? ""}</span>{codeCell()}{threadPill}{hoverActions}</>;
+  const splitCells = <><span className="num old-num">{row.oldLine ?? ""}</span><div className="split-code old-code">{row.newLine == null || rowHasKind(row, "context") || rowHasKind(row, "hunk") || rowHasKind(row, "meta") ? codeCell("code-cell split-code-cell") : null}</div><span className="num new-num">{row.newLine ?? ""}</span><div className="split-code new-code">{row.oldLine == null || rowHasKind(row, "context") || rowHasKind(row, "hunk") || rowHasKind(row, "meta") ? codeCell("code-cell split-code-cell") : null}</div>{threadPill}{hoverActions}</>;
   return <><div className={`diff-row ${diffViewMode} ${row.kind} ${thread != null && !thread.collapsed ? "selected" : ""} ${selecting ? "range-selecting" : ""} ${inThreadRange ? "in-thread-range" : ""}`} data-path={target?.path} data-line={target?.line ?? undefined} data-side={target?.side} data-hunk={target?.hunk} role={target != null ? "button" : undefined} tabIndex={target != null ? 0 : undefined} aria-label={target != null ? `Review ${targetLabel(target)}` : undefined} onKeyDown={(event) => { if (target != null && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); handleRowClick(target, event.shiftKey); } }} onMouseDown={(event) => { if (target != null && event.button === 0) { if (isDiffCodeTarget(event.target)) return; event.preventDefault(); beginDrag(target); } }} onMouseEnter={() => { if (target != null && dragSelection != null) updateDrag(target); }} onMouseUp={() => { if (target != null) finishDrag(target); }} onClick={(event) => { if (target != null && !hasSelectedDiffCode(event)) handleRowClick(target, event.shiftKey); }}>{diffViewMode === "split" ? splitCells : unifiedCells}</div>{inlineCommentThreads.map((commentThread) => <ExistingReviewThread key={commentThread.map((comment) => comment.id).join(":")} comments={commentThread} prUrl={prUrl} refreshGithubActivity={refreshGithubActivity} collapseSignal={collapseSignal} collapseComments={commentsCollapsed} />)}{rowFocusAreas.map((area) => <FocusAreaInline key={area.id} prUrl={prUrl} area={area} active={area.id === activeFocusAreaId} collapsedFocusAreaIds={collapsedFocusAreaIds} setCollapsedFocusAreaIds={setCollapsedFocusAreaIds} />)}{inlineDrafts.map((draft) => <div className="inline-thread draft" id={`draft-${draft.id}`} key={draft.id}><DraftView draft={draft} drafts={drafts} setDrafts={setDrafts} editingDraftId={editingDraftId} setEditingDraftId={setEditingDraftId} /></div>)}{thread != null && <ThreadBox thread={thread} prUrl={prUrl} setThread={(updatedThread) => setThreads((current) => { const next = { ...current }; delete next[thread.key]; next[updatedThread.key] = updatedThread; return next; })} removeThread={() => setThreads((current) => { const next = { ...current }; delete next[thread.key]; return next; })} addDraft={(body) => setDrafts([...drafts, { id: newId(), path: thread.target.path, line: thread.target.line, startLine: thread.target.startLine, side: thread.target.side, body }])} />}</>;
 }
 
