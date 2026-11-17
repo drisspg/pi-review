@@ -314,9 +314,9 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
     if (request.target == null) delete env.PI_REVIEW_TARGET;
     delete env.PI_SESSION_FILE;
     delete env.PI_SESSION_ID;
-    // --no-approve: a PR's checkout is untrusted code; ignore its project-local .pi files instead of
-    // stopping every new worktree at Pi's "Trust project folder?" prompt.
-    const args = ["--session-dir", sessionDir, "--continue", "--name", `Pi Review · ${request.session}`, "--no-approve", ...piModelArgs(cwd)];
+    // --approve: opening a PR's terminal is the reviewer's trust decision, so the checkout's
+    // project-local .pi resources load without Pi stopping at its trust prompt (or warning).
+    const args = ["--session-dir", sessionDir, "--continue", "--name", `Pi Review · ${request.session}`, "--approve", ...piModelArgs(cwd)];
     const thinkingLevel = readPiReviewLocalConfig().thinkingLevel;
     if (thinkingLevel) args.push("--thinking", thinkingLevel);
     if (deps.extensionPath != null) args.push("--extension", deps.extensionPath);
