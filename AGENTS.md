@@ -194,7 +194,9 @@ contract before relying on the frontend.
   `/api/pi/prompt` modes for durable agent prompts instead of constructing long prompts in the
   frontend. Feedback handoffs must distinguish requester-authored private drafts from GitHub
   discussion and AI suggestions using explicit provenance and source IDs. Own drafts are review
-  instructions/questions, not threads needing replies; keep triage and implementation modes distinct.
+  instructions/questions, not threads needing replies. The copied feedback prompt (`review-feedback`)
+  acts: clear notes are implemented without a sign-off round, and the agent asks short option-style
+  questions only for ambiguous or wrong notes, answering in Done / Questions / Not changed lines.
 - For "test this PR" or "have an agent try this out" flows, use the `test-pr` prompt contract via
   `/api/pi/prompt` with `{ mode: "test-pr", prKey, testIntent, files?, gpuRequired? }`.
 - Validate backend behavior from the CLI first: targeted unit tests, direct module calls, local
