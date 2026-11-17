@@ -1980,9 +1980,9 @@ test("copies local draft comments in a feedback prompt from the Review tab and a
   expect(archivePayload.comments?.map((comment) => comment.body)).toEqual(["Keep this local feedback out of GitHub."]);
   await expect(page.locator(".side")).toContainText("Review archived locally.");
   await expect(reviewPanel.locator(".draft-card")).toHaveCount(0);
-  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain("# Task: assess my review notes");
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain("# Task: work through my review notes");
   const prompt = await page.evaluate(() => navigator.clipboard.readText());
-  expect(prompt).toContain("Mode: Triage only");
+  expect(prompt).toContain("Mode: Act.");
   expect(prompt).toContain("Never classify my drafts as needing replies");
   const ownNotes = prompt.split("## Requester-authored private review notes")[1].split("## GitHub discussion")[0];
   expect(ownNotes).toContain("### R0.");
