@@ -2361,7 +2361,7 @@ function reviewStatus(pr: StoredPullRequest): { label: string; tone: string } {
   if (pr.state === "closed") return { label: "Closed", tone: "danger" };
   if (pr.reviewDecision === "APPROVED") return { label: "Approved", tone: "success" };
   if (pr.reviewDecision === "CHANGES_REQUESTED") return { label: "Changes requested", tone: "danger" };
-  if (pr.lastReviewedHeadSha == null) return { label: "Not reviewed", tone: "pending" };
+  if (pr.lastReviewedHeadSha == null) return { label: "Not reviewed", tone: "neutral" };
   if (pr.lastReviewedHeadSha !== pr.headSha) return { label: "Needs review", tone: "pending" };
   if (pr.lastReviewEvent === "APPROVE") return { label: "Approved", tone: "success" };
   if (pr.lastReviewEvent === "REQUEST_CHANGES") return { label: "Changes requested", tone: "danger" };
@@ -2536,13 +2536,13 @@ function AiReviewPanel({ prKey, prUrl, focusPanel, review, aiReviewHistory, aiRe
     {feedbackCopy.error != null && <Flash variant="danger" className="copy-feedback-error" role="alert">Copy failed: {feedbackCopy.error}</Flash>}
     <div className="pi-actions">
       <div className="pi-action">
-        <Button className="focus-review-run" onClick={() => void runFocusReview()} disabled={focusReview.running}>{focusReview.running ? "Scanning…" : focusReview.text.length > 0 ? "Refresh focus scan" : "Focus scan"}</Button>
-        {focusReview.running ? <AgentActivityLine activity={focusReview.activity} /> : <span className="muted">Find specific lines worth deeper review. Refresh saves each pass to quiet history.</span>}
+        <Button className="focus-review-run" title="Find specific lines worth deeper review. Refresh saves each pass to history." onClick={() => void runFocusReview()} disabled={focusReview.running}>{focusReview.running ? "Scanning…" : focusReview.text.length > 0 ? "Refresh focus scan" : "Focus scan"}</Button>
+        {focusReview.running && <AgentActivityLine activity={focusReview.activity} />}
         {focusScanHistory.length > 1 && <details className="pi-history-compact"><summary><span className="disclosure-chevron" aria-hidden="true">›</span>Focus scan history ({focusScanHistory.length})</summary><div className="pi-history-picker"><Select aria-label="Focus scan history" value={selectedFocusScanId} onChange={(event) => showFocusScanRecord(focusScanHistory.find((record) => record.id === event.target.value))}>{focusHistoryOptions}</Select>{viewingOlderFocusScan && <Button variant="muted" className="pi-history-back" onClick={() => showFocusScanRecord(focusScanHistory[0])}>Latest</Button>}</div></details>}
       </div>
       <div className="pi-action">
-        <Button onClick={() => void runReview()} disabled={review.running}>{review.running ? "Reviewing…" : reviewMessages.length > 0 ? "Refresh findings" : "Full review"}</Button>
-        {review.running ? <AgentActivityLine activity={review.activity} /> : <span className="muted">Run a general code review. Use the terminal for follow-up investigation.</span>}
+        <Button title="Run a general code review. Use the terminal for follow-up investigation." onClick={() => void runReview()} disabled={review.running}>{review.running ? "Reviewing…" : reviewMessages.length > 0 ? "Refresh findings" : "Full review"}</Button>
+        {review.running && <AgentActivityLine activity={review.activity} />}
         {aiReviewHistory.length > 1 && <details className="pi-history-compact"><summary><span className="disclosure-chevron" aria-hidden="true">›</span>Review history ({aiReviewHistory.length})</summary><div className="pi-history-picker"><Select aria-label="Review history" value={selectedAiReviewId} onChange={(event) => showAiReviewRecord(aiReviewHistory.find((record) => record.id === event.target.value))}>{aiHistoryOptions}</Select>{viewingOlderAiReview && <Button variant="muted" className="pi-history-back" onClick={() => showAiReviewRecord(aiReviewHistory[0])}>Latest</Button>}</div></details>}
       </div>
     </div>

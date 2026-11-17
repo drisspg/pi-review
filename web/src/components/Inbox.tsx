@@ -1,10 +1,11 @@
-import { AlertIcon, BellSlashIcon, CheckCircleFillIcon, CheckIcon, CommentIcon, DotFillIcon, EyeIcon, GitMergeIcon, GitPullRequestClosedIcon, GitPullRequestDraftIcon, GitPullRequestIcon, InboxIcon, IssueOpenedIcon, LinkExternalIcon, MentionIcon, PersonIcon, SyncIcon, XCircleFillIcon } from "@primer/octicons-react";
+import { AlertIcon, BellSlashIcon, CheckCircleFillIcon, CheckIcon, CommentIcon, DotFillIcon, EyeIcon, FilterIcon, GitMergeIcon, GitPullRequestClosedIcon, GitPullRequestDraftIcon, GitPullRequestIcon, InboxIcon, IssueOpenedIcon, LinkExternalIcon, MentionIcon, PersonIcon, SyncIcon, TriangleDownIcon, XCircleFillIcon } from "@primer/octicons-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { api, errorMessage, logUsage } from "../api";
 import { useCollapsedSection } from "../lib/collapse";
 import { relativeTime } from "../lib/pr";
 import type { InboxItem, InboxResponse, InboxTier, ViewerPullRequest } from "../types";
+import { ActionMenu, ActionMenuRadioGroup, ActionMenuRadioItem } from "./ActionMenu";
 import { Button } from "./Button";
 
 type TierFilter = InboxTier | "all";
@@ -292,15 +293,20 @@ export function InboxPanel({ openPr }: { openPr: (url: string) => Promise<void> 
           <button type="button" className={`inbox-tier${filter === "all" ? " active" : ""}`} onClick={() => setFilter("all")}>All<span className="inbox-tier-count">{repoItems.length - tierCounts.resolved}</span></button>
           {TIER_ORDER.map((tier) => <button key={tier} type="button" className={`inbox-tier tier-${tier}${filter === tier ? " active" : ""}`} title={TIER_META[tier].hint} onClick={() => setFilter(tier)}><DotFillIcon size={12} className="inbox-tier-dot" />{TIER_META[tier].label}<span className="inbox-tier-count">{tierCounts[tier]}</span></button>)}
           <span className="inbox-filters-end">
-          {repos.length > 1 || repoFilter !== "all" ? <select className={`inbox-repo-filter${repoFilter !== "all" ? " active" : ""}`} aria-label="Filter by repository" value={repoFilter} onChange={(event) => { setRepoFilter(event.target.value); logUsage("inbox:repo-filter", { scoped: event.target.value !== "all" }); }}>
-            <option value="all">All repos</option>
-            {repos.map(({ repo, count }) => <option key={repo} value={repo}>{repo} ({count})</option>)}
-          </select> : null}
-          <span className="inbox-kinds" role="group" aria-label="Filter by kind">
-            <button type="button" className={`inbox-kind${kindFilter === "all" ? " active" : ""}`} onClick={() => setKindFilter("all")}>All</button>
-            <button type="button" className={`inbox-kind${kindFilter === "pr" ? " active" : ""}`} onClick={() => setKindFilter("pr")}><GitPullRequestIcon size={12} /> PRs<span className="inbox-tier-count">{kindCounts.pr}</span></button>
-            <button type="button" className={`inbox-kind${kindFilter === "issue" ? " active" : ""}`} onClick={() => setKindFilter("issue")}><IssueOpenedIcon size={12} /> Issues<span className="inbox-tier-count">{kindCounts.issue}</span></button>
-          </span>
+          {/* One styled menu for kind and repository, so the filters stay on the tier row. */}
+          <ActionMenu trigger={<Button variant="muted" className={"inbox-filter-menu" + (repoFilter !== "all" || kindFilter !== "all" ? " active" : "")} title="Filter by kind and repository">
+            <FilterIcon size={14} /><span className="inbox-filter-label">{[kindFilter === "pr" ? "PRs" : kindFilter === "issue" ? "Issues" : null, repoFilter === "all" ? null : repoFilter.split("/").pop()].filter(Boolean).join(" · ") || "Filter"}</span><TriangleDownIcon size={14} />
+          </Button>}>
+            <ActionMenuRadioGroup label="Kind" value={kindFilter} onValueChange={(value) => setKindFilter(value as typeof kindFilter)}>
+              <ActionMenuRadioItem value="all">PRs and issues</ActionMenuRadioItem>
+              <ActionMenuRadioItem value="pr">PRs <span className="inbox-tier-count">{kindCounts.pr}</span></ActionMenuRadioItem>
+              <ActionMenuRadioItem value="issue">Issues <span className="inbox-tier-count">{kindCounts.issue}</span></ActionMenuRadioItem>
+            </ActionMenuRadioGroup>
+            {(repos.length > 1 || repoFilter !== "all") && <ActionMenuRadioGroup label="Repository" value={repoFilter} onValueChange={(value) => { setRepoFilter(value); logUsage("inbox:repo-filter", { scoped: value !== "all" }); }}>
+              <ActionMenuRadioItem value="all">All repos</ActionMenuRadioItem>
+              {repos.map(({ repo, count }) => <ActionMenuRadioItem key={repo} value={repo}>{repo} <span className="inbox-tier-count">{count}</span></ActionMenuRadioItem>)}
+            </ActionMenuRadioGroup>}
+          </ActionMenu>
           </span>
         </nav>
         {data == null || (data.fetchedAt == null && refreshing) ? <ul className="inbox-rows inbox-skeleton" aria-busy="true">{Array.from({ length: 6 }, (_, index) => <li key={index} className="inbox-row skeleton"><span className="inbox-skeleton-bar icon" /><span className="inbox-skeleton-lines"><span className="inbox-skeleton-bar" style={{ width: `${55 + (index % 3) * 12}%` }} /><span className="inbox-skeleton-bar short" /></span></li>)}</ul>

@@ -1,8 +1,7 @@
 import { ArrowDownIcon, ArrowUpIcon, StackIcon } from "@primer/octicons-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { api } from "../api";
-import { chipSlots, FULL_STACK_LIMIT } from "../lib/stack";
 
 type MemberStatus = "landed" | "closed" | "approved" | "changes-requested" | "draft" | "needs-review";
 type StackMember = { number: number; title: string; url: string; position: number; isCurrent: boolean; status: MemberStatus; additions: number; deletions: number; viewerReview: { state: string; freshness: "current" | "stale" } | null };
@@ -27,7 +26,7 @@ function describe(member: StackMember): string {
  */
 export function StackStrip({ prUrl, headSha, hrefFor }: { prUrl: string; headSha: string; hrefFor: (url: string) => string }) {
   const [stack, setStack] = useState<StackView | null>(null);
-  const [expanded, setExpanded] = useState(false);
+  const chipsRef = useRef<HTMLOListElement>(null);
   useEffect(() => {
     let cancelled = false;
     api<{ stack: StackView | null }>("/api/pr/stack", { method: "POST", body: JSON.stringify({ prUrl }) })
@@ -35,6 +34,15 @@ export function StackStrip({ prUrl, headSha, hrefFor }: { prUrl: string; headSha
       .catch(() => { if (!cancelled) setStack(null); });
     return () => { cancelled = true; };
   }, [prUrl, headSha]);
+  // Every PR shows; a long stack scrolls sideways with the current PR brought into view.
+  useEffect(() => {
+    const row = chipsRef.current;
+    const current = row?.querySelector<HTMLElement>('[aria-current="page"]');
+    if (row == null) return;
+    // Scroll only the chip row (scrollIntoView would also move the page).
+    if (current != null) row.scrollLeft = current.offsetLeft - row.offsetLeft - (row.clientWidth - current.offsetWidth) / 2;
+    row.toggleAttribute("data-overflow", row.scrollWidth > row.clientWidth);
+  }, [stack]);
   if (stack == null || stack.currentPosition == null) return null;
   const below = stack.members[stack.currentPosition - 1];
   const above = stack.members[stack.currentPosition + 1];
@@ -48,15 +56,11 @@ export function StackStrip({ prUrl, headSha, hrefFor }: { prUrl: string; headSha
       {below != null ? <a className="stack-hop" href={hrefFor(below.url)} title={`Below: ${describe(below)}`}><ArrowDownIcon size={12} /> #{below.number}</a> : <span className="stack-hop muted">bottom</span>}
       {above != null ? <a className="stack-hop" href={hrefFor(above.url)} title={`Above: ${describe(above)}`}><ArrowUpIcon size={12} /> #{above.number}</a> : <span className="stack-hop muted">top</span>}
     </span>
-    <ol className="stack-chips">{chipSlots(stack.members, stack.currentPosition, expanded).map((slot, index) => slot.kind === "gap"
-      ? <li key={`gap-${index}`}><button type="button" className="stack-chip stack-chip-gap" title={`Show ${slot.hidden} more PRs in the stack`} onClick={() => setExpanded(true)}>+{slot.hidden}</button></li>
-      : <li key={slot.member.number}>
-        {slot.member.isCurrent
-          ? <span className={`stack-chip current status-${slot.member.status}`} title={describe(slot.member)} aria-current="page">#{slot.member.number}<span className="stack-chip-mark">{reviewMark(slot.member)}</span></span>
-          : <a className={`stack-chip status-${slot.member.status}`} href={hrefFor(slot.member.url)} title={describe(slot.member)}>#{slot.member.number}<span className="stack-chip-mark">{reviewMark(slot.member)}</span></a>}
-      </li>)}
-      {expanded && stack.members.length > FULL_STACK_LIMIT && <li><button type="button" className="stack-chip stack-chip-gap" onClick={() => setExpanded(false)}>less</button></li>}
-    </ol>
+    <ol className="stack-chips" ref={chipsRef}>{stack.members.map((member) => <li key={member.number}>
+      {member.isCurrent
+        ? <span className={`stack-chip current status-${member.status}`} title={describe(member)} aria-current="page">#{member.number}<span className="stack-chip-mark">{reviewMark(member)}</span></span>
+        : <a className={`stack-chip status-${member.status}`} href={hrefFor(member.url)} title={describe(member)}>#{member.number}<span className="stack-chip-mark">{reviewMark(member)}</span></a>}
+    </li>)}</ol>
     <span className="stack-strip-summary muted">{stack.counts.landed} landed · {stack.counts.approved} approved{stack.counts.reviewedByViewer > 0 ? ` · ${stack.counts.reviewedByViewer} reviewed by you` : ""}{stack.nextToLand != null && !isBottomOpen ? ` · next to land #${stack.nextToLand}` : ""}</span>
   </nav>;
 }
