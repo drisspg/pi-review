@@ -2162,16 +2162,24 @@ body:has(.review-page) {
 }
 
 /* Filled lifecycle pill (Open / Merged / Closed) like GitHub's header. */
-.pr-header-meta .pr-state-pill {
+/* Header pills: the filled lifecycle pill and the outlined review status share one capsule shape. */
+.pr-header-meta .pr-state-pill,
+.pr-header-meta .review-status {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 0 var(--space-2);
+  height: 24px;
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
   border-radius: var(--radius-xl);
-  color: var(--on-success);
-  background: var(--success);
+  font-size: var(--text-sm);
   font-weight: 600;
 }
+.pr-header-meta .pr-state-pill {
+  color: var(--on-success);
+  background: var(--success);
+}
+.pr-header-meta .review-status { background: transparent; }
 .pr-header-author { color: var(--text); font-weight: 600; }
 
 .diff-row {
@@ -2248,17 +2256,21 @@ body:has(.review-page) {
 .row-hover-actions {
   position: absolute;
   top: 1px;
-  left: calc(var(--diff-gutter) - var(--space-3));
+  left: var(--space-1);   /* inside the old-line gutter, so the new line number stays readable */
   display: none;
   gap: var(--space-1);
   z-index: 2;
 }
 .diff-row:hover .row-hover-actions { display: inline-flex; }
 /* Split view: new-side targets sit over the right half's gutter. */
-.diff-row.split .row-hover-actions.right { left: calc(50% + var(--diff-gutter) - var(--space-3)); }
+.diff-row.split .row-hover-actions.right { left: calc(50% + var(--space-1)); }
 .row-hover-actions button {
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
   width: var(--space-5);
   height: var(--space-5);
+  min-height: 0;   /* the global button min-height would make them taller than the row */
   border: 0;
   border-radius: var(--radius-sm);
   color: var(--on-accent);
