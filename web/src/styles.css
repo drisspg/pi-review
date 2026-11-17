@@ -2255,21 +2255,24 @@ body:has(.review-page) {
 
 .row-hover-actions {
   position: absolute;
-  top: 1px;
-  left: var(--space-1);   /* inside the old-line gutter, so the new line number stays readable */
+  top: 2px;
+  left: var(--space-1);
   display: none;
   gap: var(--space-1);
   z-index: 2;
 }
 .diff-row:hover .row-hover-actions { display: inline-flex; }
 /* Split view: new-side targets sit over the right half's gutter. */
+/* Sit in the gutter column this row leaves empty: deleted lines (LEFT) have no new number,
+   added lines (RIGHT) no old number. Split view: over the target half's gutter. */
+.diff-row.unified .row-hover-actions.left { left: calc(var(--diff-gutter) + var(--space-1)); }
 .diff-row.split .row-hover-actions.right { left: calc(50% + var(--space-1)); }
 .row-hover-actions button {
   display: inline-grid;
   place-items: center;
   padding: 0;
-  width: var(--space-5);
-  height: var(--space-5);
+  width: 18px;
+  height: 18px;
   min-height: 0;   /* the global button min-height would make them taller than the row */
   border: 0;
   border-radius: var(--radius-sm);
