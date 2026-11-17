@@ -2023,3 +2023,22 @@ test("hover actions on a diff row: + opens a comment, π opens Pi inline", async
   await expect(piThread).toBeVisible();
   await expect(piThread.locator(".pi-native-terminal.compact")).toBeVisible();
 });
+
+test("Escape leaves a line comment: empty closes it, unfinished folds into its marker", async ({ page }) => {
+  const rows = await openFileWithAddedRows(page, 1);
+  await rows.first().click();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".local-thread")).toHaveCount(0);
+  await expect(page.locator(".inline-thread.collapsed")).toHaveCount(0);
+
+  await rows.first().click();
+  await page.getByRole("textbox", { name: "Review comment" }).fill("Half-written thought");
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".local-thread")).toHaveCount(0);
+  await page.getByRole("button", { name: /Comment ·/ }).click();
+  await expect(page.getByRole("textbox", { name: "Review comment" })).toHaveValue("Half-written thought");
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.locator(".local-thread")).toHaveCount(0);
+  await expect(page.locator(".inline-thread.collapsed")).toHaveCount(0);
+});
+

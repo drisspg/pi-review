@@ -2323,12 +2323,19 @@ function ThreadBox({ thread, prUrl, setThread, removeThread, addDraft }: { threa
       setDeleting(false);
     }
   }
-  if (thread.collapsed) return <><div className={`inline-thread collapsed terminal-marker${terminalOpen ? " terminal-active" : ""}`}><button type="button" className="terminal-marker-open" onClick={() => setThread({ ...thread, collapsed: false })}><ChevronRightIcon size={14} /><span className="collapsed-pill-label">{terminalOpen ? "Pi terminal" : "Comment"} · {targetLabel(thread.target)}</span></button><Button variant="icon" className="terminal-marker-delete" aria-label={terminalOpen ? "Delete terminal" : "Discard comment"} title={terminalOpen ? "Stop and permanently remove terminal" : "Discard this empty comment"} onClick={() => void deleteThread()} disabled={deleting}><XIcon size={14} /></Button></div>{deleteError != null && <Flash variant="danger" className="terminal-delete-error" role="alert">Could not delete terminal: {deleteError}</Flash>}</>;
+  if (thread.collapsed) return <><div className={`inline-thread collapsed terminal-marker${terminalOpen ? " terminal-active" : ""}`}><button type="button" className="terminal-marker-open" onClick={() => setThread({ ...thread, collapsed: false })}><ChevronRightIcon size={14} /><span className="collapsed-pill-label">{terminalOpen ? "Pi terminal" : "Comment"} · {targetLabel(thread.target)}</span></button><Button variant="icon" className="terminal-marker-delete" aria-label={terminalOpen ? "Delete terminal" : "Discard comment"} title={terminalOpen ? "Stop and permanently remove terminal" : "Discard this comment"} onClick={() => void deleteThread()} disabled={deleting}><XIcon size={14} /></Button></div>{deleteError != null && <Flash variant="danger" className="terminal-delete-error" role="alert">Could not delete terminal: {deleteError}</Flash>}</>;
   const location = targetLabel(thread.target);
   const terminalContext = `You are discussing ${location} in this pull request. Keep read-only investigation grounded in this line thread.
 
 Diff hunk:
 ${thread.target.hunk.slice(0, 4_000)}`;
+  /** Leaving the comment box: with a Pi terminal just hide the box; otherwise an empty comment
+   *  goes away and an unfinished one folds into its marker (text kept). Never leaves an empty card. */
+  function closeComposer(keepText: boolean): void {
+    if (terminalOpen) { setComposing(false); return; }
+    if (keepText) setThread({ ...thread, collapsed: true });
+    else removeThread();
+  }
   function saveDraft(): void {
     const body = draft.trim();
     if (body.length === 0) return;
@@ -2348,8 +2355,8 @@ ${thread.target.hunk.slice(0, 4_000)}`;
     </div>
     {blame != null && <div className="thread-blame">Last changed {relativeTime(blame.authorTime)} by {blame.author} in <a href={blame.commitUrl} target="_blank" rel="noreferrer">{shortSha(blame.sha)}</a> · {blame.prNumber != null ? <a href={prUrl.replace(/\/pull\/\d+.*$/, `/pull/${blame.prNumber}`)} target="_blank" rel="noreferrer">{blame.summary}</a> : blame.summary}</div>}
     {composing && <div className="line-comment-composer">
-      <MarkdownEditor autoFocus rows={2} value={draft} ariaLabel="Review comment" placeholder="Leave a review comment on this line" onChange={setDraft} onKeyDown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); saveDraft(); } else if (event.key === "Escape") { event.preventDefault(); setComposing(false); } }} />
-      <div className="actions"><span className="muted">⌘Enter to add</span><Button variant="muted" onClick={() => { setDraft(""); setComposing(false); }}>Cancel</Button><Button className="composer-submit" onClick={saveDraft} disabled={draft.trim().length === 0}>Add draft comment</Button></div>
+      <MarkdownEditor autoFocus rows={2} value={draft} ariaLabel="Review comment" placeholder="Leave a review comment on this line" onChange={setDraft} onKeyDown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); saveDraft(); } else if (event.key === "Escape") { event.preventDefault(); closeComposer(draft.trim().length > 0); } }} />
+      <div className="actions"><span className="muted">⌘Enter to add</span><Button variant="muted" onClick={() => { setDraft(""); closeComposer(false); }}>Cancel</Button><Button className="composer-submit" onClick={saveDraft} disabled={draft.trim().length === 0}>Add draft comment</Button></div>
     </div>}
     {deleteError != null && <Flash variant="danger" className="terminal-delete-error" role="alert">Could not delete terminal: {deleteError}</Flash>}
     {terminalOpen && <InlinePiTerminal session={terminalSessionId("inline", thread.key)} target={thread.target.line == null ? undefined : { path: thread.target.path, line: thread.target.line, ...(thread.target.startLine == null ? {} : { startLine: thread.target.startLine }), side: thread.target.side }} context={terminalContext} />}
