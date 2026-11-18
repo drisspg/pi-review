@@ -6483,16 +6483,65 @@ button.focus-area-collapsed {
   padding: 10px 12px;
 }
 
-.focus-area-terminal-context {
-  max-height: 132px;
-  overflow: auto;
-  padding: 8px 12px;
-  border-top: 1px solid var(--border-soft);
-  font-size: 0.84rem;
+/* Focus findings read like a review comment: a one-line location header, then
+   the finding as normal-weight prose at a readable measure. Pi opens on demand. */
+.focus-area-inline > .thread-head {
+  min-height: var(--control-h);
+  padding: var(--space-1) var(--space-1) 0 var(--space-3);
+  border-bottom: 0;
+  background: transparent;
 }
 
-.focus-area-terminal-context .markdown > :first-child { margin-top: 0; }
-.focus-area-terminal-context .markdown > :last-child { margin-bottom: 0; }
+.focus-area-inline > .thread-head .thread-title {
+  gap: var(--space-2);
+  align-items: baseline;
+}
+
+.inline-thread.focus-area-inline > .thread-head .thread-title .kicker {
+  flex-shrink: 0;
+  color: var(--thread-accent);
+  font-family: var(--font-system);
+}
+
+.focus-area-location {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.focus-area-inline > .thread-head .actions {
+  flex-shrink: 0;
+  gap: var(--space-1);
+}
+
+.focus-area-inline > .thread-head .small-muted-button {
+  height: var(--control-h-sm);
+  min-height: var(--control-h-sm);
+  padding: 0 var(--space-2);
+  font-size: var(--text-xs);
+}
+
+.focus-area-finding {
+  max-width: 96ch;
+  max-height: 240px;
+  overflow: auto;
+  padding: var(--space-1) var(--space-3) var(--space-3);
+  color: var(--text);
+  font-size: var(--text-md);
+  line-height: 1.55;
+}
+
+.focus-area-finding.has-body .markdown > :first-child { font-weight: 600; }
+.focus-area-finding .markdown > :first-child { margin-top: 0; }
+.focus-area-finding .markdown > :last-child { margin-bottom: 0; }
+
+.inline-thread.terminal-open.focus-area-inline > .focus-area-finding {
+  border-bottom: 1px solid var(--border-soft);
+}
 
 /* Inline terminals span the diff width and read as one dark surface: a slim
    header bar, a hairline blame row, then the terminal edge to edge. */

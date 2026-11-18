@@ -2260,18 +2260,21 @@ function FocusResolutionButton({ area }: { area: FocusArea }) {
 
 function FocusAreaInline({ prUrl, area, active, collapsedFocusAreaIds, setCollapsedFocusAreaIds }: { prUrl: string; area: FocusArea; active: boolean; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"] }) {
   const collapsed = collapsedFocusAreaIds[area.id] ?? false;
-  if (collapsed) return <div id={`focus-area-${area.id}`} className="inline-thread review-thread focus-area-inline focus-area-minimized focus-area-collapsed minimized"><div className="thread-head"><Button variant="muted" className="thread-title" aria-label={`Expand focus area: ${area.title}`} onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: false }))}><ChevronRightIcon size={16} /><strong>Focus area</strong></Button><FocusResolutionButton area={area} /></div></div>;
+  // Each terminal spawns a Pi process, so a finding only opens one when asked.
+  const [terminalOpen, setTerminalOpen] = useState(false);
+  if (collapsed) return <div id={`focus-area-${area.id}`} className="inline-thread review-thread focus-area-inline focus-area-minimized focus-area-collapsed minimized"><div className="thread-head"><Button variant="muted" className="thread-title" aria-label={`Expand focus area: ${area.title}`} onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: false }))}><ChevronRightIcon size={16} /><strong>Focus</strong><span>{area.title}</span></Button><FocusResolutionButton area={area} /></div></div>;
   const location = focusAreaLocation(area);
-  return <div id={`focus-area-${area.id}`} className={`inline-thread review-thread focus-area-inline terminal-open${active ? " active" : ""}`}>
+  const body = area.body.trim();
+  return <div id={`focus-area-${area.id}`} className={`inline-thread review-thread focus-area-inline${terminalOpen ? " terminal-open" : ""}${active ? " active" : ""}`}>
     <div className="thread-head">
-      <div className="thread-title"><strong>{area.title}</strong><span>{location}</span></div>
-      <div className="actions"><FocusResolutionButton area={area} /><Button variant="icon" aria-label="Collapse focus area" onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: true }))}><ChevronDownIcon size={16} /></Button></div>
+      <div className="thread-title"><span className="kicker">Focus</span><span className="focus-area-location" title={location}>{location}</span></div>
+      <div className="actions"><Button variant="muted" className="small-muted-button focus-area-ask" aria-expanded={terminalOpen} aria-label={terminalOpen ? "Close Pi terminal" : "Ask Pi about this focus area"} onClick={() => setTerminalOpen((open) => !open)}>{terminalOpen ? "Close Pi" : "Ask Pi"}</Button><FocusResolutionButton area={area} /><Button variant="icon" aria-label="Collapse focus area" onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: true }))}><ChevronDownIcon size={16} /></Button></div>
     </div>
-    {area.body.trim().length > 0 && <div className="focus-area-terminal-context"><MarkdownText text={area.body} fileLinks={{ prUrl }} /></div>}
-    <InlinePiTerminal session={terminalSessionId("focus", area.id)} target={{ path: area.path, line: area.endLine, ...(area.startLine === area.endLine ? {} : { startLine: area.startLine }), side: "RIGHT" }} context={`You are discussing the focus area at ${location} in this pull request. Keep read-only investigation grounded in this location.
+    <div className={`focus-area-finding${body.length > 0 ? " has-body" : ""}`}><MarkdownText text={body.length > 0 ? `${area.title}\n\n${body}` : area.title} fileLinks={{ prUrl }} /></div>
+    {terminalOpen && <InlinePiTerminal session={terminalSessionId("focus", area.id)} target={{ path: area.path, line: area.endLine, ...(area.startLine === area.endLine ? {} : { startLine: area.startLine }), side: "RIGHT" }} context={`You are discussing the focus area at ${location} in this pull request. Keep read-only investigation grounded in this location.
 
 Focus finding:
-${area.body}`} />
+${area.title}${body.length > 0 ? `\n\n${body}` : ""}`} />}
   </div>;
 }
 

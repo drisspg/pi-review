@@ -1643,6 +1643,8 @@ test("runs a separate focus areas review and opens native focus terminals", asyn
   await expect(collapsedFocusArea).toBeVisible();
   await collapsedFocusArea.getByRole("button", { name: /^Expand focus area:/ }).focus();
   await page.keyboard.press("Enter");
+  await expect(focusArea.locator(".pi-native-terminal.compact")).toHaveCount(0);
+  await focusArea.getByRole("button", { name: "Ask Pi about this focus area" }).click();
   await expect(focusArea.locator(".pi-native-terminal.compact")).toBeVisible();
   await expect(focusArea.getByRole("textbox", { name: "Terminal input" })).toBeFocused();
   await expect(focusArea.getByRole("button", { name: "Use chat" })).toHaveCount(0);
@@ -1674,6 +1676,8 @@ test("runs a separate focus areas review and opens native focus terminals", asyn
   await expect(highlightedRow.locator(".num").first()).not.toHaveCSS("box-shadow", "none");
   await expect(highlightedRow.locator(".num").first()).toHaveCSS("font-weight", "600");
   await expect(guide.locator(".diff-row.context:not(.guide-step-highlight) .code-cell").first()).toHaveCSS("background-image", "none");
+  await guide.locator(".guide-live-diff").getByRole("button", { name: "Ask Pi about this focus area" }).click();
+  await expect(guide.locator(".guide-live-diff .pi-native-terminal.compact")).toBeVisible();
   const liveDiffSize = await guide.locator(".guide-live-diff").evaluate((diff) => ({ clientHeight: diff.clientHeight, scrollHeight: diff.scrollHeight }));
   expect(liveDiffSize.clientHeight).toBeLessThanOrEqual(800);
   expect(liveDiffSize.scrollHeight).toBeGreaterThan(liveDiffSize.clientHeight);
@@ -1724,6 +1728,8 @@ test("runs a separate focus areas review and opens native focus terminals", asyn
   await page.getByRole("main", { name: "Guided review" }).getByRole("button", { name: /Overview/ }).click();
   await expect(page.getByRole("main", { name: "Guided review" })).toContainText("Walk map");
   expect(overviewRequests).toBe(1);
+  // Focus terminals open on demand, so keep the page taller than the viewport for the sticky check.
+  await page.setViewportSize({ width: 820, height: 480 });
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
   const modeBarTop = await page.locator(".review-bar").evaluate((bar) => bar.getBoundingClientRect().top);
   expect(modeBarTop).toBeGreaterThanOrEqual(-1);
