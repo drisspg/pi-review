@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test, { type TestContext } from "node:test";
 
-import { preserveSaplingMetadata } from "../../src/checkout-metadata.js";
+import { preserveCheckoutData } from "../../src/checkout-metadata.js";
 
 async function fixture(t: TestContext) {
   const root = await mkdtemp(resolve(tmpdir(), "pi-review-metadata-"));
@@ -19,7 +19,7 @@ async function fixture(t: TestContext) {
 
 test("Sapling metadata is copied and verified in a private durable directory", async (t) => {
   const { source, recovery } = await fixture(t);
-  const destination = await preserveSaplingMetadata(source, recovery);
+  const destination = await preserveCheckoutData("sl", source, recovery);
   assert.equal(await readFile(resolve(destination, "sl/config-git-user"), "utf8"), "local configuration\n");
   assert.equal(await readFile(resolve(destination, "sl/store/dirstate"), "utf8"), "workspace state\n");
   assert.equal(await readFile(resolve(source, "store/dirstate"), "utf8"), "workspace state\n");
@@ -33,7 +33,7 @@ test("Sapling metadata is copied and verified in a private durable directory", a
 for (const failure of ["copy", "corrupt copy", "source changed"] as const) {
   test(`metadata ${failure} failure never publishes a recovery copy or removes the source`, async (t) => {
     const { source, recovery } = await fixture(t);
-    await assert.rejects(preserveSaplingMetadata(source, recovery, async (from, to) => {
+    await assert.rejects(preserveCheckoutData("sl", source, recovery, async (from, to) => {
       if (failure === "copy") throw new Error("copy failed");
       await cp(from, to, { recursive: true });
       await writeFile(resolve(failure === "source changed" ? from : to, "config-git-user"), "changed");
@@ -47,17 +47,17 @@ test("automatic metadata preservation refuses symlinks and oversized content", a
   const { source, recovery } = await fixture(t);
   const link = resolve(source, "external");
   await symlink(resolve(source, "config-git-user"), link);
-  await assert.rejects(preserveSaplingMetadata(source, recovery), /symlink or special file/);
+  await assert.rejects(preserveCheckoutData("sl", source, recovery), /symlink or special file/);
   await rm(link);
   const large = resolve(source, "large");
   await writeFile(large, "");
   await truncate(large, 65 * 1024 * 1024);
-  await assert.rejects(preserveSaplingMetadata(source, recovery), /64 MiB/);
+  await assert.rejects(preserveCheckoutData("sl", source, recovery), /64 MiB/);
   assert.equal(await readFile(resolve(source, "config-git-user"), "utf8"), "local configuration\n");
 });
 
 test("metadata recovery cannot be placed inside its source", async (t) => {
   const { source } = await fixture(t);
-  await assert.rejects(preserveSaplingMetadata(source, resolve(source, "recovery")), /outside the checkout and Git metadata/);
+  await assert.rejects(preserveCheckoutData("sl", source, resolve(source, "recovery")), /outside the checkout and Git metadata/);
   assert.deepEqual((await readdir(source)).sort(), ["config-git-user", "store"]);
 });

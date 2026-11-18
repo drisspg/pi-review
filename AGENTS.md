@@ -66,7 +66,8 @@ src/                    Node server (TypeScript, ESM, run via tsx)
   worktrees.ts          Per-PR git worktree reuse (never force-replaces existing checkouts)
   checkout-cache.ts     Read-only inventory, offline CLI eviction, and server-owned worktree deletion;
                         lifetime cache ownership excludes servers/maintenance from sharing a root
-  checkout-metadata.ts  Bounded, verified durable copies of Sapling metadata before UI deletion
+  checkout-metadata.ts  Bounded, verified durable copies of Sapling metadata and ignored agent_space/
+                        before UI deletion
   storage-paths.ts      Separate checkout cache and durable state/session paths
   shell-api.ts          Saved-PR list overlays runtime checkoutPresent; home defaults to Local
                         checkouts, with absent checkouts kept under Saved only. Never persist this flag.
@@ -155,8 +156,10 @@ reviews, and session history; the shared clone stays cached. `/api/pr/checkout/p
 batches that delete for landed PRs (merged, or closed with the merge bot's `Merged` label), skips PRs with a
 live Pi terminal, and first re-fetches force-pushed reviewed revisions from GitHub (`preservePublishedRevisions`;
 unpublished commits stay protected). Refetching a PR keeps its previous head as `refs/pi-pr-review/pr-N-rev-<sha>`. UI deletion must not call the
-legacy saved-review removal contract `/api/pr/cleanup`. Ordinary worktree `sl/` metadata may be
-preserved in durable `checkout-metadata/` before server-owned deletion; verify source and copied
+legacy saved-review removal contract `/api/pr/cleanup`. Ordinary worktree `sl/` metadata and an
+ignored top-level `agent_space/` (agent review scratch) may be preserved in durable
+`checkout-metadata/<worktree id>/<uuid>/` before server-owned deletion; any other changed, untracked,
+or ignored file still blocks it, and the refusal names the paths. Verify source and copied
 manifests, keep recovery outside the deleted checkout, and refuse symlinks/special files or copy
 failures. Do not treat this as permission to discard unknown metadata or unpublished commits.
 Never remove saved PRs to reclaim cache space, bypass safety checks, steal a live ownership lock,

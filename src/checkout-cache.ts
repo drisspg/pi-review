@@ -4,10 +4,10 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSyn
 import { lstat, readdir, readFile, realpath, rm } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { promisify } from "node:util";
+import { isDeepStrictEqual, promisify } from "node:util";
 
 import { checkoutCacheRoot, legacyStorageRoot, reviewSessionRoot, usesDefaultReviewState } from "./storage-paths.js";
-import { preserveSaplingMetadata, resolveMetadataRecoveryPath } from "./checkout-metadata.js";
+import { checkoutDataManifest, preserveCheckoutData, resolveMetadataRecoveryPath } from "./checkout-metadata.js";
 
 const exec = promisify(execFile);
 const owners = new Map<string, string>();
@@ -133,10 +133,42 @@ async function assertContained(root: string, path: string): Promise<void> {
   }
 }
 
-/** Inspection is read-only; recognized Sapling state must be preserved by the deleting caller. */
-async function inspectEntry(root: string, entry: CacheEntry, runtime: CacheRuntime, preserveSapling = false): Promise<{ gitDir: string; saplingMetadata?: string } | undefined> {
+/** Ignored agent scratch output (review notes, repro scripts, dumps) at the checkout root. */
+const AGENT_SPACE = "agent_space";
+type StatusEntry = { code: string; path: string };
+
+/** Parse `git status --porcelain=v1 -z`; the runtime trims output, which can eat the first record's
+ *  leading space. Unrecognized output throws so inspection fails closed. */
+function parseStatus(output: string): StatusEntry[] {
+  const records = output.split("\0").filter(Boolean);
+  const entries: StatusEntry[] = [];
+  for (let index = 0; index < records.length; index++) {
+    const match = /^(.{1,2}) (.+)$/s.exec(records[index]);
+    if (match == null) throw new Error("Unrecognized git status output");
+    const code = match[1].trim();
+    entries.push({ code, path: match[2] });
+    // -z renames/copies append the source path as its own record.
+    if (/[RC]/.test(code) && ++index >= records.length) throw new Error("Unrecognized git status output");
+  }
+  return entries;
+}
+
+function describeStatus(entries: StatusEntry[]): string {
+  const label = (code: string) => code === "!!" ? "ignored" : code === "??" ? "untracked" : "changed";
+  const scratch = entries.filter((entry) => entry.path.startsWith(`${AGENT_SPACE}/`));
+  const others = entries.filter((entry) => !scratch.includes(entry));
+  const shown = (path: string) => /[\u0000-\u001f]/.test(path) ? JSON.stringify(path) : path;
+  const parts = others.slice(0, 5).map((entry) => `${shown(entry.path)} (${label(entry.code)})`);
+  if (scratch.length) parts.unshift(`${AGENT_SPACE}/ (${scratch.length} ${[...new Set(scratch.map((entry) => label(entry.code)))].join("/")} file${scratch.length === 1 ? "" : "s"})`);
+  return parts.join(", ") + (others.length > 5 ? `, and ${others.length - 5} more` : "");
+}
+
+/** Inspection is read-only; with `preserve`, recognized Sapling state and ignored agent_space/ are
+ *  returned for the deleting caller to copy to durable storage instead of blocking deletion. */
+async function inspectEntry(root: string, entry: CacheEntry, runtime: CacheRuntime, preserve = false): Promise<{ gitDir: string; saplingMetadata?: string; agentSpace?: string } | undefined> {
   if (entry.reasons.length) return;
   let saplingMetadata: string | undefined;
+  let agentSpace: string | undefined;
   try {
     // Canonicalize the root only; inner symlinks remain visible to containment checks.
     const canonicalRoot = await realpath(root);
@@ -155,7 +187,7 @@ async function inspectEntry(root: string, entry: CacheEntry, runtime: CacheRunti
     if (entry.kind === "worktree") {
       const allowed = new Set(["HEAD", "commondir", "gitdir", "index", "logs", "refs", "ORIG_HEAD", "FETCH_HEAD"]);
       const names = await children(gitDir);
-      if (preserveSapling && names.includes("sl")) {
+      if (preserve && names.includes("sl")) {
         allowed.add("sl");
         saplingMetadata = resolve(gitDir, "sl");
       }
@@ -163,7 +195,12 @@ async function inspectEntry(root: string, entry: CacheEntry, runtime: CacheRunti
     }
     const index = resolve(path, await git(["rev-parse", "--git-path", "index"]));
     if (!existsSync(index)) throw new Error("Missing Git index");
-    if (await git(["status", "--porcelain=v1", "--untracked-files=all", "--ignored"])) entry.reasons.push("tracked, staged, untracked, or ignored files need preservation");
+    const status = parseStatus(await git(["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored"]));
+    // Only ignored files under a real agent_space/ directory qualify; a symlinked agent_space is listed without the slash.
+    const scratch = preserve ? status.filter((item) => item.code === "!!" && item.path.startsWith(`${AGENT_SPACE}/`)) : [];
+    const unpreserved = status.filter((item) => !scratch.includes(item));
+    if (unpreserved.length) entry.reasons.push(`uncommitted, untracked, or ignored files need preservation: ${describeStatus(unpreserved)}`);
+    if (scratch.length) agentSpace = resolve(path, AGENT_SPACE);
     if ((await git(["ls-files", "-v"])).split("\n").some((line) => line && !line.startsWith("H "))) entry.reasons.push("index has assume-unchanged/skip-worktree or unusual entries");
     for (const line of (await git(["ls-files", "--stage"])).split("\n")) {
       if (!line.startsWith("160000 ")) continue;
@@ -196,7 +233,7 @@ async function inspectEntry(root: string, entry: CacheEntry, runtime: CacheRunti
       // Walking a large object database is expensive; only do it for an otherwise eligible clone.
       if (!entry.reasons.length && (await git(["fsck", "--full", "--unreachable", "--no-reflogs"])).trim()) entry.reasons.push("unreachable Git objects need manual preservation");
     }
-    return { gitDir, saplingMetadata };
+    return { gitDir, saplingMetadata, agentSpace };
   } catch (error) {
     entry.reasons.push(`inspection failed: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -244,17 +281,24 @@ export function createCheckoutCache(root: string, runtime: CacheRuntime = defaul
     const inspection = await inspectEntry(root, entry, runtime, true);
     if (entry.reasons.length) throw new Error(`Checkout protected: ${entry.reasons.join("; ")}. No checkout files or saved reviews were deleted.`);
     if (inspection == null) throw new Error("Failed to inspect checkout Git metadata");
-    const { gitDir, saplingMetadata } = inspection;
+    const { gitDir, saplingMetadata, agentSpace } = inspection;
     async function checkUsers(): Promise<void> {
       const users = (await Promise.all([runtime.users(entry.path), runtime.users(gitDir)])).flat();
       if (users.length) throw new Error(`Close external checkout users before deleting: ${users.join("; ")}`);
     }
     await checkUsers();
-    if (saplingMetadata != null) {
+    // Refuse unpreservable agent_space/ (symlinks, size) before publishing any recovery copy.
+    const scratchManifest = agentSpace == null ? undefined : await checkoutDataManifest("agent_space", agentSpace);
+    if (saplingMetadata != null || agentSpace != null) {
       // A legacy root may also hold durable state; only repos/ and worktrees/ are evictable.
       const destination = await resolveMetadataRecoveryPath(resolve(metadataRoot, id), [resolve(root, "repos"), resolve(root, "worktrees")]);
-      await preserveSaplingMetadata(saplingMetadata, destination);
+      if (saplingMetadata != null) await preserveCheckoutData("sl", saplingMetadata, destination);
+      if (agentSpace != null) await preserveCheckoutData("agent_space", agentSpace, destination);
       await checkUsers();
+    }
+    // `git worktree remove` deletes ignored files, so agent writes after the copy must not be lost.
+    if (agentSpace != null && !isDeepStrictEqual(scratchManifest, await checkoutDataManifest("agent_space", agentSpace))) {
+      throw new Error("agent_space/ changed during checkout deletion; retry once agents are idle. No checkout files were deleted.");
     }
     assertOwned();
     await runtime.git(["worktree", "remove", entry.path], repo);

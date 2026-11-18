@@ -171,6 +171,75 @@ for (const afterCopy of [false, true]) {
   });
 }
 
+/** Mirror real checkouts, where agent_space/ is ignored by .gitignore or global excludes. */
+async function addAgentSpace(f: Fixture, ignored = true): Promise<string> {
+  if (ignored) {
+    await mkdir(resolve(f.repo, ".git/info"), { recursive: true });
+    await writeFile(resolve(f.repo, ".git/info/exclude"), "agent_space/\n");
+  }
+  await mkdir(resolve(f.worktree, "agent_space/repro"), { recursive: true });
+  await writeFile(resolve(f.worktree, "agent_space/repro/probe.py"), "print('keep my repro')\n");
+  return resolve(f.worktree, "agent_space/repro/probe.py");
+}
+
+test("server deletion copies ignored agent_space/ to durable storage before removing the checkout", async (t) => {
+  const f = await fixture(t);
+  await addAgentSpace(f);
+  // Offline inventory/eviction cannot preserve it, so they still name it as the blocker.
+  const inventory = await f.cache.inventory();
+  assert.match(inventory.entries.find((entry) => entry.id === f.worktreeId)?.reasons.join("; ") ?? "", /agent_space\/ \(1 ignored file\)/);
+  const release = ownCheckoutCache(f.root);
+  try {
+    await f.cache.deleteWorktree(f.worktreeId);
+    assert.equal(existsSync(f.worktree), false);
+    const parent = resolve(f.metadataRoot, f.worktreeId);
+    const [version] = await readdir(parent);
+    assert.equal(await readFile(resolve(parent, version, "agent_space/repro/probe.py"), "utf8"), "print('keep my repro')\n");
+    assert.equal(JSON.parse(await readFile(resolve(parent, version, "manifest.json"), "utf8")).kind, "agent_space");
+    await assertSentinels(f);
+  } finally { release(); }
+});
+
+for (const problem of ["untracked agent_space", "other ignored file", "symlink", "symlinked agent_space", "nested agent_space", "write after copy"] as const) {
+  test(`agent_space/ preservation does not bypass ${problem} protection`, async (t) => {
+    const f = await fixture(t);
+    const probe = await addAgentSpace(f, problem !== "untracked agent_space");
+    if (problem === "other ignored file") await writeFile(resolve(f.worktree, "ignored.log"), "keep me\n");
+    if (problem === "symlink") await symlink(resolve(f.worktree, "README.md"), resolve(f.worktree, "agent_space/link"));
+    if (problem === "symlinked agent_space" || problem === "nested agent_space") {
+      // The real directory moves elsewhere in the checkout; only a top-level directory qualifies.
+      await mkdir(resolve(f.worktree, "sub"));
+      await rename(resolve(f.worktree, "agent_space"), resolve(f.worktree, "sub/agent_space"));
+      if (problem === "symlinked agent_space") await symlink(resolve(f.worktree, "sub/agent_space"), resolve(f.worktree, "agent_space"), "dir");
+      await writeFile(resolve(f.repo, ".git/info/exclude"), "agent_space\n");
+    }
+    let probes = 0;
+    const cache = problem !== "write after copy" ? f.cache : createCheckoutCache(f.root, { ...runtime, users: async (path) => {
+      // checkUsers probes the checkout and Git dir twice; the second pair runs after the verified copy.
+      if (path === f.worktree && ++probes === 2) await writeFile(resolve(f.worktree, "agent_space/late.txt"), "late agent output\n");
+      return [];
+    } }, f.metadataRoot);
+    const release = ownCheckoutCache(f.root);
+    try {
+      const reason = problem === "symlink" ? /agent_space\/ contains a symlink/
+        : problem === "other ignored file" ? /preservation: ignored\.log \(ignored\)/
+        : problem === "untracked agent_space" ? /preservation: agent_space\/ \(1 untracked file\)/
+        : problem === "write after copy" ? /agent_space\/ changed during checkout deletion/
+        : problem === "symlinked agent_space" ? /preservation: agent_space \(ignored\), sub\/agent_space\/repro\/probe\.py \(ignored\)/
+        : /preservation: sub\/agent_space\/repro\/probe\.py \(ignored\)/;
+      await assert.rejects(cache.deleteWorktree(f.worktreeId), reason);
+      if (problem === "write after copy") {
+        assert.equal(await readFile(resolve(f.worktree, "agent_space/late.txt"), "utf8"), "late agent output\n");
+        return;
+      }
+      const kept = problem === "nested agent_space" ? resolve(f.worktree, "sub/agent_space/repro/probe.py") : probe;
+      assert.equal(await readFile(kept, "utf8"), "print('keep my repro')\n");
+      assert.equal(existsSync(resolve(f.metadataRoot, f.worktreeId)) && (await readdir(resolve(f.metadataRoot, f.worktreeId))).length > 0, false);
+      await assertSentinels(f);
+    } finally { release(); }
+  });
+}
+
 test("server-owned checkout deletion keeps durable state, supports reopen, and is idempotent", async (t) => {
   const f = await fixture(t);
   await assert.rejects(f.cache.deleteWorktree(f.worktreeId), /own the cache/);
@@ -290,7 +359,8 @@ for (const kind of ["worktree", "repo"] as const) {
       await writeFile(path, `${change} user content\n`);
       if (change === "staged") await cacheGit(["add", "README.md"], checkout);
       const before = await cacheGit(["status", "--porcelain=v1", "--untracked-files=all", "--ignored"], checkout);
-      await assertRefused(f, kind === "repo" ? f.repoId : f.worktreeId, /tracked, staged, untracked, or ignored files/);
+      const named = change === "ignored" ? /ignored\.log \(ignored\)/ : change === "untracked" ? /notes\.txt \(untracked\)/ : /README\.md \(changed\)/;
+      await assertRefused(f, kind === "repo" ? f.repoId : f.worktreeId, new RegExp(`files need preservation: ${named.source}`));
       assert.equal(await readFile(path, "utf8"), `${change} user content\n`);
       assert.equal(await cacheGit(["status", "--porcelain=v1", "--untracked-files=all", "--ignored"], checkout), before);
     });

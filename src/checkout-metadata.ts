@@ -6,13 +6,17 @@ import { isDeepStrictEqual } from "node:util";
 
 type MetadataEntry = { kind: "directory" } | { kind: "file"; bytes: number; sha256: string };
 
-/** Only bounded, ordinary Sapling metadata is copied automatically; never follow symlinks. */
-async function metadataManifest(root: string): Promise<Record<string, MetadataEntry>> {
+/** Checkout data the server copies to durable storage before deleting a worktree. */
+export type RecoverableData = "sl" | "agent_space";
+const labels: Record<RecoverableData, string> = { sl: "Sapling metadata", agent_space: "agent_space/" };
+
+/** Only bounded, ordinary files are copied automatically; never follow symlinks. */
+async function metadataManifest(root: string, label: string): Promise<Record<string, MetadataEntry>> {
   const entries: Record<string, MetadataEntry> = Object.create(null);
   let bytes = 0;
   let count = 0;
   async function visit(path: string): Promise<void> {
-    if (++count > 10_000) throw new Error("Sapling metadata has too many entries to preserve automatically");
+    if (++count > 10_000) throw new Error(`${label} has too many entries to preserve automatically`);
     const stat = await lstat(path);
     const name = relative(root, path);
     if (stat.isDirectory()) {
@@ -20,23 +24,26 @@ async function metadataManifest(root: string): Promise<Record<string, MetadataEn
       for (const child of (await readdir(path)).sort()) await visit(resolve(path, child));
     } else if (stat.isFile()) {
       bytes += stat.size;
-      if (bytes > 64 * 1024 * 1024) throw new Error("Sapling metadata exceeds the 64 MiB automatic preservation limit");
+      if (bytes > 64 * 1024 * 1024) throw new Error(`${label} exceeds the 64 MiB automatic preservation limit`);
       const hash = createHash("sha256");
       let readBytes = 0;
       for await (const chunk of createReadStream(path)) {
         readBytes += chunk.length;
-        if (readBytes > stat.size) throw new Error("Sapling metadata changed while being read; retry checkout deletion");
+        if (readBytes > stat.size) throw new Error(`${label} changed while being read; retry checkout deletion`);
         hash.update(chunk);
       }
-      if (readBytes !== stat.size) throw new Error("Sapling metadata changed while being read; retry checkout deletion");
+      if (readBytes !== stat.size) throw new Error(`${label} changed while being read; retry checkout deletion`);
       entries[name] = { kind: "file", bytes: stat.size, sha256: hash.digest("hex") };
     } else {
-      throw new Error("Sapling metadata contains a symlink or special file; preserve it manually before deletion");
+      throw new Error(`${label} contains a symlink or special file; preserve it manually before deletion`);
     }
   }
   await visit(root);
   return entries;
 }
+
+/** Snapshot checkout data so deletion can refuse it changing after the verified copy. */
+export const checkoutDataManifest = (kind: RecoverableData, source: string) => metadataManifest(source, labels[kind]);
 
 const copyMetadata = (source: string, destination: string) => cp(source, destination, { recursive: true, dereference: false, errorOnExist: true, force: false, preserveTimestamps: true });
 
@@ -58,8 +65,9 @@ export async function resolveMetadataRecoveryPath(destination: string, protected
 }
 
 /** Verify both the copy and the unchanged source before publishing a durable recovery directory. */
-export async function preserveSaplingMetadata(source: string, destinationParent: string, copy = copyMetadata): Promise<string> {
-  const before = await metadataManifest(source);
+export async function preserveCheckoutData(kind: RecoverableData, source: string, destinationParent: string, copy = copyMetadata): Promise<string> {
+  const label = labels[kind];
+  const before = await metadataManifest(source, label);
   const parent = await resolveMetadataRecoveryPath(destinationParent, [source]);
   await mkdir(parent, { recursive: true, mode: 0o700 });
   if (await realpath(parent) !== parent) throw new Error("Metadata recovery storage changed during preservation");
@@ -68,11 +76,11 @@ export async function preserveSaplingMetadata(source: string, destinationParent:
   const destination = resolve(parent, id);
   await mkdir(pending, { mode: 0o700 });
   try {
-    await copy(source, resolve(pending, "sl"));
-    if (!isDeepStrictEqual(before, await metadataManifest(resolve(pending, "sl"))) || !isDeepStrictEqual(before, await metadataManifest(source))) {
-      throw new Error("Sapling metadata changed while being preserved; retry checkout deletion");
+    await copy(source, resolve(pending, kind));
+    if (!isDeepStrictEqual(before, await metadataManifest(resolve(pending, kind), label)) || !isDeepStrictEqual(before, await metadataManifest(source, label))) {
+      throw new Error(`${label} changed while being preserved; retry checkout deletion`);
     }
-    await writeFile(resolve(pending, "manifest.json"), JSON.stringify({ source, createdAt: new Date().toISOString(), entries: before }, null, 2), { flag: "wx", mode: 0o600 });
+    await writeFile(resolve(pending, "manifest.json"), JSON.stringify({ kind, source, createdAt: new Date().toISOString(), entries: before }, null, 2), { flag: "wx", mode: 0o600 });
     await rename(pending, destination);
     return destination;
   } catch (error) {
