@@ -1593,6 +1593,29 @@ test("selects diff code text without opening a thread", async ({ page }) => {
   await expect(page.locator(".local-thread")).toHaveCount(0);
 });
 
+test("lists focus findings in the Pi panel and jumps to each inline card", async ({ page }) => {
+  await mockNativeTerminal(page);
+  await openFirstFile(page);
+  const file = page.locator(".file").first();
+  const row = file.locator(".diff-row.added").first();
+  const path = await row.getAttribute("data-path");
+  const line = await row.getAttribute("data-line");
+  if (path == null || line == null) throw new Error("Missing diff row target");
+  await mockAnalysis(page, "focus-review", `## Focus areas\n- ${path}:${line} — Listed finding\nCheck the listed spot.`);
+  await openSideTab(page, "Pi");
+  await page.getByRole("button", { name: /^(Focus scan|Refresh focus scan)$/ }).click();
+  const findings = page.getByRole("list", { name: "Focus findings" });
+  await expect(page.locator(".focus-findings")).toContainText("1 open · 0 resolved");
+  await file.locator(".file-summary-left").click();
+  await expect(file.locator(".diff-row")).toHaveCount(0);
+  await findings.getByRole("button", { name: "Go to focus finding: Listed finding" }).click();
+  await expect(page.locator(".focus-area-inline").filter({ hasText: "Listed finding" })).toBeInViewport();
+  await expect(findings.locator(".focus-finding-link.active")).toHaveCount(1);
+  await page.locator(".focus-area-inline").getByRole("button", { name: "Resolve focus area: Listed finding" }).click();
+  await expect(page.locator(".focus-findings")).toContainText("0 open · 1 resolved");
+  await expect(findings.locator(".focus-finding-link.resolved")).toHaveCount(1);
+});
+
 test("resolves local focus findings only after persistence and reopens them after reload", async ({ page }) => {
   await mockNativeTerminal(page);
   const row = (await openFileWithAddedRows(page, 1)).first();
