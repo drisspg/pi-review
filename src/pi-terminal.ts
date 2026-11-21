@@ -47,12 +47,32 @@ export function terminalModePreamble(modes: Map<number, boolean>): string {
   return ordered.map(([mode, enabled]) => `\x1b[?${mode}${enabled ? "h" : "l"}`).join("");
 }
 
+const OSC_END = /[\x07\x1b]/g;
+
+/**
+ * Index just past the OSC string whose payload continues at `from`, or -1 while it is still
+ * arriving. BEL ends it; so does any ESC (ST is `ESC \`), which is left for the text after it.
+ */
+function oscEnd(text: string, from: number): number {
+  OSC_END.lastIndex = from;
+  const end = OSC_END.exec(text);
+  return end == null ? -1 : end.index + Number(end[0] === "\x07");
+}
+
 /**
  * Index at which to trim a replay buffer so it keeps at most `max` chars without splitting an
  * escape sequence (a split one would be lost from the mode state and replayed as stray text).
+ * An OSC string the trim lands in goes whole: an inline image is one, and its tail would replay
+ * as up to the whole base64 payload. One still arriving takes the whole buffer (`buffer.length`).
  */
 function replayCut(buffer: string, max: number): number {
   let cut = buffer.length - max;
+  const osc = buffer.lastIndexOf("\x1b]", cut - 1);
+  if (osc >= 0) {
+    const end = oscEnd(buffer, osc + 2);
+    if (end < 0) return buffer.length;
+    cut = Math.max(cut, end);
+  }
   const escape = buffer.lastIndexOf("\x1b", cut - 1);
   if (escape >= 0 && escape >= cut - 64) {
     const end = /^\x1b\[[0-?]*[ -/]*[@-~]/.exec(buffer.slice(escape, escape + 96));
@@ -125,6 +145,8 @@ type TerminalSession = {
   size: TerminalSize;
   /** Terminal modes in effect at the start of `buffer`, i.e. set by output already trimmed from it. */
   bufferModes: Map<number, boolean>;
+  /** The trim dropped the start of an OSC string that is still arriving: `buffer` skips the rest of it. */
+  bufferInOsc: boolean;
 };
 
 type TerminalSize = { cols: number; rows: number };
@@ -337,7 +359,7 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
     };
     let resolveExit!: () => void;
     const exited = new Promise<void>((resolve) => { resolveExit = resolve; });
-    const terminalSession: TerminalSession = { key, pid: pgid, exitObserved: false, signalGroup, exited, headSha: request.headSha, stopped: false, process: processHandle, peers: new Set(), buffer: "", idleTimer: null, lastActivityAt: Date.now(), paused: false, unackedChars: new Map(), peerSizes: new Map(), size: { cols: DEFAULT_COLS, rows: DEFAULT_ROWS }, bufferModes: new Map() };
+    const terminalSession: TerminalSession = { key, pid: pgid, exitObserved: false, signalGroup, exited, headSha: request.headSha, stopped: false, process: processHandle, peers: new Set(), buffer: "", idleTimer: null, lastActivityAt: Date.now(), paused: false, unackedChars: new Map(), peerSizes: new Map(), size: { cols: DEFAULT_COLS, rows: DEFAULT_ROWS }, bufferModes: new Map(), bufferInOsc: false };
     if (signalGroup != null) {
       processHandle.kill = (signal = "SIGTERM") => {
         // After reaping, the numeric PGID can be reused. Only read-only probes are safe then.
@@ -349,9 +371,13 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
     }
     processHandle.onData((data) => {
       terminalSession.lastActivityAt = Date.now();
-      terminalSession.buffer = `${terminalSession.buffer}${data}`;
+      // The replay buffer skips the rest of an OSC string whose start it already dropped.
+      const from = terminalSession.bufferInOsc ? oscEnd(data, 0) : 0;
+      terminalSession.bufferInOsc = from < 0;
+      if (from >= 0) terminalSession.buffer = `${terminalSession.buffer}${data.slice(from)}`;
       if (terminalSession.buffer.length > MAX_BUFFER_CHARS) {
         const cut = replayCut(terminalSession.buffer, MAX_BUFFER_CHARS);
+        terminalSession.bufferInOsc = cut === terminalSession.buffer.length;
         trackTerminalModes(terminalSession.bufferModes, terminalSession.buffer.slice(0, cut));
         terminalSession.buffer = terminalSession.buffer.slice(cut);
       }

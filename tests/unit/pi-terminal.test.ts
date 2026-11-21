@@ -350,6 +350,31 @@ test("a view attaching after the replay buffer was trimmed still gets Pi's alter
   await manager.disposePr("github.com/org/repo#1");
 });
 
+test("a replay buffer trimmed inside an inline image drops the image instead of replaying its payload as text", async () => {
+  const process = new FakeProcess();
+  const manager = createPiTerminalManager({ cwdForPr: () => "/tmp/pr-worktree", piCommand: "/usr/local/bin/pi", sessionRoot: "/tmp/pi-review-terminal-test", spawn: () => process });
+  await manager.attach(new FakePeer(), { prKey: "github.com/org/repo#1", session: "main" });
+  async function replayed(): Promise<string> {
+    const late = new FakePeer();
+    await manager.attach(late, { prKey: "github.com/org/repo#1", session: "main" });
+    const replay = late.messages.find((message) => message.type === "output");
+    assert.ok(replay?.type === "output");
+    return replay.data;
+  }
+
+  // The 1M-char trim lands in the image's base64, with the image's end already buffered.
+  process.dataListener(`before\r\n\x1b]1337;File=inline=1;width=40;height=auto:${"A".repeat(300_000)}\x07`);
+  process.dataListener("transcript line\r\n".repeat(50_000));
+  assert.ok((await replayed()).startsWith("transcript line\r\n"), "the replay starts after the image");
+
+  // An image longer than the whole buffer, still arriving when the trim reaches it.
+  process.dataListener(`\x1b]1337;File=inline=1:${"B".repeat(300_000)}`);
+  for (let index = 0; index < 4; index += 1) process.dataListener("B".repeat(300_000));
+  process.dataListener("\x07after the image\r\n");
+  assert.equal(await replayed(), "after the image\r\n");
+  await manager.disposePr("github.com/org/repo#1");
+});
+
 test("mode tracking follows the last setting, including combined parameters, and ignores unrelated modes", () => {
   const modes = new Map<number, boolean>();
   trackTerminalModes(modes, "\x1b[?1049h\x1b[?1000;1006h\x1b[?2026h\x1b[?1000l");

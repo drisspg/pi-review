@@ -76,7 +76,10 @@ src/                    Node server (TypeScript, ESM, run via tsx)
                         One pty per session, shared by all attached views: the view sending input owns
                         the pty size. Late views get a bounded output replay prefixed with the DEC modes
                         (alt screen, mouse, paste) set by trimmed output; Pi enables them only once, so
-                        dropping that preamble leaves a dead wheel and a stuck "Jump to latest"
+                        dropping that preamble leaves a dead wheel and a stuck "Jump to latest".
+                        Pi is launched with PI_IMAGE_PROTOCOL=iterm2 (the views draw inline images with
+                        xterm's image addon); each image is one OSC string of base64, which the replay
+                        trim drops whole, since a split one replays as text
   types.ts              Shared backend types
 web/src/                React frontend (Vite)
   main.tsx              Almost all screens/components: App, AppToolbar, StartPage/PrCard,
