@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { FitAddon } from "@xterm/addon-fit";
+import { ImageAddon } from "@xterm/addon-image";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
@@ -114,6 +115,8 @@ export function PiTerminal({ prKey, headSha, session = "main", context, target, 
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
+    // Inline images (charts, screenshots): the server launches Pi with PI_IMAGE_PROTOCOL=iterm2.
+    terminal.loadAddon(new ImageAddon({ sixelSupport: false }));
     terminal.open(container);
     useGpuRenderer(terminal, container);
     const socket = new WebSocket(terminalWebSocketUrl(prKey, session, headSha, context, target));

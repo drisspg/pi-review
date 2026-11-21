@@ -1407,6 +1407,22 @@ test("draws the native terminal with WebGL by default and falls back to DOM when
   await expect(page.locator(".xterm-rows")).toContainText("after context loss");
 });
 
+test("draws an inline image Pi sends with the iTerm2 protocol", async ({ page }) => {
+  await mockNativeTerminal(page);
+  await openSideTab(page, "Pi");
+  await expect(page.locator(".xterm-rows")).toContainText("Native Pi ready");
+  const redPng = "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEklEQVR4nGP4z8CAFWEXHbQSACj/P8Fu7N9hAAAAAElFTkSuQmCC";
+  await emitNativeTerminalMessage(page, { type: "output", data: `\u001b]1337;File=inline=1;size=75;width=4;height=auto:${redPng}\u0007\r\n` });
+  await expect.poll(() => page.evaluate(() => {
+    const layer = document.querySelector<HTMLCanvasElement>(".pi-native-terminal-surface canvas.xterm-image-layer");
+    if (layer == null || layer.width === 0) return 0;
+    const { data } = layer.getContext("2d")!.getImageData(0, 0, layer.width, layer.height);
+    let red = 0;
+    for (let i = 0; i < data.length; i += 4) if (data[i] > 200 && data[i + 1] < 50 && data[i + 2] < 50 && data[i + 3] > 200) red += 1;
+    return red;
+  })).toBeGreaterThan(0);
+});
+
 test("renders terminal Powerline symbols with the bundled font after a delayed load", async ({ page }) => {
   await mockNativeTerminal(page);
   let releaseFont!: () => void;

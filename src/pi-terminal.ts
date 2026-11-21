@@ -305,6 +305,9 @@ export function createPiTerminalManager(deps: PiTerminalManagerDeps) {
       ...reviewWorkspaceEnvironment({ prKey: request.prKey, root: cwd, headSha: request.headSha, scope: request.session, target: request.target }),
       TERM: "xterm-256color",
       COLORTERM: "truecolor",
+      // The view is xterm.js, whose image addon draws iTerm2 inline images; without this Pi picks a
+      // protocol from the server's own terminal (TERM_PROGRAM and friends) and sends images xterm drops.
+      PI_IMAGE_PROTOCOL: "iterm2",
       ...(deps.apiUrl == null ? {} : { PI_REVIEW_API_URL: deps.apiUrl }),
       PI_REVIEW_PR_KEY: request.prKey,
       ...(request.headSha == null ? {} : { PI_REVIEW_HEAD_SHA: request.headSha }),

@@ -287,6 +287,7 @@ test("attaches a peer to one persistent Pi PTY", async (t) => {
   assert.match(spawns[0].args.at(-1) ?? "", /Review line 7$/);
   assert.equal(spawns[0].env.PI_REVIEW_API_URL, "http://127.0.0.1:43133");
   assert.equal(spawns[0].env.PI_REVIEW_PR_KEY, "github.com/org/repo#1");
+  assert.equal(spawns[0].env.PI_IMAGE_PROTOCOL, "iterm2");
   assert.equal(spawns[0].env.PI_REVIEW_HEAD_SHA, "abcdef1234567");
   assert.equal(spawns[0].env.PI_REVIEW_TARGET, JSON.stringify({ path: "src/a.ts", line: 9, side: "RIGHT" }));
   assert.deepEqual(JSON.parse(spawns[0].env.PI_REVIEW_WORKSPACE_CONTEXT!), { prKey: "github.com/org/repo#1", root: "/tmp/pr-worktree", headSha: "abcdef1234567", scope: "main", target: { path: "src/a.ts", line: 9, side: "RIGHT" } });
