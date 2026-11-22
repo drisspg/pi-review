@@ -1623,7 +1623,8 @@ test("explains focus findings in both views and copies collapsed evidence", asyn
   const basis = "Reading the close handler shows it clears all drafts, not just the current tab.";
   const check = "Save a draft in each tab, close one, and check the remaining draft.";
   const trace = "clearDrafts removes entries for both tabs";
-  const body = `${example}\n\n${basis}\n\n${check}\n\n### Evidence\n\n\`\`\`text\n${trace}\n\`\`\``;
+  const visual = "```review-visual\nExpected: Close first tab → Keep second draft\nActual: Close first tab → Clear both drafts\n```";
+  const body = `${example}\n\n${basis}\n\n${check}\n\n${visual}\n\n### Evidence\n\n\`\`\`text\n${trace}\n\`\`\``;
   await mockAnalysis(page, "focus-review", `## Focus areas\n### ${path}:${line} — ${title}\n${body}`);
   await openSideTab(page, "Pi");
   await page.getByRole("button", { name: /^(Focus scan|Refresh focus scan)$/ }).click();
@@ -1637,6 +1638,9 @@ test("explains focus findings in both views and copies collapsed evidence", asyn
   await expect(findings.locator(".focus-finding-link.active")).toHaveCount(1);
   for (const view of [findings, inline]) {
     for (const paragraph of [example, basis, check]) await expect(view.getByText(paragraph, { exact: true })).toBeVisible();
+    const comparison = view.getByRole("figure", { name: "Path comparison" });
+    await expect(comparison.getByRole("list", { name: "Expected" }).getByRole("listitem")).toHaveText(["Close first tab", "Keep second draft"]);
+    await expect(comparison.getByRole("list", { name: "Actual" }).getByRole("listitem")).toHaveText(["Close first tab", "Clear both drafts"]);
     const disclosure = view.locator("summary").filter({ hasText: "Evidence" });
     const evidence = view.locator("code", { hasText: trace });
     await expect(evidence).toBeHidden();
@@ -1977,7 +1981,8 @@ test("runs the right-sidebar Pi review beside the native terminal", async ({ pag
     openedFile = route.request().postDataJSON();
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ target: "opened" }) });
   });
-  let reviewAnswer = "- **Correctness:** inspect `csrc/flash_attn/src/flash_fwd_kernel.h:1276`.";
+  const visual = "```review-visual\nAligned: Load full tile → Write all lanes\nRemainder: Load partial tile → Mask tail lanes\n```";
+  let reviewAnswer = `- **Correctness:** inspect \`csrc/flash_attn/src/flash_fwd_kernel.h:1276\`.\n\n${visual}`;
   await mockAnalysis(page, "main-review", () => reviewAnswer);
 
   await openSideTab(page, "Pi");
@@ -1985,6 +1990,9 @@ test("runs the right-sidebar Pi review beside the native terminal", async ({ pag
 
   const panel = page.locator(".ai-review");
   await expect(panel).toContainText("Correctness:");
+  const comparison = panel.locator(".general-review").getByRole("figure", { name: "Path comparison" });
+  await expect(comparison.getByRole("list", { name: "Aligned" }).getByRole("listitem")).toHaveText(["Load full tile", "Write all lanes"]);
+  await expect(comparison.getByRole("list", { name: "Remainder" }).getByRole("listitem")).toHaveText(["Load partial tile", "Mask tail lanes"]);
   const findingsBox = await panel.locator(".pi-review-findings").boundingBox();
   const terminalBox = await panel.locator(".pi-terminal-session").boundingBox();
   if (findingsBox == null || terminalBox == null) throw new Error("Missing Pi review layout");
@@ -1994,9 +2002,10 @@ test("runs the right-sidebar Pi review beside the native terminal", async ({ pag
     panel.getByRole("link", { name: "csrc/flash_attn/src/flash_fwd_kernel.h:1276" }).click(),
   ]);
   expect(openedFile).toMatchObject({ path: "csrc/flash_attn/src/flash_fwd_kernel.h", line: 1276 });
-  reviewAnswer = "- **Tests:** rerun the CUDA smoke test.";
+  reviewAnswer = "- **Tests:** rerun the CUDA smoke test.\n\n```review-visual\nLegacy path with <strong>literal text</strong>\n```";
   await panel.getByRole("button", { name: "Refresh findings" }).click();
   await expect(panel.getByText("CUDA smoke test")).toBeVisible();
+  await expect(panel.getByText("Legacy path with <strong>literal text</strong>", { exact: true })).toBeVisible();
   await expect(panel.getByRole("button", { name: "Use chat" })).toHaveCount(0);
   await expect(panel.getByPlaceholder("Message Pi…")).toHaveCount(0);
 

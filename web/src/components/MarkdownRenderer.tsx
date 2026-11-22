@@ -13,6 +13,7 @@ import { highlightedHtml, languageForPath } from "../lib/highlight";import { prU
 import { Button } from "./Button";
 import { InlineSnippetsContext, type FileLinkContext } from "./MarkdownContext";
 import { Mermaid } from "./Mermaid";
+import { ReviewVisual } from "./ReviewVisual";
 
 // React Flow + ELK only load when an answer actually contains a schematic block.
 const SchematicDiagram = lazy(() => import("./SchematicDiagram").then((module) => ({ default: module.SchematicDiagram })));
@@ -143,6 +144,7 @@ function MarkdownPre({ children, fileLinks, ...props }: MarkdownPreProps) {
   const [copied, setCopied] = useState(false);
   const code = codeBlockText(children);
   const language = preBlockLanguage(children);
+  if (language === "review-visual") return <ReviewVisual code={code} />;
   if (language === "mermaid") return <div className="markdown-mermaid-block"><Mermaid code={code} /></div>;
   if (language === "schematic") return <Suspense fallback={<div className="schematic-placeholder" aria-label="Rendering schematic" />}><SchematicDiagram code={code} fileLinks={fileLinks} /></Suspense>;
 

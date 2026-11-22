@@ -7,6 +7,9 @@ import { validateReviewDraftTarget, type ReviewDraftToolContext } from "../../sr
 
 const context: ReviewDraftToolContext = { headSha: "head", files: [{ filename: "Makefile", status: "modified", additions: 2, deletions: 0, changes: 2, patch: "@@ -1 +1,3 @@\n target:\n+\techo build\n+\techo done" }] };
 
+const visual = ["```review-visual", "Base: source → old result", "HEAD: source → new result", "```"].join("\n");
+const verdict = `Verified verdict.\n\n${visual}`;
+
 function fixture(answer = "No focus areas found.") {
   let current: ReviewDraftToolContext | null = context;
   const saved: unknown[] = [];
@@ -16,7 +19,7 @@ function fixture(answer = "No focus areas found.") {
     listRecentPullRequests: async () => [],
     listAiReviews: async () => [], listFocusScans: async () => [], listGuideReviews: async () => [], listOverviews: async () => [],
     buildPrompt: async (payload) => { prompts.push(payload); return { prompt: String(payload.mode), purpose: String(payload.mode) }; },
-    askPi: async (_pr, mode) => mode === "review-verify" ? `Verification evidence\n## Focus areas\n${answer.replace(/^## Focus areas\s*\n/, "")}` : ["guide-review", "code-walk"].includes(mode) ? answer : `${mode} result`,
+    askPi: async (_pr, _prompt, mode) => mode === "review-verify" ? `Verification evidence\n## Focus areas\n${answer.replace(/^## Focus areas\s*\n/, "")}` : ["guide-review", "code-walk"].includes(mode) ? answer : mode === "review-synthesis" ? verdict : `${mode} result`,
     modelForRun: async () => ({ model: "openai-codex/gpt-6-astra", thinkingLevel: "medium" }),
     saveReviewPair: async pair => {
       saved.push(pair);
@@ -75,7 +78,7 @@ test("invalid output and invalid anchors never persist or count as clean", async
 });
 
 test("extensionless file findings are validated and returned as typed areas", async () => {
-  const f = fixture("### Makefile:2-3 — Build failure\nThe target exits early.");
+  const f = fixture(`### Makefile:2-3 — Build failure\nThe target exits early.\n\n${visual}`);
   const { run } = await createAnalysisApi(f.deps).start({ prKey: "pr", headSha: "head", kind: "focus-review" });
   await settled(run);
   assert.equal(run.status, "complete");
@@ -96,7 +99,7 @@ for (const kind of ["guide-review", "focus-review"] as const) {
   test(`${kind} navigates surrounding HEAD code without requiring a reviewable patch`, async () => {
     for (const patch of [context.files[0].patch, undefined]) {
       const location = `${kind === "guide-review" ? "-" : "###"} model.py:542-550 — Follow the caller\nInspect surrounding implementation.`;
-      const f = fixture(kind === "guide-review" ? `## Review guide\n### 1. Call path\n${location}` : `## Focus areas\n${location}`);
+      const f = fixture(kind === "guide-review" ? `## Review guide\n### 1. Call path\n${location}` : `## Focus areas\n${location}\n\n${visual}`);
       const navigationContext = { ...context, files: [{ ...context.files[0], filename: "model.py", patch }] };
       f.setContext(navigationContext);
       const { run } = await createAnalysisApi(f.deps).start({ prKey: "pr", headSha: "head", kind });
@@ -121,7 +124,7 @@ for (const kind of ["guide-review", "focus-review"] as const) {
 
   test(`${kind} ranges may connect two reviewable diff hunks`, async () => {
     const location = `${kind === "guide-review" ? "-" : "###"} Makefile:2-21 — Follow the build path\nCheck how setup connects to the later target.`;
-    const f = fixture(kind === "guide-review" ? `## Review guide\n### 1. Build lifecycle\n${location}` : `## Focus areas\n${location}`);
+    const f = fixture(kind === "guide-review" ? `## Review guide\n### 1. Build lifecycle\n${location}` : `## Focus areas\n${location}\n\n${visual}`);
     const twoHunks = { ...context, files: [{ ...context.files[0], patch: "@@ -1,3 +1,3 @@\n target:\n-\techo old\n+\techo new\n context\n@@ -20,3 +20,3 @@\n later:\n-\techo before\n+\techo after\n end" }] };
     f.setContext(twoHunks);
     const { run } = await createAnalysisApi(f.deps).start({ prKey: "pr", headSha: "head", kind });
@@ -192,7 +195,7 @@ test("guide and overview contracts reject incomplete artifacts", async () => {
 
 test("reuse a current pair, but regenerate on force or a missing companion", async () => {
   const f = fixture();
-  f.deps.listAiReviews = async () => [{ id: "review", prKey: "pr", headSha: "head", answer: "verified verdict", createdAt: "now", updatedAt: "now", provenance: { runId: "main", reviewPairId: "pair", version: REVIEW_PAIR_VERSION, model: "astra", thinkingLevel: "medium" } }];
+  f.deps.listAiReviews = async () => [{ id: "review", prKey: "pr", headSha: "head", answer: verdict, createdAt: "now", updatedAt: "now", provenance: { runId: "main", reviewPairId: "pair", version: REVIEW_PAIR_VERSION, model: "astra", thinkingLevel: "medium" } }];
   f.deps.listFocusScans = async () => [{ id: "cached", prKey: "pr", headSha: "head", answer: "No focus areas found.", areaStates: {}, createdAt: "now", updatedAt: "now", provenance: { runId: "old", reviewPairId: "pair", version: REVIEW_PAIR_VERSION, model: "astra", thinkingLevel: "medium" } }];
   const api = createAnalysisApi(f.deps);
   const { run } = await api.start({ prKey: "pr", headSha: "head", kind: "focus-review" });
@@ -215,8 +218,8 @@ test("both views join one investigation; only verified evidence and the reconcil
   const answers: Record<string, string> = {
     "main-review": "Possible blocker: unsupported flag",
     "focus-review": "Investigate cache lifetime",
-    "review-verify": "Makefile:1 — flag claim refuted; no supported caller.\n## Focus areas\n### Makefile:2 — retired build retained\nObserved after clear and relaunch.",
-    "review-synthesis": "Address the verified cache regression before landing.",
+    "review-verify": `Makefile:1 — flag claim refuted; no supported caller.\n## Focus areas\n### Makefile:2 — retired build retained\nObserved after clear and relaunch.\n\n${visual}`,
+    "review-synthesis": `Address the verified cache regression before landing.\n\n${visual}`,
   };
   const freshTurns: string[] = [];
   f.deps.askPi = async (_, mode, _purpose, freshConversation) => {
@@ -276,3 +279,87 @@ test("a failed synthesis cannot publish a new focus artifact by itself", async (
   assert.equal(run.status, "failed");
   assert.equal(f.saved.length, 0);
 });
+
+test("a verified finding needs a visible visual of its own, not a diagram hidden in Evidence or in another finding", async () => {
+  const f = fixture(`### Makefile:2 — Build stops\nThe command fails.\n\n${visual}\n### Makefile:3 — Output is missing\nThe missing output breaks the caller.\n### Evidence\n${visual}`);
+  const { run } = await createAnalysisApi(f.deps).start({ prKey: "pr", headSha: "head", kind: "focus-review" });
+  await settled(run);
+  assert.equal(run.status, "invalid");
+  assert.match(run.error!, /visual/i);
+  assert.equal(f.saved.length, 0);
+});
+
+test("a repaired focus visual reaches synthesis and the saved finding without changing Evidence", async () => {
+  const head = "## Focus areas\n### Makefile:2 — Build stops\nThe build exits early.";
+  const evidence = "\n\n### Evidence\nCompared both revisions.";
+  const corrected = head + "\n\n" + visual + evidence;
+  const f = fixture();
+  const ask = f.deps.askPi;
+  f.deps.askPi = (...args) => args[2] === "review-verify"
+    ? Promise.resolve(args[1] === "review-verify" ? head + evidence : visual) : ask(...args);
+  const { run } = await createAnalysisApi(f.deps).start({ prKey: "pr", headSha: "head", kind: "focus-review" });
+  await settled(run);
+  assert.equal(run.status, "complete");
+  assert.ok(run.result?.record.answer.endsWith(visual + evidence));
+  assert.equal(f.prompts.at(-1)?.investigation, corrected);
+});
+
+test("repair only a malformed verdict visual in the existing maintainer session", async () => {
+  const f = fixture();
+  const ask = f.deps.askPi;
+  let attempts = 0;
+  f.deps.askPi = async (...args) => {
+    if (args[2] !== "review-synthesis") return ask(...args);
+    attempts++;
+    if (attempts === 1) return "Verified verdict.\n\n```review-visual\nOnly one lane\n```";
+    assert.ok(!args[3], "a formatting correction must not reset the conversation");
+    return visual;
+  };
+  const { run } = await createAnalysisApi(f.deps).start({ prKey: "pr", headSha: "head", kind: "main-review" });
+  await settled(run);
+  assert.equal(attempts, 2);
+  assert.equal(run.result?.record.answer, verdict);
+  assert.equal(f.prompts.length, 4, "discovery and verification aren't rerun");
+});
+
+for (const suffix of ["", "\n    ```"]) test(`a repair cannot replace evidence swallowed by ${suffix ? "an indented closer" : "an unterminated fence"}`, async () => {
+  const original = "## Focus areas\n### Makefile:2 — Build stops\nThe target fails.\n\n```review-visual\n### Evidence\nOriginal trace" + suffix;
+  const f = fixture();
+  const ask = f.deps.askPi;
+  f.deps.askPi = (...args) => args[2] === "review-verify" ? Promise.resolve(args[1] === "review-verify" ? original : visual) : ask(...args);
+  const { run } = await createAnalysisApi(f.deps).start({ prKey: "pr", headSha: "head", kind: "focus-review" });
+  await settled(run);
+  assert.equal(run.status, "invalid");
+  assert.equal(run.rawAnswer, original);
+  assert.equal(f.saved.length, 0);
+});
+
+test("a clean scan still needs a visual beneath the general verdict", async () => {
+  const f = fixture();
+  const ask = f.deps.askPi;
+  f.deps.askPi = (...args) => args[2] === "review-synthesis" ? Promise.resolve("Ready to land. No regression.") : ask(...args);
+  const { run } = await createAnalysisApi(f.deps).start({ prKey: "pr", headSha: "head", kind: "main-review" });
+  await settled(run);
+  assert.equal(run.status, "invalid");
+  assert.match(run.error!, /visual/i);
+  assert.equal(f.saved.length, 0);
+});
+
+for (const repair of ["## Focus areas\nNo focus areas found.", new Error("repair unavailable")]) {
+  test(`diagram repair preserves the original finding and diagnostics: ${repair instanceof Error ? "error" : "dropped finding"}`, async () => {
+    const original = "## Focus areas\n### Makefile:2 — build stops\nBuild exits early.\n### Evidence\nConfirmed on base and HEAD.";
+    const f = fixture();
+    const ask = f.deps.askPi;
+    f.deps.askPi = async (...args) => {
+      if (args[2] !== "review-verify") return ask(...args);
+      if (args[1] === "review-verify") return original;
+      if (repair instanceof Error) throw repair;
+      return repair;
+    };
+    const { run } = await createAnalysisApi(f.deps).start({ prKey: "pr", headSha: "head", kind: "main-review" });
+    await settled(run);
+    assert.equal(run.rawAnswer, original);
+    assert.equal(f.saved.length, 0);
+    assert.equal(run.status, repair instanceof Error ? "failed" : "invalid");
+  });
+}
