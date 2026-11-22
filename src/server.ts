@@ -46,7 +46,7 @@ import { createShutdownRequest } from "./server-shutdown.js";
 import { createShellApi } from "./shell-api.js";
 import { withTtlCache } from "./ttl-cache.js";
 import { createUsageApi, defaultUsageApiDeps, defaultUsageLogPath } from "./usage-api.js";
-import { appendDraftReviewComment, clearDraftReview, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, getDraftReview, listAiReviews, listFileReviews, listFocusScans, listGuideReviews, listOverviews, listRecentPullRequests, listReviewMemoryRecords, listArchivedReviews, markPullRequestReviewed, removePullRequest, reviewMemoryStats, updateDraftReviewComment, deleteDraftReviewComment, saveAiReview, saveDraftReview, saveFocusScan, saveGuideReview, saveOverview, saveReviewMemory, saveReviewProfile, setFileViewed, updateFocusScanProgress, updateGuideReviewProgress, upsertPullRequest } from "./state.js";
+import { appendDraftReviewComment, clearDraftReview, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, getDraftReview, listAiReviews, listFileReviews, listFocusScans, listGuideReviews, listOverviews, listRecentPullRequests, listReviewMemoryRecords, listArchivedReviews, markPullRequestReviewed, removePullRequest, reviewMemoryStats, updateDraftReviewComment, deleteDraftReviewComment, saveAiReview, saveDraftReview, saveFocusScan, saveGuideReview, saveOverview, saveReviewPair, saveReviewMemory, saveReviewProfile, setFileViewed, updateFocusScanProgress, updateGuideReviewProgress, upsertPullRequest } from "./state.js";
 import { cleanupPrWorktree, deletePrWorktree, prefetchPrHead, preparePrWorktree, preservePublishedRevisions, repoDirForRef, worktreeDirForRef, withPrWorktree } from "./worktrees.js";
 import { createCheckoutPruneApi } from "./checkout-prune-api.js";
 import { createStackApi } from "./stack-api.js";
@@ -77,10 +77,10 @@ const analysisApi = createAnalysisApi({
   contextForPr: piSessionReviewContext,
   listRecentPullRequests, listAiReviews, listFocusScans, listGuideReviews, listOverviews,
   buildPrompt: reviewPromptApi.build,
-  askPi,
+  askPi: (prKey, prompt, purpose, freshConversation) => askPi(prKey, prompt, purpose, undefined, undefined, freshConversation),
   modelForRun: piRunModel,
   activity: piActivity,
-  saveAiReview, saveFocusScan, saveGuideReview, saveOverview,
+  saveReviewPair, saveGuideReview, saveOverview,
   record: (name, data) => usageApi.record("server", name, data),
 });
 const piTerminalManager = createPiTerminalManager({
@@ -286,7 +286,7 @@ const prApi = createPrApi(defaultPrApiDeps({
 const reviewArchiveApi = createReviewArchiveApi(defaultReviewArchiveApiDeps({ clearDraftReview, listArchivedReviews, fetchPullRequestReviewData: cachedFetchPullRequestReviewData, markPullRequestReviewed, saveReviewMemory, notifyDraftReview: piTerminalManager.broadcastDraftReview }));
 const reviewMemoryApi = createReviewMemoryApi({ askPi, currentReviewMemoryDistillationSource, currentReviewMemoryPrompt, currentReviewProfile, listReviewMemoryRecords, reviewMemoryStats, saveReviewMemory, saveReviewProfile });
 const reviewSubmitRouteApi = createReviewSubmitRouteApi(defaultReviewSubmitRouteApiDeps({ clearDraftReview, fetchPullRequestReviewData: cachedFetchPullRequestReviewData, markPullRequestReviewed, saveReviewMemory, submitPullRequestReview }));
-const savedAnalysisApi = createSavedAnalysisApi({ listAiReviews, saveAiReview, saveFocusScan, saveGuideReview, saveOverview, updateFocusScanProgress, updateGuideReviewProgress });
+const savedAnalysisApi = createSavedAnalysisApi({ listAiReviews, listFocusScans, saveAiReview, saveFocusScan, saveGuideReview, saveOverview, updateFocusScanProgress, updateGuideReviewProgress });
 const checkoutPruneApi = createCheckoutPruneApi({
   async listLocalCheckouts() {
     return (await listRecentPullRequests()).filter((pr) => existsSync(worktreeDirForRef(pr.ref))).map((pr) => ({ prKey: pr.key, url: pr.url, title: pr.title, ref: pr.ref }));

@@ -59,6 +59,11 @@ src/                    Node server (TypeScript, ESM, run via tsx)
                         read-only evidence, runs headless Pi with `--no-tools` + its own system
                         prompt, saves suggestions. Disabled by PI_REVIEW_DISABLE_AUTO_REVIEWS=1 or
                         PI_REVIEW_PRE_REVIEW_ASSESSOR=0; never posts to GitHub
+  analysis-api.ts       Either General or Focus starts one coordinated review for the current HEAD:
+                        independent maintainer/investigator passes, verification, then one verdict.
+                        Persist both final projections atomically; never copy provisional or refuted
+                        claims. Keep paired history/progress attached to the matching generation.
+                        See docs/analysis.md for lifecycle and output contracts.
   state.ts              StateStore: JSON persistence of AppState (PRs, drafts, viewed files,
                         AI/guide/focus-scan records, reviewer memory) at PI_REVIEW_STATE_PATH
   github.ts             gh api / GraphQL calls (PR data, pending reviews, comments,

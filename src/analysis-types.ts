@@ -3,10 +3,12 @@ import type { GuideChapter } from "./guide.js";
 import type { AiReviewRecord, FocusScanRecord, GuideReviewRecord } from "./types.js";
 
 export const ANALYSIS_VERSION = 1;
+export const REVIEW_PAIR_VERSION = 2;
 export type AnalysisKind = "main-review" | "focus-review" | "guide-review" | "code-walk";
 
 export type AnalysisProvenance = {
   runId: string;
+  reviewPairId?: string;
   version: number;
   model: string;
   thinkingLevel: string;
@@ -18,6 +20,10 @@ export type AnalysisResult =
   | { kind: "guide-review"; record: GuideReviewRecord; chapters: GuideChapter[] }
   | { kind: "code-walk"; record: GuideReviewRecord };
 
+export function sameReviewPair(a: AnalysisResult["record"] | undefined, b: AnalysisResult["record"] | undefined): boolean {
+  return a?.provenance?.reviewPairId != null && a.provenance.reviewPairId === b?.provenance?.reviewPairId && a.prKey === b.prKey && a.headSha === b.headSha;
+}
+
 export type AnalysisRun = {
   id: string;
   prKey: string;
@@ -27,6 +33,8 @@ export type AnalysisRun = {
   startedAt: string;
   finishedAt?: string;
   result?: AnalysisResult;
+  companion?: AnalysisResult;
+  reviewStage?: "discovery" | "verification" | "synthesis";
   error?: string;
   rawAnswer?: string;
   activity?: import("./pi-session.js").PiActivity;

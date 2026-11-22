@@ -6419,7 +6419,7 @@ button.focus-area-collapsed {
   display: none;
 }
 
-/* Focus findings index: one compact row per finding that jumps to its inline card. */
+/* Each finding's title jumps to its diff; its explanation can be read in place. */
 .focus-findings {
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-lg);
@@ -6446,10 +6446,8 @@ button.focus-area-collapsed {
 
 .focus-findings > ol {
   display: grid;
-  max-height: 280px;
   margin: 0;
   padding: 0 0 var(--space-1);
-  overflow-y: auto;
   list-style: none;
 }
 
@@ -6466,6 +6464,25 @@ button.focus-area-collapsed {
   cursor: pointer;
   transition: background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
 }
+
+.focus-finding-body {
+  padding: var(--space-1) var(--space-3) var(--space-3);
+}
+
+.focus-finding-evidence {
+  margin-top: var(--space-2);
+}
+
+.focus-finding-evidence > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.focus-finding-evidence[open] > summary { margin-bottom: var(--space-2); }
 
 .focus-finding-link:hover { background: var(--hover-bg); }
 .focus-finding-link.active { border-left-color: var(--thread-accent); background: var(--selected-bg); }
@@ -6615,7 +6632,7 @@ button.focus-area-collapsed {
   line-height: 1.55;
 }
 
-.focus-area-finding.has-body .markdown > :first-child { font-weight: 600; }
+.focus-area-finding.has-body > .markdown > :first-child { font-weight: 600; }
 .focus-area-finding .markdown > :first-child { margin-top: 0; }
 .focus-area-finding .markdown > :last-child { margin-bottom: 0; }
 

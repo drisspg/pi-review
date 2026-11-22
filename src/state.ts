@@ -58,6 +58,7 @@ export type StateStore = {
   updateFocusScanProgress: (input: Pick<FocusScanRecord, "prKey" | "id" | "areaStates">) => Promise<FocusScanRecord>;
   updateGuideReviewProgress: (input: Pick<GuideReviewRecord, "prKey" | "id"> & { stepStates: NonNullable<GuideReviewRecord["stepStates"]> }) => Promise<GuideReviewRecord>;
   listFocusScans: (prKey: string) => Promise<FocusScanRecord[]>;
+  saveReviewPair: (pair: { review: Omit<AiReviewRecord, "id" | "createdAt" | "updatedAt">; scan: Omit<FocusScanRecord, "id" | "createdAt" | "updatedAt"> }) => Promise<{ review: AiReviewRecord; scan: FocusScanRecord }>;
   saveFocusScan: (scan: Omit<FocusScanRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<FocusScanRecord, "id" | "createdAt">>) => Promise<FocusScanRecord>;
   listAiReviews: (prKey: string) => Promise<AiReviewRecord[]>;
   saveAiReview: (review: Omit<AiReviewRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<AiReviewRecord, "id" | "createdAt">>) => Promise<AiReviewRecord>;
@@ -365,20 +366,25 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
   }
 
   /** Save a new generation, or update only progress on an unchanged legacy artifact. */
-  async function saveFocusScan(scan: Omit<FocusScanRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<FocusScanRecord, "id" | "createdAt">>): Promise<FocusScanRecord> {
+  function storeFocusScanRecord(state: AppState, scan: Parameters<StateStore["saveFocusScan"]>[0]): FocusScanRecord {
+    const previous = scan.id == null ? null : state.focusScans.find((stored) => stored.id === scan.id);
+    assertImmutableAnalysis(previous, scan);
+    const now = runtime.now();
+    const next: FocusScanRecord = {
+      ...scan,
+      ...previous,
+      areaStates: scan.areaStates,
+      id: scan.id ?? runtime.uuid(),
+      createdAt: previous?.createdAt ?? scan.createdAt ?? now,
+      updatedAt: now,
+    };
+    state.focusScans = capRecordsPerPr([next, ...state.focusScans.filter((stored) => stored.id !== next.id)].sort((a, b) => b.createdAt.localeCompare(a.createdAt)), maxFocusScansPerPr);
+    return next;
+  }
+
+  async function saveFocusScan(scan: Parameters<StateStore["saveFocusScan"]>[0]): Promise<FocusScanRecord> {
     return mutateState(async (state) => {
-      const previous = scan.id == null ? null : state.focusScans.find((stored) => stored.id === scan.id);
-      assertImmutableAnalysis(previous, scan);
-      const now = runtime.now();
-      const next: FocusScanRecord = {
-        ...scan,
-        ...previous,
-        areaStates: scan.areaStates,
-        id: scan.id ?? runtime.uuid(),
-        createdAt: previous?.createdAt ?? scan.createdAt ?? now,
-        updatedAt: now,
-      };
-      state.focusScans = capRecordsPerPr([next, ...state.focusScans.filter((stored) => stored.id !== next.id)].sort((a, b) => b.createdAt.localeCompare(a.createdAt)), maxFocusScansPerPr);
+      const next = storeFocusScanRecord(state, scan);
       await writeState(state);
       return next;
     });
@@ -400,21 +406,35 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
     return (await readState()).aiReviews.filter((review) => review.prKey === prKey).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
-  async function saveAiReview(review: Omit<AiReviewRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<AiReviewRecord, "id" | "createdAt">>): Promise<AiReviewRecord> {
+  function storeAiReviewRecord(state: AppState, review: Parameters<StateStore["saveAiReview"]>[0]): AiReviewRecord {
+    const previous = review.id == null ? null : state.aiReviews.find((stored) => stored.id === review.id);
+    assertImmutableAnalysis(previous, review);
+    const now = runtime.now();
+    const next: AiReviewRecord = {
+      ...review,
+      ...previous,
+      id: review.id ?? runtime.uuid(),
+      createdAt: previous?.createdAt ?? review.createdAt ?? now,
+      updatedAt: now,
+    };
+    state.aiReviews = capRecordsPerPr([next, ...state.aiReviews.filter((stored) => stored.id !== next.id)].sort((a, b) => b.createdAt.localeCompare(a.createdAt)), maxAiReviewsPerPr);
+    return next;
+  }
+
+  async function saveAiReview(review: Parameters<StateStore["saveAiReview"]>[0]): Promise<AiReviewRecord> {
     return mutateState(async (state) => {
-      const previous = review.id == null ? null : state.aiReviews.find((stored) => stored.id === review.id);
-      assertImmutableAnalysis(previous, review);
-      const now = runtime.now();
-      const next: AiReviewRecord = {
-        ...review,
-        ...previous,
-        id: review.id ?? runtime.uuid(),
-        createdAt: previous?.createdAt ?? review.createdAt ?? now,
-        updatedAt: now,
-      };
-      state.aiReviews = capRecordsPerPr([next, ...state.aiReviews.filter((stored) => stored.id !== next.id)].sort((a, b) => b.createdAt.localeCompare(a.createdAt)), maxAiReviewsPerPr);
+      const next = storeAiReviewRecord(state, review);
       await writeState(state);
       return next;
+    });
+  }
+
+  async function saveReviewPair(pair: Parameters<StateStore["saveReviewPair"]>[0]) {
+    return mutateState(async (state) => {
+      const review = storeAiReviewRecord(state, pair.review);
+      const scan = storeFocusScanRecord(state, pair.scan);
+      await writeState(state);
+      return { review, scan };
     });
   }
 
@@ -496,7 +516,7 @@ export function createStateStore(runtime: StateStoreRuntime = defaultRuntime, pa
     });
   }
 
-  return { readState, currentReviewMemoryDistillationSource, currentReviewProfile, listReviewMemoryRecords, listArchivedReviews, reviewMemoryStats, saveReviewProfile, listRecentPullRequests, upsertPullRequest, markPullRequestReviewed, listFileReviews, setFileViewed, getDraftReview, saveDraftReview, appendDraftReviewComment, updateDraftReviewComment, deleteDraftReviewComment, clearDraftReview, updateFocusScanProgress, updateGuideReviewProgress, listFocusScans, saveFocusScan, listAiReviews, saveAiReview, listGuideReviews, saveGuideReview, listOverviews, saveOverview, saveReviewMemory, currentReviewMemoryPrompt, removePullRequest };
+  return { readState, currentReviewMemoryDistillationSource, currentReviewProfile, listReviewMemoryRecords, listArchivedReviews, reviewMemoryStats, saveReviewProfile, listRecentPullRequests, upsertPullRequest, markPullRequestReviewed, listFileReviews, setFileViewed, getDraftReview, saveDraftReview, appendDraftReviewComment, updateDraftReviewComment, deleteDraftReviewComment, clearDraftReview, updateFocusScanProgress, updateGuideReviewProgress, listFocusScans, saveFocusScan, listAiReviews, saveAiReview, saveReviewPair, listGuideReviews, saveGuideReview, listOverviews, saveOverview, saveReviewMemory, currentReviewMemoryPrompt, removePullRequest };
 }
 
 export const {
@@ -519,6 +539,7 @@ export const {
   removePullRequest,
   reviewMemoryStats,
   saveAiReview,
+  saveReviewPair,
   saveDraftReview,
   saveFocusScan,
   saveGuideReview,

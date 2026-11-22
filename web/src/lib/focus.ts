@@ -1,1 +1,1 @@
-export { parseFocusAreas, focusReviewHasNoFindings } from "../../../src/focus";
+export { splitFocusEvidence, parseFocusAreas, focusReviewHasNoFindings, focusReviewIsInconclusive } from "../../../src/focus";

@@ -23,9 +23,9 @@ import { buildDiffAnnotationIndex, commentTarget, commentThreadDomId, diffAnnota
 import { contextRowsFromText, hunkNewStart, isTargetInSelection, lastNewLine, parsePatchRows, parsePatchSetSections, targetFromPoint, targetFromRow, type PatchSeedTexts } from "./lib/diff";
 import { loadFileText } from "./lib/file-text";
 import { writeClipboard } from "./lib/dom";
-import { focusReviewHasNoFindings, parseFocusAreas } from "./lib/focus";
-import { AnalysisError, runAnalysis } from "./lib/analysis";
-import type { AnalysisKind } from "../../src/analysis-types";
+import { focusReviewHasNoFindings, focusReviewIsInconclusive, parseFocusAreas, splitFocusEvidence } from "./lib/focus";
+import { AnalysisError, runAnalysis, sameReviewPair } from "./lib/analysis";
+import type { AnalysisKind, AnalysisResult } from "../../src/analysis-types";
 import { parseGuideChapters, type GuideChapter } from "./lib/guide";
 import { parseOverviewSections } from "./lib/overview";
 import { languageForPath } from "./lib/highlight";
@@ -211,7 +211,7 @@ function sessionMessages(messages: AiReviewMessage[]): AiReviewMessage[] {
 
 function messagesFromAiReviewRecord(review: AiReviewRecord | null | undefined): AiReviewMessage[] {
   if (review == null) return [];
-  if (review.messages != null && review.messages.length > 0) return review.messages;
+  if (review.provenance?.reviewPairId == null && review.messages != null && review.messages.length > 0) return review.messages;
   return review.answer.trim().length > 0 ? [generalReviewMessage(review.answer)] : [];
 }
 
@@ -223,7 +223,9 @@ function historyTimestamp(record: { updatedAt: string; createdAt: string }): str
 function focusScanSummary(record: FocusScanRecord): string {
   const areas = parseFocusAreas(record.answer);
   if (areas.length > 0) return `${areas.length} focus ${areas.length === 1 ? "area" : "areas"}`;
-  return record.answer.trim().length === 0 ? "Not yet scanned" : "Clean — no focus areas";
+  if (focusReviewIsInconclusive(record.answer)) return "Inconclusive";
+  if (focusReviewHasNoFindings(record.answer)) return "Clean — no focus areas";
+  return record.answer.trim().length === 0 ? "Not yet scanned" : "Unvalidated scan";
 }
 
 function draftDiffHunk(files: PullFile[], draft: DraftComment): string {
@@ -298,7 +300,13 @@ function commentUpdatedAt(comment: PullReviewComment | PullIssueComment | PullRe
   return comment.updated_at;
 }
 
-function reviewFeedbackPromptPayload(review: OpenResponse, drafts: DraftComment[], overallBody: string, aiReview: AiReview, focusAreas: FocusArea[], viewedFocusIds: Record<string, boolean>): Record<string, unknown> {
+function reviewFeedbackPromptPayload(review: OpenResponse, drafts: DraftComment[], overallBody: string, aiReviewId: string | null, focusScanId: string | null, viewedFocusIds: Record<string, boolean>): Record<string, unknown> {
+  const main = review.aiReviews.find((record) => record.id === aiReviewId && record.headSha === review.pr.headSha);
+  const focus = review.focusScans.find((record) => record.id === focusScanId && record.headSha === review.pr.headSha);
+  const paired = sameReviewPair(main, focus);
+  const messages = messagesFromAiReviewRecord(main?.provenance?.reviewPairId == null || paired ? main : undefined);
+  const globalFeedback = generalReviewMessages(messages).map((message) => message.text.trim()).join("\n\n");
+  const focusAreas = focus && (focus.provenance?.reviewPairId == null || paired) ? parseFocusAreas(focus.answer) : [];
   const localReviewComments = [overallBody.trim().length > 0 ? { source: "requester-draft", id: "R0", kind: "Local overall review", author: "You", body: overallBody.trim() } : null, ...drafts.map((draft, index) => ({ source: "requester-draft", id: `D${index + 1}`, kind: "Local draft comment", author: "You", body: draft.body.trim(), location: draftLocation(draft) })).filter((draft) => draft.body.length > 0)].filter((comment) => comment != null);
   const reviewSummaries = review.reviewSummaries.filter((comment) => comment.body.trim().length > 0).map((comment) => ({ source: "github", id: `G-review-${comment.id}`, kind: `Review summary (${comment.state.toLowerCase().replace("_", " ")})`, author: commentAuthor(comment), body: comment.body.trim(), url: comment.html_url, updatedAt: commentUpdatedAt(comment) }));
   const issueComments = review.issueComments.filter((comment) => comment.body.trim().length > 0).map((comment) => ({ source: "github", id: `G-conversation-${comment.id}`, kind: "Conversation comment", author: commentAuthor(comment), body: comment.body.trim(), url: comment.html_url, updatedAt: commentUpdatedAt(comment) }));
@@ -310,10 +318,24 @@ function reviewFeedbackPromptPayload(review: OpenResponse, drafts: DraftComment[
     prUrl: review.pr.url,
     headSha: review.pr.headSha,
     userComments: [...localReviewComments, ...reviewSummaries, ...issueComments, ...reviewComments],
-    aiComments: sessionMessages(aiReview.messages).filter((message) => (message.role === "user" || message.role === "pi") && message.text.trim().length > 0).map(({ role, text, title, kind }) => ({ role, text: text.trim(), title, kind })),
+    aiComments: sessionMessages(messages).filter((message) => (message.role === "user" || (message.role === "pi" && message.text.trim() !== globalFeedback)) && message.text.trim().length > 0).map(({ role, text, title, kind }) => ({ role, text: text.trim(), title, kind })),
     focusAreas: focusAreas.map((area) => ({ path: area.path, startLine: area.startLine, endLine: area.endLine, title: area.title, body: area.body, viewed: viewedFocusIds[area.id] === true })),
-    globalFeedback: currentGeneralReviewText(aiReview),
+    globalFeedback,
   };
+}
+
+function cacheAnalysisResult(current: OpenResponse, result: AnalysisResult): OpenResponse {
+  if (current.pr.key !== result.record.prKey || current.pr.headSha !== result.record.headSha) return current;
+  switch (result.kind) {
+    case "main-review": return { ...current, aiReview: result.record, aiReviews: upsertHistoryRecord(current.aiReviews, result.record) };
+    case "focus-review": {
+      const existing = current.focusScans.find((scan) => scan.id === result.record.id);
+      const focusScan = existing && existing.updatedAt > result.record.updatedAt ? existing : result.record;
+      return { ...current, focusScan, focusScans: upsertHistoryRecord(current.focusScans, focusScan) };
+    }
+    case "guide-review": return { ...current, guideReview: result.record };
+    case "code-walk": return { ...current, overview: result.record };
+  }
 }
 
 function upsertHistoryRecord<T extends { id: string; updatedAt: string; createdAt: string }>(records: T[], record: T): T[] {
@@ -969,7 +991,7 @@ function App() {
    */
   async function copyReviewFeedbackPrompt(body = reviewBody): Promise<boolean> {
     if (review == null) return false;
-    const { prompt } = await buildPiPrompt(reviewFeedbackPromptPayload(review, drafts, body, aiReview, focusAreas, viewedFocusAreaIds));
+    const { prompt } = await buildPiPrompt(reviewFeedbackPromptPayload(review, drafts, body, aiReviewId, focusScanId, viewedFocusAreaIds));
     await writeClipboard(prompt);
     const hasFeedback = body.trim().length > 0 || drafts.some((draft) => draft.line != null && draft.body.trim().length > 0);
     if (!hasFeedback) return false;
@@ -981,7 +1003,7 @@ function App() {
   /** The backend decides freshness and joins existing work, including after navigation/reload. */
   async function runAutomaticPiReviews(nextReview: OpenResponse) {
     if (!(await autoReviewsEnabled())) return;
-    await Promise.all((['main-review', 'focus-review', 'guide-review', 'code-walk'] as const).map((kind) => runAnalysisFor(nextReview, kind, false)));
+    await Promise.all((['main-review', 'guide-review', 'code-walk'] as const).map((kind) => runAnalysisFor(nextReview, kind, false)));
   }
 
   async function runAiReview() {
@@ -1002,45 +1024,42 @@ function App() {
 
   /** Render a run without owning its execution, result validation, or persistence. */
   async function runAnalysisFor(target: OpenResponse, kind: AnalysisKind, force: boolean) {
-    const observer = (analysisObserversRef.current[kind] ?? 0) + 1;
-    analysisObserversRef.current[kind] = observer;
-    const isCurrent = () => activeReviewKeyRef.current === target.pr.key && activeReviewHeadRef.current === target.pr.headSha && analysisObserversRef.current[kind] === observer;
-    if (!isCurrent()) return;
+    if (activeReviewKeyRef.current !== target.pr.key || activeReviewHeadRef.current !== target.pr.headSha) return;
+    const observerKind = kind === "focus-review" ? "main-review" : kind;
+    const observer = (analysisObserversRef.current[observerKind] ?? 0) + 1;
+    analysisObserversRef.current[observerKind] = observer;
+    const isCurrent = () => activeReviewKeyRef.current === target.pr.key && activeReviewHeadRef.current === target.pr.headSha && analysisObserversRef.current[observerKind] === observer;
     const activity = runningAgentActivity();
     const onActivity = (next: PiAgentActivity | undefined) => {
       if (!isCurrent()) return;
       const update = { running: true, activity: next ?? activity };
       switch (kind) {
-        case "main-review": updateAiReview((current) => ({ ...current, ...update })); break;
-        case "focus-review": setFocusReview((current) => ({ ...current, ...update, error: undefined, rawAnswer: undefined })); break;
+        case "main-review":
+        case "focus-review":
+          updateAiReview((current) => ({ ...current, ...update }));
+          setFocusReview((current) => ({ ...current, ...update, error: undefined, rawAnswer: undefined }));
+          break;
         case "guide-review": setGuideReview((current) => ({ ...current, ...update })); break;
         case "code-walk": setOverview((current) => ({ ...current, ...update, error: null })); break;
       }
     };
     onActivity(activity);
     try {
-      const result = await runAnalysis(target.pr.key, target.pr.headSha, kind, force, onActivity, isCurrent);
-      if (result == null || !isCurrent()) return;
-      updateCachedReview(target.pr.key, (current) => {
-        if (current.pr.headSha !== result.record.headSha) return current;
-        switch (result.kind) {
-          case "main-review": return { ...current, aiReview: result.record, aiReviews: upsertHistoryRecord(current.aiReviews, result.record) };
-          case "focus-review": return { ...current, focusScan: result.record, focusScans: upsertHistoryRecord(current.focusScans, result.record) };
-          case "guide-review": return { ...current, guideReview: result.record };
-          case "code-walk": return { ...current, overview: result.record };
-        }
-      });
-      switch (result.kind) {
+      const results = await runAnalysis(target.pr.key, target.pr.headSha, kind, force, onActivity, isCurrent);
+      if (results == null || !isCurrent()) return;
+      if (results.length === 1) {
+        if (kind === "main-review") setFocusReview((current) => ({ ...current, running: false }));
+        if (kind === "focus-review") updateAiReview((current) => ({ ...current, running: false }));
+      }
+      const cached = updateCachedReview(target.pr.key, (current) => results.reduce(cacheAnalysisResult, current));
+      for (const result of results) switch (result.kind) {
         case "main-review": showAiReviewRecord(result.record); break;
         case "guide-review": showGuideReviewRecord(result.record); break;
         case "code-walk": showOverviewRecord(result.record); break;
         case "focus-review":
-          setFocusReview({ running: false, text: result.record.answer });
-          setFocusScanId(result.record.id);
-          setViewedFocusAreaIds(idsFromFocusStates(result.areas, result.record.areaStates, "viewed"));
-          setCollapsedFocusAreaIds(idsFromFocusStates(result.areas, result.record.areaStates, "collapsed"));
+          showFocusScanRecord(cached?.focusScan ?? result.record);
           // Background analysis must not mount an unsolicited terminal.
-          if (force) {
+          if (force && kind === "focus-review") {
             setOpenFiles((current) => ({ ...current, ...Object.fromEntries(result.areas.map((area) => [area.path, true])) }));
             setActiveFocusAreaId(result.areas[0]?.id ?? null);
           }
@@ -1050,12 +1069,11 @@ function App() {
       if (!isCurrent()) return;
       const message = errorMessage(err);
       switch (kind) {
-        case "main-review": {
-          const text = `AI review failed: ${message}`;
-          updateAiReview(() => ({ running: false, text, messages: [generalReviewMessage(text)] }));
+        case "main-review":
+        case "focus-review":
+          updateAiReview((current) => ({ ...current, running: false, activity: undefined }));
+          setFocusReview((current) => ({ ...current, running: false, activity: undefined, error: message, rawAnswer: err instanceof AnalysisError ? err.rawAnswer : undefined }));
           break;
-        }
-        case "focus-review": setFocusReview({ running: false, text: "", error: message, rawAnswer: err instanceof AnalysisError ? err.rawAnswer : undefined }); break;
         case "guide-review": setGuideReview({ running: false, text: `Guide generation failed: ${message}` }); break;
         case "code-walk": setOverview({ running: false, text: "", error: message }); break;
       }
@@ -2270,6 +2288,15 @@ function FocusResolutionButton({ area }: { area: FocusArea }) {
   return <Button variant="muted" className="small-muted-button focus-area-resolve" aria-label={`${resolved ? "Reopen" : "Resolve"} focus area: ${area.title}`} title={resolved ? "Reopen this local finding" : "Mark as handled or dismissed; exclude from copied feedback"} disabled={resolution.saving} onClick={() => void resolution.toggle(area)}>{resolved ? "Reopen" : "Resolve"}</Button>;
 }
 
+function FocusFindingContent({ prUrl, body, title }: { prUrl: string; body: string; title?: string }) {
+  const { explanation, evidence } = splitFocusEvidence(body);
+  const text = [title, explanation].filter(Boolean).join("\n\n");
+  return <>
+    {text && <MarkdownText text={text} fileLinks={{ prUrl, snippets: false }} />}
+    {evidence && <details className="focus-finding-evidence"><summary><span className="disclosure-chevron" aria-hidden="true">›</span>Evidence</summary><MarkdownText text={evidence} fileLinks={{ prUrl, snippets: false }} /></details>}
+  </>;
+}
+
 function FocusAreaInline({ prUrl, area, active, collapsedFocusAreaIds, setCollapsedFocusAreaIds }: { prUrl: string; area: FocusArea; active: boolean; collapsedFocusAreaIds: Record<string, boolean>; setCollapsedFocusAreaIds: DiffProps["setCollapsedFocusAreaIds"] }) {
   const collapsed = collapsedFocusAreaIds[area.id] ?? false;
   // Each terminal spawns a Pi process, so a finding only opens one when asked.
@@ -2282,7 +2309,7 @@ function FocusAreaInline({ prUrl, area, active, collapsedFocusAreaIds, setCollap
       <div className="thread-title"><span className="kicker">Focus</span><span className="focus-area-location" title={location}>{location}</span></div>
       <div className="actions"><Button variant="muted" className="small-muted-button focus-area-ask" aria-expanded={terminalOpen} aria-label={terminalOpen ? "Close Pi terminal" : "Ask Pi about this focus area"} onClick={() => setTerminalOpen((open) => !open)}>{terminalOpen ? "Close Pi" : "Ask Pi"}</Button><FocusResolutionButton area={area} /><Button variant="icon" aria-label="Collapse focus area" onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: true }))}><ChevronDownIcon size={16} /></Button></div>
     </div>
-    <div className={`focus-area-finding${body.length > 0 ? " has-body" : ""}`}><MarkdownText text={body.length > 0 ? `${area.title}\n\n${body}` : area.title} fileLinks={{ prUrl }} /></div>
+    <div className={`focus-area-finding${body.length > 0 ? " has-body" : ""}`}><FocusFindingContent prUrl={prUrl} title={area.title} body={body} /></div>
     {terminalOpen && <InlinePiTerminal session={terminalSessionId("focus", area.id)} target={{ path: area.path, line: area.endLine, ...(area.startLine === area.endLine ? {} : { startLine: area.startLine }), side: "RIGHT" }} context={`You are discussing the focus area at ${location} in this pull request. Keep read-only investigation grounded in this location.
 
 Focus finding:
@@ -2527,8 +2554,7 @@ function GeneralReviewEntry({ message, prUrl }: { message: AiReviewMessage; prUr
   </details>;
 }
 
-/** Index of the current scan's findings; the inline cards stay the place to read and act on them. */
-function FocusFindingsList({ areas, viewedIds, activeId, jump }: { areas: FocusArea[]; viewedIds: Record<string, boolean>; activeId: string | null; jump: (area: FocusArea) => void }) {
+function FocusFindingsList({ prUrl, areas, viewedIds, activeId, jump }: { prUrl: string; areas: FocusArea[]; viewedIds: Record<string, boolean>; activeId: string | null; jump: (area: FocusArea) => void }) {
   const open = areas.filter((area) => viewedIds[area.id] !== true).length;
   return <details className="focus-findings" open>
     <summary><span className="disclosure-chevron" aria-hidden="true">›</span><span className="kicker">Focus findings</span><span className="focus-findings-count">{open} open · {areas.length - open} resolved</span></summary>
@@ -2537,7 +2563,7 @@ function FocusFindingsList({ areas, viewedIds, activeId, jump }: { areas: FocusA
       return <li key={area.id}><button type="button" className={`focus-finding-link${resolved ? " resolved" : ""}${area.id === activeId ? " active" : ""}`} aria-label={`Go to focus finding: ${area.title}`} title={area.title} onClick={() => jump(area)}>
         <span className="focus-finding-location">{resolved && <CheckIcon size={12} aria-label="Resolved" />}{focusAreaLocation(area)}</span>
         <span className="focus-finding-title">{area.title}</span>
-      </button></li>;
+      </button>{area.body && <div className="focus-finding-body"><FocusFindingContent prUrl={prUrl} body={area.body} /></div>}</li>;
     })}</ol>
   </details>;
 }
@@ -2566,6 +2592,20 @@ function AiReviewPanel({ prKey, prUrl, focusPanel, review, aiReviewHistory, aiRe
   const viewingOlderAiReview = latestAiReviewId != null && aiReviewId != null && aiReviewId !== latestAiReviewId;
   const viewingOlderFocusScan = latestFocusScanId != null && focusScanId != null && focusScanId !== latestFocusScanId;
   const viewingHistory = viewingOlderAiReview || viewingOlderFocusScan;
+  const running = review.running || focusReview.running;
+  const selectedMain = aiReviewHistory.find(main => main.id === aiReviewId);
+  const selectedFocus = focusScanHistory.find(scan => scan.id === focusScanId);
+  const historyOnly = (selectedMain && selectedMain.headSha !== terminalReview?.headSha) || (selectedFocus && selectedFocus.headSha !== terminalReview?.headSha) || ((selectedMain?.provenance?.reviewPairId || selectedFocus?.provenance?.reviewPairId) && !sameReviewPair(selectedMain, selectedFocus));
+  function selectMain(record: AiReviewRecord | undefined) {
+    showAiReviewRecord(record);
+    if (record?.provenance?.reviewPairId != null) showFocusScanRecord(focusScanHistory.find((scan) => sameReviewPair(scan, record)));
+    else if (selectedFocus?.provenance?.reviewPairId != null) showFocusScanRecord(focusScanHistory.find(scan => scan.headSha === record?.headSha && !scan.provenance?.reviewPairId));
+  }
+  function selectFocus(record: FocusScanRecord | undefined) {
+    showFocusScanRecord(record);
+    if (record?.provenance?.reviewPairId != null) showAiReviewRecord(aiReviewHistory.find((main) => sameReviewPair(main, record)));
+    else if (selectedMain?.provenance?.reviewPairId != null) showAiReviewRecord(aiReviewHistory.find(main => main.headSha === record?.headSha && !main.provenance?.reviewPairId));
+  }
   const focusHistoryOptions = focusScanHistory.map((record, index) => <option key={record.id} value={record.id}>{index === 0 ? "Latest · " : ""}{historyTimestamp(record)} · {focusScanSummary(record)}</option>);
   const aiHistoryOptions = aiReviewHistory.map((record, index) => <option key={record.id} value={record.id}>{index === 0 ? "Latest · " : ""}{historyTimestamp(record)} · Findings</option>);
   return <section className={`panel ai-review${viewingHistory ? " viewing-history" : ""}${terminalFocused ? " terminal-focused" : ""}`}>
@@ -2573,20 +2613,22 @@ function AiReviewPanel({ prKey, prUrl, focusPanel, review, aiReviewHistory, aiRe
     {feedbackCopy.error != null && <Flash variant="danger" className="copy-feedback-error" role="alert">Copy failed: {feedbackCopy.error}</Flash>}
     <div className="pi-actions">
       <div className="pi-action">
-        <Button className="focus-review-run" title="Find specific lines worth deeper review. Refresh saves each pass to history." onClick={() => void runFocusReview()} disabled={focusReview.running}>{focusReview.running ? "Scanning…" : focusReview.text.length > 0 ? "Refresh focus scan" : "Focus scan"}</Button>
-        {focusReview.running && <AgentActivityLine activity={focusReview.activity} />}
-        {focusScanHistory.length > 1 && <details className="pi-history-compact"><summary><span className="disclosure-chevron" aria-hidden="true">›</span>Focus scan history ({focusScanHistory.length})</summary><div className="pi-history-picker"><Select aria-label="Focus scan history" value={selectedFocusScanId} onChange={(event) => showFocusScanRecord(focusScanHistory.find((record) => record.id === event.target.value))}>{focusHistoryOptions}</Select>{viewingOlderFocusScan && <Button variant="muted" className="pi-history-back" onClick={() => showFocusScanRecord(focusScanHistory[0])}>Latest</Button>}</div></details>}
+        <Button className="focus-review-run" title="Refresh the general review and inline findings together." onClick={() => void runFocusReview()} disabled={running}>{focusReview.running ? "Scanning…" : focusReview.text.length > 0 ? "Refresh focus scan" : "Focus scan"}</Button>
+        {focusScanHistory.length > 1 && <details className="pi-history-compact"><summary><span className="disclosure-chevron" aria-hidden="true">›</span>Focus scan history ({focusScanHistory.length})</summary><div className="pi-history-picker"><Select aria-label="Focus scan history" value={selectedFocusScanId} disabled={running} onChange={(event) => selectFocus(focusScanHistory.find((record) => record.id === event.target.value))}>{focusHistoryOptions}</Select>{viewingOlderFocusScan && <Button variant="muted" className="pi-history-back" disabled={running} onClick={() => selectFocus(focusScanHistory[0])}>Latest</Button>}</div></details>}
       </div>
       <div className="pi-action">
-        <Button title="Run a general code review. Use the terminal for follow-up investigation." onClick={() => void runReview()} disabled={review.running}>{review.running ? "Reviewing…" : reviewMessages.length > 0 ? "Refresh findings" : "Full review"}</Button>
+        <Button title="Refresh the general review and inline findings together. Use the terminal for follow-up investigation." onClick={() => void runReview()} disabled={running}>{review.running ? "Reviewing…" : reviewMessages.length > 0 ? "Refresh findings" : "Full review"}</Button>
         {review.running && <AgentActivityLine activity={review.activity} />}
-        {aiReviewHistory.length > 1 && <details className="pi-history-compact"><summary><span className="disclosure-chevron" aria-hidden="true">›</span>Review history ({aiReviewHistory.length})</summary><div className="pi-history-picker"><Select aria-label="Review history" value={selectedAiReviewId} onChange={(event) => showAiReviewRecord(aiReviewHistory.find((record) => record.id === event.target.value))}>{aiHistoryOptions}</Select>{viewingOlderAiReview && <Button variant="muted" className="pi-history-back" onClick={() => showAiReviewRecord(aiReviewHistory[0])}>Latest</Button>}</div></details>}
+        {aiReviewHistory.length > 1 && <details className="pi-history-compact"><summary><span className="disclosure-chevron" aria-hidden="true">›</span>Review history ({aiReviewHistory.length})</summary><div className="pi-history-picker"><Select aria-label="Review history" value={selectedAiReviewId} disabled={running} onChange={(event) => selectMain(aiReviewHistory.find((record) => record.id === event.target.value))}>{aiHistoryOptions}</Select>{viewingOlderAiReview && <Button variant="muted" className="pi-history-back" disabled={running} onClick={() => selectMain(aiReviewHistory[0])}>Latest</Button>}</div></details>}
       </div>
     </div>
     <div className="pi-review-findings">
-      {focusAreas.length > 0 && <FocusFindingsList areas={focusAreas} viewedIds={viewedFocusIds} activeId={activeFocusAreaId} jump={jumpToFocusArea} />}
-      {!focusReview.running && !focusReview.error && focusReviewHasNoFindings(focusReview.text) && <Flash variant="success" className="focus-review-note clean" role="status"><strong>✓ Focus scan clean.</strong><span>No focus areas reported for this pass.</span>{focusReview.text.trim().toLowerCase() !== "no focus areas found." && <details><summary>Scan notes</summary><MarkdownText text={focusReview.text} fileLinks={{ prUrl }} /></details>}</Flash>}
-      {!focusReview.running && (focusReview.error || (focusReview.text.trim().length > 0 && !focusReviewHasNoFindings(focusReview.text) && focusAreas.length === 0)) && <Flash variant="warning" role="alert"><strong>Focus scan could not be validated.</strong><p>{focusReview.error ?? focusReview.text}</p>{focusReview.rawAnswer && <details><summary>Raw response</summary><pre>{focusReview.rawAnswer}</pre></details>}</Flash>}
+      {historyOnly && <p className="muted">Copy Feedback omits AI results from other revisions or unmatched review pairs. Your own notes are still included.</p>}
+      {focusReview.error && <Flash variant="warning" role="alert"><strong>Review analysis failed.</strong><p>{focusReview.error}</p>{(selectedMain || selectedFocus) && <p>Showing the previously selected results.</p>}{focusReview.rawAnswer && <details><summary>Raw response</summary><pre>{focusReview.rawAnswer}</pre></details>}</Flash>}
+      {focusAreas.length > 0 && <FocusFindingsList prUrl={prUrl} areas={focusAreas} viewedIds={viewedFocusIds} activeId={activeFocusAreaId} jump={jumpToFocusArea} />}
+      {!focusReview.running && focusReviewHasNoFindings(focusReview.text) && <Flash variant="success" className="focus-review-note clean" role="status"><strong>{focusReview.error ? "Previously selected scan: clean." : "✓ Focus scan clean."}</strong><span>No focus areas reported for this pass.</span>{focusReview.text.trim().toLowerCase() !== "no focus areas found." && <details><summary>Scan notes</summary><MarkdownText text={focusReview.text} fileLinks={{ prUrl }} /></details>}</Flash>}
+      {!focusReview.running && focusReviewIsInconclusive(focusReview.text) && <Flash variant="warning" className="focus-review-note" role="status">{focusReview.text}</Flash>}
+      {!focusReview.running && !focusReview.error && focusReview.text.trim().length > 0 && !focusReviewHasNoFindings(focusReview.text) && !focusReviewIsInconclusive(focusReview.text) && focusAreas.length === 0 && <Flash variant="warning" role="alert"><strong>Focus scan could not be validated.</strong><p>{focusReview.text}</p></Flash>}
       {reviewMessages.length > 0 && <div className="ai-chat-messages ai-review-response">{reviewMessages.map((message, index) => <GeneralReviewEntry key={index} message={message} prUrl={prUrl} />)}</div>}
     </div>
     {terminal}

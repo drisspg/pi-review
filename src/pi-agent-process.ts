@@ -22,6 +22,7 @@ type Options = { cwd: string; sessionDir: string; thinkingLevel: string; tools?:
 
 type RpcData = {
   get_state: RpcSessionState;
+  new_session: { cancelled: boolean };
   prompt: undefined;
   abort: undefined;
   get_available_models: { models: Model[] };
@@ -177,6 +178,29 @@ export class PiAgentProcess {
     } finally {
       this.settled = null;
     }
+  }
+
+  /** RPC rebuilds a session from launch flags; preserve later model/effort selections. */
+  async startFreshConversation(): Promise<void> {
+    const { model, thinkingLevel } = this.state;
+    this.bridge.metadata.ready = false;
+    try {
+      const { cancelled } = await this.request("new_session");
+      if (!cancelled) {
+        if (!this.bridge.metadata.ready) throw new Error("Pi Review's tool extension did not initialize in the fresh conversation.");
+        this.messages = [];
+        this.state = await this.request("get_state");
+        if (model && (this.model?.provider !== model.provider || this.model?.id !== model.id)) await this.setModel(model.provider, model.id);
+        if (this.thinkingLevel !== thinkingLevel) await this.setThinkingLevel(thinkingLevel);
+        return;
+      }
+    } catch (error) {
+      this.fail(error instanceof Error ? error : new Error(String(error)));
+      this.disposeAfterFailure();
+      throw error;
+    }
+    this.bridge.metadata.ready = true; // A veto leaves the existing session and its tools active.
+    throw new Error("Pi cancelled the fresh conversation.");
   }
 
   async getAvailableModels(): Promise<Model[]> {

@@ -50,6 +50,15 @@ test("launcher-backed agents stream through retries, call server-owned tools, sw
     await session.setThinkingLevel("high");
     assert.equal(session.model?.provider, "anthropic");
     assert.equal(session.thinkingLevel, "high");
+    const previousSession = session.sessionId;
+    await session.startFreshConversation();
+    assert.notEqual(session.sessionId, previousSession);
+    assert.deepEqual([session.model?.provider, session.model?.id, session.thinkingLevel], ["anthropic", "claude-fable-5-1", "high"]);
+    await session.prompt("/history");
+    assert.equal(piFinalAssistantAnswer(session.messages), "[]");
+    assert.equal(calls.at(-1), "/history");
+    await session.setModel("anthropic", "cancel-switch");
+    await assert.rejects(session.startFreshConversation(), /cancelled/);
     assert.deepEqual(await session.getAvailableThinkingLevels(), ["off", "low", "high"]);
     assert.equal((await session.getAvailableModels())[0].provider, "anthropic");
     const hanging = session.prompt("hang");
@@ -60,6 +69,11 @@ test("launcher-backed agents stream through retries, call server-owned tools, sw
     assert.equal(session.closed, true);
     unsubscribe();
     await session.dispose();
+    await session.dispose();
+    defaultModel = "missing-rebound-extension";
+    session = await PiAgentProcess.create({ cwd: root, sessionDir: root, thinkingLevel: "low", customTools: [] });
+    await assert.rejects(session.startFreshConversation(), /tool extension did not initialize/);
+    assert.equal(session.closed, true);
     await session.dispose();
     for (const [model, expected] of [["missing-extension", /tool extension did not initialize/], ["fallback", /refusing a fallback/]] as const) {
       defaultModel = model;

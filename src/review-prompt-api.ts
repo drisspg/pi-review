@@ -2,7 +2,7 @@ import { ghstackWorkspaceInstructions } from "./ghstack-guidance.js";
 import { reviewStandards } from "./pi-review-workspace.js";
 import { AI_DRAFT_FORMAT_GUIDELINE } from "./review-draft-actions.js";
 
-type ReviewPromptMode = "code-walk" | "guide-review" | "main-review" | "focus-review" | "test-pr" | "ai-chat" | "inline-chat" | "focus-chat" | "review-feedback" | "github-draft-handoff" | "pytorch-pre-review";
+type ReviewPromptMode = "code-walk" | "guide-review" | "main-review" | "focus-review" | "review-verify" | "review-synthesis" | "test-pr" | "ai-chat" | "inline-chat" | "focus-chat" | "review-feedback" | "github-draft-handoff" | "pytorch-pre-review";
 
 type PromptFile = {
   additions?: number;
@@ -147,10 +147,6 @@ function promptFiles(payload: Record<string, unknown>): PromptFile[] {
   });
 }
 
-function patchSummary(files: PromptFile[]): string {
-  return files.map((file) => `## ${file.filename}\n${file.patch ?? "Patch unavailable"}`).join("\n\n");
-}
-
 function statusPatchSummary(files: PromptFile[]): string {
   return files.map((file) => `## ${file.filename}\nStatus: ${file.status ?? "unknown"}, +${file.additions ?? 0}/-${file.deletions ?? 0}\n${file.patch ?? "Patch unavailable"}`).join("\n\n");
 }
@@ -252,14 +248,20 @@ ${statusPatchSummary(promptFiles(payload))}`,
   };
 }
 
+const readOnlyReview = "Investigate read-only: inspect real callers, implementation and tests. Do not edit files, create drafts or publish comments.";
+const priorReviewEvidence = "A viewed checkbox or previous report is not proof of a fix or a defect. Re-check prior concerns on this HEAD.";
+const focusLocationFormat = "Start each finding with a standalone Markdown heading `### path:startLine-endLine — short title` or `### path:line — short title`, then give the supported trigger, impact and evidence. Use an exact changed-file path and real HEAD lines (full-file navigation references, not publishable comment anchors). Inspect HEAD before citing lines outside the patch; do not guess line numbers or anchor at deleted files.";
+
 async function mainReviewPrompt(payload: Record<string, unknown>, deps: ReviewPromptApiDeps): Promise<ReviewPromptResponse> {
   const prKey = requiredString(payload, "prKey");
-  const previousAiReview = optionalString(payload, "previousAiReview", "No previous full review is stored.");
+  const previousAiReview = optionalString(payload, "previousAiReview", "No previous full review supplied for this pass.");
   const previousFocusAreas = optionalString(payload, "previousFocusAreas", "No previous focus scan findings are stored.");
   const reviewMemory = await deps.currentReviewMemoryPrompt();
   return {
     purpose: "main-review",
-    prompt: `Run a concise code review for ${prKey}. Focus on correctness, edge cases, tests, and concrete actionable findings. Lead with a short judgment on the change the author is actually making and the strongest evidence for it, including what you could not verify. If that path is sound, say so; do not make a niche follow-up the verdict on the whole PR. Avoid generic praise. Use bullets and file/line references for findings where helpful.
+    prompt: `Form an independent, provisional maintainer judgment for ${prKey}: does the change the author is making meet its intended contract, and leave the system better than the base? Look for a simpler owner of the changed policy or a cheaper design only when you can name the concrete cost to callers or the next maintainer. Separate that design judgment from defects. What, if anything, should prevent landing? Trace the main supported path and cite the strongest evidence. For a possible blocker, identify who can hit it, the actual consequence, and what the PR introduces or newly exposes compared to base. Separate pre-existing issues, optional improvements and checks you could not make (say why). A clean review is valid; do not turn a niche follow-up into the verdict.
+
+${readOnlyReview} ${priorReviewEvidence}
 
 Reviewer preference memory:
 ${reviewMemory}
@@ -270,13 +272,7 @@ ${previousAiReview}
 Previous focus scan state:
 ${previousFocusAreas}
 
-Inspect the relevant implementation, callers, and tests before reporting a concern. Attempt to disprove each candidate; report only concrete problems supported by current code. Complete ordinary read-only investigation without asking for approval. Do not modify source files or publish comments. If evidence is unavailable, state the limitation rather than claiming the code was checked.
-
-Before calling anything a landing blocker, say what the PR introduces or newly exposes, who can hit it under the supported contract, and what goes wrong. Compare the base when claiming a regression. A missing guard on an internal hook is not a blocker just because a test can manufacture inconsistent arguments. If an existing abstraction would remove duplicated policy, say that directly rather than inventing a correctness risk. Ask for a test only when it distinguishes a meaningful failure. A clean review is a valid result.
-
-Previous reviews are context, not proof. Re-check prior concerns against this revision: keep still-valid findings and omit addressed ones. A viewed checkbox or previous report does not establish that a defect was fixed.
-
-${patchSummary(promptFiles(payload))}`,
+${statusPatchSummary(promptFiles(payload))}`,
   };
 }
 
@@ -287,17 +283,9 @@ async function focusReviewPrompt(payload: Record<string, unknown>, deps: ReviewP
   const reviewMemory = await deps.currentReviewMemoryPrompt();
   return {
     purpose: "focus-review",
-    prompt: `You are a second, independent PR-review pass for ${prKey}. Look specifically for high-signal areas worth deeper human review, not a normal exhaustive review. Prioritize:
-- concrete inconsistencies with nearby codebase patterns or API contracts
-- surprising behavior, hidden assumptions, or edge cases with plausible impact
-- tests, migrations, performance, concurrency, or compatibility risks supported by evidence
-- subtle tradeoffs that remain genuinely unresolved after inspecting the code and its conventions
+    prompt: `Investigate ${prKey} independently: of the possible failure paths, which one or two highest-consequence risks deserve a closer look, and can a real caller trigger them? Test those hypotheses against nearby precedent, supported user overrides, tests and the base revision. State what you inspected and what the evidence rules in or out; do not pad the result with speculative guards or unrelated cleanup. Distinguish a PR regression from a pre-existing issue.
 
-Investigate before reporting. For every candidate, inspect the surrounding implementation, nearby precedent, tests, and relevant language or build-system semantics, then actively try to disprove the concern. Suppress it when the behavior is standard, matches adjacent code, preserves an intentional user override, is answered by the diff or repository, or depends only on a speculative future scenario. A technically true observation is not a focus area unless it exposes a realistic failure mode or a consequential unresolved design choice.
-
-Respect supported user overrides and the repository's documented environment contract. Report migration or cached-state concerns only when they expose a supported workflow's realistic failure. Complete ordinary read-only investigation without asking for approval; do not modify source files or publish comments. If investigation is blocked, explain the limitation instead of returning a clean result.
-
-Do not manufacture questions to fill the list. "Could this be intentional?", "should this be different?", and similar questions are not findings without concrete evidence that the current behavior is wrong or risky. Prefer no findings over a weak finding.
+${readOnlyReview} ${priorReviewEvidence}
 
 Reviewer preference memory:
 ${reviewMemory}
@@ -305,13 +293,41 @@ ${reviewMemory}
 Previous focus scan state:
 ${previousFocusAreas}
 
-Re-check previous findings against this revision and retain concerns that remain valid. Being previously reported or viewed does not mean a defect is resolved. Use the closest current reviewable location; omit concerns that are now addressed.
-
-Return markdown with a "Focus areas" list. Start each item with a clickable-style location in this exact format: \`path:startLine-endLine — short title\` or \`path:line — short title\`. Use exact changed-file paths and real HEAD line numbers, including surrounding unchanged code outside the patch when needed; these are full-file navigation references, not publishable comment anchors. Inspect the HEAD file before citing lines not shown in the patch; do not guess line numbers or anchor at deleted files. Then state the evidence, realistic impact, and the specific unresolved reviewer question. Avoid generic praise and blocking language unless there is strong evidence. If no candidate survives investigation, return exactly: \`No focus areas found.\`
+${focusLocationFormat} If the checks rule out the risks, conclude with \`No focus areas found.\` If blocked instead, name the missing evidence and why it matters; do not claim a clean result.
 
 PR title: ${prTitle}
 
 ${statusPatchSummary(promptFiles(payload))}`,
+  };
+}
+
+function reviewHandoffEvidence(payload: Record<string, unknown>, investigationLabel: string): string {
+  return `Provisional maintainer draft:\n${requiredString(payload, "maintainerDraft")}\n\n${investigationLabel}:\n${requiredString(payload, "investigation")}\n\nChanged files (the diff was supplied to both initial passes):\n${promptFiles(payload).map(file => file.filename).join("\n")}`;
+}
+
+function reviewVerifyPrompt(payload: Record<string, unknown>): ReviewPromptResponse {
+  return {
+    purpose: "focus-review",
+    prompt: `Verify the review of ${requiredString(payload, "prKey")}. Try to disprove each provisional blocker and settle each independent candidate against the code. Compare the supported trigger, caller, scope and base behavior. Silence from a pass that checked a different path is not counterevidence. Distinguish introduced or newly exposed problems from pre-existing ones. ${readOnlyReview}
+
+Put private verification notes before the standalone Markdown heading \`## Focus areas\`. For refuted or uncertain claims give the decisive evidence or the missing check and why it was unavailable. Put only surviving navigable findings below the heading, one per distinct issue. If a verified issue cannot be anchored in a changed HEAD file (for example, removed code), explain it in the notes for the final verdict instead of inventing a location. ${focusLocationFormat}
+
+Write for the maintainer who knows the system but hasn't traced this path. On the location line, give just the short, observable outcome. On the next lines, walk through the smallest supported example: what the caller expects, what actually happens and which operation explains the difference. For kernels, use a few values, a stride comparison or the order of two operations if that makes it easier to see; don't invent numbers, insist on a diagram, or dump the kernel. Distinguish an observed result from a prediction traced in source. Give the coding agent one discriminating check and its expected result, not a prescribed patch. For a design finding, explain the concrete maintenance cost instead of manufacturing a failing example. Keep this explanation and check visible. Only if a longer trace adds value, put it last under a standalone \`### Evidence\` heading; use ordinary prose, bullets or fenced code inside Evidence; only the next location heading starts another finding.
+
+If checks completed and nothing survived, put \`No focus areas found.\` alone below the heading. If you cannot settle a material claim and have no verified finding, write a single line beginning "Investigation inconclusive:" followed by the specific missing check and why it matters, without the clean marker. Do not append notes after the findings.
+
+${reviewHandoffEvidence(payload, "Independent investigation")}${[optionalRecordString(payload, "previousAiReview"), optionalRecordString(payload, "previousFocusAreas")].filter(Boolean).map(report => "\n\nEarlier saved review (context only; re-check against this HEAD):\n" + report).join("")}`,
+  };
+}
+
+function reviewSynthesisPrompt(payload: Record<string, unknown>): ReviewPromptResponse {
+  return {
+    purpose: "main-review",
+    prompt: `Give the final maintainer judgment for ${requiredString(payload, "prKey")} in a few sentences. In plain language, explain what changed on the main path, why that matters to the caller, and whether it is ready to land. For a kernel, describe the movement or computation that changed rather than listing symbols. Ground the decision in the verified evidence. Resolve differences in scope rather than averaging votes: one pass checking a different caller neither confirms nor contradicts the other. Do not resurrect refuted claims or call a pre-existing issue a regression. State what remains materially unverified and why; missing evidence is not a clean bill of health.
+
+Surviving focus findings are shown separately. State their effect on readiness, but leave their details and action items inline so dismissing a card also dismisses its advice. For a verified issue with no possible inline anchor, state the trigger and consequence here instead. Do not repeat inline issue descriptions or turn dismissed items, uncertainty, or private verification notes into requests. No second findings list, intermediate reports, or process narrative. ${readOnlyReview}
+
+${reviewHandoffEvidence(payload, "Verified investigation")}`,
   };
 }
 
@@ -528,8 +544,9 @@ function reviewFeedbackPrompt(payload: Record<string, unknown>): ReviewPromptRes
   const userComments = promptFeedbackItems(payload, "userComments");
   const aiComments = promptAiMessages(payload);
   // Checked-off focus areas mean "handled or deliberately dismissed" — they stay out of the feedback pool.
-  const focusAreas = promptFocusAreas(payload).filter((area) => area.viewed !== true);
-  const dismissedCount = promptFocusAreas(payload).length - focusAreas.length;
+  const allFocusAreas = promptFocusAreas(payload);
+  const focusAreas = allFocusAreas.filter((area) => !area.viewed);
+  const dismissedCount = allFocusAreas.length - focusAreas.length;
 
   return {
     purpose: "review-feedback",
@@ -548,7 +565,7 @@ ${reviewStandards} Follow the checkout’s testing guidance when validating chan
 
 ## What to act on
 - My notes (R0, D1, ...): do the clear ones; answer my questions by investigating the code (a short answer, plus a change only if the answer shows one is needed).
-- AI items (AI dialogue, focus areas, AI-GLOBAL): suggestions only. Trace a supported input or caller to the failure; a rare valid input still counts. Fix a verified problem introduced or newly exposed by the PR when the fix is small and in scope. Surface serious bugs even if pre-existing or expensive to fix: give the trigger, impact, and whether reproduced or established from code. If evidence is incomplete, say what check would settle it rather than calling it confirmed. Skip speculative guards, optional cleanup, and redundant tests unless my notes ask for them; do not turn skipped AI suggestions into questions. Ask only for consequential decisions. Never present AI items as my requests.
+- AI items (AI dialogue, focus areas, AI-GLOBAL): suggestions only. Use the finding’s example and expected result as a starting point: reproduce or trace the same supported caller, compare against the control, and recheck after the fix. If the current code already satisfies the contract, say why rather than adding a guard. A rare valid input still counts. Fix a verified problem introduced or newly exposed by the PR when the fix is small and in scope. Surface serious bugs even if pre-existing or expensive to fix: give the trigger, impact, and whether reproduced or established from code. If evidence is incomplete, say what check would settle it rather than calling it confirmed. Skip speculative guards, optional cleanup, and redundant tests unless my notes ask for them; do not turn skipped AI suggestions into questions. Ask only for consequential decisions. Never present AI items as my requests.
 - Deduplicate overlapping points while retaining all contributing IDs (one line, all IDs).
 - Never draft, suggest, or return reply text for review threads. Do not add "needs reply" or communication follow-up tasks, and do not invent work for status comments.
 
@@ -576,7 +593,7 @@ ${formatFeedbackItems(userComments.filter((item) => item.source === "github"), "
 ${formatAiMessages(aiComments)}
 
 ## AI focus areas
-${dismissedCount > 0 ? `The reviewer checked off ${dismissedCount} focus area${dismissedCount === 1 ? "" : "s"} as handled or not worth addressing; those are deliberately excluded.\n\n` : ""}${formatFocusAreas(focusAreas)}
+${dismissedCount > 0 ? `The reviewer checked off ${dismissedCount} focus area${dismissedCount === 1 ? "" : "s"} as handled or not worth addressing; those are deliberately excluded. Use AI-GLOBAL as context only, not a way to reconstruct excluded action items.\n\n` : ""}${formatFocusAreas(focusAreas)}
 
 ## AI global feedback [AI-GLOBAL]
 ${globalFeedback}`,
@@ -596,6 +613,10 @@ export function createReviewPromptApi(deps: ReviewPromptApiDeps): ReviewPromptAp
         return await mainReviewPrompt(payload, deps);
       case "focus-review":
         return await focusReviewPrompt(payload, deps);
+      case "review-verify":
+        return reviewVerifyPrompt(payload);
+      case "review-synthesis":
+        return reviewSynthesisPrompt(payload);
       case "test-pr":
         return testPrPrompt(payload);
       case "ai-chat":

@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { PiAgentProcess, PiAgentStartupError } from "../../src/pi-agent-process.js";
 
 import { askPi, disposePiSession, disposePiSessions, piActivity, piFinalAssistantAnswer, piSessionCwd, prewarmPiSession, registerPiSessionContext } from "../../src/pi-session.js";
@@ -25,6 +26,27 @@ test("final assistant result excludes commentary and recovers from earlier model
   assert.throws(() => piFinalAssistantAnswer([assistant("partial", "aborted")]), /aborted/);
   assert.throws(() => piFinalAssistantAnswer([assistant("earlier"), assistant("")]), /without assistant text/);
   assert.throws(() => piFinalAssistantAnswer([]), /without assistant text/);
+});
+
+test("a fresh discovery waits for prior turns, then retains only the new pair's evidence", async () => {
+  const root = await mkdtemp(resolve(tmpdir(), "pi-review-pair-history-"));
+  const env = { PI_REVIEW_PI_COMMAND: fileURLToPath(new URL("../fixtures/pi-rpc.mjs", import.meta.url)), PI_REVIEW_STATE_PATH: resolve(root, "state.json"), PI_REVIEW_LOCAL_CONFIG: resolve(root, "config.json") };
+  const previous = new Map(Object.keys(env).map((name) => [name, process.env[name]]));
+  Object.assign(process.env, env);
+  try {
+    await writeFile(env.PI_REVIEW_LOCAL_CONFIG, JSON.stringify({ model: "openai/fixture" }));
+    await registerPiSessionContext(key, root, { headSha: "head", files: [] });
+    const ask = (prompt: string, fresh = false) => askPi(key, prompt, "main-review", undefined, undefined, fresh);
+    const answers = await Promise.all([ask("old collaborator finding"), ask("/history"), ask("/history", true), ask("current finding"), ask("/history")]);
+    assert.deepEqual(answers, ["old collaborator finding", '["old collaborator finding"]', "[]", "current finding", '["/history","current finding"]']);
+  } finally {
+    await disposePiSession(key);
+    for (const [name, value] of previous) {
+      if (value == null) delete process.env[name];
+      else process.env[name] = value;
+    }
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("disposal invalidates queued work before it can create a fallback session", async () => {

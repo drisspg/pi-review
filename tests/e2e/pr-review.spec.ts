@@ -1609,7 +1609,8 @@ test("selects diff code text without opening a thread", async ({ page }) => {
   await expect(page.locator(".local-thread")).toHaveCount(0);
 });
 
-test("lists focus findings in the Pi panel and jumps to each inline card", async ({ page }) => {
+test("explains focus findings in both views and copies collapsed evidence", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await mockNativeTerminal(page);
   await openFirstFile(page);
   const file = page.locator(".file").first();
@@ -1617,17 +1618,37 @@ test("lists focus findings in the Pi panel and jumps to each inline card", async
   const path = await row.getAttribute("data-path");
   const line = await row.getAttribute("data-line");
   if (path == null || line == null) throw new Error("Missing diff row target");
-  await mockAnalysis(page, "focus-review", `## Focus areas\n- ${path}:${line} — Listed finding\nCheck the listed spot.`);
+  const title = "Closing one tab discards another tab’s draft";
+  const example = "With two tabs open, closing the first should keep the second draft. Instead, both drafts disappear.";
+  const basis = "Reading the close handler shows it clears all drafts, not just the current tab.";
+  const check = "Save a draft in each tab, close one, and check the remaining draft.";
+  const trace = "clearDrafts removes entries for both tabs";
+  const body = `${example}\n\n${basis}\n\n${check}\n\n### Evidence\n\n\`\`\`text\n${trace}\n\`\`\``;
+  await mockAnalysis(page, "focus-review", `## Focus areas\n### ${path}:${line} — ${title}\n${body}`);
   await openSideTab(page, "Pi");
   await page.getByRole("button", { name: /^(Focus scan|Refresh focus scan)$/ }).click();
   const findings = page.getByRole("list", { name: "Focus findings" });
   await expect(page.locator(".focus-findings")).toContainText("1 open · 0 resolved");
   await file.locator(".file-summary-left").click();
   await expect(file.locator(".diff-row")).toHaveCount(0);
-  await findings.getByRole("button", { name: "Go to focus finding: Listed finding" }).click();
-  await expect(page.locator(".focus-area-inline").filter({ hasText: "Listed finding" })).toBeInViewport();
+  await findings.getByRole("button", { name: `Go to focus finding: ${title}` }).click();
+  const inline = page.locator(".focus-area-inline").filter({ hasText: title });
+  await expect(inline).toBeInViewport();
   await expect(findings.locator(".focus-finding-link.active")).toHaveCount(1);
-  await page.locator(".focus-area-inline").getByRole("button", { name: "Resolve focus area: Listed finding" }).click();
+  for (const view of [findings, inline]) {
+    for (const paragraph of [example, basis, check]) await expect(view.getByText(paragraph, { exact: true })).toBeVisible();
+    const disclosure = view.locator("summary").filter({ hasText: "Evidence" });
+    const evidence = view.locator("code", { hasText: trace });
+    await expect(evidence).toBeHidden();
+    await disclosure.focus();
+    await page.keyboard.press("Enter");
+    await expect(evidence).toBeVisible();
+    await page.keyboard.press("Enter");
+    await expect(evidence).toBeHidden();
+  }
+  await page.getByRole("button", { name: "Copy feedback prompt" }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain(body);
+  await inline.getByRole("button", { name: `Resolve focus area: ${title}` }).click();
   await expect(page.locator(".focus-findings")).toContainText("0 open · 1 resolved");
   await expect(findings.locator(".focus-finding-link.resolved")).toHaveCount(1);
 });
@@ -1847,7 +1868,7 @@ test("keeps a viewed unchanged file collapsed when the review reopens", async ({
   await viewedCleared;
 });
 
-test("keeps focus findings and resolution controls inline, not duplicated in the Pi panel", async ({ page }) => {
+test("keeps focus resolution controls inline, not duplicated in the Pi panel", async ({ page }) => {
   await mockNativeTerminal(page);
   const rows = await openFileWithAddedRows(page, 2);
   const firstPath = await rows.nth(0).getAttribute("data-path");
@@ -1909,6 +1930,18 @@ test("accepts a clean focus conclusion and preserves investigation limitations",
   await expect(panel.locator(".focus-review-note .markdown")).toContainText("Could not independently rerun CUDA/NCCL on macOS.");
 });
 
+test("shows an inconclusive investigation as a limitation, not a clean or invalid scan", async ({ page }) => {
+  const answer = "Investigation inconclusive: verifying the dispatch path requires a CUDA build unavailable here.";
+  await mockNativeTerminal(page);
+  await mockAnalysis(page, "focus-review", answer);
+  await openSideTab(page, "Pi");
+  const panel = page.locator(".ai-review");
+  await panel.getByRole("button", { name: /Focus scan|Refresh focus scan/ }).click();
+  await expect(panel.getByRole("status").filter({ hasText: answer })).toBeVisible();
+  await expect(panel).not.toContainText("Focus scan clean");
+  await expect(panel).not.toContainText("could not be validated");
+});
+
 for (const status of ["failed", "invalid"] as const) {
   test(`does not show ${status} focus scans as clean and exposes the diagnostic`, async ({ page }) => {
     await mockAnalysis(page, "focus-review", "No focus areas found.");
@@ -1927,9 +1960,10 @@ for (const status of ["failed", "invalid"] as const) {
     });
     await panel.getByRole("button", { name: /Focus scan|Refresh focus scan/ }).click();
     const alert = panel.getByRole("alert");
-    await expect(alert).toContainText("Focus scan could not be validated.");
+    await expect(alert).toContainText("Review analysis failed.");
     await expect(alert).toContainText(diagnostic);
     await expect(panel.getByText("Focus scan clean", { exact: false })).toHaveCount(0);
+    await expect(panel.getByRole("status").filter({ hasText: "Previously selected scan: clean." })).toBeVisible();
     await alert.getByText("Raw response", { exact: true }).click();
     await expect(alert.locator("pre")).toHaveText(rawAnswer);
   });
@@ -1980,6 +2014,43 @@ test("runs the right-sidebar Pi review beside the native terminal", async ({ pag
   await expect(panel).not.toHaveClass(/terminal-focused/);
 });
 
+test("feedback excludes mismatched and previous-head findings without hiding their history", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.route("**/api/pr/open", async (route) => {
+    const data = await (await route.fetch()).json();
+    const record = (id: string, reviewPairId: string, headSha: string) => ({ id, headSha, prKey: data.pr.key, createdAt: "now", updatedAt: "now", provenance: { reviewPairId } });
+    const aiReview = { ...record("orphan-main", "unmatched", data.pr.headSha), answer: "Unmatched general review." };
+    const focusScan = { ...record("orphan-focus", "different", data.pr.headSha), answer: "file.ts:1 — Unmatched focus", areaStates: {} };
+    const oldReview = { ...record("old-main", "old", "prior-head"), answer: "General review from prior head." };
+    const oldScan = { ...record("old-focus", "old", "prior-head"), answer: "file.ts:2 — Prior head focus", areaStates: {} };
+    const legacy = { ...aiReview, id: "legacy-main", provenance: undefined, answer: "Legacy maintainer note." };
+    await route.fulfill({ json: { ...data, aiReview, aiReviews: [aiReview, oldReview, legacy], focusScan, focusScans: [focusScan, oldScan] } });
+  });
+  await page.reload();
+  await expect(page.locator(".review-layout")).toBeVisible();
+  await mockNativeTerminal(page);
+  await openSideTab(page, "Pi");
+  const panel = page.locator(".ai-review");
+  async function checkCopy() {
+    const payload = page.waitForRequest((request) => request.url().endsWith("/api/pi/prompt") && request.postDataJSON().mode === "review-feedback");
+    await panel.locator(".pi-copy-feedback").click();
+    expect((await payload).postDataJSON()).toMatchObject({ globalFeedback: "", focusAreas: [], aiComments: [] });
+  }
+  await expect(panel).toContainText("Unmatched general review.");
+  await checkCopy();
+  await panel.locator("summary").filter({ hasText: "Focus scan history (" }).click();
+  await panel.getByLabel("Focus scan history", { exact: true }).selectOption("old-focus");
+  await expect(panel).toContainText("General review from prior head.");
+  await checkCopy();
+  await panel.locator("summary").filter({ hasText: "Review history (" }).click();
+  await panel.getByLabel("Review history", { exact: true }).selectOption("legacy-main");
+  await expect(panel).toContainText("Legacy maintainer note.");
+  await expect(panel.locator(".pi-review-findings")).not.toContainText("Prior head focus");
+  const legacyCopy = page.waitForRequest(request => request.url().endsWith("/api/pi/prompt") && request.postDataJSON().mode === "review-feedback");
+  await panel.locator(".pi-copy-feedback").click();
+  expect((await legacyCopy).postDataJSON()).toMatchObject({ globalFeedback: "Legacy maintainer note.", focusAreas: [] });
+});
+
 test("Pi panel copies the same overall instruction it archives", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   const note = "Fix the cache regression; leave the helper alone.";
@@ -2011,8 +2082,26 @@ test("copies local draft comments in a feedback prompt from the Review tab and a
     }
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ prompt: `prompt for ${String(body.mode)}`, purpose: String(body.mode) }) });
   });
-  await mockAnalysis(page, "main-review", "Global feedback from Pi.");
-  await mockAnalysis(page, "focus-review", `## Focus areas\n- ${path}:${line} — copied focus area\nCheck this focused spot.`);
+  const starts: AnalysisKind[] = [];
+  let complete!: () => void;
+  const firstPass = new Promise<void>((resolve) => { complete = resolve; });
+  await page.route("**/api/analysis/start", async (route) => {
+    const { prKey, headSha, kind } = route.request().postDataJSON();
+    starts.push(kind);
+    const pass = starts.length;
+    if (pass === 1) await firstPass;
+    if (pass === 4) {
+      await route.fulfill({ json: { run: { id: "failed-refresh", prKey, headSha, kind, status: "failed", error: "Verification failed.", rawAnswer: "Private verifier diagnostic." } } });
+      return;
+    }
+    const base = { prKey, headSha, createdAt: `2026-01-0${pass}`, updatedAt: `2026-01-0${pass}`, provenance: { reviewPairId: `pair-${pass}`, runId: `run-${pass}`, version: 1, model: "mock", thinkingLevel: "high" } };
+    const answer = `Global feedback from pass ${pass}.`;
+    const main = { kind: "main-review", record: { ...base, id: `main-${pass}`, answer, messages: [{ role: "pi", kind: "general-review", text: answer }, { role: "thinking", text: "intermediate analysis" }] } };
+    const focusAnswer = `## Focus areas\n- ${path}:${line} — focus from pass ${pass}\nCheck this focused spot.`;
+    const focus = { kind: "focus-review", record: { ...base, id: `focus-${pass}`, answer: focusAnswer, areaStates: {} }, areas: parseFocusAreas(focusAnswer) };
+    const [result, companion] = kind === main.kind ? [main, focus] : [focus, main];
+    await route.fulfill({ json: { run: { id: `run-${pass}`, prKey, headSha, kind, status: "complete", startedAt: base.createdAt, result, companion: pass === 3 ? undefined : companion } } });
+  });
   await loadDraftReviewFromTerminal(page, [{ id: "feedback-draft", path, line: lineNumber, side: "RIGHT", body: "Keep this local feedback out of GitHub." }]);
   await openSideTab(page, "Review");
   await expect(page.locator(".review-summary .draft-card", { hasText: "Keep this local feedback out of GitHub." })).toBeVisible();
@@ -2020,9 +2109,39 @@ test("copies local draft comments in a feedback prompt from the Review tab and a
   await openSideTab(page, "Pi");
   const panel = page.locator(".ai-review");
   await panel.getByRole("button", { name: /Full review|Refresh findings/ }).click();
-  await expect(panel).toContainText("Global feedback from Pi");
-  await panel.getByRole("button", { name: /Focus scan|Refresh focus scan/ }).click();
-  await expect(page.locator(".focus-area-inline")).toContainText("copied focus area");
+  try {
+    await expect(panel.getByRole("button", { name: "Scanning…" })).toBeDisabled();
+    await expect(panel.getByRole("button", { name: "Reviewing…" })).toBeDisabled();
+  } finally {
+    complete();
+  }
+  await expect(panel).toContainText("Global feedback from pass 1");
+  await expect(panel).toContainText("focus from pass 1");
+  await panel.getByRole("button", { name: "Refresh focus scan" }).click();
+  await expect(panel).toContainText("Global feedback from pass 2");
+  await expect(page.locator(".focus-area-inline", { hasText: "focus from pass 2" }).first()).toBeVisible();
+  expect(starts).toEqual(["main-review", "focus-review"]);
+  await panel.locator("summary").filter({ hasText: "Review history (" }).click();
+  await panel.getByLabel("Review history", { exact: true }).selectOption("main-1");
+  await expect(panel).toContainText("focus from pass 1");
+  await expect(panel).not.toContainText("Global feedback from pass 2");
+  await panel.locator("summary").filter({ hasText: "Focus scan history (" }).click();
+  for (const button of ["Refresh focus scan", "Refresh findings"]) {
+    await panel.getByRole("button", { name: button }).click();
+    const alert = panel.getByRole("alert");
+    await expect(alert).toContainText("Review analysis failed.");
+    if (button === "Refresh findings") {
+      await expect(alert).toContainText("Verification failed.");
+      await alert.getByText("Raw response", { exact: true }).click();
+      await expect(alert.locator("pre")).toHaveText("Private verifier diagnostic.");
+    } else {
+      await expect(alert).toContainText("Analysis returned only half of a paired review.");
+    }
+    await expect(panel.getByLabel("Review history", { exact: true })).toHaveValue("main-1");
+    await expect(panel.getByLabel("Focus scan history", { exact: true })).toHaveValue("focus-1");
+    await expect(panel).toContainText("Global feedback from pass 1.");
+    await expect(page.locator(".focus-area-inline", { hasText: "focus from pass 1" }).first()).toBeVisible();
+  }
   await openSideTab(page, "Review");
   const reviewPanel = page.locator(".side .panel");
   const finalDraftSave = page.waitForResponse((response) => response.url().endsWith("/api/draft-review/save") && (response.request().postDataJSON() as { body?: string }).body === "Keep this overall note local too.");
@@ -2040,6 +2159,9 @@ test("copies local draft comments in a feedback prompt from the Review tab and a
   await expect(reviewPanel.locator(".draft-card")).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain("# Task: work through my review notes");
   const prompt = await page.evaluate(() => navigator.clipboard.readText());
+  expect(prompt).toContain("Global feedback from pass 1.");
+  expect(prompt).toContain("focus from pass 1");
+  expect(prompt).not.toContain("Private verifier diagnostic.");
   expect(prompt).toContain("Mode: Act.");
   expect(prompt).toContain("Never classify my drafts as needing replies");
   const ownNotes = prompt.split("## Requester-authored private review notes")[1].split("## GitHub discussion")[0];
@@ -2055,8 +2177,8 @@ test("copies local draft comments in a feedback prompt from the Review tab and a
   expect(userComments?.find((comment) => comment.body === "Keep this local feedback out of GitHub.")).toMatchObject({ source: "requester-draft", id: "D1" });
   expect(userComments?.find((comment) => comment.body?.includes("Before #2448"))).toMatchObject({ source: "github" });
   expect(aiComments).toEqual([]);
-  expect(focusAreas?.[0]).toMatchObject({ path, startLine: lineNumber, title: "copied focus area" });
-  expect(feedbackPayload?.globalFeedback).toBe("Global feedback from Pi.");
+  expect(focusAreas?.[0]).toMatchObject({ path, startLine: lineNumber, title: "focus from pass 1" });
+  expect(feedbackPayload?.globalFeedback).toBe("Global feedback from pass 1.");
 
   await page.reload();
   await expect(page.locator(".review-layout")).toBeVisible({ timeout: 60_000 });

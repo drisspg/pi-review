@@ -64,15 +64,41 @@ test("review prompt API injects memory for main and focus review prompts", async
   assert.match(main.prompt, /Previous full review:\nold review/);
   assert.equal(focus.purpose, "focus-review");
   assert.match(focus.prompt, /Previous focus scan state:\nold focus/);
-  assert.match(focus.prompt, /actively try to disprove the concern/);
-  assert.match(focus.prompt, /preserves an intentional user override/);
-  assert.match(focus.prompt, /Respect supported user overrides/);
-  assert.match(focus.prompt, /If investigation is blocked, explain the limitation instead of returning a clean result/);
-  assert.match(main.prompt, /A viewed checkbox or previous report does not establish that a defect was fixed/);
-  assert.match(focus.prompt, /Prefer no findings over a weak finding/);
-  assert.match(focus.prompt, /full-file navigation references, not publishable comment anchors/);
-  assert.match(focus.prompt, /do not guess line numbers or anchor at deleted files/);
+  assert.match(main.prompt, /provisional maintainer judgment/i);
+  assert.match(main.prompt, /previous report.*not proof/i);
+  assert.match(focus.prompt, /one or two highest-consequence risks/i);
+  assert.match(focus.prompt, /supported user overrides/i);
   assert.match(focus.prompt, /No focus areas found\./);
+});
+
+test("verification requests counterevidence outside the navigable findings list", async () => {
+  const { purpose, prompt } = await api().build({ mode: "review-verify", prKey: "pr", files, maintainerDraft: "Possible stale cache", investigation: "Eviction is serialized" });
+  assert.equal(purpose, "focus-review");
+  for (const input of ["Possible stale cache", "Eviction is serialized", "src/a.ts"]) assert.ok(prompt.includes(input));
+  assert.match(prompt, /disprove each provisional blocker/i);
+  assert.match(prompt, /refuted.*uncertain/i);
+  assert.match(prompt, /before.*## Focus areas/);
+  assert.match(prompt, /path:startLine-endLine — short title/);
+  assert.match(prompt, /do not guess line numbers or anchor at deleted files/);
+  assert.match(prompt, /without the clean marker/);
+});
+
+test("synthesis reconciles the draft against verification without duplicating inline feedback", async () => {
+  const { purpose, prompt } = await api().build({ mode: "review-synthesis", prKey: "pr", files, maintainerDraft: "Request changes: possible stale cache", investigation: "Refuted: eviction takes the same lock.\nNo focus areas found." });
+  assert.equal(purpose, "main-review");
+  for (const input of ["Request changes: possible stale cache", "Refuted: eviction takes the same lock.", "src/a.ts"]) assert.ok(prompt.includes(input));
+  assert.match(prompt, /do not resurrect refuted claims/i);
+  assert.match(prompt, /leave their details and action items inline/i);
+  assert.match(prompt, /unverified.*why/i);
+});
+
+test("both handoff stages require the two reports and the changed files", async () => {
+  for (const mode of ["review-verify", "review-synthesis"]) {
+    const complete = { mode, prKey: "pr", files, maintainerDraft: "Draft", investigation: "Investigation" };
+    for (const key of ["maintainerDraft", "investigation", "files"]) {
+      await assert.rejects(api().build({ ...complete, [key]: undefined }), new RegExp(`Expected ${key}`));
+    }
+  }
 });
 
 test("review prompt API builds test-pr prompts for CLI-first validation", async () => {
@@ -125,6 +151,8 @@ test("review prompt API builds copyable review feedback bundles", async () => {
       { path: "src/b.ts", startLine: 10, endLine: 12, title: "dismissed concern", body: "src/b.ts:10-12 — not worth addressing", viewed: true },
     ],
     globalFeedback: "Global review says the flow is sound.",
+    maintainerDraft: "Provisional candidate, not feedback",
+    investigation: "Private verification notes, not feedback",
   });
 
   assert.equal(result.purpose, "review-feedback");
@@ -151,7 +179,8 @@ test("review prompt API builds copyable review feedback bundles", async () => {
   assert.match(result.prompt, /Pi · Follow-up · chat\nadd a regression test/);
   assert.match(result.prompt, /src\/a\.ts:4-6 — edge case/);
   // Checked-off focus areas stay out of the feedback pool.
-  assert.doesNotMatch(result.prompt, /dismissed concern/);
+  assert.doesNotMatch(result.prompt, /dismissed concern|Provisional candidate|Private verification notes/);
+  assert.match(result.prompt, /Use AI-GLOBAL as context only/);
   assert.match(result.prompt, /checked off 1 focus area as handled or not worth addressing/);
   assert.match(result.prompt, /Global review says the flow is sound/);
 });

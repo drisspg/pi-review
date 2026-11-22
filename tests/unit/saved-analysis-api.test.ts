@@ -41,6 +41,7 @@ function fakeDeps() {
         guideInputs.push(review as Record<string, unknown>);
         return { ...review, id: review.id ?? "guide-id", createdAt: review.createdAt ?? "then", updatedAt: "now" } as GuideReviewRecord;
       },
+      async listFocusScans(): Promise<FocusScanRecord[]> { return []; },
       async listAiReviews(): Promise<AiReviewRecord[]> { return []; },
       async saveOverview(record: Omit<GuideReviewRecord, "id" | "createdAt" | "updatedAt" | "stepStates">) {
         overviewInputs.push(record as Record<string, unknown>);
@@ -136,6 +137,19 @@ test("legacy guide saves forward explicit identity for immutable validation", as
   const { deps, guideInputs } = fakeDeps();
   await createSavedAnalysisApi(deps).saveGuideReview({ prKey: "pr", id: "old", headSha: "head", answer: "guide" });
   assert.equal(guideInputs[0].id, "old");
+});
+
+test("terminal review reads the verdict with open evidence from the very same review", async () => {
+  const provenance = { runId: "run", version: 1, model: "model", thinkingLevel: "medium", reviewPairId: "pair" };
+  const main = { id: "r", prKey: "p", headSha: "sha", answer: "Request changes", createdAt: "r", updatedAt: "r", provenance };
+  const scan = { ...main, id: "s", answer: "- foo:1 — dismissed issue\n- foo:2 — retained build\nA clear and relaunch keeps the old entry.", areaStates: { "foo:1-1:0": { viewed: true, collapsed: false, updatedAt: "now" } } };
+  const wrongScan = { ...scan, provenance: { ...provenance, reviewPairId: "other" }, answer: "- foo:3 — unrelated issue" };
+  const api = createSavedAnalysisApi({ ...fakeDeps().deps, listAiReviews: async () => [main], listFocusScans: async () => [wrongScan, scan] });
+  const text = (await api.readGeneralReview({ prKey: "p", headSha: "sha" })).review!.text;
+  assert.match(text, /Request changes/);
+  assert.match(text, /retained build/);
+  assert.match(text, /clear and relaunch/);
+  assert.doesNotMatch(text, /dismissed issue|unrelated issue/);
 });
 
 test("general review read prefers the caller's head, excludes chat, and flags stale reviews", async () => {

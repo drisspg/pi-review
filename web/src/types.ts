@@ -1,3 +1,6 @@
+import type { AiReviewRecord, FocusScanRecord } from "../../src/types";
+export type { AiReviewRecord, FocusScanRecord };
+
 export type StoredPullRequest = { key: string; url: string; title: string; body: string | null; state: string; merged?: boolean; author: string | null; baseSha: string; headSha: string; filesChanged: number | null; existingCommentCount: number | null; lastOpenedAt: string; lastReviewedHeadSha: string | null; lastReviewEvent: "COMMENT" | "APPROVE" | "REQUEST_CHANGES" | null; reviewDecision: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null };
 export type PullRequestListItem = StoredPullRequest & { checkoutPresent: boolean };
 export type PullFile = { filename: string; previous_filename?: string; status: string; additions: number; deletions: number; changes: number; patch?: string; generated?: boolean };
@@ -20,10 +23,8 @@ export type PiAgentActivity = { status: "queued" | "running" | "complete" | "fai
 export type FocusReview = { running: boolean; text: string; activity?: PiAgentActivity | null; error?: string; rawAnswer?: string };
 export type FlowDag = { running: boolean; text: string; error: string | null; activity?: PiAgentActivity | null };
 export type FocusAreaReviewState = { viewed: boolean; collapsed: boolean; updatedAt: string };
-export type FocusScanRecord = { id: string; prKey: string; headSha: string; answer: string; areaStates: Record<string, FocusAreaReviewState>; createdAt: string; updatedAt: string };
 export type GuideStepState = { reviewed: boolean; updatedAt: string };
 export type GuideReviewRecord = { id: string; prKey: string; headSha: string; answer: string; stepStates?: Record<string, GuideStepState>; createdAt: string; updatedAt: string };
-export type AiReviewRecord = GuideReviewRecord & { messages?: AiReviewMessage[] };
 export type ReviewMemoryComment = { path: string; line: number | null; startLine?: number | null; side: "RIGHT" | "LEFT"; body: string };
 export type ReviewMemoryFile = { path: string; status?: string; additions?: number; deletions?: number; patch?: string };
 export type ReviewMemoryChangeSet = { title?: string; url?: string; source?: string; files: ReviewMemoryFile[] };

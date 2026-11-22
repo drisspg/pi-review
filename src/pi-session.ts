@@ -449,12 +449,16 @@ function errorFromMessage(message: unknown): string | null {
   return errorMessage ?? "Assistant stopped with an error.";
 }
 
-async function runPiPrompt(prKey: string, prompt: string, generation: number, purpose = "chat", onDelta?: (delta: string) => void, onEvent?: (event: PiPromptEvent) => void): Promise<string> {
+async function runPiPrompt(prKey: string, prompt: string, generation: number, purpose: string, freshConversation: boolean, onDelta?: (delta: string) => void, onEvent?: (event: PiPromptEvent) => void): Promise<string> {
   const startedAt = performance.now();
   const sessionKey = sessionKeyForPr(prKey, purpose);
   const session = await getSession(prKey, purpose);
   let answer = "";
   assertGeneration(prKey, generation);
+  if (freshConversation) {
+    await session.startFreshConversation();
+    assertGeneration(prKey, generation);
+  }
   const previousMessages = new Set(session.messages);
   const unsubscribe = session.subscribe((event) => {
     if ((generationByPr.get(prKey) ?? 0) !== generation) return;
@@ -485,7 +489,7 @@ async function runPiPrompt(prKey: string, prompt: string, generation: number, pu
   }
 }
 
-export async function askPi(prKey: string, prompt: string, purpose = "chat", onDelta?: (delta: string) => void, onEvent?: (event: PiPromptEvent) => void): Promise<string> {
+export async function askPi(prKey: string, prompt: string, purpose = "chat", onDelta?: (delta: string) => void, onEvent?: (event: PiPromptEvent) => void, freshConversation = false): Promise<string> {
   const generation = generationByPr.get(prKey) ?? 0;
   generationByPr.set(prKey, generation);
   const sessionKey = sessionKeyForPr(prKey, purpose);
@@ -508,7 +512,7 @@ export async function askPi(prKey: string, prompt: string, purpose = "chat", onD
   const startedAt = new Date().toISOString();
   promptStateByPr.set(sessionKey, { status: "running", purpose, chars: prompt.length, queuedAt: promptStateByPr.get(sessionKey)?.queuedAt ?? startedAt, startedAt, lastActivityAt: startedAt });
   try {
-    const answer = await runPiPrompt(prKey, prompt, generation, purpose, onDelta, onEvent);
+    const answer = await runPiPrompt(prKey, prompt, generation, purpose, freshConversation, onDelta, onEvent);
     assertGeneration(prKey, generation);
     promptStateByPr.set(sessionKey, { ...promptStateByPr.get(sessionKey)!, status: "complete", finishedAt: new Date().toISOString(), answerChars: answer.length });
     return answer;

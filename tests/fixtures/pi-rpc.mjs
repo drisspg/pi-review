@@ -18,12 +18,16 @@ const state = {
   model: { provider: option("--provider"), id: option("--model"), name: "Fixture" },
   thinkingLevel: option("--thinking"), sessionId: "fixture", isStreaming: false,
 };
+const launchModel = state.model, launchThinking = state.thinkingLevel;
+let sessionNumber = 0;
+let history = [];
 const headers = { authorization: `Bearer ${process.env.PI_REVIEW_TOOL_TOKEN}`, "content-type": "application/json" };
 const endpoint = process.env.PI_REVIEW_TOOL_URL;
 const tools = (await (await fetch(`${endpoint}/tools`, { headers })).json()).tools;
-if (state.model.id !== "missing-extension") {
+async function registerTools() {
   await fetch(`${endpoint}/metadata`, { method: "POST", headers, body: JSON.stringify({ tools, activeTools: tools.map((tool) => tool.name) }) });
 }
+if (state.model.id !== "missing-extension") await registerTools();
 if (state.model.id === "fallback") state.model.provider = "personal";
 // Like a launcher that routes one provider to another (e.g. openai -> plugboard-codex).
 if (state.model.provider === "openai" && state.model.id === "routed") state.model.provider = "plugboard-codex";
@@ -41,6 +45,16 @@ const assistant = (text, stopReason = "stop") => ({ role: "assistant", content: 
 async function handle(command) {
   const reply = (data) => emit({ type: "response", id: command.id, success: true, data });
   if (command.type === "get_state") return reply(state);
+  if (command.type === "new_session") {
+    if (state.model.id === "cancel-switch") return reply({ cancelled: true });
+    if (state.isStreaming) throw new Error("Cannot replace an active turn");
+    state.sessionId = `fixture-${++sessionNumber}`;
+    state.model = launchModel;
+    state.thinkingLevel = launchThinking;
+    history = [];
+    if (launchModel.id !== "missing-rebound-extension") await registerTools();
+    return reply({ cancelled: false });
+  }
   if (command.type === "get_available_models") return reply({ models: [state.model] });
   if (command.type === "get_available_thinking_levels") return reply({ levels: ["off", "low", "high"] });
   if (command.type === "set_model") { state.model = { provider: command.provider, id: command.modelId }; return reply(state.model); }
@@ -65,8 +79,10 @@ async function handle(command) {
     const result = await (await fetch(`${endpoint}/execute`, { method: "POST", headers, body: JSON.stringify({ name: tools[0].name, id: "tool-1", params: { value: command.message } }) })).json();
     emit({ type: "tool_execution_end", toolName: tools[0].name, toolCallId: "tool-1", result: result.result, isError: false });
   }
-  emit({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: command.message } }, true);
-  emit({ type: "message_end", message: assistant(command.message) }, true);
+  const answer = command.message === "/history" ? JSON.stringify(history) : command.message;
+  history.push(command.message);
+  emit({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: answer } }, true);
+  emit({ type: "message_end", message: assistant(answer) }, true);
   emit({ type: "agent_end", willRetry: false });
   state.isStreaming = false;
   emit({ type: "agent_settled" });

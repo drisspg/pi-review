@@ -348,6 +348,18 @@ test("draft append checks current HEAD after queued PR and human draft mutations
   assert.equal((await store.appendDraftReviewComment(current.key, "new", input)).created, true);
 });
 
+test("a failed state write leaves the previous review pair intact after restart", async () => {
+  const { runtime } = fakeRuntime(emptyState());
+  const store = createStateStore(runtime, paths);
+  const base = { prKey: "pr", headSha: "head", answer: "verdict" };
+  const { review, scan } = await store.saveReviewPair({ review: base, scan: { ...base, answer: "No focus areas found.", areaStates: {} } });
+  const failing = createStateStore({ ...runtime, rename: async () => { throw Error("disk full"); } }, paths);
+  await assert.rejects(failing.saveReviewPair({ review: { ...base, answer: "replacement" }, scan: { ...base, answer: "new finding", areaStates: {} } }), /disk full/);
+  const restarted = createStateStore(runtime, paths);
+  assert.deepEqual(await restarted.listAiReviews("pr"), [review]);
+  assert.deepEqual(await restarted.listFocusScans("pr"), [scan]);
+});
+
 test("AI review saves preserve immutable content and provenance", async () => {
   const { runtime } = fakeRuntime();
   const store = createStateStore(runtime, paths);

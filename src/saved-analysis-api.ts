@@ -1,3 +1,5 @@
+import { sameReviewPair } from "./analysis-types.js";
+import { parseFocusAreas } from "./focus.js";
 import type { StateStore } from "./state.js";
 import type { AiReviewMessageRecord, AiReviewRecord, FocusAreaReviewState, FocusScanRecord, GuideReviewRecord } from "./types.js";
 
@@ -8,6 +10,7 @@ export type SavedAnalysisApiDeps = {
   saveFocusScan: (scan: Omit<FocusScanRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<FocusScanRecord, "id" | "createdAt">>) => Promise<FocusScanRecord>;
   saveOverview: (record: Omit<GuideReviewRecord, "id" | "createdAt" | "updatedAt" | "stepStates">) => Promise<GuideReviewRecord>;
   saveGuideReview: (review: Omit<GuideReviewRecord, "id" | "createdAt" | "updatedAt"> & Partial<Pick<GuideReviewRecord, "id" | "createdAt">>) => Promise<GuideReviewRecord>;
+  listFocusScans: StateStore["listFocusScans"];
   listAiReviews: (prKey: string) => Promise<AiReviewRecord[]>;
 };
 
@@ -36,6 +39,14 @@ function aiReviewMessagesFromPayload(payload: Record<string, unknown>): AiReview
 function generalReviewText(review: AiReviewRecord): string {
   const general = review.messages?.filter((message) => message.kind === "general-review" && message.text.trim().length > 0).map((message) => message.text.trim()) ?? [];
   return general.length > 0 ? general.join("\n\n") : review.answer.trim();
+}
+
+function openFocusEvidence(scan: FocusScanRecord | undefined): string {
+  if (!scan) return "Paired evidence is no longer available.";
+  const areas = parseFocusAreas(scan.answer);
+  if (!areas.length) return scan.answer;
+  return areas.filter(area => !scan.areaStates[area.id]?.viewed).map(area => `- ${area.path}:${area.startLine}-${area.endLine} — ${area.title}
+${area.body}`.trimEnd()).join("\n\n") || "The reviewer marked all inline findings handled.";
 }
 
 export function createSavedAnalysisApi(deps: SavedAnalysisApiDeps): SavedAnalysisApi {
@@ -100,8 +111,13 @@ export function createSavedAnalysisApi(deps: SavedAnalysisApiDeps): SavedAnalysi
     const reviews = (await deps.listAiReviews(payload.prKey)).filter((review) => generalReviewText(review).length > 0);
     const record = reviews.find((review) => review.headSha === headSha) ?? reviews[0];
     if (record == null) return { review: null, olderCount: 0 };
+    let text = generalReviewText(record);
+    if (record.provenance?.reviewPairId) {
+      const scan = (await deps.listFocusScans(payload.prKey)).find(candidate => sameReviewPair(record, candidate));
+      text += "\n\n" + openFocusEvidence(scan);
+    }
     return {
-      review: { id: record.id, headSha: record.headSha, createdAt: record.createdAt, matchesHead: headSha == null ? null : record.headSha === headSha, text: generalReviewText(record) },
+      review: { id: record.id, headSha: record.headSha, createdAt: record.createdAt, matchesHead: headSha == null ? null : record.headSha === headSha, text },
       olderCount: reviews.length - 1,
     };
   }
