@@ -129,6 +129,8 @@ test("review prompt API builds copyable review feedback bundles", async () => {
 
   assert.equal(result.purpose, "review-feedback");
   assert.match(result.prompt, /Role: I am the reviewer/);
+  assert.match(result.prompt, /scoped AGENTS\.md or REVIEW\.md/);
+  assert.match(result.prompt, /not permission to expand the task/);
   assert.match(result.prompt, /Mode: Act\. My notes that are clear and correct are already approved/);
   assert.match(result.prompt, /Do not ask me to sign off on them and do not restate them back to me/);
   assert.match(result.prompt, /Stop to ask only when a note is ambiguous, technically wrong/);
@@ -206,6 +208,7 @@ test("review prompt API builds private GitHub draft handoff prompts", async () =
   });
 
   assert.equal(result.purpose, "github-draft-handoff");
+  assert.doesNotMatch(result.prompt, /scoped AGENTS\.md or REVIEW\.md/);
   assert.match(result.prompt, /private GitHub review drafts/);
   assert.match(result.prompt, /I am the reviewer who authored these private drafts/);
   assert.match(result.prompt, /Task: Implement each valid requested change/);

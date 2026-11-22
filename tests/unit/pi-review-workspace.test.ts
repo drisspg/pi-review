@@ -21,6 +21,16 @@ test("review workspace guidance gives concrete scope and bounded dependency disc
   assert.doesNotMatch(linux, /cannot execute NVIDIA CUDA/);
 });
 
+test("review standards apply to full and focus reviews without changing other sessions", () => {
+  const instructions = (scope: string) => reviewWorkspaceInstructions({ ...workspace, scope }, { platform: "linux", arch: "x64" });
+  for (const scope of ["main-review", "focus-review"]) {
+    assert.match(instructions(scope), /AGENTS\.md/);
+    assert.match(instructions(scope), /REVIEW\.md/);
+    assert.match(instructions(scope), /skills/);
+  }
+  for (const scope of ["main", "chat", "inline-1", "test-pr", "guide-review"]) assert.doesNotMatch(instructions(scope), /REVIEW\.md/);
+});
+
 test("review metadata stays bounded without hiding the total changed-file count", () => {
   const env = reviewWorkspaceEnvironment({ ...workspace, changedFiles: Array.from({ length: 1000 }, (_, i) => `src/${i}.ts`) });
   const snapshot = JSON.parse(env[REVIEW_WORKSPACE_ENV]);
