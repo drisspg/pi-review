@@ -161,6 +161,20 @@ test("saveReviewMemory assigns metadata, prepends records, and writes preference
   assert.match(files.get(paths.reviewMemoryNotesPath) ?? "", /a\.ts:10: inline/);
 });
 
+test("AI drafts remain archived but do not crowd personal notes out of review prompts", async () => {
+  const record = { id: "old", prKey: "old", headSha: "base", createdAt: "then", event: "APPROVE" as const, body: "config before land; the rest is cleanup", comments: [] };
+  const disclosures = ["#### AI-assisted", "_AI-drafted; I've reviewed and agree._", "> AI-assisted suggestion:", "> AI-generated draft:", "> **Non-blocking follow-up — AI-assisted investigation:**"];
+  const newer = Array.from({ length: 12 }, (_, i) => ({ ...record, id: String(i), prKey: "recent", body: "", disposition: "archived" as const,
+    comments: [{ path: "a.ts", line: 1, side: "RIGHT" as const, body: disclosures[i % disclosures.length] + "\n\nAdd another guard" }] }));
+  newer[0].comments.push({ path: "b.ts", line: 2, side: "RIGHT", body: "AI-assisted reviews ignore the opt-out: please fix before landing." });
+  const store = createStateStore(fakeRuntime({ reviewMemory: [...newer, record] }).runtime, paths);
+  const prompt = await store.currentReviewMemoryPrompt();
+  assert.ok(prompt.includes(record.body));
+  assert.ok(prompt.includes("AI-assisted reviews ignore the opt-out: please fix before landing."));
+  assert.ok(!prompt.includes("Add another guard"));
+  assert.deepEqual(await store.listArchivedReviews("recent"), newer);
+});
+
 test("saveDraftReview replaces the PR draft and persists empty drafts", async () => {
   const { runtime } = fakeRuntime(emptyState());
   const store = createStateStore(runtime, paths);

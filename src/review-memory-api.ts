@@ -63,7 +63,7 @@ Return only markdown with these sections:
 ## Comment style
 ## Review prompt rules
 
-Make the profile compact and directive. Prefer durable patterns over one-off specifics. Include actionable rules a future reviewer can follow. Do not include raw examples verbatim except short representative phrases when needed.
+Make the profile compact and directive. Compare reviews across PRs: distinguish what Driss explicitly wanted before landing from questions, cleanup, and accepted follow-ups. Use his wording over the review event when they differ. AI-disclosed text is evidence he retained the comment, not independent evidence of his voice or threshold. Do not infer agreement or rejection from silence. Prefer durable patterns over one-off specifics. Include actionable rules a future reviewer can follow. Do not include raw examples verbatim except short representative phrases when needed.
 
 Existing profile:
 ${existingProfile?.text ?? "No existing profile."}

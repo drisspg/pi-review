@@ -18,6 +18,10 @@ export function reviewSessionRoot(env: NodeJS.ProcessEnv = process.env, home = h
   return usesDefaultReviewState(env, home) ? legacyStorageRoot(home) : `${reviewStatePath(env, home)}.data`;
 }
 
+export function reviewNotesRoot(env: NodeJS.ProcessEnv = process.env, home = homedir()): string {
+  return usesDefaultReviewState(env, home) ? resolve(home, "agent_notes", "findings") : reviewSessionRoot(env, home);
+}
+
 export function checkoutCacheRoot(env: NodeJS.ProcessEnv = process.env, platform = process.platform, home = homedir()): string {
   if (env.PI_REVIEW_CACHE_DIR != null) {
     if (!env.PI_REVIEW_CACHE_DIR.trim()) throw new Error("PI_REVIEW_CACHE_DIR must not be empty");

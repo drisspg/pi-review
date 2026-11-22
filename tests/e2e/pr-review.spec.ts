@@ -1980,6 +1980,19 @@ test("runs the right-sidebar Pi review beside the native terminal", async ({ pag
   await expect(panel).not.toHaveClass(/terminal-focused/);
 });
 
+test("Pi panel copies the same overall instruction it archives", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const note = "Fix the cache regression; leave the helper alone.";
+  await mockNativeTerminal(page);
+  await openReviewForm(page);
+  await page.getByPlaceholder("Overall review body").fill(note);
+  await openSideTab(page, "Pi");
+  const archived = page.waitForRequest(request => request.url().endsWith("/api/review/archive"));
+  await page.locator(".ai-review").getByRole("button", { name: "Copy feedback prompt" }).click();
+  expect((await archived).postDataJSON().body).toBe(note);
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain(note);
+});
+
 test("copies local draft comments in a feedback prompt from the Review tab and archives them locally", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   const rows = await openFileWithAddedRows(page, 1);

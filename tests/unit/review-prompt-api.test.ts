@@ -134,7 +134,7 @@ test("review prompt API builds copyable review feedback bundles", async () => {
   assert.match(result.prompt, /Stop to ask only when a note is ambiguous, technically wrong/);
   assert.match(result.prompt, /\*\*Done\*\* — one line per change/);
   assert.match(result.prompt, /\*\*Questions\*\* — only for what you could not decide/);
-  assert.match(result.prompt, /\*\*Not changed\*\*/);
+  assert.match(result.prompt, /\*\*Not changed\*\*.*serious bug left open/);
   assert.match(result.prompt, /AI items .* suggestions only/);
   assert.match(result.prompt, /Never present AI items as my requests/);
   // My own review notes are not incoming threads or communication tasks.

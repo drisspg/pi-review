@@ -258,7 +258,7 @@ async function mainReviewPrompt(payload: Record<string, unknown>, deps: ReviewPr
   const reviewMemory = await deps.currentReviewMemoryPrompt();
   return {
     purpose: "main-review",
-    prompt: `Run a concise code review for ${prKey}. Focus on correctness, edge cases, tests, and concrete actionable findings. Avoid generic praise. Return markdown with bullets and file/line references where possible.
+    prompt: `Run a concise code review for ${prKey}. Focus on correctness, edge cases, tests, and concrete actionable findings. Lead with a short judgment on the change the author is actually making and the strongest evidence for it, including what you could not verify. If that path is sound, say so; do not make a niche follow-up the verdict on the whole PR. Avoid generic praise. Use bullets and file/line references for findings where helpful.
 
 Reviewer preference memory:
 ${reviewMemory}
@@ -270,6 +270,8 @@ Previous focus scan state:
 ${previousFocusAreas}
 
 Inspect the relevant implementation, callers, and tests before reporting a concern. Attempt to disprove each candidate; report only concrete problems supported by current code. Complete ordinary read-only investigation without asking for approval. Do not modify source files or publish comments. If evidence is unavailable, state the limitation rather than claiming the code was checked.
+
+Before calling anything a landing blocker, say what the PR introduces or newly exposes, who can hit it under the supported contract, and what goes wrong. Compare the base when claiming a regression. A missing guard on an internal hook is not a blocker just because a test can manufacture inconsistent arguments. If an existing abstraction would remove duplicated policy, say that directly rather than inventing a correctness risk. Ask for a test only when it distinguishes a meaningful failure. A clean review is a valid result.
 
 Previous reviews are context, not proof. Re-check prior concerns against this revision: keep still-valid findings and omit addressed ones. A viewed checkbox or previous report does not establish that a defect was fixed.
 
@@ -543,14 +545,14 @@ Mode: Act. My notes that are clear and correct are already approved: implement t
 
 ## What to act on
 - My notes (R0, D1, ...): do the clear ones; answer my questions by investigating the code (a short answer, plus a change only if the answer shows one is needed).
-- AI items (AI dialogue, focus areas, AI-GLOBAL): suggestions only. Act on one only if you verified it and it is small and in scope; otherwise raise it as a question. Never present AI items as my requests.
+- AI items (AI dialogue, focus areas, AI-GLOBAL): suggestions only. Apply the checkout’s review and testing guidance. Trace a supported input or caller to the failure; a rare valid input still counts. Fix a verified problem introduced or newly exposed by the PR when the fix is small and in scope. Surface serious bugs even if pre-existing or expensive to fix: give the trigger, impact, and whether reproduced or established from code. If evidence is incomplete, say what check would settle it rather than calling it confirmed. Skip speculative guards, optional cleanup, and redundant tests unless my notes ask for them; do not turn skipped AI suggestions into questions. Ask only for consequential decisions. Never present AI items as my requests.
 - Deduplicate overlapping points while retaining all contributing IDs (one line, all IDs).
 - Never draft, suggest, or return reply text for review threads. Do not add "needs reply" or communication follow-up tasks, and do not invent work for status comments.
 
 ## Response: short and plain, for me to skim
 **Done** — one line per change: what you changed and where, with the note ID(s) (e.g. "D2 — cached the plan lookup in paged_decode.py; added a test").
 **Questions** — only for what you could not decide. One line each, with the concrete options and what each costs (e.g. "D4 — keep the fallback or remove it? Removing breaks X.").
-**Not changed** — one line each for notes needing no change (already handled, intentional behavior) and why; include answers to my questions here when nothing changed.
+**Not changed** — distinguish “no fix needed” from a serious bug left open. For an unfixed bug, give the reachable trigger, impact, and evidence or missing check. Answer my questions here when nothing changed.
 No preamble, no evidence dumps, no checklists or per-item labels. Omit empty sections.
 
 # PR review feedback bundle

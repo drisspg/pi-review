@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 
 import { assertLegacyTransition, createCheckoutCache, ownCheckoutCache } from "../../src/checkout-cache.js";
-import { checkoutCacheRoot, legacyStorageRoot, reviewSessionRoot, reviewStatePath } from "../../src/storage-paths.js";
+import { checkoutCacheRoot, legacyStorageRoot, reviewNotesRoot, reviewSessionRoot, reviewStatePath } from "../../src/storage-paths.js";
 
 const home = "/home/reviewer";
 test("cache roots follow platform conventions and explicit settings", () => {
@@ -21,6 +21,7 @@ test("durable state defaults remain unchanged; custom state isolates checkouts a
   assert.equal(reviewStatePath({}, home), `${legacyStorageRoot(home)}/state.json`);
   assert.equal(reviewSessionRoot({}, home), legacyStorageRoot(home));
   const explicitDefault = { PI_REVIEW_STATE_PATH: reviewStatePath({}, home) };
+  assert.equal(reviewNotesRoot(explicitDefault, home), `${home}/agent_notes/findings`);
   assert.equal(reviewSessionRoot(explicitDefault, home), legacyStorageRoot(home));
   assert.equal(checkoutCacheRoot(explicitDefault, "darwin", home), `${home}/Library/Caches/pi-review`);
   assert.equal(reviewStatePath({ PI_REVIEW_CACHE_DIR: "/cache" }, home), `${legacyStorageRoot(home)}/state.json`);
@@ -28,6 +29,7 @@ test("durable state defaults remain unchanged; custom state isolates checkouts a
     const env = { PI_REVIEW_STATE_PATH: `/tmp/${name}.json` };
     assert.equal(reviewStatePath(env, home), `/tmp/${name}.json`);
     assert.equal(checkoutCacheRoot(env, "darwin", home), `/tmp/${name}.json.cache`);
+    assert.equal(reviewNotesRoot(env, home), `/tmp/${name}.json.data`);
     assert.equal(reviewSessionRoot(env, home), `/tmp/${name}.json.data`);
   }
 });

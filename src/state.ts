@@ -1,17 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
 import type { AiReviewRecord, AppState, DraftReview, FileReviewState, FocusScanRecord, GuideReviewRecord, ReviewMemoryProfile, ReviewMemoryRecord, StoredPullRequest } from "./types.js";
 
-import { reviewStatePath } from "./storage-paths.js";
-
-const STATE_PATH = reviewStatePath();
-const REVIEW_MEMORY_NOTES_PATH = resolve(homedir(), "agent_notes", "findings", "pi_review_preferences.md");
-const REVIEW_PROFILE_PATH = resolve(homedir(), "agent_notes", "findings", "pi_review_profile.md");
+import { hasAiDraftDisclosure } from "./review-draft-disclosure.js";
+import { reviewNotesRoot, reviewStatePath } from "./storage-paths.js";
 
 const maxFocusScansPerPr = 20;
 const maxAiReviewsPerPr = 20;
@@ -75,9 +71,9 @@ export type StateStore = {
 };
 
 const defaultPaths: StateStorePaths = {
-  statePath: STATE_PATH,
-  reviewMemoryNotesPath: REVIEW_MEMORY_NOTES_PATH,
-  reviewProfilePath: REVIEW_PROFILE_PATH,
+  statePath: reviewStatePath(),
+  reviewMemoryNotesPath: resolve(reviewNotesRoot(), "pi_review_preferences.md"),
+  reviewProfilePath: resolve(reviewNotesRoot(), "pi_review_profile.md"),
 };
 
 const defaultRuntime: StateStoreRuntime = {
@@ -143,13 +139,21 @@ function reviewMemoryChangeSetBlock(record: ReviewMemoryRecord, maxPatchChars: n
 }
 
 function reviewMemoryPrompt(records: ReviewMemoryRecord[]): string {
-  if (records.length === 0) return "No review preference examples have been captured yet.";
-  const examples = records.slice(0, maxReviewMemoryPromptRecords).map((record, index) => {
+  // Endorsing a Pi draft isn't evidence that the reviewer would independently write or prioritize it.
+  const personal: ReviewMemoryRecord[] = [];
+  for (const record of records) {
+    const body = hasAiDraftDisclosure(record.body) ? "" : record.body.trim();
+    const comments = record.comments.filter(comment => !hasAiDraftDisclosure(comment.body));
+    if (body || comments.length) personal.push({ ...record, body, comments });
+    if (personal.length === maxReviewMemoryPromptRecords) break;
+  }
+  if (!personal.length) return "No unlabelled review notes available as preference examples.";
+  const examples = personal.map((record, index) => {
     const comments = record.comments.length === 0 ? "No inline comments." : record.comments.map((comment) => `- ${reviewMemoryLocation(comment)}: ${comment.body}`).join("\n");
     const body = record.body.trim().length === 0 ? "No overall body." : record.body.trim();
     return `## Example ${index + 1}: ${record.prKey} (${record.disposition === "archived" ? "archived locally" : "published"}, ${record.event})\nOverall review body:\n${body}\n\nInline comments:\n${comments}\n\nChange-set context:\n${reviewMemoryChangeSetBlock(record, maxReviewMemoryPromptPatchChars)}`;
   });
-  return `# Driss review preference examples\n\nThese are review comments Driss either published or deliberately archived locally. Use them as positive examples of feedback he considered worth preserving. Prefer similar specificity, severity, and style. Do not copy comments verbatim unless the same issue is present. Avoid over-indexing on one example when the current diff points elsewhere.\n\n${examples.join("\n\n")}`;
+  return `# Driss review preference examples\n\nThese examples skip notes starting with a known AI disclosure. Some older or mixed notes may still include AI text; do not learn voice or urgency from those passages. Learn from what Driss asked to change now versus what he questioned or left for later. Archiving a comment does not make it a landing condition. Do not copy comments verbatim unless the same issue is present. Avoid over-indexing on one example when the current diff points elsewhere.\n\n${examples.join("\n\n")}`;
 }
 
 function reviewMemoryDistillationSource(records: ReviewMemoryRecord[]): string {

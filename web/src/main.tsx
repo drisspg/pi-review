@@ -967,11 +967,10 @@ function App() {
    * it also archives the local review once the clipboard write succeeds: snapshot in Review memory,
    * head marked reviewed, drafts cleared. Returns whether it archived; nothing to archive just copies.
    */
-  async function copyReviewFeedbackPrompt(overallBody = ""): Promise<boolean> {
+  async function copyReviewFeedbackPrompt(body = reviewBody): Promise<boolean> {
     if (review == null) return false;
-    const { prompt } = await buildPiPrompt(reviewFeedbackPromptPayload(review, drafts, overallBody, aiReview, focusAreas, viewedFocusAreaIds));
+    const { prompt } = await buildPiPrompt(reviewFeedbackPromptPayload(review, drafts, body, aiReview, focusAreas, viewedFocusAreaIds));
     await writeClipboard(prompt);
-    const body = overallBody.trim().length > 0 ? overallBody : reviewBody;
     const hasFeedback = body.trim().length > 0 || drafts.some((draft) => draft.line != null && draft.body.trim().length > 0);
     if (!hasFeedback) return false;
     logUsage("review:copy-feedback-archive", { comments: drafts.length });
