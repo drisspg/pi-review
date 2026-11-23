@@ -37,7 +37,7 @@ test("draws worker-to-range assignments in both focus views and the verdict, and
   await page.goto(`/#/review?pr=${encodeURIComponent(url)}`);
   await page.getByRole("button", { name: /^Pi review/ }).click();
   const findings = page.getByRole("list", { name: "Focus findings" });
-  await findings.getByRole("button", { name: "Go to focus finding: Check the tail" }).click();
+  await findings.getByRole("button", { name: "View diff: Check the tail" }).click();
   for (const view of [page.locator(".focus-area-inline"), findings]) {
     const figure = view.getByRole("figure", { name: "Worker assignments" });
     await expect(figure.locator(".react-flow:not(.schematic-measuring)")).toBeVisible();

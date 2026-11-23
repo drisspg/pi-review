@@ -2558,14 +2558,26 @@ function GeneralReviewEntry({ message, prUrl }: { message: AiReviewMessage; prUr
 
 function FocusFindingsList({ prUrl, areas, viewedIds, activeId, jump }: { prUrl: string; areas: FocusArea[]; viewedIds: Record<string, boolean>; activeId: string | null; jump: (area: FocusArea) => void }) {
   const open = areas.filter((area) => viewedIds[area.id] !== true).length;
+  const [expandedId, setExpandedId] = useState<string | null>(() => areas.find(area => area.body && !viewedIds[area.id])?.id ?? null);
+  const listId = React.useId();
   return <details className="focus-findings" open>
     <summary><span className="disclosure-chevron" aria-hidden="true">›</span><span className="kicker">Focus findings</span><span className="focus-findings-count">{open} open · {areas.length - open} resolved</span></summary>
-    <ol aria-label="Focus findings">{areas.map((area) => {
+    <ol aria-label="Focus findings">{areas.map((area, index) => {
       const resolved = viewedIds[area.id] === true;
-      return <li key={area.id}><button type="button" className={`focus-finding-link${resolved ? " resolved" : ""}${area.id === activeId ? " active" : ""}`} aria-label={`Go to focus finding: ${area.title}`} title={area.title} onClick={() => jump(area)}>
-        <span className="focus-finding-location">{resolved && <CheckIcon size={12} aria-label="Resolved" />}{focusAreaLocation(area)}</span>
-        <span className="focus-finding-title">{area.title}</span>
-      </button>{area.body && <div className="focus-finding-body"><FocusFindingContent prUrl={prUrl} body={area.body} /></div>}</li>;
+      const expanded = expandedId === area.id;
+      const bodyId = `${listId}-finding-${index}`;
+      const jumpLabel = `View diff: ${area.title}`;
+      return <li key={area.id}>
+        <div className="focus-finding-header">
+          <button type="button" className={`focus-finding-link${resolved ? " resolved" : ""}${area.id === activeId ? " active" : ""}`} aria-label={area.body ? area.title : jumpLabel} title={area.title} aria-expanded={area.body ? expanded : undefined} aria-controls={area.body ? bodyId : undefined} onClick={() => area.body ? setExpandedId(expanded ? null : area.id) : jump(area)}>
+            <span className="focus-finding-location">{resolved && <CheckIcon size={12} aria-label="Resolved" />}{focusAreaLocation(area)}</span>
+            <span className="focus-finding-title">{area.title}</span>
+            {area.body && <span className="disclosure-chevron" aria-hidden="true">›</span>}
+          </button>
+          {area.body && <Button variant="muted" aria-label={jumpLabel} onClick={() => jump(area)}>View diff</Button>}
+        </div>
+        {area.body && <div id={bodyId} hidden={!expanded} className="focus-finding-body">{expanded && <FocusFindingContent prUrl={prUrl} body={area.body} />}</div>}
+      </li>;
     })}</ol>
   </details>;
 }
@@ -2627,7 +2639,7 @@ function AiReviewPanel({ prKey, prUrl, focusPanel, review, aiReviewHistory, aiRe
     <div className="pi-review-findings">
       {historyOnly && <p className="muted">Copy Feedback omits AI results from other revisions or unmatched review pairs. Your own notes are still included.</p>}
       {focusReview.error && <Flash variant="warning" role="alert"><strong>Review analysis failed.</strong><p>{focusReview.error}</p>{(selectedMain || selectedFocus) && <p>Showing the previously selected results.</p>}{focusReview.rawAnswer && <details><summary>Raw response</summary><pre>{focusReview.rawAnswer}</pre></details>}</Flash>}
-      {focusAreas.length > 0 && <FocusFindingsList prUrl={prUrl} areas={focusAreas} viewedIds={viewedFocusIds} activeId={activeFocusAreaId} jump={jumpToFocusArea} />}
+      {focusAreas.length > 0 && <FocusFindingsList key={focusScanId} prUrl={prUrl} areas={focusAreas} viewedIds={viewedFocusIds} activeId={activeFocusAreaId} jump={jumpToFocusArea} />}
       {!focusReview.running && focusReviewHasNoFindings(focusReview.text) && <Flash variant="success" className="focus-review-note clean" role="status"><strong>{focusReview.error ? "Previously selected scan: clean." : "✓ Focus scan clean."}</strong><span>No focus areas reported for this pass.</span>{focusReview.text.trim().toLowerCase() !== "no focus areas found." && <details><summary>Scan notes</summary><MarkdownText text={focusReview.text} fileLinks={{ prUrl }} /></details>}</Flash>}
       {!focusReview.running && focusReviewIsInconclusive(focusReview.text) && <Flash variant="warning" className="focus-review-note" role="status">{focusReview.text}</Flash>}
       {!focusReview.running && !focusReview.error && focusReview.text.trim().length > 0 && !focusReviewHasNoFindings(focusReview.text) && !focusReviewIsInconclusive(focusReview.text) && focusAreas.length === 0 && <Flash variant="warning" role="alert"><strong>Focus scan could not be validated.</strong><p>{focusReview.text}</p></Flash>}

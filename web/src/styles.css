@@ -6503,8 +6503,16 @@ button.focus-area-collapsed {
   list-style: none;
 }
 
+.focus-finding-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-right: var(--space-2);
+}
 .focus-finding-link {
   display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  min-width: 0;
   width: 100%;
   gap: 2px;
   padding: var(--space-1) var(--space-3);
@@ -6516,6 +6524,11 @@ button.focus-area-collapsed {
   cursor: pointer;
   transition: background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
 }
+
+.focus-finding-link > .disclosure-chevron { grid-column: 1; grid-row: 1 / 3; align-self: center; }
+.focus-finding-link[aria-expanded="true"] > .disclosure-chevron { transform: rotate(90deg); }
+.focus-finding-link > .focus-finding-location, .focus-finding-link > .focus-finding-title { grid-column: 2; }
+.focus-finding-header > .ui-button { flex-shrink: 0; }
 
 .focus-finding-body {
   padding: var(--space-1) var(--space-3) var(--space-3);

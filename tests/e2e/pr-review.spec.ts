@@ -1619,6 +1619,35 @@ test("selects diff code text without opening a thread", async ({ page }) => {
   await expect(page.locator(".local-thread")).toHaveCount(0);
 });
 
+test("reads one focus finding at a time without resolving or excluding folded findings", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await mockNativeTerminal(page);
+  const rows = await openFileWithAddedRows(page, 2);
+  const path = await rows.first().getAttribute("data-path");
+  const first = await rows.first().getAttribute("data-line");
+  const second = await rows.nth(1).getAttribute("data-line");
+  await mockAnalysis(page, "focus-review", `## Focus areas
+### ${path}:${first} — First finding
+First explanation.
+### ${path}:${second} — Second finding
+Second explanation.`);
+  await openSideTab(page, "Pi");
+  await page.getByRole("button", { name: /^(Focus scan|Refresh focus scan)$/ }).click();
+  const list = page.getByRole("list", { name: "Focus findings" });
+  await expect(list.getByText("First explanation.")).toBeVisible();
+  await expect(list.getByText("Second explanation.")).toBeHidden();
+  const toggle = list.getByRole("button", { name: "Second finding", exact: true });
+  await toggle.focus();
+  await page.keyboard.press("Enter");
+  await expect(list.getByText("First explanation.")).toBeHidden();
+  await expect(list.getByText("Second explanation.")).toBeVisible();
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator(".focus-findings-count")).toHaveText("2 open · 0 resolved");
+  await page.getByRole("button", { name: "Copy feedback prompt" }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toMatch(/First explanation\.[\s\S]*Second explanation\./);
+});
+
 test("explains focus findings in both views and copies collapsed evidence", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await mockNativeTerminal(page);
@@ -1642,7 +1671,7 @@ test("explains focus findings in both views and copies collapsed evidence", asyn
   await expect(page.locator(".focus-findings")).toContainText("1 open · 0 resolved");
   await file.locator(".file-summary-left").click();
   await expect(file.locator(".diff-row")).toHaveCount(0);
-  await findings.getByRole("button", { name: `Go to focus finding: ${title}` }).click();
+  await findings.getByRole("button", { name: `View diff: ${title}` }).click();
   const inline = page.locator(".focus-area-inline").filter({ hasText: title });
   await expect(inline).toBeInViewport();
   await expect(findings.locator(".focus-finding-link.active")).toHaveCount(1);
