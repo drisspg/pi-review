@@ -6688,9 +6688,8 @@ button.focus-area-collapsed {
 }
 
 .focus-area-finding {
-  max-width: 96ch;
-  max-height: 240px;
-  overflow: auto;
+  container-type: inline-size;
+  min-width: 0;
   padding: var(--space-1) var(--space-3) var(--space-3);
   color: var(--text);
   font-size: var(--text-md);
@@ -6698,12 +6697,29 @@ button.focus-area-collapsed {
 }
 
 /* Let the review pane scroll the graph and its key together, not inside a second scroller. */
-.ai-review .markdown:has(.schematic-block),
-.focus-area-finding:has(.schematic-block) { max-height: none; }
+.ai-review .markdown:has(.schematic-block) { max-height: none; }
 
-.focus-area-finding.has-body > .markdown > :first-child { font-weight: 600; }
-.focus-area-finding .markdown > :first-child { margin-top: 0; }
-.focus-area-finding .markdown > :last-child { margin-bottom: 0; }
+@container (min-width: 60rem) {
+  .focus-area-finding > .markdown:has(> .finding-illustration) {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: auto 1fr;
+    align-items: start;
+    column-gap: var(--space-6);
+  }
+  .finding-lead, .finding-followup { grid-column: 1; }
+  .finding-illustration { grid-area: 1 / 2 / span 2; }
+  .finding-followup > :first-child { margin-top: 0; }
+  .finding-illustration > :last-child { margin-bottom: 0; }
+}
+.focus-area-finding.has-body > .markdown > p:first-child,
+.focus-area-finding.has-body .finding-lead > p:first-child { font-weight: 600; }
+/* Keep prose readable; figures can still use the full column. */
+.focus-area-finding :is(.markdown, .finding-lead, .finding-followup) > :is(p, ul, ol) { max-width: 96ch; }
+.focus-area-finding .markdown > :first-child,
+.finding-lead > :first-child, .finding-illustration > :first-child { margin-top: 0; }
+.focus-area-finding .markdown > :last-child,
+.finding-followup > :last-child { margin-bottom: 0; }
 
 .inline-thread.terminal-open.focus-area-inline > .focus-area-finding {
   border-bottom: 1px solid var(--border-soft);

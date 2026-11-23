@@ -1,5 +1,6 @@
 import { CheckIcon, CopyIcon } from "@primer/octicons-react";
 import React, { lazy, Suspense, useState } from "react";
+import type { Element, Root } from "hast";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
@@ -102,12 +103,35 @@ const sanitizeSchema = {
 };
 const rehypePlugins = [rehypeRaw, [rehypeSanitize, sanitizeSchema]] as unknown as NonNullable<React.ComponentProps<typeof ReactMarkdown>["rehypePlugins"]>;
 
+/** Group the already-rendered Markdown around its illustration, without reparsing prose or breaking reference links. */
+function layoutInlineFinding() {
+  return (root: Root) => {
+    const nodes = root.children.filter(node => node.type !== "doctype");
+    const kinds = nodes.map(node => {
+      if (node.type !== "element") return null;
+      if (node.tagName === "table") return "table";
+      if (node.tagName !== "pre") return null;
+      const code = node.children.find(child => child.type === "element" && child.tagName === "code");
+      const classes = code?.type === "element" && code.properties.className;
+      return Array.isArray(classes) ? classes.find(name => String(name).startsWith("language-")) : null;
+    });
+    // A quoted excerpt can precede the actual diagram in the same finding.
+    let i = kinds.findIndex(kind => kind === "language-schematic" || kind === "language-review-visual" || kind === "language-mermaid");
+    if (i < 0) i = kinds.indexOf("table");
+    if (i < 0) i = kinds.findIndex(kind => kind === "language-text" || kind === "language-diff");
+    if (i < 0) return;
+    const wrap = (className: string, children: Element["children"]): Element => ({ type: "element", tagName: "div", properties: { className: [className] }, children });
+    root.children = [wrap("finding-lead", nodes.slice(0, i)), wrap("finding-illustration", [nodes[i]]), wrap("finding-followup", nodes.slice(i + 1))];
+  };
+}
+const inlineFindingPlugins = [...rehypePlugins, layoutInlineFinding];
+
 /** Default sanitization strips unknown protocols, which would empty our internal file-reference hrefs. */
 function markdownUrlTransform(url: string): string {
   return url.startsWith(fileReferenceUrlPrefix) ? url : defaultUrlTransform(url);
 }
 
-export function MarkdownTextRenderer({ text, fileLinks }: { text: string; fileLinks?: FileLinkContext }) {
+export function MarkdownTextRenderer({ text, fileLinks, inlineFinding }: { text: string; fileLinks?: FileLinkContext; inlineFinding?: boolean }) {
   const inlineCtx = React.useContext(InlineSnippetsContext);
   const prUrl = fileLinks?.prUrl;
   const headSha = fileLinks?.headSha ?? inlineCtx?.headSha;
@@ -123,7 +147,7 @@ export function MarkdownTextRenderer({ text, fileLinks }: { text: string; fileLi
       a: (props: MarkdownAnchorProps) => <MarkdownAnchor {...props} fileLinks={mergedFileLinks} />,
     };
   }, [prUrl, headSha, snippets]);
-  return <div className="markdown"><ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components} urlTransform={markdownUrlTransform}>{text}</ReactMarkdown></div>;
+  return <div className="markdown"><ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={inlineFinding ? inlineFindingPlugins : rehypePlugins} components={components} urlTransform={markdownUrlTransform}>{text}</ReactMarkdown></div>;
 }
 
 type MarkdownCodeProps = { className?: string; children?: React.ReactNode; fileLinks?: FileLinkContext };

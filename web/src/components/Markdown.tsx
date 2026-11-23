@@ -11,6 +11,6 @@ export const CodeText = React.memo(function CodeText({ code, language, syntaxCon
   return <code dangerouslySetInnerHTML={{ __html: highlightedHtml(code, language, syntaxContext) }} />;
 });
 
-export function MarkdownText({ text, fileLinks }: { text: string; fileLinks?: FileLinkContext }) {
-  return <Suspense fallback={<div className="markdown">{text}</div>}><MarkdownTextRenderer text={text} fileLinks={fileLinks} /></Suspense>;
+export function MarkdownText({ text, fileLinks, inlineFinding }: { text: string; fileLinks?: FileLinkContext; inlineFinding?: boolean }) {
+  return <Suspense fallback={<div className="markdown">{text}</div>}><MarkdownTextRenderer text={text} fileLinks={fileLinks} inlineFinding={inlineFinding} /></Suspense>;
 }

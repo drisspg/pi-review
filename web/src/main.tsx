@@ -2294,7 +2294,7 @@ function FocusFindingContent({ prUrl, body, title }: { prUrl: string; body: stri
   const { explanation, evidence } = splitFocusEvidence(body);
   const text = [title, explanation].filter(Boolean).join("\n\n");
   return <>
-    {text && <MarkdownText text={text} fileLinks={{ prUrl, snippets: false }} />}
+    {text && <MarkdownText text={text} fileLinks={{ prUrl, snippets: false }} inlineFinding={title != null} />}
     {evidence && <details className="focus-finding-evidence"><summary><span className="disclosure-chevron" aria-hidden="true">›</span>Evidence</summary><MarkdownText text={evidence} fileLinks={{ prUrl, snippets: false }} /></details>}
   </>;
 }

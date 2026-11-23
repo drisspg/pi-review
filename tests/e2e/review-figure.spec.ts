@@ -10,7 +10,7 @@ const diagram = "```schematic\n" + JSON.stringify({
   ],
   edges: [{ from: "w0", to: "first", label: "writes" }, { from: "w1", to: "tail", label: "writes" }],
 }) + "\n```";
-const body = `The second worker stops at row 11.\n\n${diagram}\n\n### Evidence\nThe input has eleven rows.`;
+const body = `The second worker stops at row 11.\n\n\`\`\`diff\n+limit = 11\n\`\`\`\n\n${diagram}\n\n### Evidence\nThe input has eleven rows.`;
 const url = "https://github.com/example/tiles/pull/1";
 const record = { prKey: "github.com/example/tiles#1", headSha: "head", createdAt: "2025-01-01", updatedAt: "2025-01-01", provenance: { reviewPairId: "pair", runId: "run", version: REVIEW_PAIR_VERSION, model: "fixture", thinkingLevel: "medium" } };
 const focusScan = { ...record, id: "focus", answer: `### tiles.py:1 — Check the tail\n${body}`, areaStates: {} };
@@ -27,12 +27,42 @@ const review: OpenResponse = {
   focusScan, focusScans: [focusScan], aiReview, aiReviews: [aiReview], guideReview: null, overview: null,
 };
 
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/pr/stack", route => route.fulfill({ json: { stack: null } }));
+  await page.route("**/api/pr/checks", route => route.fulfill({ json: { checks: { total: 0, success: 0, failure: 0, pending: 0, neutral: 0, failures: [] } } }));
+});
+
+test("inline findings use the available diff width and stack in source order in a narrow diff", async ({ page }, testInfo) => {
+  const explanation = "A value survives in the base kernel but rounds to zero on HEAD.";
+  const check = "Compare the replay output with the full computation.";
+  const sample = ["```text", "row    base       HEAD", ...Array.from({ length: 18 }, (_, i) => `${i + 1}      nonzero    zero`), "```"].join("\n");
+  const scan = { ...focusScan, answer: "### tiles.py:1 — Compare the packed weights\n" + [explanation, sample, check].join("\n\n") };
+  await page.route("**/api/pr/open", route => route.fulfill({ json: { ...review, focusScan: scan, focusScans: [scan] } }));
+  await page.routeWebSocket("**/api/pi/terminal*", () => {});
+  await page.setViewportSize({ width: 1280, height: 950 });
+  await page.goto(`/#/review?pr=${encodeURIComponent(url)}`);
+  const card = page.locator(".focus-area-inline");
+  const prose = card.getByText(explanation, { exact: true });
+  const figure = card.locator("pre");
+  await expect(figure).toBeVisible();
+  const box = async (el: typeof card) => (await el.boundingBox())!;
+  expect((await box(card.locator(".focus-area-finding"))).height).toBeGreaterThan(240);
+  const wide = await box(prose);
+  expect((await box(figure)).x).toBeGreaterThanOrEqual(wide.x + wide.width);
+  expect((await box(figure)).x + (await box(figure)).width).toBeGreaterThan((await box(card)).x + (await box(card)).width * 0.9);
+  await card.screenshot({ path: testInfo.outputPath("wide-inline-finding.png") });
+  await page.getByRole("button", { name: /^Pi review/ }).click();
+  const narrow = await box(prose);
+  const stacked = await box(figure);
+  expect(stacked.y).toBeGreaterThanOrEqual(narrow.y + narrow.height);
+  expect((await box(card.getByText(check, { exact: true }))).y).toBeGreaterThanOrEqual(stacked.y + stacked.height);
+  expect(await card.locator(".focus-area-finding").evaluate(el => el.scrollHeight <= el.clientHeight && el.scrollWidth <= el.clientWidth)).toBe(true);
+});
+
 test("draws worker-to-range assignments in both focus views and the verdict, and copies the original diagram", async ({ page, context }, testInfo) => {
   await page.setViewportSize({ width: 1280, height: 1400 });
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.routeWebSocket("**/api/pi/terminal*", () => {});
-  await page.route("**/api/pr/stack", route => route.fulfill({ json: { stack: null } }));
-  await page.route("**/api/pr/checks", route => route.fulfill({ json: { checks: { total: 0, success: 0, failure: 0, pending: 0, neutral: 0, failures: [] } } }));
   await page.route("**/api/pr/open", route => route.fulfill({ json: review }));
   await page.goto(`/#/review?pr=${encodeURIComponent(url)}`);
   await page.getByRole("button", { name: /^Pi review/ }).click();
@@ -55,6 +85,7 @@ test("draws worker-to-range assignments in both focus views and the verdict, and
   await expect(verdict.locator(".react-flow__edge-text").first()).toBeHidden();
   await verdict.screenshot({ path: testInfo.outputPath("paired-helper.png") });
   const finding = page.locator(".focus-area-inline .focus-area-finding");
+  await expect(finding.locator(".finding-illustration").getByRole("figure", { name: "Worker assignments" })).toBeVisible();
   expect(await finding.evaluate(el => el.scrollHeight <= el.clientHeight)).toBe(true);
   await page.locator(".focus-area-inline figure").screenshot({ path: testInfo.outputPath("worker-assignments.png") });
   await page.getByRole("button", { name: "Copy feedback prompt" }).click();
