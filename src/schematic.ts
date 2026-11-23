@@ -1,11 +1,8 @@
 /**
- * Typed schematic contract for the overview's fenced ```schematic blocks.
+ * Shared JSON contract for fenced ```schematic blocks in guides and reviews.
  *
- * The overview prompt asks the model for this JSON instead of Mermaid text so
- * rendering quality is owned by the app (React Flow + ELK) rather than by the
- * model's diagram syntax. Parsing is strict about structure (ids, references)
- * but lenient about enums: unknown kinds fall back to defaults so a slightly
- * off answer still renders instead of collapsing to raw JSON.
+ * Display mode salvages old diagrams with dangling references. Review mode
+ * rejects missing relationships before a new paired result can be published.
  */
 
 export type SchematicNodeKind = "entry" | "core" | "state" | "boundary" | "test";
@@ -50,7 +47,7 @@ function optionalText(record: Record<string, unknown>, key: string): string | un
 }
 
 /** Parse one fenced ```schematic block; throws with a message worth showing in the error card. */
-export function parseSchematic(code: string): Schematic {
+export function parseSchematic(code: string, mode: "display" | "review" = "display"): Schematic {
   let raw: unknown;
   try {
     raw = JSON.parse(code);
@@ -75,9 +72,11 @@ export function parseSchematic(code: string): Schematic {
   for (const [index, record] of nodeRecords.entries()) {
     const id = requiredText(record, "id", `nodes[${index}]`);
     if (nodeIds.has(id)) throw new Error(`Duplicate node id "${id}"`);
+    if (mode === "review" && groupIds.has(id)) throw new Error(`Node and group share id "${id}"`);
     nodeIds.add(id);
     const kind = record.kind;
     const group = optionalText(record, "group");
+    if (mode === "review" && group != null && !groupIds.has(group)) throw new Error(`Unknown group "${group}"`);
     nodes.push({
       id,
       label: requiredText(record, "label", `nodes[${index}]`),
@@ -88,13 +87,14 @@ export function parseSchematic(code: string): Schematic {
     });
   }
 
-  // Drop edges with unknown endpoints instead of failing: one hallucinated id
-  // should not blank out an otherwise useful diagram.
   const edges: SchematicEdge[] = [];
   for (const record of asRecordArray(root.edges, "edges")) {
     const from = optionalText(record, "from");
     const to = optionalText(record, "to");
-    if (from == null || to == null || !nodeIds.has(from) || !nodeIds.has(to)) continue;
+    if (from == null || to == null || !nodeIds.has(from) || !nodeIds.has(to)) {
+      if (mode === "review") throw new Error("Every review edge must connect named nodes");
+      continue;
+    }
     const kind = record.kind;
     edges.push({
       from,
@@ -104,6 +104,7 @@ export function parseSchematic(code: string): Schematic {
     });
   }
 
+  if (mode === "review" && !edges.some(edge => edge.from !== edge.to)) throw new Error("A review schematic needs a relationship between two distinct nodes");
   return {
     title: optionalText(root, "title"),
     direction: root.direction === "down" ? "down" : "right",

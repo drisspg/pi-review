@@ -19,6 +19,7 @@ import {
   useNodesInitialized,
   useNodesState,
   useReactFlow,
+  useStore,
   type Edge,
   type Node,
   type NodeProps,
@@ -27,7 +28,8 @@ import ELK, { type ElkNode } from "elkjs/lib/elk.bundled.js";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { errorMessage, openFileInEditor } from "../api";
-import { cssVar } from "../lib/dom";import { parseSchematic, type Schematic, type SchematicDirection, type SchematicNodeKind } from "../lib/schematic";
+import { parseSchematic, type Schematic, type SchematicDirection, type SchematicNodeKind } from "../../../src/schematic";
+import { cssVar } from "../lib/dom";
 import type { FileLinkContext } from "./MarkdownContext";
 
 type CardData = { label: string; detail?: string; refText?: string; kind: SchematicNodeKind; direction: SchematicDirection };
@@ -80,7 +82,6 @@ function flowEdges(schematic: Schematic): Edge[] {
     source: edge.from,
     target: edge.to,
     label: edge.label,
-    type: "smoothstep",
     className: `schematic-edge-${edge.kind}`,
     markerEnd: { type: MarkerType.ArrowClosed, width: 15, height: 15, color: markerColor },
   }));
@@ -128,7 +129,7 @@ async function elkPlacements(schematic: Schematic, measured: Node[]): Promise<El
   return { placements, contentHeight: layout.height ?? 0 };
 }
 
-function SchematicFlow({ schematic, canvasHeight, onOpenRef, onContentHeight }: { schematic: Schematic; canvasHeight: number | null; onOpenRef?: (ref: string) => void; onContentHeight: (height: number) => void }) {
+function SchematicFlow({ schematic, canvasHeight, onOpenRef, onContentHeight, onLabelCrowding }: { schematic: Schematic; canvasHeight: number | null; onOpenRef?: (ref: string) => void; onContentHeight: (height: number) => void; onLabelCrowding: (crowded: boolean) => void }) {
   const [nodes, setNodes, onNodesChange] = useNodesState(useMemo(() => flowNodes(schematic), [schematic]));
   const edges = useMemo(() => flowEdges(schematic), [schematic]);
   const nodesInitialized = useNodesInitialized();
@@ -190,6 +191,22 @@ function SchematicFlow({ schematic, canvasHeight, onOpenRef, onContentHeight }: 
     };
   }, [fitted, fitView]);
 
+  // Crossing edges may share a midpoint. Keep SVG labels measurable when
+  // hidden so zooming or dragging can restore labels that fit on the canvas.
+  const zoom = useStore(state => state.transform[2]);
+  useEffect(() => {
+    if (!fitted) return;
+    const frame = requestAnimationFrame(() => {
+      const labels = Array.from(flowRef.current!.querySelectorAll(".react-flow__edge-textwrapper"));
+      const boxes = labels.map(el => el.getBoundingClientRect());
+      const overlaps = boxes.some((a, i) => boxes.some((b, j) => j < i && a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom));
+      const text = labels[0]?.querySelector("text");
+      const tooSmall = text != null && zoom * parseFloat(getComputedStyle(text).fontSize) < parseFloat(cssVar("--text-xs", "11px"));
+      onLabelCrowding(overlaps || tooSmall);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [fitted, nodes, zoom, onLabelCrowding]);
+
   // Stable handlers keep React Flow's memoized node wrappers from re-rendering every node.
   const onMoveStart = useCallback((event: unknown) => {
     if (event != null) interactedRef.current = true;
@@ -233,6 +250,7 @@ export function SchematicDiagram({ code, fileLinks }: { code: string; fileLinks?
 
   // Size the canvas to the laid-out diagram so small schematics do not float
   // in a fixed-height sea of dead space; the CSS clamp only pre-sizes it.
+  const [showLegend, setShowLegend] = useState(false);
   const [canvasHeight, setCanvasHeight] = useState<number | null>(null);
   const fitCanvasHeight = useCallback((contentHeight: number) => {
     setCanvasHeight(Math.round(Math.min(Math.max(contentHeight + 96, 240), 680)));
@@ -252,12 +270,16 @@ export function SchematicDiagram({ code, fileLinks }: { code: string; fileLinks?
     void openFileInEditor(fileLinks.prUrl, match[1], Number.parseInt(match[2], 10));
   }
 
-  return <div className="schematic-block">
-    {parsed.schematic.title != null && <span className="schematic-title">{parsed.schematic.title}</span>}
+  const nodeLabels = new Map(parsed.schematic.nodes.map(node => [node.id, node.label]));
+  return <figure className={`schematic-block${showLegend ? " with-legend" : ""}`} aria-label={parsed.schematic.title ?? "Relationship diagram"}>
+    {parsed.schematic.title != null && <figcaption className="schematic-title">{parsed.schematic.title}</figcaption>}
     <div className="schematic-canvas" style={canvasHeight == null ? undefined : { height: canvasHeight }}>
       <ReactFlowProvider>
-        <SchematicFlow key={code} schematic={parsed.schematic} canvasHeight={canvasHeight} onOpenRef={fileLinks == null ? undefined : openRef} onContentHeight={fitCanvasHeight} />
+        <SchematicFlow key={code} schematic={parsed.schematic} canvasHeight={canvasHeight} onOpenRef={fileLinks == null ? undefined : openRef} onContentHeight={fitCanvasHeight} onLabelCrowding={setShowLegend} />
       </ReactFlowProvider>
     </div>
-  </div>;
+    {showLegend && <ul className="schematic-legend" aria-label="Connections">{parsed.schematic.edges.map((edge, i) => edge.label && <li key={i}>
+      <span>{nodeLabels.get(edge.from)} → {nodeLabels.get(edge.to)}</span><strong>{edge.label}</strong>
+    </li>)}</ul>}
+  </figure>;
 }

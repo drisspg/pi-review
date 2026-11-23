@@ -6684,6 +6684,10 @@ button.focus-area-collapsed {
   line-height: 1.55;
 }
 
+/* Let the review pane scroll the graph and its key together, not inside a second scroller. */
+.ai-review .markdown:has(.schematic-block),
+.focus-area-finding:has(.schematic-block) { max-height: none; }
+
 .focus-area-finding.has-body > .markdown > :first-child { font-weight: 600; }
 .focus-area-finding .markdown > :first-child { margin-top: 0; }
 .focus-area-finding .markdown > :last-child { margin-bottom: 0; }
@@ -8127,8 +8131,30 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
 
 .schematic-canvas .react-flow__edge-text {
   fill: var(--muted);
-  font-size: 10px;
+  font-size: var(--text-sm);
 }
+
+.schematic-block.with-legend .react-flow__edge-textwrapper { visibility: hidden; }
+
+.markdown .schematic-legend {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font: var(--text-sm)/1.4 var(--font-system);
+}
+
+.schematic-legend li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  column-gap: var(--space-2);
+  border-bottom: 1px solid var(--border-soft);
+  overflow-wrap: anywhere;
+}
+
+.schematic-legend li span { color: var(--muted); }
 
 .schematic-canvas .react-flow__edge-textbg {
   fill: var(--panel);

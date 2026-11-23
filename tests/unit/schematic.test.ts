@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parseSchematic } from "../../web/src/lib/schematic.js";
+import { parseSchematic } from "../../src/schematic.js";
 
 test("parses a full schematic block", () => {
   const schematic = parseSchematic(JSON.stringify({
@@ -45,6 +45,12 @@ test("drops dangling edges, unknown group refs, and empty groups", () => {
   assert.deepEqual(schematic.groups, []);
   assert.equal(schematic.nodes[0]?.group, undefined);
   assert.equal(schematic.edges.length, 1);
+});
+
+test("an unused legacy group cannot shadow a node in the rendered graph", () => {
+  const code = JSON.stringify({ groups: [{ id: "a", label: "Unused" }], nodes: [{ id: "a", label: "Worker" }, { id: "b", label: "Rows" }], edges: [{ from: "a", to: "b" }] });
+  assert.deepEqual(parseSchematic(code).groups, []);
+  assert.throws(() => parseSchematic(code, "review"), /share id/);
 });
 
 test("rejects structurally broken schematics", () => {

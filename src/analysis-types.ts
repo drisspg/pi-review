@@ -3,7 +3,7 @@ import type { GuideChapter } from "./guide.js";
 import type { AiReviewRecord, FocusScanRecord, GuideReviewRecord } from "./types.js";
 
 export const ANALYSIS_VERSION = 1;
-export const REVIEW_PAIR_VERSION = 3;
+export const REVIEW_PAIR_VERSION = 4;
 export type AnalysisKind = "main-review" | "focus-review" | "guide-review" | "code-walk";
 
 export type AnalysisProvenance = {

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { Code, RootContent } from "mdast";
 import { fromMarkdown } from "mdast-util-from-markdown";
 
 import { ANALYSIS_VERSION, REVIEW_PAIR_VERSION, sameReviewPair, type AnalysisKind, type AnalysisProvenance, type AnalysisResult, type AnalysisRun } from "./analysis-types.js";
@@ -7,6 +8,7 @@ import { parseGuideChapters } from "./guide.js";
 import type { ReviewDraftToolContext } from "./review-draft-tool.js";
 import { parseReviewVisual, reviewVisualInstructions } from "./review-visual.js";
 import type { ReviewPromptApi } from "./review-prompt-api.js";
+import { parseSchematic } from "./schematic.js";
 import type { StateStore } from "./state.js";
 import type { SavedAnalysisApiDeps } from "./saved-analysis-api.js";
 import type { AiReviewRecord, FocusScanRecord, GuideReviewRecord, StoredPullRequest } from "./types.js";
@@ -35,39 +37,69 @@ class InvalidAnalysisError extends Error {}
 
 class InvalidVisualError extends InvalidAnalysisError {
   constructor(readonly explanation: string, where: string) {
-    super(`Expected an explanation followed by one valid two-lane review visual in ${where}.`);
+    super(`Expected an explanation and a visible illustration in ${where}.`);
   }
+}
+
+function isFigure(block: RootContent | undefined): block is Code {
+  return block?.type === "code" && (block.lang === "schematic" || block.lang === "review-visual" || block.lang === "text" || block.lang === "diff");
+}
+
+function figureCandidates(blocks: RootContent[]): Code[] {
+  const figures = blocks.filter(isFigure);
+  // A diff or text excerpt can accompany a structured diagram without being another diagram.
+  const diagrams = figures.filter(block => block.lang === "schematic" || block.lang === "review-visual");
+  return diagrams.length ? diagrams : figures;
+}
+
+function closedFigure(markdown: string, block: Code): boolean {
+  const lines = markdown.slice(block.position!.start.offset, block.position!.end.offset).split(/\r?\n/);
+  const opener = /^(`{3,}|~{3,})([\w-]+)(?:[ \t].*)?$/.exec(lines[0]);
+  const closer = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(lines.at(-1)!);
+  return !!opener && opener[2] === block.lang && !!closer && closer[1].startsWith(opener[1]);
+}
+
+function validFigure(markdown: string, block: Code): boolean {
+  if (!closedFigure(markdown, block)) return false;
+  if (block.lang === "text" || block.lang === "diff") return !!block.value.trim();
+  if (block.lang === "review-visual") return !!parseReviewVisual(block.value);
+  try { parseSchematic(block.value, "review"); return true; } catch { return false; }
 }
 
 function requireIllustration(markdown: string, where: string) {
   const blocks = fromMarkdown(markdown).children;
-  const last = blocks.at(-1);
-  const visuals = blocks.filter(block => block.type === "code" && block.lang === "review-visual");
-  if (visuals.length !== 1 || last?.type !== "code" || last.lang !== "review-visual" || !parseReviewVisual(last.value) || !blocks.some(block => block.type === "paragraph" || block.type === "list")) {
+  const figures = figureCandidates(blocks);
+  if (figures.length !== 1 || !validFigure(markdown, figures[0]) || !blocks.some(block => block.type === "paragraph" || block.type === "list")) {
     throw new InvalidVisualError(markdown, where);
   }
+}
+
+/** A lost closer may have consumed review text up to an unrelated closing fence. */
+function replaceableFigure(markdown: string, block: Code): boolean {
+  if (block.lang === "text" || block.lang === "diff") return false; // Never discard free-form review text during a repair.
+  if (!closedFigure(markdown, block) || /^\s*(?:#{1,6}\s|`{3,}|~{3,})/m.test(block.value)) return false;
+  const lines = block.value.split("\n");
+  if (lines.length === 1) return true;
+  if (block.lang === "review-visual") return lines.length === 2 && lines.every(line => /^[^:]+:/.test(line));
+  // A multiline graph with bad references is still recognizably diagram data.
+  // Arbitrary non-JSON could include prose; keep the original in diagnostics.
+  try { JSON.parse(block.value); return true; } catch { return false; }
 }
 
 /** Only splice a diagram at an unambiguous location; the model never rewrites the review. */
 function insertRepair(answer: string, explanation: string, repair: string): string {
   const [block, ...rest] = fromMarkdown(repair).children;
-  if (rest.length || block?.type !== "code" || block.lang !== "review-visual" || !parseReviewVisual(block.value)) throw new InvalidAnalysisError("Visual repair rejected: expected just the replacement diagram.");
+  if (rest.length || !isFigure(block) || !validFigure(repair, block)) throw new InvalidAnalysisError("Visual repair rejected: expected just the replacement diagram.");
   const at = answer.indexOf(explanation);
   if (at < 0 || at !== answer.lastIndexOf(explanation)) throw new InvalidAnalysisError("Visual repair rejected: ambiguous finding location.");
-  const visuals = fromMarkdown(explanation).children.filter(node => node.type === "code" && node.lang === "review-visual");
-  let end = explanation.length;
-  if (visuals.length) {
-    const [old] = visuals;
-    const start = old.position!.start.offset!;
-    const fence = explanation.slice(start).trimEnd().split(/\r?\n/);
-    const opener = /^(`{3,}|~{3,})review-visual[ \t]*$/.exec(fence[0]);
-    const closer = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(fence.at(-1) ?? "")?.[1];
-    // An unterminated fence may have swallowed evidence or additional findings. Never remove it.
-    if (visuals.length !== 1 || old.position!.end.offset !== explanation.length || !opener || !closer?.startsWith(opener[1]) || fence.length > 4) throw new InvalidAnalysisError("Visual repair rejected: cannot safely replace the malformed diagram.");
-    end = start;
+  const visuals = figureCandidates(fromMarkdown(explanation).children);
+  const end = at + explanation.length;
+  if (!visuals.length) return answer.slice(0, end) + "\n\n" + repair + answer.slice(end);
+  const [old] = visuals;
+  if (visuals.length !== 1 || !replaceableFigure(explanation, old)) {
+    throw new InvalidAnalysisError("Visual repair rejected: cannot safely replace the malformed diagram.");
   }
-  const replacement = "```review-visual\n" + block.value.trim() + "\n```";
-  return answer.slice(0, at + end).trimEnd() + "\n\n" + replacement + answer.slice(at + explanation.length);
+  return answer.slice(0, at + old.position!.start.offset!) + repair + answer.slice(at + old.position!.end.offset!);
 }
 
 function checkedAnswer(text: string): string {
@@ -184,7 +216,7 @@ export function createAnalysisApi(deps: AnalysisApiDeps): AnalysisApi {
       if (error instanceof InvalidVisualError) {
         try {
           assertCurrent(run, context);
-          const diagram = checkedAnswer(await deps.askPi(run.prKey, `${error.message} Return ONLY the replacement review-visual block for that item, with no prose or review headings. ${reviewVisualInstructions}`, purpose));
+          const diagram = checkedAnswer(await deps.askPi(run.prKey, `${error.message} Return ONLY the replacement fenced diagram for that item, with no prose or review headings. ${reviewVisualInstructions}`, purpose));
           assertCurrent(run, context);
           const repaired = insertRepair(answer, error.explanation, diagram);
           return { answer: repaired, purpose, value: validate(repaired) };

@@ -10,7 +10,7 @@ import { parseGuideChapters } from "../../src/guide";
 test.describe.configure({ mode: "serial" });
 
 const prUrl = process.env.PI_REVIEW_TEST_PR ?? "https://github.com/Dao-AILab/flash-attention/pull/2542";
-let openedPr: { key: string; headSha: string } | null = null;
+let openedPr: { key: string; headSha: string; title: string } | null = null;
 let openedWorktreeDir: string | undefined;
 
 function testCheckoutDir(page: Page): string {
@@ -152,7 +152,7 @@ test.beforeEach(async ({ page }, testInfo) => {
   const responsePromise = page.waitForResponse((response) => response.url().endsWith("/api/pr/open") && response.request().method() === "POST");
   await page.getByRole("button", { name: "Open", exact: true }).click();
   const response = await responsePromise;
-  const data = await response.json() as { pr: { key: string; headSha: string }; worktreeDir?: string };
+  const data = await response.json() as { pr: { key: string; headSha: string; title: string }; worktreeDir?: string };
   openedPr = data.pr;
   openedWorktreeDir = data.worktreeDir;
   await expect(page.locator(".review-layout")).toBeVisible({ timeout: 60_000 });
@@ -161,6 +161,16 @@ test.beforeEach(async ({ page }, testInfo) => {
 test.afterEach(async ({ request }) => {
   if (openedPr == null) return;
   await request.post("/api/draft-review/save", { data: { prKey: openedPr.key, headSha: openedPr.headSha, event: "COMMENT", body: "", comments: [] } });
+});
+
+test("browser tab identifies the open PR and resets on home", async ({ page }) => {
+  if (!openedPr) throw new Error("Missing opened PR");
+  const title = `${openedPr.key.split("/").pop()} · ${openedPr.title}`;
+  await expect(page).toHaveTitle(title);
+  await page.reload();
+  await expect(page).toHaveTitle(title);
+  await goHome(page);
+  await expect(page).toHaveTitle("Pi PR Review");
 });
 
 test("deletes a local checkout, preserves the saved PR and draft, and recreates it on reopen", async ({ page }) => {

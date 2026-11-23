@@ -59,6 +59,7 @@ src/                    Node server (TypeScript, ESM, run via tsx)
                         read-only evidence, runs headless Pi with `--no-tools` + its own system
                         prompt, saves suggestions. Disabled by PI_REVIEW_DISABLE_AUTO_REVIEWS=1 or
                         PI_REVIEW_PRE_REVIEW_ASSESSOR=0; never posts to GitHub
+  schematic.ts          Shared JSON graph contract for the overview and review figures.
   analysis-api.ts       Either General or Focus starts one coordinated review for the current HEAD:
                         independent maintainer/investigator passes, verification, then one verdict.
                         Persist both final projections atomically; never copy provisional or refuted
@@ -111,9 +112,7 @@ web/src/                React frontend (Vite)
                         done))
   lib/                  diff parsing, comment helpers, guide steps, overview panel sections
                         (overview.ts parses the code-walk prompt's four-section contract, with a
-                        free-form fallback), schematic.ts (typed JSON contract behind fenced
-                        ```schematic blocks, rendered by SchematicDiagram via React Flow + ELK;
-                        mermaid remains the legacy fallback), focus areas, highlight, dom
+                        free-form fallback), focus areas, highlight, dom
 tests/unit/             node:test suites for backend api modules (run via tsx)
 tests/e2e/              Playwright suite (pr-review.spec.ts, ~55 tests)
 scripts/                start.mjs + smoke scripts (gpu-workspace, chat latency)

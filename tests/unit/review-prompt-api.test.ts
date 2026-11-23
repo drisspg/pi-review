@@ -88,6 +88,7 @@ test("synthesis reconciles the draft against verification without duplicating in
   assert.equal(purpose, "main-review");
   for (const input of ["Request changes: possible stale cache", "Refuted: eviction takes the same lock.", "src/a.ts"]) assert.ok(prompt.includes(input));
   assert.match(prompt, /do not resurrect refuted claims/i);
+  assert.match(prompt, /name its trigger and observable consequence/i);
   assert.match(prompt, /leave their details and action items inline/i);
   assert.match(prompt, /unverified.*why/i);
 });

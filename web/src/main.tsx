@@ -418,6 +418,8 @@ function App() {
   const [prs, setPrs] = useState<PullRequestListItem[]>([]);
   const historyRequestIdRef = useRef(0);
   const [review, setReview] = useState<OpenResponse | null>(null);
+  const tabTitle = review ? `${review.pr.key.split("/").pop()} · ${review.pr.title}` : "Pi PR Review";
+  useEffect(() => { document.title = tabTitle; }, [tabTitle]);
   const [reviewMode, setReviewMode] = useState<"guide" | "diff">("diff");
   const [overview, setOverview] = useState<FlowDag>({ running: false, text: "", error: null });
   const [openFiles, setOpenFiles] = useState<Record<string, boolean>>({});

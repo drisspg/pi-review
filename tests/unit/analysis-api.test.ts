@@ -8,6 +8,10 @@ import { validateReviewDraftTarget, type ReviewDraftToolContext } from "../../sr
 const context: ReviewDraftToolContext = { headSha: "head", files: [{ filename: "Makefile", status: "modified", additions: 2, deletions: 0, changes: 2, patch: "@@ -1 +1,3 @@\n target:\n+\techo build\n+\techo done" }] };
 
 const visual = ["```review-visual", "Base: source → old result", "HEAD: source → new result", "```"].join("\n");
+const graph = (edges: Array<{ from: string; to: string }>) => "```schematic\n" + JSON.stringify({
+  nodes: [{ id: "worker", label: "Worker 0" }, { id: "rows", label: "Rows [0, n)" }], edges,
+}, null, 2) + "\n```";
+const assignment = graph([{ from: "worker", to: "rows" }]);
 const verdict = `Verified verdict.\n\n${visual}`;
 
 function fixture(answer = "No focus areas found.") {
@@ -304,6 +308,48 @@ test("a repaired focus visual reaches synthesis and the saved finding without ch
   assert.equal(f.prompts.at(-1)?.investigation, corrected);
 });
 
+test("the diagram-only retry replaces a multiline schematic without rewriting either finding or its evidence", async () => {
+  const prefix = "## Focus areas\n### Makefile:2 — Missing rows\nA worker exits early.  \n\n```diff excerpt\n- old bound\n+ new bound\n```\n\n";
+  const suffix = `\n\nCheck the last assigned row.\n\n### Evidence\nOriginal trace.\n### Makefile:3 — Missing output\nSecond finding.\n\n${assignment}`;
+  const invalid = graph([{ from: "worker", to: "rows" }, { from: "worker", to: "missing" }]);
+  const f = fixture();
+  const ask = f.deps.askPi;
+  f.deps.askPi = (...args) => args[2] === "review-verify"
+    ? Promise.resolve(args[1] === "review-verify" ? prefix + invalid + suffix : assignment) : ask(...args);
+  const { run } = await createAnalysisApi(f.deps).start({ prKey: "pr", headSha: "head", kind: "focus-review" });
+  await settled(run);
+  assert.equal(run.status, "complete", run.error);
+  assert.equal(f.prompts.at(-1)?.investigation, prefix + assignment + suffix);
+  assert.equal(run.result?.record.answer, (prefix + assignment + suffix).slice("## Focus areas\n".length));
+});
+
+test("a row sketch can explain the finding in place, before the discriminating check", async () => {
+  const sketch = ["```text", "rows      0 … 63 | 64 … 71", "output    [valid]| [guard]", "unexpected write   ^^^^^^^", "```"].join("\n");
+  const body = `There is no row left to write.\n\n${sketch}\n\nCheck that the guard stays unchanged.`;
+  const f = fixture(`### Makefile:2 — Empty work writes into the guard\n${body}`);
+  const { run } = await createAnalysisApi(f.deps).start({ prKey: "pr", headSha: "head", kind: "focus-review" });
+  await settled(run);
+  assert.equal(run.status, "complete", run.error);
+  assert.equal(run.result?.record.answer.includes(body), true);
+});
+
+test("a general verdict needs exactly one figure with real relationships", async () => {
+  for (const figure of [assignment, assignment + "\n\n" + visual, graph([]), graph([{ from: "worker", to: "missing" }]), assignment.slice(0, -3)]) {
+    const f = fixture();
+    const ask = f.deps.askPi;
+    const answer = "The worker owns the tile.\n\n" + figure;
+    f.deps.askPi = (...args) => args[2] === "review-synthesis" ? Promise.resolve(answer) : ask(...args);
+    const { run } = await createAnalysisApi(f.deps).start({ prKey: "pr", headSha: "head", kind: "main-review" });
+    await settled(run);
+    if (figure === assignment) assert.equal(run.result?.record.answer, answer);
+    else {
+      assert.equal(run.status, "invalid");
+      assert.equal(run.rawAnswer, answer.trim());
+      assert.equal(f.saved.length, 0);
+    }
+  }
+});
+
 test("repair only a malformed verdict visual in the existing maintainer session", async () => {
   const f = fixture();
   const ask = f.deps.askPi;
@@ -328,6 +374,18 @@ for (const suffix of ["", "\n    ```"]) test(`a repair cannot replace evidence s
   const ask = f.deps.askPi;
   f.deps.askPi = (...args) => args[2] === "review-verify" ? Promise.resolve(args[1] === "review-verify" ? original : visual) : ask(...args);
   const { run } = await createAnalysisApi(f.deps).start({ prKey: "pr", headSha: "head", kind: "focus-review" });
+  await settled(run);
+  assert.equal(run.status, "invalid");
+  assert.equal(run.rawAnswer, original);
+  assert.equal(f.saved.length, 0);
+});
+
+test("a broken schematic cannot swallow reviewer prose during repair", async () => {
+  const original = "The verdict.\n\n```schematic\n{\"nodes\": []}\n\nOnly land after checking the retry.\n```";
+  const f = fixture();
+  const ask = f.deps.askPi;
+  f.deps.askPi = (...args) => args[2] === "review-synthesis" ? Promise.resolve(args[1] === "review-synthesis" ? original : assignment) : ask(...args);
+  const { run } = await createAnalysisApi(f.deps).start({ prKey: "pr", headSha: "head", kind: "main-review" });
   await settled(run);
   assert.equal(run.status, "invalid");
   assert.equal(run.rawAnswer, original);
