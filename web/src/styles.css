@@ -7756,6 +7756,9 @@ summary:has(.disclosure-chevron)::-webkit-details-marker {
 .logs summary { cursor: pointer; color: var(--muted); }
 .log { border-top: 1px solid var(--border); padding: 8px 0; font-family: var(--font-mono); font-size: var(--text-sm); }
 .logs-modal { width: min(1100px, 96vw); }
+.general-review-modal { width: 96vw; height: 94vh; max-height: 94vh; }
+.general-review-modal-body { display: block; font-size: var(--text-lg); }
+.ai-chat-message.general-review .general-review-expand { margin-left: auto; }
 .logs-modal-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 12px 20px 16px; }
 .log span, .log code { color: var(--muted); overflow-wrap: anywhere; }
 .log span { font-size: var(--text-xs); }

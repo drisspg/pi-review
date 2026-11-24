@@ -2552,9 +2552,20 @@ function AgentActivityLine({ activity }: { activity: PiAgentActivity | null | un
 }
 
 function GeneralReviewEntry({ message, prUrl }: { message: AiReviewMessage; prUrl: string }) {
+  const [fullscreen, setFullscreen] = useState(false);
+  const title = message.title ?? "General review";
+  const body = <MarkdownText text={message.text} fileLinks={{ prUrl, snippets: false }} />;
   return <details className="ai-chat-message general-review" open>
-    <summary><span className="message-role">{message.title ?? "General review"}</span></summary>
-    <MarkdownText text={message.text} fileLinks={{ prUrl, snippets: false }} />
+    <summary>
+      <span className="message-role">{title}</span>
+      <Button variant="icon" className="general-review-expand" aria-label={`Expand ${title} to full screen`} title="Expand to full screen" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setFullscreen(true); }}><ScreenFullIcon size={14} /></Button>
+    </summary>
+    {/* One mounted copy: schematic diagrams use document-wide SVG ids. */}
+    {!fullscreen && body}
+    <ModalShell open={fullscreen} onOpenChange={setFullscreen} label={title} className="pi-modal general-review-modal">
+      <header className="pi-modal-head"><div><h2>{title}</h2></div></header>
+      <div className="pi-modal-body general-review-modal-body">{body}</div>
+    </ModalShell>
   </details>;
 }
 

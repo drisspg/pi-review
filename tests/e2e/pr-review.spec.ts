@@ -2071,6 +2071,14 @@ test("runs the right-sidebar Pi review beside the native terminal", async ({ pag
     panel.getByRole("link", { name: "csrc/flash_attn/src/flash_fwd_kernel.h:1276" }).click(),
   ]);
   expect(openedFile).toMatchObject({ path: "csrc/flash_attn/src/flash_fwd_kernel.h", line: 1276 });
+  await panel.getByRole("button", { name: "Expand General review to full screen" }).click();
+  const fullscreenReview = page.getByRole("dialog", { name: "General review" });
+  await expect(fullscreenReview).toContainText("Correctness:");
+  const dialogBox = await fullscreenReview.boundingBox();
+  expect(dialogBox?.width ?? 0).toBeGreaterThan(1800);
+  await page.keyboard.press("Escape");
+  await expect(fullscreenReview).toHaveCount(0);
+  await expect(panel.locator(".general-review")).toHaveAttribute("open", "");
   reviewAnswer = "- **Tests:** rerun the CUDA smoke test.\n\n```review-visual\nLegacy path with <strong>literal text</strong>\n```";
   await panel.getByRole("button", { name: "Refresh findings" }).click();
   await expect(panel.getByText("CUDA smoke test")).toBeVisible();
