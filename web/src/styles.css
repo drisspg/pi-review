@@ -6971,6 +6971,7 @@ body:has(.line-review-expanded) {
   overflow: hidden;
 }
 
+.focus-comment-modal { width: min(44rem, 96vw); }
 .pi-settings-modal { width: min(1080px, 96vw); }
 .pi-diagnostics-modal { width: min(1200px, 96vw); }
 .review-memory-modal { width: min(1280px, 96vw); }
@@ -7423,6 +7424,7 @@ body:has(.line-review-expanded) {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-left: auto;
 }
 
 .pi-card-stack {

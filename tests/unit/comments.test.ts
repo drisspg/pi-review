@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildDiffAnnotationIndex, diffAnnotationTargetKey } from "../../web/src/lib/comments.js";
+import { buildDiffAnnotationIndex, diffAnnotationTargetKey, focusCommentAnchor } from "../../web/src/lib/comments.js";
 import type { DraftComment, FocusArea, PullReviewComment, Thread } from "../../web/src/types.js";
 
 const lineKey = (line: number) => diffAnnotationTargetKey({ path: "src/a.ts", side: "RIGHT", line });
@@ -24,6 +24,16 @@ test("diff annotation index groups comments and indexes row annotations", () => 
   assert.deepEqual(index.focusAreasByTarget.get(lineKey(10))?.map((area) => area.id), ["focus"]);
   assert.equal(index.threadsByTarget.get(lineKey(11)), thread);
   assert.deepEqual([9, 10, 11, 12].map((line) => index.openThreadRangeTargets.has(lineKey(line))), [true, true, true, false]);
+});
+
+test("focus drafts use a reviewable HEAD range, or one line inside the finding", () => {
+  const patch = "@@ -3,2 +3,2 @@\n before\n-old\n+new\n@@ -10 +10 @@\n-other\n+changed";
+  const target = (startLine: number, endLine: number) => focusCommentAnchor({ path: "a.ts", startLine, endLine }, patch);
+  assert.deepEqual(target(3, 4), { path: "a.ts", startLine: 3, line: 4, side: "RIGHT" });
+  assert.deepEqual(target(4, 4), { path: "a.ts", line: 4, side: "RIGHT" });
+  assert.deepEqual(target(4, 10), { path: "a.ts", line: 4, side: "RIGHT" });
+  assert.deepEqual(target(1, 3), { path: "a.ts", line: 3, side: "RIGHT" });
+  assert.equal(target(5, 9), null);
 });
 
 test("diff annotation index excludes collapsed thread ranges", () => {

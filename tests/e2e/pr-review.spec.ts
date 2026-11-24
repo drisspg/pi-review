@@ -1648,6 +1648,36 @@ Second explanation.`);
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toMatch(/First explanation\.[\s\S]*Second explanation\./);
 });
 
+test("adds a private reviewer comment from a focus finding without resolving it", async ({ page }) => {
+  await mockNativeTerminal(page);
+  const row = (await openFileWithAddedRows(page, 1)).first();
+  const path = await row.getAttribute("data-path");
+  const line = Number(await row.getAttribute("data-line"));
+  await mockAnalysis(page, "focus-review", `## Focus areas
+### ${path}:${line} — Check the caller
+Investigate the supported caller.`);
+  await openSideTab(page, "Pi");
+  await page.getByRole("button", { name: /^(Focus scan|Refresh focus scan)$/ }).click();
+  const button = { name: "Add comment: Check the caller" };
+  await page.locator(".focus-area-inline").getByRole("button", button).click();
+  const editor = page.getByRole("dialog", { name: "Comment on finding" });
+  await expect(editor.getByRole("textbox")).toHaveValue("");
+  await editor.getByRole("button", { name: "Cancel" }).click();
+  await page.getByRole("list", { name: "Focus findings" }).getByRole("button", button).click();
+  await expect(editor).toContainText(`${path}:${line}`);
+  const body = "Which caller reaches this branch?";
+  await editor.getByRole("textbox").fill(body);
+  const saved = page.waitForResponse(response => response.url().endsWith("/api/draft-review/save") && response.request().postDataJSON().comments?.some((c: {body: string}) => c.body === body));
+  await editor.getByRole("button", { name: "Add draft comment" }).click();
+  const response = await saved;
+  expect(response.ok()).toBeTruthy();
+  expect(response.request().postDataJSON().comments).toContainEqual(expect.objectContaining({ path, line, side: "RIGHT", body }));
+  await expect(page.locator(".focus-findings-count")).toHaveText("1 open · 0 resolved");
+  await page.reload();
+  await openSideTab(page, "Review");
+  await expect(page.locator(".review-summary .draft-card", { hasText: body })).toBeVisible();
+});
+
 test("explains focus findings in both views and copies collapsed evidence", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await mockNativeTerminal(page);

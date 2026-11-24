@@ -5,6 +5,7 @@ import { BaseStyles, Checkbox, Flash, Radio, Select, Textarea, TextInput, ThemeP
 import { api, ApiError, errorMessage, isStaleBuild, isStaleServer, logUsage, RESTART_HINT, subscribeStaleBuild, subscribeStaleServer } from "./api";
 import { ActionMenu, ActionMenuItem } from "./components/ActionMenu";
 import { Button } from "./components/Button";
+import { FocusCommentButton, FocusCommentContext } from "./components/FocusComment";
 import { CodeText, InlineSnippetsProvider, MarkdownText } from "./components/Markdown";
 import { MarkdownEditor } from "./components/MarkdownEditor";
 import { ModalShell } from "./components/Modal";
@@ -127,7 +128,7 @@ type DiffProps = {
   setThreads: (threads: Record<string, Thread> | ((threads: Record<string, Thread>) => Record<string, Thread>)) => void;
   setViewed: (file: PullFile, viewed: boolean) => Promise<void>;
   drafts: DraftComment[];
-  setDrafts: (drafts: DraftComment[]) => void;
+  setDrafts: React.Dispatch<React.SetStateAction<DraftComment[]>>;
   editingDraftId: string | null;
   setEditingDraftId: (id: string | null) => void;
   sideWidth: number;
@@ -1594,8 +1595,9 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { r
       </Tabs>
     </aside>
   </>;
+  const currentScanId = props.review.focusScans.find(scan => scan.id === props.piPanel.focusScanId && scan.headSha === pr.headSha)?.id;
   const gridTemplateColumns = sideCollapsed || sideFocused ? "minmax(0, 1fr)" : `minmax(0, 1fr) 12px ${props.sideWidth}px`;
-  return <PiTerminalPrContext.Provider value={{ prKey: props.review.pr.key, headSha: props.review.pr.headSha, onDraftReview: (draftReview) => props.setDrafts(draftReview.comments) }}><FocusResolutionContext.Provider value={{ viewedIds: props.piPanel.viewedFocusIds, saving: savingFocusResolution, toggle: toggleFocusResolution }}><GitHubDraftContext.Provider value={props.githubDrafts}><div className={`review-page${sideFocused ? " panel-focused" : ""}`}>
+  return <PiTerminalPrContext.Provider value={{ prKey: props.review.pr.key, headSha: props.review.pr.headSha, onDraftReview: (draftReview) => props.setDrafts(draftReview.comments) }}><FocusResolutionContext.Provider value={{ viewedIds: props.piPanel.viewedFocusIds, saving: savingFocusResolution, toggle: toggleFocusResolution }}><FocusCommentContext.Provider value={{ currentScanId, files: props.review.files, addDraft: draft => props.setDrafts(current => [...current, draft]) }}><GitHubDraftContext.Provider value={props.githubDrafts}><div className={`review-page${sideFocused ? " panel-focused" : ""}`}>
     <div className={`review-layout${sideCollapsed ? " side-collapsed" : ""}${sideFocused ? " side-focused" : ""}`} style={{ gridTemplateColumns }}>
       <div className="review-main">
         <PrHeaderStrip pr={props.review.pr} refreshingActivity={props.refreshingActivity} refresh={() => props.refreshGithubActivity(true)} />
@@ -1639,7 +1641,7 @@ function ReviewPage({ threads, setActiveFocusAreaId, ...props }: DiffProps & { r
       {sidePanel}
     </div>
     {draftCount > 0 && (sideCollapsed || sideTab !== "review") && <Button className="floating-submit" onClick={() => openSidePanel("review")}>Review draft ({draftCount}) →</Button>}
-  </div></GitHubDraftContext.Provider></FocusResolutionContext.Provider></PiTerminalPrContext.Provider>;
+  </div></GitHubDraftContext.Provider></FocusCommentContext.Provider></FocusResolutionContext.Provider></PiTerminalPrContext.Provider>;
 }
 
 function PrChecks({ checks }: { checks: CommitChecks }) {
@@ -2309,7 +2311,7 @@ function FocusAreaInline({ prUrl, area, active, collapsedFocusAreaIds, setCollap
   return <div id={`focus-area-${area.id}`} className={`inline-thread review-thread focus-area-inline${terminalOpen ? " terminal-open" : ""}${active ? " active" : ""}`}>
     <div className="thread-head">
       <div className="thread-title"><span className="kicker">Focus</span><span className="focus-area-location" title={location}>{location}</span></div>
-      <div className="actions"><Button variant="muted" className="small-muted-button focus-area-ask" aria-expanded={terminalOpen} aria-label={terminalOpen ? "Close Pi terminal" : "Ask Pi about this focus area"} onClick={() => setTerminalOpen((open) => !open)}>{terminalOpen ? "Close Pi" : "Ask Pi"}</Button><FocusResolutionButton area={area} /><Button variant="icon" aria-label="Collapse focus area" onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: true }))}><ChevronDownIcon size={16} /></Button></div>
+      <div className="actions"><FocusCommentButton area={area} /><Button variant="muted" className="small-muted-button focus-area-ask" aria-expanded={terminalOpen} aria-label={terminalOpen ? "Close Pi terminal" : "Ask Pi about this focus area"} onClick={() => setTerminalOpen((open) => !open)}>{terminalOpen ? "Close Pi" : "Ask Pi"}</Button><FocusResolutionButton area={area} /><Button variant="icon" aria-label="Collapse focus area" onClick={() => setCollapsedFocusAreaIds((current) => ({ ...current, [area.id]: true }))}><ChevronDownIcon size={16} /></Button></div>
     </div>
     <div className={`focus-area-finding${body.length > 0 ? " has-body" : ""}`}><FocusFindingContent prUrl={prUrl} title={area.title} body={body} /></div>
     {terminalOpen && <InlinePiTerminal session={terminalSessionId("focus", area.id)} target={{ path: area.path, line: area.endLine, ...(area.startLine === area.endLine ? {} : { startLine: area.startLine }), side: "RIGHT" }} context={`You are discussing the focus area at ${location} in this pull request. Keep read-only investigation grounded in this location.
@@ -2574,6 +2576,7 @@ function FocusFindingsList({ prUrl, areas, viewedIds, activeId, jump }: { prUrl:
             <span className="focus-finding-title">{area.title}</span>
             {area.body && <span className="disclosure-chevron" aria-hidden="true">›</span>}
           </button>
+          {(expanded || !area.body) && <FocusCommentButton area={area} />}
           {area.body && <Button variant="muted" aria-label={jumpLabel} onClick={() => jump(area)}>View diff</Button>}
         </div>
         {area.body && <div id={bodyId} hidden={!expanded} className="focus-finding-body">{expanded && <FocusFindingContent prUrl={prUrl} body={area.body} />}</div>}

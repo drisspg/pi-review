@@ -1,5 +1,19 @@
 import type { DraftComment, FocusArea, PullReviewComment, Target, Thread } from "../types";
 
+import { parsePatchRows } from "./diff";
+
+/** A finding may span multiple hunks or unchanged lines outside the GitHub patch. */
+export function focusCommentAnchor(area: Pick<FocusArea, "path" | "startLine" | "endLine">, patch?: string): Omit<DraftComment, "id" | "body"> | null {
+  const rows = parsePatchRows(patch).filter(row => row.hunk && row.newLine != null && row.newLine >= area.startLine && row.newLine <= area.endLine);
+  const first = rows[0];
+  const last = rows.at(-1);
+  if (first?.newLine == null || !last) return null;
+  if (area.startLine !== area.endLine && first.newLine === area.startLine && last.newLine === area.endLine && first.hunk === last.hunk) {
+    return { path: area.path, side: "RIGHT", startLine: area.startLine, line: area.endLine };
+  }
+  return { path: area.path, side: "RIGHT", line: first.newLine };
+}
+
 export type DiffAnnotationIndex = {
   commentThreadsByFile: Map<string, PullReviewComment[][]>;
   commentThreadsByTarget: Map<string, PullReviewComment[][]>;
