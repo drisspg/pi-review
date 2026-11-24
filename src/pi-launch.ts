@@ -5,6 +5,8 @@ import { homedir } from "node:os";
 import { delimiter, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import type { AnalysisKind } from "./analysis-types.js";
+
 const localConfigPath = () => process.env.PI_REVIEW_LOCAL_CONFIG?.trim() || fileURLToPath(new URL("../.pi-review.local.json", import.meta.url));
 
 export type PiModelRef = { provider: string; id: string };
@@ -14,7 +16,7 @@ export type PiModelRef = { provider: string; id: string };
  * e.g. openai -> plugboard-codex). `models` is that list; `model` stays the first entry.
  * `activityLedgerPath` relocates the review activity ledger (e.g. into a notes vault).
  */
-export type PiReviewLocalConfig = { piCommand?: string; model?: PiModelRef; models?: PiModelRef[]; thinkingLevel?: string; activityLedgerPath?: string };
+export type PiReviewLocalConfig = { piCommand?: string; model?: PiModelRef; models?: PiModelRef[]; reviewModels?: PiModelRef[]; thinkingLevel?: string; activityLedgerPath?: string };
 
 /** Read this app checkout's optional machine-local config, never a reviewed PR's config. */
 export function readPiReviewLocalConfig(configPath = localConfigPath()): PiReviewLocalConfig {
@@ -39,13 +41,16 @@ export function readPiReviewLocalConfig(configPath = localConfigPath()): PiRevie
     if (slash <= 0 || slash === model.length - 1) throw new Error(`Expected model as provider/id (or a list of them) in ${configPath}`);
     return { provider: model.slice(0, slash), id: model.slice(slash + 1) };
   };
-  const rawModel = config?.model;
-  if (rawModel !== undefined) {
-    const models = (Array.isArray(rawModel) ? rawModel : [rawModel]).map(parseModel);
-    if (models.length === 0) throw new Error(`Expected at least one model in ${configPath}`);
-    result.models = models;
-    result.model = models[0];
+  const modelList = (raw: unknown): PiModelRef[] => {
+    const models = (Array.isArray(raw) ? raw : [raw]).map(parseModel);
+    if (!models.length) throw new Error(`Expected at least one model in ${configPath}`);
+    return models;
+  };
+  if (config?.model !== undefined) {
+    result.models = modelList(config.model);
+    result.model = result.models[0];
   }
+  if (config?.reviewModel !== undefined) result.reviewModels = modelList(config.reviewModel);
   const thinkingLevel = text("thinkingLevel");
   if (thinkingLevel) result.thinkingLevel = thinkingLevel;
   const activityLedgerPath = text("activityLedgerPath");
@@ -84,8 +89,12 @@ export function piLaunch(args: string[], env: NodeJS.ProcessEnv = process.env, l
   return { command: command.startsWith("~/") ? resolve(homedir(), command.slice(2)) : command, args, env: childEnv };
 }
 
+/** Background review purposes that use `reviewModel`; verification and synthesis prompts run under these purposes too. */
+const REVIEW_MODEL_PURPOSES: ReadonlySet<string> = new Set<AnalysisKind>(["main-review", "focus-review"]);
+
 /** Acceptable models in preference order: the Pi Review list, else the single global default (empty = Pi decides). */
-export function piModelCandidates(cwd = process.cwd(), agentDir = getAgentDir(), local = readPiReviewLocalConfig()): PiModelRef[] {
+export function piModelCandidates(cwd = process.cwd(), purpose?: string, agentDir = getAgentDir(), local = readPiReviewLocalConfig()): PiModelRef[] {
+  if (purpose != null && REVIEW_MODEL_PURPOSES.has(purpose) && local.reviewModels?.length) return local.reviewModels;
   if (local.models?.length) return local.models;
   const args = piModelArgs(cwd, agentDir, local);
   return args.length === 0 ? [] : [{ provider: args[1], id: args[3] }];

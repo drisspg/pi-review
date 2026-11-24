@@ -111,6 +111,14 @@ test("a configured model list accepts launcher routing between listed providers 
 
     await assert.rejects(start("openai/routed"), /did not select any configured model \(openai\/routed -> plugboard-codex\/routed\); refusing a fallback/);
     await assert.rejects(start([]), /at least one model/);
+
+    await writeFile(process.env.PI_REVIEW_LOCAL_CONFIG!, JSON.stringify({ model: "google/neon", reviewModel: "anthropic/fable" }));
+    for (const scope of ["main-review", "focus-review", "chat", "guide-review"]) {
+      const session = await PiAgentProcess.create({ cwd: root, sessionDir: root, thinkingLevel: "low", customTools: [], purpose: scope });
+      try {
+        assert.equal(session.model?.id, scope === "main-review" || scope === "focus-review" ? "fable" : "neon", scope);
+      } finally { await session.dispose(); }
+    }
   } finally {
     if (previous.command == null) delete process.env.PI_REVIEW_PI_COMMAND;
     else process.env.PI_REVIEW_PI_COMMAND = previous.command;

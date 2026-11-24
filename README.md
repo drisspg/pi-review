@@ -58,6 +58,7 @@ Machine-local settings live in the gitignored `.pi-review.local.json` in this ch
 | --- | --- |
 | `piCommand` | Pi launcher for terminals and background agents (else `PI_BIN`, else `pi` on PATH) |
 | `model` | Model for Pi Review only: `provider/id`, or a preference list. The first is requested; any listed model is accepted (launchers may route one provider to another); anything else is refused |
+| `reviewModel` | Optional model or preference list for the paired background review only (maintainer draft, Focus investigation, verification and final verdict). Omit to use `model`. Chat and terminals still use `model`. Applies when a new agent process starts. |
 | `thinkingLevel` | Thinking level for every Pi Review agent and terminal |
 | `activityLedgerPath` | Where review-activity data and the year report are written (e.g. a notes vault) |
 

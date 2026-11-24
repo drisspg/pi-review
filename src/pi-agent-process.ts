@@ -18,7 +18,7 @@ const STARTUP_LOCK_RETRY_MS = 250;
 const MAX_RECORD_CHARS = 16_000_000;
 type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout };
 type Model = NonNullable<RpcSessionState["model"]>;
-type Options = { cwd: string; sessionDir: string; thinkingLevel: string; tools?: string[]; customTools: ToolDefinition[]; workspace?: PiReviewWorkspace };
+type Options = { cwd: string; sessionDir: string; thinkingLevel: string; purpose?: string; tools?: string[]; customTools: ToolDefinition[]; workspace?: PiReviewWorkspace };
 
 type RpcData = {
   get_state: RpcSessionState;
@@ -81,7 +81,7 @@ export class PiAgentProcess {
    * model is never used as a silent fallback.
    */
   static async create(options: Options): Promise<PiAgentProcess> {
-    const candidates = piModelCandidates(options.cwd);
+    const candidates = piModelCandidates(options.cwd, options.purpose);
     if (candidates.length === 0) return PiAgentProcess.startRetryingLock(options, null, []);
     const rejected: string[] = [];
     for (const candidate of candidates) {
