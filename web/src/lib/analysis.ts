@@ -6,13 +6,27 @@ export class AnalysisError extends Error {
   constructor(message: string, readonly rawAnswer?: string) { super(message); }
 }
 
+/** Wait between status polls: slower while the tab is hidden, cut short when the user returns to it. */
+function pollDelay(): Promise<void> {
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+      resolve();
+    };
+    const onVisible = () => { if (!document.hidden) done(); };
+    const timer = setTimeout(done, document.hidden ? 10_000 : 2_000);
+    document.addEventListener("visibilitychange", onVisible);
+  });
+}
+
 /** Poll a backend-owned run; navigation may stop observing without cancelling its persistence. */
 export async function runAnalysis(prKey: string, headSha: string, kind: AnalysisKind, force: boolean, onActivity: (activity: AnalysisRun["activity"]) => void, isCurrent: () => boolean): Promise<AnalysisResult[] | null> {
   let { run } = await api<{ run: AnalysisRun }>("/api/analysis/start", { method: "POST", body: JSON.stringify({ prKey, headSha, kind, force }) });
   while (run.status === "running") {
     if (!isCurrent()) return null;
     onActivity(run.activity);
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    await pollDelay();
     if (!isCurrent()) return null;
     ({ run } = await api<{ run: AnalysisRun }>("/api/analysis/status", { method: "POST", body: JSON.stringify({ runId: run.id }) }));
   }

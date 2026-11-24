@@ -355,12 +355,13 @@ export function createRequestListener(route: ServerRoute, logger: ServerLogger, 
     if (assetsVersion != null) res.setHeader("x-pi-review-assets", assetsVersion());
     // Server code on disk is newer than this process: new UI features may call routes it lacks.
     if (serverStale?.() === true) res.setHeader("x-pi-review-server-stale", "1");
-    const shouldLogRequest = method !== "GET";
+    const pathname = url.split("?")[0];
+    const statusPoll = method === "POST" && pathname === "/api/analysis/status";
+    const shouldLogRequest = method !== "GET" && !statusPoll;
     if (shouldLogRequest) logger.info("http", "request start", { method, url });
     res.on("finish", () => {
       const ms = Math.round(performance.now() - startedAt);
-      if (shouldLogRequest) logger.info("http", "request finish", { method, url, status: res.statusCode, ms });
-      const pathname = url.split("?")[0];
+      if (shouldLogRequest || (statusPoll && res.statusCode >= 400)) logger.info("http", "request finish", { method, url, status: res.statusCode, ms });
       if (recordUsage != null && method !== "OPTIONS" && pathname.startsWith("/api/") && !usageIgnoredApiPaths.has(pathname)) {
         recordUsage(pathname, { method, status: res.statusCode, ms });
       }

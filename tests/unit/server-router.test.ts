@@ -644,6 +644,20 @@ test("request listener identifies a checkout revision conflict as recoverable wi
   assert.deepEqual(jsonBody(res), { error: error.message, code: "CHECKOUT_RESET_REQUIRED" });
 });
 
+test("status polls stay quiet on success but log an unsuccessful response", async () => {
+  const messages: string[] = [];
+  const listener = createRequestListener(async (_req, res) => { res.end(); }, { info: (_scope, message) => messages.push(message), error: (_scope, message) => messages.push(message) });
+  for (const status of [200, 403]) {
+    const res = new FakeResponse();
+    res.statusCode = status;
+    await new Promise<void>(resolve => {
+      res.on("finish", resolve);
+      listener(fakeRequest("POST", "/api/analysis/status?test=1"), res as unknown as ServerResponse);
+    });
+    assert.deepEqual(messages, status === 200 ? [] : ["request finish"]);
+  }
+});
+
 test("request listener logs and wraps route failures as JSON 500", async () => {
   const logs: unknown[] = [];
   const logger = {
