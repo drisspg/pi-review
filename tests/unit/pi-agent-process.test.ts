@@ -113,10 +113,11 @@ test("a configured model list accepts launcher routing between listed providers 
     await assert.rejects(start([]), /at least one model/);
 
     await writeFile(process.env.PI_REVIEW_LOCAL_CONFIG!, JSON.stringify({ model: "google/neon", reviewModel: "anthropic/fable" }));
-    for (const scope of ["main-review", "focus-review", "chat", "guide-review"]) {
+    const reviewPurposes = ["main-review", "focus-review", "flow-dag"];
+    for (const scope of [...reviewPurposes, "chat", "guide-review"]) {
       const session = await PiAgentProcess.create({ cwd: root, sessionDir: root, thinkingLevel: "low", customTools: [], purpose: scope });
       try {
-        assert.equal(session.model?.id, scope === "main-review" || scope === "focus-review" ? "fable" : "neon", scope);
+        assert.equal(session.model?.id, reviewPurposes.includes(scope) ? "fable" : "neon", scope);
       } finally { await session.dispose(); }
     }
   } finally {

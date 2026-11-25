@@ -89,8 +89,11 @@ export function piLaunch(args: string[], env: NodeJS.ProcessEnv = process.env, l
   return { command: command.startsWith("~/") ? resolve(homedir(), command.slice(2)) : command, args, env: childEnv };
 }
 
-/** Background review purposes that use `reviewModel`; verification and synthesis prompts run under these purposes too. */
-const REVIEW_MODEL_PURPOSES: ReadonlySet<string> = new Set<AnalysisKind>(["main-review", "focus-review"]);
+/**
+ * Background analysis purposes that use `reviewModel`: the paired review (its verification and
+ * synthesis prompts run under these purposes too) and the overview page (`flow-dag`).
+ */
+const REVIEW_MODEL_PURPOSES: ReadonlySet<string> = new Set<Extract<AnalysisKind, "main-review" | "focus-review"> | "flow-dag">(["main-review", "focus-review", "flow-dag"]);
 
 /** Acceptable models in preference order: the Pi Review list, else the single global default (empty = Pi decides). */
 export function piModelCandidates(cwd = process.cwd(), purpose?: string, agentDir = getAgentDir(), local = readPiReviewLocalConfig()): PiModelRef[] {
