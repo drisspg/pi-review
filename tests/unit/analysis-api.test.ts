@@ -197,6 +197,32 @@ test("guide and overview contracts reject incomplete artifacts", async () => {
   }
 });
 
+test("the overview saves only its HTML page, and a markdown overview from before is rebuilt", async () => {
+  const page = "<!doctype html>\n<html><body><h2>1. The fix</h2><svg></svg></body></html>";
+  const f = fixture("Here is the page:\n\n```html\n" + page + "\n```");
+  const legacy = { id: "old", prKey: "pr", headSha: "head", answer: "## TL;DR\nOld.\n## Schematic\nx\n## Change map\n- a\n## Reviewer notes\n- b", provenance: { runId: "old", version: 1 }, createdAt: "then", updatedAt: "then" };
+  f.deps.listOverviews = async () => [legacy];
+  const { run } = await createAnalysisApi(f.deps).start({ prKey: "pr", headSha: "head", kind: "code-walk" });
+  await settled(run);
+  assert.equal(run.status, "complete", run.error);
+  assert.equal(run.result?.record.answer, page);
+  assert.equal(f.saved.length, 1);
+
+  const reuse = fixture("unused");
+  reuse.deps.listOverviews = async () => [{ ...legacy, answer: page, provenance: { runId: "new", version: 2 } }];
+  reuse.deps.askPi = async () => { throw new Error("a current HTML overview is reused"); };
+  const { run: reused } = await createAnalysisApi(reuse.deps).start({ prKey: "pr", headSha: "head", kind: "code-walk" });
+  await settled(reused);
+  assert.equal(reused.status, "complete", reused.error);
+  assert.equal(reused.result?.record.answer, page);
+
+  const truncated = fixture(page.replace("</html>", ""));
+  const { run: cut } = await createAnalysisApi(truncated.deps).start({ prKey: "pr", headSha: "head", kind: "code-walk" });
+  await settled(cut);
+  assert.equal(cut.status, "invalid");
+  assert.equal(truncated.saved.length, 0);
+});
+
 test("reuse a current pair, but regenerate on force or a missing companion", async () => {
   const f = fixture();
   f.deps.listAiReviews = async () => [{ id: "review", prKey: "pr", headSha: "head", answer: verdict, createdAt: "now", updatedAt: "now", provenance: { runId: "main", reviewPairId: "pair", version: REVIEW_PAIR_VERSION, model: "astra", thinkingLevel: "medium" } }];

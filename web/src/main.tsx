@@ -9,6 +9,7 @@ import { FocusCommentButton, FocusCommentContext } from "./components/FocusComme
 import { CodeText, InlineSnippetsProvider, MarkdownText } from "./components/Markdown";
 import { MarkdownEditor } from "./components/MarkdownEditor";
 import { ModalShell } from "./components/Modal";
+import { OverviewPage, openOverviewInTab } from "./components/OverviewPage";
 import { Tab, TabList, TabPanel, Tabs } from "./components/Tabs";
 import { ActivityBadge, ActivityModal } from "./components/Activity";
 import { InboxPanel } from "./components/Inbox";
@@ -27,8 +28,8 @@ import { writeClipboard } from "./lib/dom";
 import { focusReviewHasNoFindings, focusReviewIsInconclusive, parseFocusAreas, splitFocusEvidence } from "./lib/focus";
 import { AnalysisError, runAnalysis, sameReviewPair } from "./lib/analysis";
 import type { AnalysisKind, AnalysisResult } from "../../src/analysis-types";
+import { isOverviewHtml } from "../../src/overview-html";
 import { parseGuideChapters, type GuideChapter } from "./lib/guide";
-import { parseOverviewSections } from "./lib/overview";
 import { languageForPath } from "./lib/highlight";
 import { newId, prUrlFromKey, relativeTime, shortSha } from "./lib/pr";
 import { isLightTheme, themes } from "./lib/theme";
@@ -1729,89 +1730,33 @@ function PrSummary({ pr }: { pr: StoredPullRequest }) {
 function focusAreaLocation(area: Pick<FocusArea, "path" | "startLine" | "endLine">): string {  return `${area.path}:${area.startLine === area.endLine ? area.startLine : `${area.startLine}-${area.endLine}`}`;
 }
 
-function OverviewMaximizeButton({ title, maximized, onToggle }: { title: string; maximized: boolean; onToggle: () => void }) {
-  return <Button variant="icon" className="overview-maximize-button" aria-label={`${maximized ? "Restore dashboard from" : "Maximize"} ${title}`} title={maximized ? "Restore dashboard (Esc)" : "Maximize this panel"} onClick={(event) => { event.stopPropagation(); onToggle(); }}>{maximized ? <ScreenNormalIcon size={14} /> : <ScreenFullIcon size={14} />}</Button>;
-}
-
-/** Right-column overview panel that collapses to a header strip so the remaining panels (e.g. the terminal) take the space. */
-function OverviewSidePanel({ id, title, className, ariaLabel, maximized, onToggleMaximize, children }: { id: string; title: string; className: string; ariaLabel?: string; maximized: boolean; onToggleMaximize: () => void; children: ReactNode }) {
-  const storageKey = `pi-review-overview-${id}`;
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(storageKey) === "collapsed");
-  function toggle() {
-    setCollapsed((current) => {
-      localStorage.setItem(storageKey, current ? "expanded" : "collapsed");
-      return !current;
-    });
-  }
-  return <section className={`guide-overview-panel ${className}${collapsed && !maximized ? " collapsed" : ""}${maximized ? " maximized" : ""}`} aria-label={ariaLabel}>
-    <div className="guide-overview-panel-head" onClick={toggle}>
-      <span className="kicker">{title}</span>
-      <div className="guide-overview-panel-controls">
-        <OverviewMaximizeButton title={title} maximized={maximized} onToggle={onToggleMaximize} />
-        {!maximized && <Button variant="icon" aria-label={`${collapsed ? "Expand" : "Collapse"} ${title}`} onClick={(event) => { event.stopPropagation(); toggle(); }}>{collapsed ? <ChevronRightIcon size={14} /> : <ChevronDownIcon size={14} />}</Button>}
-      </div>
-    </div>
-    {/* Keep the body mounted so collapsing the terminal doesn't drop its session. */}
-    <div className="guide-overview-panel-body" hidden={collapsed && !maximized}>{children}</div>
-  </section>;
-}
-
-type OverviewPanelId = "tldr" | "schematic" | "map" | "notes" | "terminal";
-
-function OverviewBody({ text, prUrl }: { text: string; prUrl: string }) {
-  const sections = parseOverviewSections(text);
-  // One panel can take over the whole overview area; everything else stays mounted but hidden.
-  const [maximized, setMaximized] = useState<OverviewPanelId | null>(null);
-  useEffect(() => {
-    if (maximized == null) return;
-    function restore(event: KeyboardEvent): void {
-      if (event.key === "Escape") setMaximized(null);
-    }
-    window.addEventListener("keydown", restore);
-    return () => window.removeEventListener("keydown", restore);
-  }, [maximized]);
-  if (sections == null) return <div className="guide-overview-body"><MarkdownText text={text} fileLinks={{ prUrl }} /></div>;
-  const toggle = (panel: OverviewPanelId) => () => setMaximized((current) => current === panel ? null : panel);
-  return <div className={`guide-overview-grid${maximized != null ? " has-maximized" : ""}`}>
-    <section className={`guide-overview-panel guide-overview-tldr${maximized === "tldr" ? " maximized" : ""}`}>
-      <div className="guide-overview-panel-head"><span className="kicker">TL;DR</span><OverviewMaximizeButton title="TL;DR" maximized={maximized === "tldr"} onToggle={toggle("tldr")} /></div>
-      <MarkdownText text={sections.tldr} fileLinks={{ prUrl }} />
-    </section>
-    <section className={`guide-overview-panel guide-overview-schematic${maximized === "schematic" ? " maximized" : ""}`}>
-      <div className="guide-overview-panel-head"><span className="kicker">Schematic</span><OverviewMaximizeButton title="Schematic" maximized={maximized === "schematic"} onToggle={toggle("schematic")} /></div>
-      <MarkdownText text={sections.schematic} fileLinks={{ prUrl }} />
-    </section>
-    <div className="guide-overview-side">
-      {sections.changeMap.length > 0 && <OverviewSidePanel id="map" title="Change map" className="guide-overview-map" maximized={maximized === "map"} onToggleMaximize={toggle("map")}><MarkdownText text={sections.changeMap} fileLinks={{ prUrl }} /></OverviewSidePanel>}
-      {sections.notes.length > 0 && <OverviewSidePanel id="notes" title="Reviewer notes" className="guide-overview-notes" maximized={maximized === "notes"} onToggleMaximize={toggle("notes")}><MarkdownText text={sections.notes} fileLinks={{ prUrl }} /></OverviewSidePanel>}
-      <OverviewSidePanel id="terminal" title="Pi terminal" className="guide-overview-terminal" ariaLabel="Overview Pi terminal" maximized={maximized === "terminal"} onToggleMaximize={toggle("terminal")}>
-        <InlinePiTerminal session={terminalSessionId("guide", "overview")} context={"You are orienting a reviewer in this pull request from its guide overview. Answer questions about structure and intent, investigate the change, and keep all work grounded in this PR's worktree."} />
-      </OverviewSidePanel>
-    </div>
-  </div>;
-}
-
-/** Use guide chapters to navigate the authoritative diff instead of duplicating it. */
 function GuideReview({ review, chapters, viewedIds, setViewedIds, guideReview, runGuideReview, overview, runOverview, onProgress, onActivate, renderDiff }: { review: OpenResponse; chapters: GuideChapter[]; viewedIds: Record<string, boolean>; setViewedIds: React.Dispatch<React.SetStateAction<Record<string, boolean>>>; guideReview: FocusReview; runGuideReview: () => Promise<void>; overview: FlowDag; runOverview: () => Promise<void>; onProgress: (viewedIds: Record<string, boolean>) => void; onActivate: (step: FocusArea) => void; renderDiff: (step: FocusArea) => ReactNode }) {
   const walkthrough = useMemo(() => chapters.flatMap((chapter, chapterIndex) => chapter.steps.map((step) => ({ chapter, chapterIndex, step }))), [chapters]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const overviewSelected = selectedId === "overview";
+  // Without a walkthrough the overview is all there is to show.
+  const overviewSelected = selectedId === "overview" || walkthrough.length === 0;
   const activeIndex = Math.max(0, walkthrough.findIndex(({ step }) => step.id === selectedId));
   const active = overviewSelected ? null : walkthrough[activeIndex] ?? null;
   const reviewedCount = walkthrough.filter(({ step }) => viewedIds[step.id]).length;
 
-  useEffect(() => {
-    if (overviewSelected) return;
-    if (walkthrough.length === 0) {
-      setSelectedId(null);
-      return;
-    }
-    if (!walkthrough.some(({ step }) => step.id === selectedId)) setSelectedId(walkthrough.find(({ step }) => !viewedIds[step.id])?.step.id ?? walkthrough[0].step.id);
-  }, [overviewSelected, selectedId, viewedIds, walkthrough]);
+  // Whether the overview was picked for the reviewer rather than by them.
+  const autoOverview = useRef(false);
+  const [askingPi, setAskingPi] = useState(false);
+  const overviewHtml = isOverviewHtml(overview.text);
 
-  // Build the overview on first visit, like the old standalone Overview tab did.
   useEffect(() => {
-    if (overviewSelected && overview.text.trim().length === 0 && !overview.running && overview.error == null) void runOverview();
+    if (walkthrough.length === 0) return;
+    const started = walkthrough.some(({ step }) => viewedIds[step.id]);
+    if (selectedId === "overview" ? !(autoOverview.current && started) : walkthrough.some(({ step }) => step.id === selectedId)) return;
+    // Orient on the overview first. Once the walkthrough is under way (its progress can arrive
+    // after the chapters), resume at the first unreviewed stop.
+    autoOverview.current = !started;
+    setSelectedId(started ? (walkthrough.find(({ step }) => !viewedIds[step.id]) ?? walkthrough[0]).step.id : "overview");
+  }, [selectedId, viewedIds, walkthrough]);
+
+  // Build the overview on first visit; a markdown overview from before the page contract is rebuilt.
+  useEffect(() => {
+    if (overviewSelected && !overviewHtml && !overview.running && overview.error == null) void runOverview();
   }, [overviewSelected]);
 
   useEffect(() => {
@@ -1844,6 +1789,7 @@ function GuideReview({ review, chapters, viewedIds, setViewedIds, guideReview, r
   }, [active?.step.id]);
 
   function activate(id: string): void {
+    autoOverview.current = false;
     setSelectedId(id);
     window.setTimeout(() => document.querySelector(".guide-stage")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
   }
@@ -1877,7 +1823,13 @@ function GuideReview({ review, chapters, viewedIds, setViewedIds, guideReview, r
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target instanceof HTMLElement ? event.target : null;
       if (target != null && (target.isContentEditable || target.closest("input, textarea, select, [contenteditable], .xterm, .review-modal-card") != null)) return;
-      if (active == null) return;
+      if (active == null) {
+        if (walkthrough.length > 0 && (event.key === "j" || event.key === "ArrowRight")) {
+          event.preventDefault();
+          activate((walkthrough.find(({ step }) => !viewedIds[step.id]) ?? walkthrough[0]).step.id);
+        }
+        return;
+      }
       if (event.key === "j" || event.key === "ArrowRight") {
         event.preventDefault();
         move(1);
@@ -1895,16 +1847,6 @@ function GuideReview({ review, chapters, viewedIds, setViewedIds, guideReview, r
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   });
-
-  if (chapters.length === 0) return <main className="guide-review guide-empty" aria-label="Guided review">
-    <div className="guide-empty-card">
-      <span className="kicker">Guided review</span>
-      <h2>{guideReview.running ? "Building the walkthrough…" : guideReview.text.startsWith("Guide generation failed:") ? "Could not build the walkthrough" : "Build a walkthrough of the change"}</h2>
-      <p>{guideReview.running ? "Pi is finding the implementation entry point, tracing its consequences, and separating supporting changes." : guideReview.text.startsWith("Guide generation failed:") ? guideReview.text : "Generate an ordered explanation of the core implementation, its consequences, supporting code, and tests."}</p>
-      <Button onClick={() => void runGuideReview()} disabled={guideReview.running}>{guideReview.running ? "Building walkthrough…" : "Build walkthrough"}</Button>
-      {guideReview.running && <AgentActivityLine activity={guideReview.activity} />}
-    </div>
-  </main>;
 
   return <main className="guide-review" aria-label="Guided review">
     <div className="guide-workspace">
@@ -1935,14 +1877,22 @@ function GuideReview({ review, chapters, viewedIds, setViewedIds, guideReview, r
             </div>}
           </div>;
         })}
-        <Button variant="muted" className="small-muted-button guide-refresh" onClick={() => void runGuideReview()} disabled={guideReview.running}>{guideReview.running ? "Rebuilding…" : "Refresh walkthrough"}</Button>
+        {chapters.length === 0 && <p className="guide-outline-status" role="status">{guideReview.running ? "Building the walkthrough…" : guideReview.text.startsWith("Guide generation failed:") ? guideReview.text : "No walkthrough yet."}</p>}
+        <Button variant="muted" className="small-muted-button guide-refresh" onClick={() => void runGuideReview()} disabled={guideReview.running}>{chapters.length > 0 ? guideReview.running ? "Rebuilding…" : "Refresh walkthrough" : guideReview.running ? "Building…" : "Build walkthrough"}</Button>
       </nav>
       {overviewSelected ? <section className="guide-stage guide-overview">
         <header className="guide-stage-head guide-overview-head">
           <div><span className="guide-chapter-number">Overview</span><h3>What’s going on in this change</h3></div>
-          <Button variant="muted" className="small-muted-button" onClick={() => void runOverview()} disabled={overview.running}>{overview.running ? "Building…" : overview.text.trim().length > 0 ? "Refresh overview" : "Build overview"}</Button>
+          <div className="guide-overview-actions">
+            {overviewHtml && !overview.running && <Button variant="muted" className="small-muted-button" onClick={() => openOverviewInTab(overview.text)}>Open in new tab</Button>}
+            <Button variant="muted" className="small-muted-button" onClick={() => void runOverview()} disabled={overview.running}>{overview.running ? "Building…" : overviewHtml ? "Refresh overview" : "Build overview"}</Button>
+          </div>
         </header>
-        {overview.error != null ? <Flash variant="danger">Overview failed: {overview.error}</Flash> : overview.running ? <div className="guide-overview-loading"><span className="spinner" /><p>Building a focused visual explanation of this PR…</p>{overview.activity != null && <AgentActivityLine activity={overview.activity} />}</div> : overview.text.trim().length > 0 ? <InlineSnippetsProvider value={{ headSha: review.pr.headSha, snippets: false }}><OverviewBody text={overview.text} prUrl={review.pr.url} /></InlineSnippetsProvider> : null}
+        {overview.error != null ? <Flash variant="danger">Overview failed: {overview.error}</Flash> : overview.running ? <div className="guide-overview-loading"><span className="spinner" /><p>Building a focused visual explanation of this PR…</p>{overview.activity != null && <AgentActivityLine activity={overview.activity} />}</div> : overviewHtml ? <OverviewPage html={overview.text} prUrl={review.pr.url} /> : null}
+        <details className="overview-page-ask" onToggle={(event) => { if ((event.target as HTMLDetailsElement).open) setAskingPi(true); }}>
+          <summary><span className="disclosure-chevron" aria-hidden="true">›</span><span className="kicker">Ask Pi about this change</span></summary>
+          {askingPi && <InlinePiTerminal session={terminalSessionId("guide", "overview")} context={"You are orienting a reviewer in this pull request from its guide overview. Answer questions about structure and intent, investigate the change, and keep all work grounded in this PR's worktree."} />}
+        </details>
       </section> : active == null ? null : <section className="guide-stage">
         <header className="guide-stage-head">
           <span className="guide-chapter-number">Chapter {active.chapterIndex + 1} of {chapters.length}</span>

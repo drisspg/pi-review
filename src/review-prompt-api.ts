@@ -172,38 +172,18 @@ function codeWalkPrompt(payload: Record<string, unknown>): ReviewPromptResponse 
   const diffSummary = statusPatchSummary(promptFiles(payload));
   return {
     purpose: "flow-dag",
-    prompt: `Use the show-me skill style to show me what's going on in PR ${prKey}. This is a visual orientation for a reviewer, not a findings report. When your session has the show-me or pr-context skills available, use them to ground the answer in the real change.
+    prompt: `Show me what's going on in PR ${prKey}, as a show-me HTML page a reviewer can take in at a glance. This is a visual orientation, not a findings report. Read the show-me skill's HTML route and the frontier-editorial style before building, and ground every figure in the real change.
 
-Return only the final markdown inline. Do not create files or mention your process, commands, tests, or where anything was saved.
+The page answers one question: what does this PR change, and why does it work? Build it as two to four numbered figures in the order a reader needs them, for example: what goes wrong (or what is missing) at base, what triggers it versus what the fix changes, and the fix itself. Each figure is a short bold heading, at most one sentence, and a diagram: inline SVG or HTML built from the PR's real identifiers, shapes and numbers (a memory span with the first bad byte marked, a decision path with yes/no branches, a before/after tile or call path). Draw the mechanism; never restate the prose in boxes.
 
-Structure the answer as exactly these sections, in this order, so the review UI can lay them out as panels:
-## TL;DR
-Two to four sentences: the PR's goal, the key implementation idea, and why this approach.
-## Schematic
-Ground the reviewer visually with one or more fenced \`\`\`schematic blocks. Each block is one JSON diagram the review UI renders as an interactive canvas:
-\`\`\`schematic
-{
-  "title": "Execution path",
-  "direction": "right",
-  "groups": [{ "id": "wiring", "label": "CP wiring" }],
-  "nodes": [
-    { "id": "apply_cp", "label": "apply_cp()", "detail": "selects the MLA path", "ref": "torchtitan/models/kimi_k3/parallelize.py:105", "kind": "entry", "group": "wiring" },
-    { "id": "forward", "label": "KimiK3Model.forward", "ref": "torchtitan/models/kimi_k3/model.py:132", "kind": "core" }
-  ],
-  "edges": [{ "from": "apply_cp", "to": "forward", "label": "wires", "kind": "call" }]
-}
-\`\`\`
-Contract:
-- "direction": "right" for call/data flow, "down" for layered or lifecycle structure.
-- Node "kind": "entry" (where reading starts), "core" (main logic), "state" (owned state/lifecycle), "boundary" (API/config/process boundary), "test" (validation). "label" is a real identifier from the diff, "detail" one short clause, "ref" a real changed file:line, "group" optional.
-- Edge "kind": "call" (control flow), "data" (data/tensor flow), "state" (state transition); "label" is three words or fewer.
-Keep each diagram to at most 12 nodes. A small change may need a single diagram; a layered change may deserve one block per distinct aspect (execution path, state lifecycle, ownership boundaries), and each extra diagram must explain something the others cannot. Use a compact text call tree or code-shape sketch instead only when exact source structure communicates the change more clearly than a graph.
-## Change map
-Group the changed files by their role in the change (core behavior, API surface, supporting plumbing, tests). One tight line per file or coherent group: \`path\` — what changed there and why it matters to a reviewer.
-## Reviewer notes
-Three to six bullets: where to start, the order to read, contracts or invariants to verify, and anything easy to miss. Cite real file:line references.
+Words are the cost here: keep the visible prose to about 120 words in total, outside figure labels. No change map, file list, reviewer-notes section or paragraphs; put each file:line where it matters, as a small mono chip: <a data-ref="path/to/file.py:123">file.py:123</a>, which the review app opens in the editor. Label illustrative values as illustrative.
 
-Scale every section to the actual PR — short sections for small changes, never padding. Avoid generic praise and review findings unless a tradeoff is necessary to understand the design.
+Page contract:
+- One self-contained document starting with <!doctype html>: inline <style> and <script> only, no network requests (no CDN scripts or fonts; use "IBM Plex Sans", "IBM Plex Mono" with system fallbacks).
+- Frontier-editorial tokens as CSS custom properties for both themes, switched on :root[data-theme="dark"] and :root[data-theme="light"]; the app sets the attribute. Transparent or paper background, no shadows or gradients, semantic green/amber/red.
+- Fit a review pane about 1000px wide without horizontal scrolling. Interaction (step tabs, a toggle between base and HEAD) only where it makes the mechanism clearer; support the keyboard and prefers-reduced-motion.
+
+Return only the HTML document. Do not create files, open a browser, or mention your process.
 
 PR title: ${prTitle}
 

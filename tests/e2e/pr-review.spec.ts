@@ -1754,6 +1754,23 @@ test("resolves local focus findings only after persistence and reopens them afte
   await expect(focus.getByRole("button", { name: "Resolve focus area: Resolution fixture" })).toBeVisible();
 });
 
+test("shows the overview page even when the walkthrough could not be built", async ({ page }) => {
+  // Neither run is saved, so later tests still start without an overview or walkthrough.
+  await page.route("**/api/analysis/start", async (route) => {
+    const input = route.request().postDataJSON() as { prKey: string; headSha: string; kind: AnalysisKind };
+    const base = { id: `unsaved-${input.kind}`, prKey: input.prKey, headSha: input.headSha, kind: input.kind, startedAt: new Date().toISOString() };
+    if (input.kind === "guide-review") return route.fulfill({ json: { run: { ...base, status: "invalid", error: "The walkthrough contains missing or invalid review stops." } } });
+    if (input.kind !== "code-walk") return route.fallback();
+    const record = { id: "unsaved-overview", prKey: input.prKey, headSha: input.headSha, answer: "<!doctype html><html><head></head><body><h2>1. Only the overview</h2></body></html>", createdAt: base.startedAt, updatedAt: base.startedAt };
+    await route.fulfill({ json: { run: { ...base, status: "complete", result: { kind: "code-walk", record } } } });
+  });
+  await page.getByRole("button", { name: "Guide" }).click();
+  const guide = page.getByRole("main", { name: "Guided review" });
+  await expect(guide.frameLocator("iframe.overview-page-frame").getByRole("heading", { name: "1. Only the overview" })).toBeVisible();
+  await expect(guide.getByRole("status").filter({ hasText: "missing or invalid review stops" })).toBeVisible();
+  await expect(guide.getByRole("button", { name: "Build walkthrough" })).toBeEnabled();
+});
+
 test("runs a separate focus areas review and opens native focus terminals", async ({ page }) => {
   await mockNativeTerminal(page);
   await openFirstFile(page);
@@ -1790,14 +1807,29 @@ test("runs a separate focus areas review and opens native focus terminals", asyn
   let overviewRequests = 0;
   await mockAnalysis(page, "code-walk", () => {
     overviewRequests += 1;
-    return "## TL;DR\nOrient reviewers with the Walk map below.\n## Schematic\n```schematic\n{\"title\": \"Dispatch path\", \"groups\": [{\"id\": \"api\", \"label\": \"API surface\"}], \"nodes\": [{\"id\": \"toolbar\", \"label\": \"Toolbar\", \"detail\": \"entry point\", \"ref\": \"csrc/flash_attn/flash_api.cpp:10\", \"kind\": \"entry\", \"group\": \"api\"}, {\"id\": \"modal\", \"label\": \"Modal\", \"kind\": \"core\"}], \"edges\": [{\"from\": \"toolbar\", \"to\": \"modal\", \"label\": \"opens\", \"kind\": \"call\"}]}\n```\n```mermaid\nflowchart LR\n  Toolbar -->|opens| Modal\n```\n## Change map\n- `csrc/flash_attn/flash_api.cpp` — core dispatch change\n## Reviewer notes\n- Start at the dispatch condition";
+    // The script posts a chip message unprompted; only a click may open the editor.
+    return `<!doctype html><html><head><style>:root[data-theme="dark"] h2 { color: rgb(1, 2, 3); }</style></head><body><h2>1. Walk map</h2><a href="#" data-ref="${path}:${line}">${path}:${line}</a><script>parent.postMessage({ type: "pi-review-ref", ref: "Makefile:1" }, "*")</script></body></html>`;
   });
   await mockAnalysis(page, "guide-review", () => {
     guideRequests += 1;
     return `## Review guide\n### 1. Core path\nFollow the implementation from selection through validation.\n- ${path}:${line}-${Number.parseInt(line, 10) + 1} — Core implementation\n  Start with the changed tiling condition and follow how it selects the implementation path.\n- ${path}:${line} — Validation path\n  Finish by checking that tests cover the intended behavior.`;
   });
+  await page.route(/\/api\/file\/open$/, (route) => route.fulfill({ json: { target: "opened" } }));
+  const editorOpens: unknown[] = [];
+  page.on("request", (request) => { if (request.url().endsWith("/api/file/open")) editorOpens.push(request.postDataJSON()); });
   await page.getByRole("button", { name: "Guide" }).click();
   const guide = page.getByRole("main", { name: "Guided review" });
+  // A walkthrough that hasn't started opens on the overview page, themed like the app.
+  const overviewPage = guide.frameLocator("iframe.overview-page-frame");
+  await expect(guide.locator("iframe.overview-page-frame")).toHaveAttribute("sandbox", "allow-scripts");
+  await expect(overviewPage.getByRole("heading", { name: "1. Walk map" })).toHaveCSS("color", "rgb(1, 2, 3)");
+  // The page's own load-time post, inside the Guide click's activation window, opens nothing.
+  await page.waitForTimeout(300);
+  expect(editorOpens).toEqual([]);
+  const [opened] = await Promise.all([page.waitForRequest(/\/api\/file\/open$/), overviewPage.getByRole("link", { name: `${path}:${line}` }).click()]);
+  expect(opened.postDataJSON()).toMatchObject({ path, line: Number.parseInt(line, 10) });
+  expect(editorOpens).toHaveLength(1);
+  await page.keyboard.press("j");
   await expect(guide.getByRole("heading", { name: "Core path" })).toBeVisible();
   await expect(guide.getByRole("heading", { name: "Core implementation" })).toBeVisible();
   await expect(guide).toContainText(`${path}:${line}`);
@@ -1834,24 +1866,8 @@ test("runs a separate focus areas review and opens native focus terminals", asyn
   await page.keyboard.press("j");
   await expect(guide.locator(".guide-active-stop")).toContainText("Validation path");
 
-  await mockNativeTerminal(page);
   await guide.getByRole("button", { name: /Overview/ }).click();
-  await expect(guide).toContainText("Walk map");
-  await expect(guide.locator(".guide-overview-grid")).toBeVisible();
-  await expect(guide.locator(".guide-overview .schematic-canvas")).toBeVisible();
-  await expect(guide.locator(".schematic-card-label").first()).toHaveText("Toolbar");
-  await expect(guide.locator(".schematic-frame-label")).toHaveText("API surface");
-  await expect(guide.locator(".guide-overview .markdown-mermaid-block")).toBeVisible();
-  await expect(guide.locator(".guide-overview-terminal .pi-native-terminal")).toBeVisible();
-
-  await guide.getByRole("button", { name: "Collapse Change map" }).click();
-  await guide.getByRole("button", { name: "Collapse Reviewer notes" }).click();
-  await expect(guide.locator(".guide-overview-map .markdown")).toBeHidden();
-  await expect(guide.locator(".guide-overview-notes .markdown")).toBeHidden();
-  await expect(guide.locator(".guide-overview-terminal .pi-native-terminal")).toBeVisible();
-  await guide.getByRole("button", { name: "Expand Change map" }).click();
-  await guide.getByRole("button", { name: "Expand Reviewer notes" }).click();
-  await expect(guide.locator(".guide-overview-map .markdown")).toBeVisible();
+  await expect(overviewPage.getByRole("heading", { name: "1. Walk map" })).toBeVisible();
 
   await page.reload();
   await expect(page.locator(".review-layout")).toBeVisible({ timeout: 60_000 });
@@ -1859,7 +1875,7 @@ test("runs a separate focus areas review and opens native focus terminals", asyn
   await expect(page.getByRole("main", { name: "Guided review" })).toContainText("2/2 stops");
   await expect(page.getByRole("main", { name: "Guided review" }).locator(".guide-live-diff .file")).toBeVisible();
   await page.getByRole("main", { name: "Guided review" }).getByRole("button", { name: /Overview/ }).click();
-  await expect(page.getByRole("main", { name: "Guided review" })).toContainText("Walk map");
+  await expect(page.getByRole("main", { name: "Guided review" }).frameLocator("iframe.overview-page-frame").getByRole("heading", { name: "1. Walk map" })).toBeVisible();
   expect(overviewRequests).toBe(1);
   // Focus terminals open on demand, so keep the page taller than the viewport for the sticky check.
   await page.setViewportSize({ width: 820, height: 480 });

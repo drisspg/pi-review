@@ -25,14 +25,14 @@ test("review prompt API builds code walk prompts with flow-dag purpose", async (
   const result = await api().build({ mode: "code-walk", prKey: "pr", prTitle: "Title", files });
 
   assert.equal(result.purpose, "flow-dag");
-  assert.match(result.prompt, /Use the show-me skill style/);
-  assert.match(result.prompt, /Show me what's going on in PR pr/i);
-  assert.match(result.prompt, /```schematic/);
-  assert.match(result.prompt, /"kind": "entry"/);
-  assert.match(result.prompt, /## TL;DR/);
-  assert.match(result.prompt, /## Change map/);
-  assert.match(result.prompt, /## Reviewer notes/);
-  assert.match(result.prompt, /short sections for small changes, never padding/);
+  assert.match(result.prompt, /Show me what's going on in PR pr, as a show-me HTML page/);
+  assert.match(result.prompt, /frontier-editorial/);
+  assert.match(result.prompt, /two to four numbered figures/);
+  assert.match(result.prompt, /about 120 words/);
+  assert.match(result.prompt, /data-ref="path\/to\/file.py:123"/);
+  assert.match(result.prompt, /:root\[data-theme="dark"\]/);
+  assert.match(result.prompt, /Return only the HTML document/);
+  assert.doesNotMatch(result.prompt, /## Change map/);
   assert.match(result.prompt, /PR title: Title/);
   assert.match(result.prompt, /Status: modified, \+3\/-1/);
 });

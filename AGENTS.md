@@ -90,10 +90,9 @@ src/                    Node server (TypeScript, ESM, run via tsx)
 web/src/                React frontend (Vite)
   main.tsx              Almost all screens/components: App, AppToolbar, StartPage/PrCard,
                         ReviewPage, PrHeaderStrip, PrSummary, GuideReview (Review route rail +
-                        OverviewBody four-panel dashboard: TL;DR/Schematic/Change map/Reviewer
-                        notes + Pi terminal; any panel can be maximized to fill the overview
-                        (Esc restores; siblings stay mounted so the terminal session survives);
-                        reviewed stops persist via guide stepStates),
+                        the Overview: a model-written show-me HTML page (code-walk, OVERVIEW_VERSION),
+                        shown even without a walkthrough and landed on until the walkthrough is
+                        under way; reviewed stops persist via guide stepStates),
                         FileNavigator, FileDiff/DiffRowView (files marked viewed-and-unchanged
                         start collapsed), ThreadBox, FocusAreaInline,
                         GitHubDraftReviewPanel, ReviewSummary, AiReviewPanel, and the modals
@@ -105,14 +104,16 @@ web/src/                React frontend (Vite)
                         media queries → mermaid/schematic/file snippets
   components/           Small shared pieces (Button→.ui-button, Modal→ModalShell, ActionMenu,
                         Tabs, Threads (resolved GitHub threads start collapsed), Markdown*,
-                        Mermaid, SchematicDiagram, PiTerminal, PytorchWorkflow (start-page
+                        Mermaid, SchematicDiagram, PiTerminal, OverviewPage (the overview in a
+                        sandbox="allow-scripts" frame, CSP blocking all network; its bridge themes it
+                        and forwards chip clicks/`j` only on user activation; the new tab frames it in
+                        the same sandbox, since a blob URL has the app's origin), PytorchWorkflow (start-page
                         PyTorch queues + PR-header stage strip with Pi pre-review), Inbox (start-page triage list +
                         "Your PRs" board grouped per collapsible repo, newest first, Open / Closed
                         (last 14 days) tabs; j/k ← → m g keyboard triage; opening a PR row marks its thread
                         done))
-  lib/                  diff parsing, comment helpers, guide steps, overview panel sections
-                        (overview.ts parses the code-walk prompt's four-section contract, with a
-                        free-form fallback), focus areas, highlight, dom
+  lib/                  diff parsing, comment helpers, guide steps, overview-page (frame/tab
+                        documents for the overview), focus areas, highlight, dom
 tests/unit/             node:test suites for backend api modules (run via tsx)
 tests/e2e/              Playwright suite (pr-review.spec.ts, ~55 tests)
 scripts/                start.mjs + smoke scripts (gpu-workspace, chat latency)

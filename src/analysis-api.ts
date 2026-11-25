@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto";
 import type { Code, RootContent } from "mdast";
 import { fromMarkdown } from "mdast-util-from-markdown";
 
-import { ANALYSIS_VERSION, REVIEW_PAIR_VERSION, sameReviewPair, type AnalysisKind, type AnalysisProvenance, type AnalysisResult, type AnalysisRun } from "./analysis-types.js";
+import { ANALYSIS_VERSION, OVERVIEW_VERSION, REVIEW_PAIR_VERSION, sameReviewPair, type AnalysisKind, type AnalysisProvenance, type AnalysisResult, type AnalysisRun } from "./analysis-types.js";
 import { focusReviewIsInconclusive, parseFocusAreas, publishedFocusSection, splitFocusEvidence } from "./focus.js";
 import { parseGuideChapters } from "./guide.js";
+import { extractOverviewHtml } from "./overview-html.js";
 import type { ReviewDraftToolContext } from "./review-draft-tool.js";
 import { parseReviewVisual, reviewVisualInstructions } from "./review-visual.js";
 import type { ReviewPromptApi } from "./review-prompt-api.js";
@@ -203,9 +204,8 @@ export function createAnalysisApi(deps: AnalysisApiDeps): AnalysisApi {
       validateLocations(context, chapters.flatMap((chapter) => chapter.steps));
       return { kind, record, chapters };
     }
-    if (kind === "code-walk" && ![/^## TL;DR\s*$/m, /^## Schematic\s*$/m, /^## Change map\s*$/m, /^## Reviewer notes\s*$/m].every((heading) => heading.test(answer))) {
-      throw new InvalidAnalysisError("The overview is missing required sections. See the raw response.");
-    }
+    // The saved answer is exactly one bounded, complete page: truncated or oversized output is refused.
+    if (kind === "code-walk" && extractOverviewHtml(answer) !== answer) throw new InvalidAnalysisError("The overview is not one complete HTML page. See the raw response.");
     return { kind, record };
   }
 
@@ -288,13 +288,17 @@ export function createAnalysisApi(deps: AnalysisApiDeps): AnalysisApi {
   async function walkthrough(run: AnalysisRun, context: ReviewDraftToolContext, force: boolean) {
     const [previous, prs] = await Promise.all([previousRecord(run.kind, run.prKey, run.headSha), deps.listRecentPullRequests()]);
     assertCurrent(run, context);
-    if (!force && currentArtifact(previous, run.headSha, ANALYSIS_VERSION)) {
+    const version = run.kind === "code-walk" ? OVERVIEW_VERSION : ANALYSIS_VERSION;
+    if (!force && currentArtifact(previous, run.headSha, version)) {
       run.result = resultFor(run.kind, previous, context);
       return;
     }
-    const { answer, purpose } = await ask(run, context, run.kind, { prTitle: prs.find(pr => pr.key === run.prKey)?.title ?? run.prKey });
-    run.rawAnswer = answer;
-    const provenance = { runId: run.id, version: ANALYSIS_VERSION, ...await deps.modelForRun(run.prKey, purpose) };
+    const asked = await ask(run, context, run.kind, { prTitle: prs.find(pr => pr.key === run.prKey)?.title ?? run.prKey });
+    run.rawAnswer = asked.answer;
+    // Keep only the page: a model may fence it or add a line around it.
+    const answer = run.kind === "code-walk" ? extractOverviewHtml(asked.answer) ?? asked.answer : asked.answer;
+    const { purpose } = asked;
+    const provenance = { runId: run.id, version, ...await deps.modelForRun(run.prKey, purpose) };
     assertCurrent(run, context);
     const base = { prKey: run.prKey, headSha: run.headSha, answer, provenance };
     const validated = resultFor(run.kind, { ...base, id: run.id, createdAt: run.startedAt, updatedAt: run.startedAt }, context);
