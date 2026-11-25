@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createAnalysisApi, type AnalysisApiDeps } from "../../src/analysis-api.js";
-import { REVIEW_PAIR_VERSION, type AnalysisRun } from "../../src/analysis-types.js";
+import { OVERVIEW_VERSION, REVIEW_PAIR_VERSION, type AnalysisRun } from "../../src/analysis-types.js";
 import { validateReviewDraftTarget, type ReviewDraftToolContext } from "../../src/review-draft-tool.js";
 
 const context: ReviewDraftToolContext = { headSha: "head", files: [{ filename: "Makefile", status: "modified", additions: 2, deletions: 0, changes: 2, patch: "@@ -1 +1,3 @@\n target:\n+\techo build\n+\techo done" }] };
@@ -209,7 +209,7 @@ test("the overview saves only its HTML page, and a markdown overview from before
   assert.equal(f.saved.length, 1);
 
   const reuse = fixture("unused");
-  reuse.deps.listOverviews = async () => [{ ...legacy, answer: page, provenance: { runId: "new", version: 2 } }];
+  reuse.deps.listOverviews = async () => [{ ...legacy, answer: page, provenance: { runId: "new", version: OVERVIEW_VERSION } }];
   reuse.deps.askPi = async () => { throw new Error("a current HTML overview is reused"); };
   const { run: reused } = await createAnalysisApi(reuse.deps).start({ prKey: "pr", headSha: "head", kind: "code-walk" });
   await settled(reused);

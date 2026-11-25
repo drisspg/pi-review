@@ -3,8 +3,8 @@ import type { GuideChapter } from "./guide.js";
 import type { AiReviewRecord, FocusScanRecord, GuideReviewRecord } from "./types.js";
 
 export const ANALYSIS_VERSION = 1;
-/** 2: the overview is a show-me HTML page instead of markdown panels. */
-export const OVERVIEW_VERSION = 2;
+/** 2: the overview is a show-me HTML page instead of markdown panels; 3: it opens with a short lead. */
+export const OVERVIEW_VERSION = 3;
 export const REVIEW_PAIR_VERSION = 4;
 export type AnalysisKind = "main-review" | "focus-review" | "guide-review" | "code-walk";
 
