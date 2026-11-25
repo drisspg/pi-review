@@ -333,6 +333,43 @@ test("a row sketch can explain the finding in place, before the discriminating c
   assert.equal(run.result?.record.answer.includes(body), true);
 });
 
+test("an untagged fenced sketch counts as the verdict's text figure, without a repair turn", async () => {
+  const verdictWithSketch = "Land it.\n\n" + ["```", "alone     piece chain   -> bits differ", "packed    uncut         -> bits equal", "```"].join("\n");
+  const f = fixture();
+  const ask = f.deps.askPi;
+  let synthesis = 0;
+  f.deps.askPi = (...args) => args[2] === "review-synthesis" ? (synthesis++, Promise.resolve(verdictWithSketch)) : ask(...args);
+  const { run } = await createAnalysisApi(f.deps).start({ prKey: "pr", headSha: "head", kind: "main-review" });
+  await settled(run);
+  assert.equal(run.status, "complete", run.error);
+  assert.equal(synthesis, 1);
+  assert.equal(run.result?.record.answer, verdictWithSketch);
+});
+
+test("an untagged excerpt beside a tagged sketch is not a second figure", async () => {
+  for (const excerpt of ["```\npython test.py\n```", "    python test.py"]) {
+    const answer = `Land it.\n\n${["```text", "alone   -> bits differ", "```"].join("\n")}\n\nRun:\n\n${excerpt}`;
+    const f = fixture();
+    const ask = f.deps.askPi;
+    f.deps.askPi = (...args) => args[2] === "review-synthesis" ? Promise.resolve(answer) : ask(...args);
+    const { run } = await createAnalysisApi(f.deps).start({ prKey: "pr", headSha: "head", kind: "main-review" });
+    await settled(run);
+    assert.equal(run.status, "complete", run.error);
+    assert.equal(run.result?.record.answer, answer);
+  }
+});
+
+test("a repair may answer with an untagged fenced sketch", async () => {
+  const sketch = ["```", "alone     piece chain   -> bits differ", "```"].join("\n");
+  const f = fixture();
+  const ask = f.deps.askPi;
+  f.deps.askPi = (...args) => args[2] === "review-synthesis" ? Promise.resolve(args[1] === "review-synthesis" ? "Land it." : sketch) : ask(...args);
+  const { run } = await createAnalysisApi(f.deps).start({ prKey: "pr", headSha: "head", kind: "main-review" });
+  await settled(run);
+  assert.equal(run.status, "complete", run.error);
+  assert.equal(run.result?.record.answer, `Land it.\n\n${sketch}`);
+});
+
 test("a general verdict needs exactly one figure with real relationships", async () => {
   for (const figure of [assignment, assignment + "\n\n" + visual, graph([]), graph([{ from: "worker", to: "missing" }]), assignment.slice(0, -3)]) {
     const f = fixture();

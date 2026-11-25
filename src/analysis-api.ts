@@ -41,34 +41,48 @@ class InvalidVisualError extends InvalidAnalysisError {
   }
 }
 
-function isFigure(block: RootContent | undefined): block is Code {
-  return block?.type === "code" && (block.lang === "schematic" || block.lang === "review-visual" || block.lang === "text" || block.lang === "diff");
+/** Free-form excerpt: a `text` or `diff` fence, or a fence with no language, which models often write for a text sketch. */
+function isTextFigure(block: Code): boolean {
+  return block.lang == null || block.lang === "text" || block.lang === "diff";
 }
 
-function figureCandidates(blocks: RootContent[]): Code[] {
-  const figures = blocks.filter(isFigure);
-  // A diff or text excerpt can accompany a structured diagram without being another diagram.
-  const diagrams = figures.filter(block => block.lang === "schematic" || block.lang === "review-visual");
-  return diagrams.length ? diagrams : figures;
+function isFigure(block: RootContent | undefined): block is Code {
+  return block?.type === "code" && (block.lang === "schematic" || block.lang === "review-visual" || isTextFigure(block));
+}
+
+const fenceOpener = /^(`{3,}|~{3,})([\w-]*)(?:[ \t].*)?$/;
+
+function blockLines(markdown: string, block: Code): string[] {
+  return markdown.slice(block.position!.start.offset, block.position!.end.offset).split(/\r?\n/);
+}
+
+/** The figure to validate: a structured diagram, else a tagged excerpt, else an untagged fence. */
+function figureCandidates(markdown: string, blocks: RootContent[]): Code[] {
+  // An indented code block also parses with no language, but it is not a sketch.
+  const figures = blocks.filter(isFigure).filter(block => block.lang != null || fenceOpener.test(blockLines(markdown, block)[0]));
+  // An excerpt can accompany a better-tagged figure without being another figure.
+  const tier = (block: Code) => block.lang === "schematic" || block.lang === "review-visual" ? 0 : block.lang != null ? 1 : 2;
+  const best = Math.min(...figures.map(tier));
+  return figures.filter(block => tier(block) === best);
 }
 
 function closedFigure(markdown: string, block: Code): boolean {
-  const lines = markdown.slice(block.position!.start.offset, block.position!.end.offset).split(/\r?\n/);
-  const opener = /^(`{3,}|~{3,})([\w-]+)(?:[ \t].*)?$/.exec(lines[0]);
+  const lines = blockLines(markdown, block);
+  const opener = fenceOpener.exec(lines[0]);
   const closer = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(lines.at(-1)!);
-  return !!opener && opener[2] === block.lang && !!closer && closer[1].startsWith(opener[1]);
+  return !!opener && opener[2] === (block.lang ?? "") && lines.length > 1 && !!closer && closer[1].startsWith(opener[1]);
 }
 
 function validFigure(markdown: string, block: Code): boolean {
   if (!closedFigure(markdown, block)) return false;
-  if (block.lang === "text" || block.lang === "diff") return !!block.value.trim();
+  if (isTextFigure(block)) return !!block.value.trim();
   if (block.lang === "review-visual") return !!parseReviewVisual(block.value);
   try { parseSchematic(block.value, "review"); return true; } catch { return false; }
 }
 
 function requireIllustration(markdown: string, where: string) {
   const blocks = fromMarkdown(markdown).children;
-  const figures = figureCandidates(blocks);
+  const figures = figureCandidates(markdown, blocks);
   if (figures.length !== 1 || !validFigure(markdown, figures[0]) || !blocks.some(block => block.type === "paragraph" || block.type === "list")) {
     throw new InvalidVisualError(markdown, where);
   }
@@ -76,7 +90,7 @@ function requireIllustration(markdown: string, where: string) {
 
 /** A lost closer may have consumed review text up to an unrelated closing fence. */
 function replaceableFigure(markdown: string, block: Code): boolean {
-  if (block.lang === "text" || block.lang === "diff") return false; // Never discard free-form review text during a repair.
+  if (isTextFigure(block)) return false; // Never discard free-form review text during a repair.
   if (!closedFigure(markdown, block) || /^\s*(?:#{1,6}\s|`{3,}|~{3,})/m.test(block.value)) return false;
   const lines = block.value.split("\n");
   if (lines.length === 1) return true;
@@ -92,7 +106,7 @@ function insertRepair(answer: string, explanation: string, repair: string): stri
   if (rest.length || !isFigure(block) || !validFigure(repair, block)) throw new InvalidAnalysisError("Visual repair rejected: expected just the replacement diagram.");
   const at = answer.indexOf(explanation);
   if (at < 0 || at !== answer.lastIndexOf(explanation)) throw new InvalidAnalysisError("Visual repair rejected: ambiguous finding location.");
-  const visuals = figureCandidates(fromMarkdown(explanation).children);
+  const visuals = figureCandidates(explanation, fromMarkdown(explanation).children);
   const end = at + explanation.length;
   if (!visuals.length) return answer.slice(0, end) + "\n\n" + repair + answer.slice(end);
   const [old] = visuals;
