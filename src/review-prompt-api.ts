@@ -174,14 +174,14 @@ function codeWalkPrompt(payload: Record<string, unknown>): ReviewPromptResponse 
     purpose: "flow-dag",
     prompt: `Show me what's going on in PR ${prKey}, as a show-me HTML page that explains it visually. This is a visual orientation, not a findings report. Read the show-me skill's HTML route and the frontier-editorial style before building, and ground every figure in the real change.
 
-The page answers one question: what does this PR change, and how does the new flow work? Explain it the way the show-me skill would to a colleague: enough detail that a reviewer could walk someone else through the change afterwards, and no padding.
+The page answers three questions in order: why the PR is needed, what it does, and how the new flow works. Explain it the way the show-me skill would to a colleague: enough detail that a reviewer could walk someone else through the change afterwards, and no padding.
 
 Open with a lead at the top of the page, under its title: three or four plain sentences (about 80 words) saying what problem the PR solves, what it changes, and the idea that makes it work.
 
-Then build two to four numbered figures in the order a reader needs them, for example: what goes wrong (or what is missing) at base, the new flow end to end, and the detail that makes it correct or fast. Each figure has:
+Then build two to four numbered figures in that order: why (what goes wrong, or is missing, at base), what (the new flow end to end, from its entry point to its result), and how (the detail that makes it correct or fast). Each figure has:
 - a short bold heading that states its point;
 - a diagram: inline SVG or HTML built from the PR's real identifiers, shapes and numbers (a memory span with the first bad byte marked, a decision path with yes/no branches, a before/after tile or call path, a data flow from inputs to outputs). Draw the mechanism; never put sentences in boxes;
-- a walkthrough of two to five sentences beside or under the diagram that follows it in order: what comes in, what each step does to it and why, what comes out, and what the reader should check. Refer to the labels the diagram shows.
+- a walkthrough of two to five sentences beside or under the diagram that follows it in order: what comes in, what each step does to it and why the PR does it that way, what comes out, and what the reader should check. Refer to the labels the diagram shows.
 
 Spend words on the flow, not on inventory: no change map, file list or reviewer-notes section; put each file:line where it matters, as a small mono chip: <a data-ref="path/to/file.py:123">file.py:123</a>, which the review app opens in the editor. Label illustrative values as illustrative.
 
