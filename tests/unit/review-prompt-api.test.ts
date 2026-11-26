@@ -25,12 +25,12 @@ test("review prompt API builds code walk prompts with flow-dag purpose", async (
   const result = await api().build({ mode: "code-walk", prKey: "pr", prTitle: "Title", files });
 
   assert.equal(result.purpose, "flow-dag");
-  assert.match(result.prompt, /Show me what's going on in PR pr, as a show-me HTML page/);
+  assert.match(result.prompt, /Show me what's going on in PR pr, as a show-me HTML page that explains it visually/);
   assert.match(result.prompt, /frontier-editorial/);
   assert.match(result.prompt, /two to four numbered figures/);
-  assert.match(result.prompt, /Open with a short lead at the top of the page, under its title: two or three plain sentences \(at most about 60 words\)/);
-  assert.match(result.prompt, /paragraphs other than the lead/);
-  assert.match(result.prompt, /beyond the lead, keep the visible prose to about 120 words/);
+  assert.match(result.prompt, /Open with a lead at the top of the page, under its title: three or four plain sentences \(about 80 words\)/);
+  assert.match(result.prompt, /a walkthrough of two to five sentences beside or under the diagram that follows it in order/);
+  assert.match(result.prompt, /no change map, file list or reviewer-notes section/);
   assert.match(result.prompt, /data-ref="path\/to\/file.py:123"/);
   assert.match(result.prompt, /:root\[data-theme="dark"\]/);
   assert.match(result.prompt, /Return only the HTML document/);

@@ -172,11 +172,18 @@ function codeWalkPrompt(payload: Record<string, unknown>): ReviewPromptResponse 
   const diffSummary = statusPatchSummary(promptFiles(payload));
   return {
     purpose: "flow-dag",
-    prompt: `Show me what's going on in PR ${prKey}, as a show-me HTML page a reviewer can take in at a glance. This is a visual orientation, not a findings report. Read the show-me skill's HTML route and the frontier-editorial style before building, and ground every figure in the real change.
+    prompt: `Show me what's going on in PR ${prKey}, as a show-me HTML page that explains it visually. This is a visual orientation, not a findings report. Read the show-me skill's HTML route and the frontier-editorial style before building, and ground every figure in the real change.
 
-The page answers one question: what does this PR change, and why does it work? Open with a short lead at the top of the page, under its title: two or three plain sentences (at most about 60 words) a reviewer could repeat, saying what problem the PR solves, what it changes, and the idea that makes it work. Then build two to four numbered figures in the order a reader needs them, for example: what goes wrong (or what is missing) at base, what triggers it versus what the fix changes, and the fix itself. Each figure is a short bold heading, at most one sentence, and a diagram: inline SVG or HTML built from the PR's real identifiers, shapes and numbers (a memory span with the first bad byte marked, a decision path with yes/no branches, a before/after tile or call path). The figures draw the mechanism the lead names; never put sentences in boxes.
+The page answers one question: what does this PR change, and how does the new flow work? Explain it the way the show-me skill would to a colleague: enough detail that a reviewer could walk someone else through the change afterwards, and no padding.
 
-Words are the cost here: beyond the lead, keep the visible prose to about 120 words in total, outside figure labels. No change map, file list, reviewer-notes section or paragraphs other than the lead; put each file:line where it matters, as a small mono chip: <a data-ref="path/to/file.py:123">file.py:123</a>, which the review app opens in the editor. Label illustrative values as illustrative.
+Open with a lead at the top of the page, under its title: three or four plain sentences (about 80 words) saying what problem the PR solves, what it changes, and the idea that makes it work.
+
+Then build two to four numbered figures in the order a reader needs them, for example: what goes wrong (or what is missing) at base, the new flow end to end, and the detail that makes it correct or fast. Each figure has:
+- a short bold heading that states its point;
+- a diagram: inline SVG or HTML built from the PR's real identifiers, shapes and numbers (a memory span with the first bad byte marked, a decision path with yes/no branches, a before/after tile or call path, a data flow from inputs to outputs). Draw the mechanism; never put sentences in boxes;
+- a walkthrough of two to five sentences beside or under the diagram that follows it in order: what comes in, what each step does to it and why, what comes out, and what the reader should check. Refer to the labels the diagram shows.
+
+Spend words on the flow, not on inventory: no change map, file list or reviewer-notes section; put each file:line where it matters, as a small mono chip: <a data-ref="path/to/file.py:123">file.py:123</a>, which the review app opens in the editor. Label illustrative values as illustrative.
 
 Page contract:
 - One self-contained document starting with <!doctype html>: inline <style> and <script> only, no network requests (no CDN scripts or fonts; use "IBM Plex Sans", "IBM Plex Mono" with system fallbacks).
