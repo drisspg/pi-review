@@ -3,8 +3,9 @@ import type { GuideChapter } from "./guide.js";
 import type { AiReviewRecord, FocusScanRecord, GuideReviewRecord } from "./types.js";
 
 export const ANALYSIS_VERSION = 1;
-/** 2: the overview is a show-me HTML page instead of markdown panels; 3: it opens with a short lead; 4: each figure walks through its flow. */
-export const OVERVIEW_VERSION = 4;
+/** 2: the overview is a show-me HTML page instead of markdown panels; 3: it opens with a short lead; 4: each figure walks through its flow;
+ * 5: how it is called, call path, tensor contract, support matrix, then interactive mechanism figures. */
+export const OVERVIEW_VERSION = 5;
 export const REVIEW_PAIR_VERSION = 4;
 export type AnalysisKind = "main-review" | "focus-review" | "guide-review" | "code-walk";
 

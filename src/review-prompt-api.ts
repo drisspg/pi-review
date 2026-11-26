@@ -174,21 +174,27 @@ function codeWalkPrompt(payload: Record<string, unknown>): ReviewPromptResponse 
     purpose: "flow-dag",
     prompt: `Show me what's going on in PR ${prKey}, as a show-me HTML page that explains it visually. This is a visual orientation, not a findings report. Read the show-me skill's HTML route and the frontier-editorial style before building, and ground every figure in the real change.
 
-The page answers three questions in order: why the PR is needed, what it does, and how the new flow works. Explain it the way the show-me skill would to a colleague: enough detail that a reviewer could walk someone else through the change afterwards, and no padding.
+The reader wants to understand how this code is used and invoked, what changes for its users, and how the new flow works. Explain it the way the show-me skill would to a colleague who will review the code: concrete, with real identifiers, shapes and dtypes. Keep every diagram, table and flow the change needs; cut words, not content.
 
-Open with a lead at the top of the page, under its title: three or four plain sentences (about 80 words) saying what problem the PR solves, what it changes, and the idea that makes it work.
+Wording: plain and direct, like engineering notes. State facts in short sentences. No flowery or promotional phrasing, no throat-clearing ("this PR introduces…", "it's worth noting"), no hedging, and never repeat in prose what a diagram or table already shows. Prefer a label, arrow or table cell to a sentence.
 
-Then build two to four numbered figures in that order: why (what goes wrong, or is missing, at base), what (the new flow end to end, from its entry point to its result), and how (the detail that makes it correct or fast). Each figure has:
-- a short bold heading that states its point;
-- a diagram: inline SVG or HTML built from the PR's real identifiers, shapes and numbers (a memory span with the first bad byte marked, a decision path with yes/no branches, a before/after tile or call path, a data flow from inputs to outputs). Draw the mechanism; never put sentences in boxes;
-- a walkthrough of two to five sentences beside or under the diagram that follows it in order: what comes in, what each step does to it and why the PR does it that way, what comes out, and what the reader should check. Refer to the labels the diagram shows.
+Open with a lead under the title: two or three sentences on the problem, what the PR changes, and why.
 
-Spend words on the flow, not on inventory: no change map, file list or reviewer-notes section; put each file:line where it matters, as a small mono chip: <a data-ref="path/to/file.py:123">file.py:123</a>, which the review app opens in the editor. Label illustrative values as illustrative.
+Then these sections, as numbered figures, skipping any that do not apply:
+1. How you call it: the user-facing call before and after the PR as short code (signature, defaults, new arguments or behavior), with one sentence on what a caller must do differently, if anything.
+2. Call path: from that entry point down to the kernels, as a diagram of the actual functions and dispatch decisions (which backend, which condition picks it), each node a file:line chip.
+3. Tensor contract: a table with one row per tensor on the changed path, inputs first, then outputs, then internal buffers: name, shape with named dimensions, dtype, layout or memory format, device, and who allocates it, plus a column marking new, changed or unchanged. Fill every cell; never merge cells across rows.
+4. What is supported and why: the support matrix (GPU architecture, dtypes, sizes or alignment, modes) and the fallback for everything else, with the reason for each limit taken from the code, in a few words.
+5. The mechanism: one or two interactive figures of the core algorithm on one concrete example. Let the reader drive the input that matters (a slider or step control for a position, size or step; a toggle between cases or between base and HEAD) and update the diagram and a live readout of the result as it changes, so they can test their understanding. Each figure has a walkthrough of two to four plain sentences that follows it in order.
+
+Only file:line chips look clickable: mark "new" with plain colored text, never a boxed badge or button-like shape.
+
+Put each file:line where it matters, as a small mono chip: <a data-ref="path/to/file.py:123">file.py:123</a>, which the review app opens in the editor. Label illustrative values as illustrative. No change map, file list or reviewer-notes section.
 
 Page contract:
 - One self-contained document starting with <!doctype html>: inline <style> and <script> only, no network requests (no CDN scripts or fonts; use "IBM Plex Sans", "IBM Plex Mono" with system fallbacks).
 - Frontier-editorial tokens as CSS custom properties for both themes, switched on :root[data-theme="dark"] and :root[data-theme="light"]; the app sets the attribute. Transparent or paper background, no shadows or gradients, semantic green/amber/red.
-- Fit a review pane about 1000px wide without horizontal scrolling. Interaction (step tabs, a toggle between base and HEAD) only where it makes the mechanism clearer; support the keyboard and prefers-reduced-motion.
+- Fit a review pane about 1000px wide without horizontal scrolling. Interaction belongs in the mechanism figures and wherever else it helps the reader learn the flow; support the keyboard and prefers-reduced-motion.
 
 Return only the HTML document. Do not create files, open a browser, or mention your process.
 

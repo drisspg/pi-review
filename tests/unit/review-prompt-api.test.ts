@@ -27,12 +27,12 @@ test("review prompt API builds code walk prompts with flow-dag purpose", async (
   assert.equal(result.purpose, "flow-dag");
   assert.match(result.prompt, /Show me what's going on in PR pr, as a show-me HTML page that explains it visually/);
   assert.match(result.prompt, /frontier-editorial/);
-  assert.match(result.prompt, /two to four numbered figures/);
-  assert.match(result.prompt, /Open with a lead at the top of the page, under its title: three or four plain sentences \(about 80 words\)/);
-  assert.match(result.prompt, /a walkthrough of two to five sentences beside or under the diagram that follows it in order/);
-  assert.match(result.prompt, /why the PR is needed, what it does, and how the new flow works/);
-  assert.match(result.prompt, /in that order: why \(what goes wrong, or is missing, at base\), what \(the new flow end to end/);
-  assert.match(result.prompt, /no change map, file list or reviewer-notes section/);
+  assert.match(result.prompt, /Wording: plain and direct, like engineering notes/);
+  for (const section of ["1. How you call it", "2. Call path", "3. Tensor contract", "4. What is supported and why", "5. The mechanism: one or two interactive figures"]) assert.ok(result.prompt.includes(section), section);
+  assert.match(result.prompt, /never merge cells across rows/);
+  assert.match(result.prompt, /a slider or step control/);
+  assert.match(result.prompt, /never a boxed badge/);
+  assert.match(result.prompt, /No change map, file list or reviewer-notes section/);
   assert.match(result.prompt, /data-ref="path\/to\/file.py:123"/);
   assert.match(result.prompt, /:root\[data-theme="dark"\]/);
   assert.match(result.prompt, /Return only the HTML document/);
