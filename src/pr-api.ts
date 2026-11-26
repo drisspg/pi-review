@@ -21,8 +21,6 @@ export type PrApiDeps = {
   listOverviews: (prKey: string) => Promise<GuideReviewRecord[]>;
   parsePullRequestRef: (input: string) => PullRequestRef;
   preparePrWorktree: (ref: PullRequestRef, cloneUrl: string, headSha: string, mode?: PrepareMode) => Promise<string>;
-  /** A live Pi terminal blocks advancing a stale checkout on open. */
-  hasLiveTerminal: (prKey: string) => boolean;
   /** Optional: begin fetching the PR head while GitHub is queried (must never reject). */
   prefetchPrHead?: (ref: PullRequestRef) => Promise<void>;
   prewarmPiSession: (prKey: string, purposes: string[]) => void;
@@ -111,8 +109,9 @@ export function createPrApi(deps: PrApiDeps): PrApi {
 
   /**
    * Refresh resets local files. Opening a PR whose checkout is behind advances it with a fresh
-   * snapshot after Pi teardown, but only when the checkout is clean, on a fetched PR revision, and
-   * has no live Pi terminal; otherwise the user must Refresh. Implicit activity updates never reset.
+   * snapshot after Pi teardown (agents and terminals; their history persists), but only when the
+   * checkout is clean and on a fetched PR revision; otherwise the user must Refresh. Review state
+   * lives outside the checkout, so advancing loses nothing. Implicit activity updates never reset.
    */
   function load(input: string, mode: "open" | "activity" | "refresh"): Promise<PullRequestReviewResponse> {
     const ref = deps.parsePullRequestRef(input);
@@ -139,7 +138,7 @@ export function createPrApi(deps: PrApiDeps): PrApi {
             if (!isCheckoutResetRequired(retryError)) throw retryError;
             // Read-only eligibility first: a refused advance must not tear down Pi work.
             await prepare("check-advance");
-            if (deps.hasLiveTerminal(key)) throw Object.assign(new Error("This checkout is on an older revision and has a live Pi terminal. Use Refresh to stop it and reset the checkout to the remote PR."), { code: "CHECKOUT_RESET_REQUIRED" });
+            // Advance re-runs the checks after teardown, in case a terminal changed files meanwhile.
             return disposeAndPrepare("advance");
           });
         }

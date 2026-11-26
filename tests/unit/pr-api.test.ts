@@ -116,9 +116,6 @@ function fakeDeps() {
         calls.push(`prepare:${requestRef.number}:${cloneUrl}:${headSha}:${mode}`);
         return "/tmp/worktree";
       },
-      hasLiveTerminal(_prKey: string) {
-        return false;
-      },
       prewarmPiSession(prKey: string, purposes: string[]) {
         calls.push(`prewarm:${prKey}:${purposes.join(",")}`);
       },
@@ -416,6 +413,28 @@ test("opening a PR whose checkout is behind advances it with a fresh snapshot af
   assert.ok(calls.includes("context:github.com/pytorch/pytorch#1:/tmp/worktree:latest:a.ts"));
 });
 
+test("opening a stale checkout never moves it when Pi teardown fails", async () => {
+  const { deps, calls } = fakeDeps();
+  staleCheckout(deps, calls, "older");
+  deps.disposePiSession = async () => { calls.push("dispose:failed"); throw new Error("terminal still running"); };
+  await assert.rejects(createPrApi(deps).open("url"), /terminal still running/);
+  assert.equal(calls.some((call) => /^(upsert|context):/.test(call) || call.endsWith(":advance")), false);
+});
+
+test("opening a stale checkout stops if a terminal changed files before teardown finished", async () => {
+  const { deps, calls } = fakeDeps();
+  staleCheckout(deps, calls, "older");
+  const prepare = deps.preparePrWorktree;
+  deps.preparePrWorktree = async (ref, url, headSha, mode) => {
+    await prepare(ref, url, headSha, mode);
+    if (mode === "advance") throw Object.assign(new Error("has local changes"), { code: "CHECKOUT_RESET_REQUIRED" });
+    return "/tmp/worktree";
+  };
+  await assert.rejects(createPrApi(deps).open("url"), { code: "CHECKOUT_RESET_REQUIRED" });
+  assert.ok(calls.includes("dispose:github.com/pytorch/pytorch#1"));
+  assert.equal(calls.some((call) => /^(upsert|context):/.test(call)), false);
+});
+
 test("opening a stale checkout with local work keeps Pi alive and leaves it for an explicit Refresh", async () => {
   const { deps, calls } = fakeDeps();
   staleCheckout(deps, calls, "older");
@@ -435,14 +454,6 @@ test("opening with a stale cached snapshot reuses a checkout already at the fres
   const response = await createPrApi(deps).open("url");
   assert.equal(response.pr.headSha, "latest");
   assert.equal(calls.some((call) => call.endsWith(":advance") || call.endsWith(":reset")), false);
-});
-
-test("opening a stale checkout with a live Pi terminal leaves it for an explicit Refresh", async () => {
-  const { deps, calls } = fakeDeps();
-  staleCheckout(deps, calls, "older");
-  deps.hasLiveTerminal = () => true;
-  await assert.rejects(createPrApi(deps).open("url"), { code: "CHECKOUT_RESET_REQUIRED" });
-  assert.equal(calls.some((call) => /^(dispose|upsert|context):/.test(call) || call.endsWith(":advance")), false);
 });
 
 test("implicit activity never resets a checkout on another revision", async () => {
